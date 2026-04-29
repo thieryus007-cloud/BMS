@@ -50,28 +50,24 @@ impl TsinkHandle {
     pub async fn new(config: &TsinkConfig) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&config.data_path)?;
 
-        // Configuration avec uniquement les méthodes disponibles dans l'API publique.
-        // Les paramètres de performance clés sont:
-        // - with_queue_capacity: taille de la file d'attente pour les opérations d'écriture.
-        // - with_max_writers: nombre maximum d'écrivains simultanés (défaut=nombre de cœurs CPU).
-        // - with_chunk_points: nombre de points par chunk de compression (défaut=1000).
-        // Tsink est "container-aware" et ajuste automatiquement ses workers aux limites CPU.
+        // Configuration avec les méthodes disponibles dans l'API publique de Tsink 0.10.
+        // build() est synchrone (pas de .await)
         let storage = AsyncStorageBuilder::new()
             .with_data_path(&config.data_path)
             .with_timestamp_precision(TimestampPrecision::Milliseconds)
             .with_retention(Duration::from_secs(config.retention_days * 24 * 3600))
             .with_memory_limit(config.memory_limit_mb * 1024 * 1024)
             .with_cardinality_limit(config.cardinality_limit)
-            .with_queue_capacity(500)         // File d'attente de 500 requêtes
-            .with_max_writers(2)              // Limite à 2 écrivains simultanés
-            .with_chunk_points(500)           // Points par chunk (performance)
-            .build()
-            .await?;
+            // Paramètres de performance pour limiter la charge CPU
+            .with_queue_capacity(500)   // File d'attente interne
+            .with_max_writers(2)        // Limite le nombre d'écrivains simultanés
+            .with_chunk_points(500)     // Points par chunk
+            .build()?;                  // ← PAS de .await, build() est synchrone
 
         info!(
             path = %config.data_path,
             retention_days = config.retention_days,
-            "Tsink initialisé avec une configuration optimisée pour la charge CPU."
+            "Tsink initialisé"
         );
 
         Ok(Self {
