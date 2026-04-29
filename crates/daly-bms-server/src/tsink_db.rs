@@ -58,13 +58,15 @@ impl TsinkHandle {
             .with_retention(Duration::from_secs(config.retention_days * 24 * 3600))
             .with_memory_limit(config.memory_limit_mb * 1024 * 1024)
             .with_cardinality_limit(config.cardinality_limit)
-            // Paramètres de performance pour limiter la charge CPU
-            .with_queue_capacity(2048)   // File d'attente interne
-            .with_max_writers(1)        // Limite le nombre d'écrivains simultanés
-            .with_chunk_points(16384)     // Points par chunk
+            .with_queue_capacity(4096)
+            .with_max_writers(2)
+            .with_chunk_points(16384)
             .with_partition_duration(Duration::from_secs(24 * 3600))
-            .with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(30)))
-            .with_wal_buffer_size(512 * 1024)
+            .with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(60)))
+            .with_wal_buffer_size(1024 * 1024)
+            // Désactiver le fail-fast : une erreur du thread de flush ne tue pas
+            // toutes les écritures. L'erreur réelle est récupérée via last_background_error().
+            .with_background_fail_fast(false)
             .build()?; 
 
         info!(
@@ -83,14 +85,31 @@ impl TsinkHandle {
     // -------------------------------------------------------------------------
 
     /// Écrit un batch de lignes dans Tsink (non-bloquant).
+    /// En cas d'échec, enrichit l'erreur avec le dernier message d'erreur background.
     pub async fn write_rows(&self, rows: Vec<Row>) -> Result<()> {
         if rows.is_empty() {
             return Ok(());
         }
+        self.storage.insert_rows(rows).await.map_err(|e| {
+            // Enrich with the actual background thread error when it's the root cause.
+            if matches!(e, tsink::TsinkError::StorageShuttingDown) {
+                if let Some(bg) = self.last_background_error() {
+                    return TsinkError::Storage(tsink::TsinkError::Other(format!(
+                        "Storage is shutting down — background worker error: {bg}"
+                    )));
+                }
+            }
+            TsinkError::Storage(e)
+        })
+    }
+
+    /// Retourne le dernier message d'erreur du thread background (flush/compaction).
+    pub fn last_background_error(&self) -> Option<String> {
         self.storage
-            .insert_rows(rows)
-            .await
-            .map_err(TsinkError::Storage)
+            .inner()
+            .observability_snapshot()
+            .health
+            .last_background_error
     }
 
     // -------------------------------------------------------------------------
