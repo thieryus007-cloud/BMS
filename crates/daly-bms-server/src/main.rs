@@ -280,8 +280,9 @@ async fn main() -> anyhow::Result<()> {
                 devs_ta,
                 mqtt_ta,
                 move |snap| {
+                    // ✅ Appel direct, sans tokio::spawn
                     let s = state_ta.clone();
-                    tokio::spawn(async move { s.on_tasmota_snapshot(snap).await });
+                    async move { s.on_tasmota_snapshot(snap).await }
                 },
             )
             .await;
@@ -304,18 +305,14 @@ async fn main() -> anyhow::Result<()> {
                 mqtt_sh,
                 client_sh,
                 move |snap| {
+                    // ✅ Appel direct, sans tokio::spawn
                     let s = state_sh.clone();
-                    tokio::spawn(async move { s.on_shelly_snapshot(snap).await });
+                    async move { s.on_shelly_snapshot(snap).await }
                 },
             )
             .await;
         });
     }
-
-    // NOTE : ET112, PRALRAN et ATS utilisent le bus RS485 UNIFIÉ.
-    // Leur lancement est dans le bloc hardware, après l'ouverture du DalyPort,
-    // afin de partager le même Arc<SharedBus>.
-    // En mode simulation, ET112/PRALRAN/ATS ne sont pas lancés (pas de port réel).
 
     // ── Mode SIMULATION ou HARDWARE ────────────────────────────────────────────
     if args.simulate {
@@ -393,18 +390,20 @@ async fn main() -> anyhow::Result<()> {
                                 et112_cfg.devices,
                                 std::time::Duration::from_millis(et112_cfg.poll_interval_ms),
                                 move |snap| {
+                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_et.clone();
-                                    tokio::spawn(async move { s.on_et112_snapshot(snap).await });
+                                    async move { s.on_et112_snapshot(snap).await }
                                 },
                                 move |addr, name, res| {
+                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_et_err.clone();
                                     let name = name.to_string();
-                                    tokio::spawn(async move {
+                                    async move {
                                         match res {
                                             Ok(()) => s.record_rs485_success(addr, "ET112", &name).await,
                                             Err(msg) => s.record_rs485_error(addr, "ET112", &name, &msg).await,
                                         }
-                                    });
+                                    }
                                 },
                             )
                             .await;
@@ -425,18 +424,20 @@ async fn main() -> anyhow::Result<()> {
                                 bus_irrad,
                                 irrad_cfg,
                                 move |snap| {
+                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_irrad.clone();
-                                    tokio::spawn(async move { s.on_irradiance_snapshot(snap).await });
+                                    async move { s.on_irradiance_snapshot(snap).await }
                                 },
                                 move |addr, name, res| {
+                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_irrad_err.clone();
                                     let name = name.to_string();
-                                    tokio::spawn(async move {
+                                    async move {
                                         match res {
                                             Ok(()) => s.record_rs485_success(addr, "PRALRAN", &name).await,
                                             Err(msg) => s.record_rs485_error(addr, "PRALRAN", &name, &msg).await,
                                         }
-                                    });
+                                    }
                                 },
                             )
                             .await;
@@ -444,8 +445,6 @@ async fn main() -> anyhow::Result<()> {
                     }
 
                     // ── ATS CHINT sur bus unifié ──────────────────────────────────
-                    // Même bus RS485 que BMS/ET112/PRALRAN — parité None (8N1).
-                    // L'ATS doit être configuré en parité None (reg 0x000E = 0).
                     if let Some(ats_cfg) = config.ats.clone() {
                         if ats_cfg.enabled {
                             info!(
@@ -462,18 +461,20 @@ async fn main() -> anyhow::Result<()> {
                                     bus_ats,
                                     ats_cfg,
                                     move |snap| {
+                                        // ✅ Appel direct sans tokio::spawn
                                         let s = state_ats.clone();
-                                        tokio::spawn(async move { s.on_ats_snapshot(snap).await });
+                                        async move { s.on_ats_snapshot(snap).await }
                                     },
                                     move |addr, name, res| {
+                                        // ✅ Appel direct sans tokio::spawn
                                         let s = state_ats_err.clone();
                                         let name = name.to_string();
-                                        tokio::spawn(async move {
+                                        async move {
                                             match res {
                                                 Ok(()) => s.record_rs485_success(addr, "ATS", &name).await,
                                                 Err(msg) => s.record_rs485_error(addr, "ATS", &name, &msg).await,
                                             }
-                                        });
+                                        }
                                     },
                                 )
                                 .await;
@@ -536,15 +537,17 @@ async fn main() -> anyhow::Result<()> {
                                 manager,
                                 poll_cfg,
                                 move |snap| {
+                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_poll.clone();
                                     let addr = snap.address;
                                     let name = snap.name.clone();
-                                    tokio::spawn(async move {
+                                    async move {
                                         s.record_rs485_success(addr, "BMS", &name).await;
                                         s.on_snapshot(snap).await;
-                                    });
+                                    }
                                 },
                                 move |addr, kind, msg| {
+                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_err.clone();
                                     let name = bms_names
                                         .get(&addr)
@@ -553,13 +556,13 @@ async fn main() -> anyhow::Result<()> {
                                     let err_tag = match kind {
                                         PollErrorKind::Timeout => "timeout",
                                         PollErrorKind::Crc     => "crc",
-                                        PollErrorKind::Serial  => "timeout", // port série → traité comme timeout
+                                        PollErrorKind::Serial  => "timeout",
                                         PollErrorKind::Other   => "other",
                                     };
                                     let err_msg = format!("{}: {}", err_tag, msg);
-                                    tokio::spawn(async move {
+                                    async move {
                                         s.record_rs485_error(addr, "BMS", &name, &err_msg).await;
-                                    });
+                                    }
                                 },
                             )
                             .await;
