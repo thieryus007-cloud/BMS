@@ -416,9 +416,9 @@ retention_days = 30
 
 # Limite mémoire en Mo pour le cache chaud (données récentes)
 memory_limit_mb = 512
-cardinality_limit = 200
-chunk_points = 8192
-flush_interval_secs = 120
+cardinality_limit = 10000
+chunk_points = 16384
+flush_interval_secs = 300
 compaction_interval_secs = 300
 
 
