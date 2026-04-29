@@ -265,7 +265,9 @@ async fn read_uptime_secs() -> u64 {
 /// Services à surveiller : (label, host, port, commande_systemd).
 /// Si la commande est None le service n'est pas redémarré automatiquement.
 const WATCHDOG_SERVICES: &[(&str, &str, u16, Option<&str>)] = &[
-    ("energy-manager", "127.0.0.1", 8081, Some("energy-manager")),
+    // None = pas de restart automatique : NoNewPrivileges=true empêche sudo,
+    // systemd gère le restart via Restart=on-failure dans energy-manager.service.
+    ("energy-manager", "127.0.0.1", 8081, None),
 ];
 
 /// Intervalle de vérification du watchdog.

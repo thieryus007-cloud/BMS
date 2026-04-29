@@ -15,6 +15,9 @@ Environment=DALY_CONFIG=/etc/daly-bms/config.toml
 # Niveau de log (trace, debug, info, warn, error)
 Environment=RUST_LOG=info
 
+# Limite les threads background Tsink (WAL/flush/compaction) — évite 100% CPU
+Environment=TSINK_MAX_CPUS=1
+
 ExecStart=/usr/local/bin/daly-bms-server
 
 # Redémarrage automatique en cas de crash
