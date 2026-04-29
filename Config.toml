@@ -406,7 +406,7 @@ name      = "DEYE — Shelly Pro 2PM"
 #   Phase 2 : valider les données Tsink via /api/v1/query
 #   Phase 3 : influxdb.enabled = false  (Tsink seul)
 [tsink]
-enabled = false
+enabled = true
 
 # Répertoire de stockage local (relatif au répertoire courant ou chemin absolu)
 data_path = "/var/lib/daly-bms/tsink"
