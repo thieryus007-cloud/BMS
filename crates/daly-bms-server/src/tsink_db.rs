@@ -8,6 +8,8 @@ use std::time::Duration;
 use tsink::{
     AsyncStorage, AsyncStorageBuilder, DataPoint, Label, Row, TimestampPrecision, WalSyncMode,
 };
+
+pub use tsink::Row;
 use tsink::promql::{Engine, PromqlValue};
 use tracing::info;
 

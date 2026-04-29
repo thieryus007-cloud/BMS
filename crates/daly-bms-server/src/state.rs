@@ -10,7 +10,8 @@ use crate::et112::Et112Snapshot;
 use crate::irradiance::IrradianceSnapshot;
 use crate::shelly::ShellyEmSnapshot;
 use crate::tasmota::TasmotaSnapshot;
-use crate::tsink_db::TsinkHandle;
+use crate::tsink_db::{TsinkHandle, Row as TsinkRow};
+use tokio::sync::mpsc;
 use daly_bms_core::bus::DalyPort;
 use daly_bms_core::types::BmsSnapshot;
 use chrono::{DateTime, Datelike, Utc};
@@ -403,10 +404,20 @@ pub struct AppState {
     /// Stockage time-series embarqué Tsink (None si désactivé dans la config).
     pub tsink: Option<Arc<TsinkHandle>>,
 
+    /// Canal d'envoi vers le batch writer Tsink (None si Tsink désactivé).
+    /// Remplace les tokio::spawn par mesure — les rows sont accumulées et
+    /// écrites en un seul appel toutes les 10 secondes.
+    pub tsink_tx: Option<mpsc::UnboundedSender<Vec<TsinkRow>>>,
+
 }
 
 impl AppState {
-    pub fn new(config: AppConfig, log_buffer: LogBuffer, tsink: Option<TsinkHandle>) -> Self {
+    pub fn new(
+        config: AppConfig,
+        log_buffer: LogBuffer,
+        tsink: Option<TsinkHandle>,
+        tsink_tx: Option<mpsc::UnboundedSender<Vec<TsinkRow>>>,
+    ) -> Self {
         let (ws_tx, _) = broadcast::channel(WS_BROADCAST_CAPACITY);
         let addresses = config.bms_addresses();
         let ring_size = config.serial.ring_buffer_size;
@@ -461,6 +472,7 @@ impl AppState {
             shelly_latest: Arc::new(RwLock::new(BTreeMap::new())),
             shelly_client: Arc::new(tokio::sync::Mutex::new(None)),
             tsink: tsink.map(Arc::new),
+            tsink_tx,
         }
     }
 
@@ -522,13 +534,8 @@ impl AppState {
         let latest = self.latest_snapshots().await;
         let _ = self.ws_tx.send(Arc::new(latest));
 
-        if let Some(tsink) = self.tsink.clone() {
-            let rows = TsinkHandle::bms_rows(&snap);
-            tokio::spawn(async move {
-                if let Err(e) = tsink.write_rows(rows).await {
-                    tracing::warn!("Tsink BMS write error: {}", e);
-                }
-            });
+        if let Some(tx) = &self.tsink_tx {
+            let _ = tx.send(TsinkHandle::bms_rows(&snap));
         }
     }
 
@@ -580,13 +587,8 @@ impl AppState {
                 .push(snap.clone());
         }
 
-        if let Some(tsink) = self.tsink.clone() {
-            let rows = TsinkHandle::et112_rows(&snap);
-            tokio::spawn(async move {
-                if let Err(e) = tsink.write_rows(rows).await {
-                    tracing::warn!("Tsink ET112 write error: {}", e);
-                }
-            });
+        if let Some(tx) = &self.tsink_tx {
+            let _ = tx.send(TsinkHandle::et112_rows(&snap));
         }
     }
 
@@ -618,13 +620,8 @@ impl AppState {
             "address": snap.address,
             "irradiance_wm2": snap.irradiance_wm2,
         })));
-        if let Some(tsink) = self.tsink.clone() {
-            let rows = TsinkHandle::irradiance_rows(&snap);
-            tokio::spawn(async move {
-                if let Err(e) = tsink.write_rows(rows).await {
-                    tracing::warn!("Tsink irradiance write error: {}", e);
-                }
-            });
+        if let Some(tx) = &self.tsink_tx {
+            let _ = tx.send(TsinkHandle::irradiance_rows(&snap));
         }
         *self.irradiance_value.write().await = Some(snap);
     }
@@ -741,13 +738,8 @@ impl AppState {
                 "ah_charged_today": shunt.ah_charged_today,
                 "ah_discharged_today": shunt.ah_discharged_today,
             })));
-            if let Some(tsink) = self.tsink.clone() {
-                let rows = TsinkHandle::smartshunt_rows(&shunt);
-                tokio::spawn(async move {
-                    if let Err(e) = tsink.write_rows(rows).await {
-                        tracing::warn!("Tsink SmartShunt write error: {}", e);
-                    }
-                });
+            if let Some(tx) = &self.tsink_tx {
+                let _ = tx.send(TsinkHandle::smartshunt_rows(&shunt));
             }
             *self.venus_smartshunt.write().await = Some(shunt);
             return;
@@ -792,13 +784,8 @@ impl AppState {
             "ah_discharged_today": shunt.ah_discharged_today,
         })));
 
-        if let Some(tsink) = self.tsink.clone() {
-            let rows = TsinkHandle::smartshunt_rows(&shunt);
-            tokio::spawn(async move {
-                if let Err(e) = tsink.write_rows(rows).await {
-                    tracing::warn!("Tsink SmartShunt write error: {}", e);
-                }
-            });
+        if let Some(tx) = &self.tsink_tx {
+            let _ = tx.send(TsinkHandle::smartshunt_rows(&shunt));
         }
         *self.venus_smartshunt.write().await = Some(shunt);
     }
@@ -822,13 +809,8 @@ impl AppState {
 
     /// Enregistre/met à jour les données de l'onduleur Victron (MultiPlus, cgwacs, etc.).
     pub async fn on_venus_inverter(&self, inverter: VenusInverter) {
-        if let Some(tsink) = self.tsink.clone() {
-            let rows = TsinkHandle::inverter_rows(&inverter);
-            tokio::spawn(async move {
-                if let Err(e) = tsink.write_rows(rows).await {
-                    tracing::warn!("Tsink inverter write error: {}", e);
-                }
-            });
+        if let Some(tx) = &self.tsink_tx {
+            let _ = tx.send(TsinkHandle::inverter_rows(&inverter));
         }
         *self.venus_inverter.write().await = Some(inverter);
     }

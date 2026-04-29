@@ -32,12 +32,14 @@ mod monitor;
 use crate::bridges::{alerts, influx, mqtt};
 use crate::config::AppConfig;
 use crate::state::{AppState, LogBuffer, LogEntry};
+use crate::tsink_db::Row as TsinkRow;
 use daly_bms_core::bus::{BmsConfig, DalyBusManager, DalyPort};
 use daly_bms_core::poll::{poll_loop, PollConfig, PollErrorKind};
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tracing::{error, info, warn};
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
@@ -133,6 +135,54 @@ impl ServerArgs {
 }
 
 // =============================================================================
+// Tsink batch writer
+// =============================================================================
+
+/// Accumule les rows reçues via channel et écrit dans Tsink en batch toutes les
+/// WRITE_INTERVAL secondes. Évite de spawner une task par mesure (source du CPU élevé).
+async fn tsink_batch_writer(
+    tsink: tsink_db::TsinkHandle,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<Vec<TsinkRow>>,
+) {
+    const WRITE_INTERVAL: Duration = Duration::from_secs(10);
+    let mut interval = tokio::time::interval(WRITE_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut pending: Vec<TsinkRow> = Vec::with_capacity(512);
+
+    loop {
+        tokio::select! {
+            biased;
+            _ = interval.tick() => {
+                if !pending.is_empty() {
+                    let rows = std::mem::take(&mut pending);
+                    if let Err(e) = tsink.write_rows(rows).await {
+                        tracing::warn!("Tsink batch write error: {e}");
+                    }
+                }
+            }
+            msg = rx.recv() => {
+                match msg {
+                    Some(rows) => {
+                        pending.extend(rows);
+                        // Drain all immediately available messages for efficient batching
+                        while let Ok(rows) = rx.try_recv() {
+                            pending.extend(rows);
+                        }
+                    }
+                    None => {
+                        // Channel closed — flush remaining rows and exit
+                        if !pending.is_empty() {
+                            let _ = tsink.write_rows(std::mem::take(&mut pending)).await;
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
@@ -210,24 +260,26 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // ── Tsink (stockage time-series embarqué) ─────────────────────────────────
-    let tsink_handle = if config.tsink.enabled {
+    let (tsink_handle, tsink_tx) = if config.tsink.enabled {
         match tsink_db::TsinkHandle::new(&config.tsink).await {
             Ok(h) => {
-                info!("Tsink activé — stockage dans '{}'", config.tsink.data_path);
-                Some(h)
+                info!("Tsink activé — stockage dans '{}' (batch writer 10s)", config.tsink.data_path);
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Vec<TsinkRow>>();
+                tokio::spawn(tsink_batch_writer(h.clone(), rx));
+                (Some(h), Some(tx))
             }
             Err(e) => {
                 warn!("Tsink init échoué : {} — stockage désactivé", e);
-                None
+                (None, None)
             }
         }
     } else {
         info!("Tsink désactivé (tsink.enabled = false)");
-        None
+        (None, None)
     };
 
     // ── État partagé ───────────────────────────────────────────────────────────
-    let state = AppState::new(config.clone(), log_buffer, tsink_handle);
+    let state = AppState::new(config.clone(), log_buffer, tsink_handle, tsink_tx);
 
     // ── Bridges en arrière-plan ─────────────────────────────────────────────────
 
