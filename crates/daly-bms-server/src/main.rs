@@ -280,9 +280,8 @@ async fn main() -> anyhow::Result<()> {
                 devs_ta,
                 mqtt_ta,
                 move |snap| {
-                    // ✅ Appel direct, sans tokio::spawn
                     let s = state_ta.clone();
-                    async move { s.on_tasmota_snapshot(snap).await }
+                    tokio::spawn(async move { s.on_tasmota_snapshot(snap).await });
                 },
             )
             .await;
@@ -305,9 +304,8 @@ async fn main() -> anyhow::Result<()> {
                 mqtt_sh,
                 client_sh,
                 move |snap| {
-                    // ✅ Appel direct, sans tokio::spawn
                     let s = state_sh.clone();
-                    async move { s.on_shelly_snapshot(snap).await }
+                    tokio::spawn(async move { s.on_shelly_snapshot(snap).await });
                 },
             )
             .await;
@@ -390,20 +388,18 @@ async fn main() -> anyhow::Result<()> {
                                 et112_cfg.devices,
                                 std::time::Duration::from_millis(et112_cfg.poll_interval_ms),
                                 move |snap| {
-                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_et.clone();
-                                    async move { s.on_et112_snapshot(snap).await }
+                                    tokio::spawn(async move { s.on_et112_snapshot(snap).await });
                                 },
                                 move |addr, name, res| {
-                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_et_err.clone();
                                     let name = name.to_string();
-                                    async move {
+                                    tokio::spawn(async move {
                                         match res {
                                             Ok(()) => s.record_rs485_success(addr, "ET112", &name).await,
                                             Err(msg) => s.record_rs485_error(addr, "ET112", &name, &msg).await,
                                         }
-                                    }
+                                    });
                                 },
                             )
                             .await;
@@ -424,20 +420,18 @@ async fn main() -> anyhow::Result<()> {
                                 bus_irrad,
                                 irrad_cfg,
                                 move |snap| {
-                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_irrad.clone();
-                                    async move { s.on_irradiance_snapshot(snap).await }
+                                    tokio::spawn(async move { s.on_irradiance_snapshot(snap).await });
                                 },
                                 move |addr, name, res| {
-                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_irrad_err.clone();
                                     let name = name.to_string();
-                                    async move {
+                                    tokio::spawn(async move {
                                         match res {
                                             Ok(()) => s.record_rs485_success(addr, "PRALRAN", &name).await,
                                             Err(msg) => s.record_rs485_error(addr, "PRALRAN", &name, &msg).await,
                                         }
-                                    }
+                                    });
                                 },
                             )
                             .await;
@@ -461,20 +455,18 @@ async fn main() -> anyhow::Result<()> {
                                     bus_ats,
                                     ats_cfg,
                                     move |snap| {
-                                        // ✅ Appel direct sans tokio::spawn
                                         let s = state_ats.clone();
-                                        async move { s.on_ats_snapshot(snap).await }
+                                        tokio::spawn(async move { s.on_ats_snapshot(snap).await });
                                     },
                                     move |addr, name, res| {
-                                        // ✅ Appel direct sans tokio::spawn
                                         let s = state_ats_err.clone();
                                         let name = name.to_string();
-                                        async move {
+                                        tokio::spawn(async move {
                                             match res {
                                                 Ok(()) => s.record_rs485_success(addr, "ATS", &name).await,
                                                 Err(msg) => s.record_rs485_error(addr, "ATS", &name, &msg).await,
                                             }
-                                        }
+                                        });
                                     },
                                 )
                                 .await;
@@ -537,17 +529,15 @@ async fn main() -> anyhow::Result<()> {
                                 manager,
                                 poll_cfg,
                                 move |snap| {
-                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_poll.clone();
                                     let addr = snap.address;
                                     let name = snap.name.clone();
-                                    async move {
+                                    tokio::spawn(async move {
                                         s.record_rs485_success(addr, "BMS", &name).await;
                                         s.on_snapshot(snap).await;
-                                    }
+                                    });
                                 },
                                 move |addr, kind, msg| {
-                                    // ✅ Appel direct sans tokio::spawn
                                     let s = state_err.clone();
                                     let name = bms_names
                                         .get(&addr)
@@ -560,9 +550,9 @@ async fn main() -> anyhow::Result<()> {
                                         PollErrorKind::Other   => "other",
                                     };
                                     let err_msg = format!("{}: {}", err_tag, msg);
-                                    async move {
+                                    tokio::spawn(async move {
                                         s.record_rs485_error(addr, "BMS", &name, &err_msg).await;
-                                    }
+                                    });
                                 },
                             )
                             .await;
