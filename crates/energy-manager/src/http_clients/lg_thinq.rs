@@ -6,7 +6,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::bus::AppBus;
 use crate::config::LgThinqConfig;
-use crate::types::{InfluxPoint, LiveEvent, WaterHeaterMode};
+use crate::types::{LiveEvent, WaterHeaterMode};
 
 // ---------------------------------------------------------------------------
 // API response types — ThinQ EIC API v2
@@ -226,17 +226,6 @@ pub async fn spawn_poller(
                         s.water_heater_temp_c   = snap.current_temp_c;
                         s.water_heater_target_c = snap.target_temp_c;
                     }
-                    // Write to InfluxDB on every poll
-                    let mut pt = InfluxPoint::new("water_heater_status")
-                        .field_s("mode",  snap.mode.to_lg_str())
-                        .field_i("state", snap.mode.to_venus_state() as i64);
-                    if let Some(t) = snap.current_temp_c {
-                        pt = pt.field_f("temperature_c", t);
-                    }
-                    if let Some(t) = snap.target_temp_c {
-                        pt = pt.field_f("target_c", t);
-                    }
-                    bus2.write_influx(pt).await;
                     bus2.emit_live(LiveEvent::new("water_heater", &snap));
                 }
                 Err(e) => error!("LG ThinQ poll error: {e}"),
