@@ -63,7 +63,7 @@ impl TsinkHandle {
             .with_max_writers(2)        // Limite le nombre d'écrivains simultanés
             .with_chunk_points(4096)     // Points par chunk
             .with_partition_duration(Duration::from_secs(6 * 3600)) // 6h partitions
-            .with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(5)))
+            //.with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(5)))
             .with_wal_buffer_size(64 * 1024)
             .build()?;                  // ← PAS de .await, build() est synchrone
 
