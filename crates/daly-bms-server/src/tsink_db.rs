@@ -50,26 +50,28 @@ impl TsinkHandle {
     pub async fn new(config: &TsinkConfig) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&config.data_path)?;
 
-        // Configuration optimisée pour réduire la charge CPU
+        // Configuration avec uniquement les méthodes disponibles dans l'API publique.
+        // Les paramètres de performance clés sont:
+        // - with_queue_capacity: taille de la file d'attente pour les opérations d'écriture.
+        // - with_max_writers: nombre maximum d'écrivains simultanés (défaut=nombre de cœurs CPU).
+        // - with_chunk_points: nombre de points par chunk de compression (défaut=1000).
+        // Tsink est "container-aware" et ajuste automatiquement ses workers aux limites CPU.
         let storage = AsyncStorageBuilder::new()
             .with_data_path(&config.data_path)
             .with_timestamp_precision(TimestampPrecision::Milliseconds)
             .with_retention(Duration::from_secs(config.retention_days * 24 * 3600))
             .with_memory_limit(config.memory_limit_mb * 1024 * 1024)
             .with_cardinality_limit(config.cardinality_limit)
-            // Paramètres clés pour diminuer la consommation CPU
-            .with_flush_interval(Duration::from_secs(10))      // Flush périodique (10s)
-            .with_compaction_interval(Duration::from_secs(300)) // Compaction espacée (5min)
-            .with_queue_capacity(500)                          // File d'attente interne
-            .with_chunk_points(500)                            // Points par chunk
-            .with_max_writers(2)                               // Limite des workers d'écriture
+            .with_queue_capacity(500)         // File d'attente de 500 requêtes
+            .with_max_writers(2)              // Limite à 2 écrivains simultanés
+            .with_chunk_points(500)           // Points par chunk (performance)
             .build()
             .await?;
 
         info!(
             path = %config.data_path,
             retention_days = config.retention_days,
-            "Tsink initialisé"
+            "Tsink initialisé avec une configuration optimisée pour la charge CPU."
         );
 
         Ok(Self {
