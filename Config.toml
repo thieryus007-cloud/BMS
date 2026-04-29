@@ -557,7 +557,7 @@ device_instance = 152
 host              = "192.168.1.141"   # broker Mosquitto local Pi5
 port              = 1883
 keep_alive_secs   = 60
-reconnect_delay_secs = 5
+reconnect_delay_secs = 10
 # username = ""
 # password = ""
 
