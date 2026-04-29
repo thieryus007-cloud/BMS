@@ -154,7 +154,7 @@ async fn writer_task(
             solar_total, house_power,
             m273_w, _m273_v, _m273_i, _m273_yield, _m273_state,
             m289_w, _m289_v, _m289_i, _m289_yield, _m289_state,
-            pvinv_w, pvinv_yield,
+            pvinv_w, _pvinv_yield,
             total_yield,
         ) = {
             let s = state.read().await;
