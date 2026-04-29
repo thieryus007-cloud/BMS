@@ -1,5 +1,67 @@
 La timeserie database est maintenant Tsink: https://github.com/h2337/tsink
 
+L'erreur est claire : Tsink n'a pas les droits d'écriture dans le répertoire /var/lib/daly-bms/tsink/. Votre serveur tourne sous l'utilisateur dalybms, mais ce dossier appartient probablement à root ou à un autre utilisateur.
+
+🔧 Solutions possibles (choisissez la plus adaptée)
+
+1. Corriger les permissions du dossier existant (recommandé)
+
+Exécutez ces commandes pour donner la propriété à dalybms :
+
+```bash
+sudo chown -R dalybms:dalybms /var/lib/daly-bms/tsink
+sudo chmod 755 /var/lib/daly-bms/tsink
+```
+
+Ensuite, redémarrez votre serveur.
+
+2. Changer le chemin de stockage dans la configuration
+
+Si vous préférez utiliser un autre répertoire où dalybms a déjà les droits (par exemple son home), modifiez votre config.toml :
+
+```toml
+[tsink]
+enabled = true
+data_path = "/home/dalybms/tsink_data"   # ← chemin accessible
+retention_days = 30
+memory_limit_mb = 512
+cardinality_limit = 10000
+```
+
+Créez le dossier et donnez les droits :
+
+```bash
+sudo -u dalybms mkdir -p /home/dalybms/tsink_data
+```
+
+3. Utiliser un répertoire temporaire (pour test uniquement)
+
+```toml
+data_path = "/tmp/dalybms_tsink"
+```
+
+Mais ce répertoire sera vidé au redémarrage. À éviter en production.
+
+✅ Vérification après correction
+
+Relancez le service et surveillez les logs :
+
+```bash
+sudo systemctl restart daly-bms   # ou votre commande de démarrage
+journalctl -u daly-bms -f
+```
+
+Vous ne devriez plus voir l'erreur Permission denied. Tsink s'initialisera correctement et la charge CPU devrait se stabiliser.
+
+Si le problème persiste, vérifiez que l'utilisateur dalybms a bien les droits sur le dossier parent (/var/lib/daly-bms) :
+
+```bash
+ls -ld /var/lib/daly-bms
+```
+
+Si nécessaire, ajustez avec sudo chown dalybms:dalybms /var/lib/daly-bms.
+
+
 ## I	Actions:
 	-a) Retirer completement InfluxDB.
 	-b) Retirer completement GRAFANA. 
