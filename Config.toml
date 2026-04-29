@@ -419,7 +419,11 @@ memory_limit_mb = 512
 
 # Limite de cardinalité : nombre maximum de séries distinctes (metric + tags)
 # Dépasse → erreur d'écriture pour les nouvelles séries
-cardinality_limit = 500
+cardinality_limit = 200
+
+chunk_points = 8192
+flush_interval_secs = 60
+compaction_interval_secs = 300
 
 
 [influxdb]
