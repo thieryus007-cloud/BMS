@@ -355,29 +355,14 @@ pub struct SolarConfig {
     /// URL of daly-bms-server for solar data POST
     #[serde(default = "default_bms_server_url")]
     pub bms_server_url: String,
-    /// InfluxDB measurement for solar persist
-    #[serde(default = "default_persist_measurement")]
-    pub persist_measurement: String,
-    /// InfluxDB measurement for solar power
-    #[serde(default = "default_power_measurement")]
-    pub power_measurement: String,
-    /// Host tag for InfluxDB points
-    #[serde(default = "default_host_tag")]
-    pub host_tag: String,
 }
 
 fn default_bms_server_url() -> String { "http://192.168.1.141:8080".into() }
-fn default_persist_measurement() -> String { "solar_persist".into() }
-fn default_power_measurement() -> String { "solar_power".into() }
-fn default_host_tag() -> String { "pi5".into() }
 
 impl Default for SolarConfig {
     fn default() -> Self {
         Self {
             bms_server_url: default_bms_server_url(),
-            persist_measurement: default_persist_measurement(),
-            power_measurement: default_power_measurement(),
-            host_tag: default_host_tag(),
         }
     }
 }
