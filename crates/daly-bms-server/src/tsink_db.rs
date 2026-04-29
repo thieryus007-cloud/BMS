@@ -56,7 +56,13 @@ impl TsinkHandle {
             .with_retention(Duration::from_secs(config.retention_days * 24 * 3600))
             .with_memory_limit(config.memory_limit_mb * 1024 * 1024)
             .with_cardinality_limit(config.cardinality_limit)
-            .build()?;
+            // 🔧 CORRECTIONS POUR RÉDUIRE LA CONSOMMATION CPU
+            .with_worker_threads(2)                     // Limite les threads internes
+            .with_flush_interval(Duration::from_secs(10))   // Flush périodique
+            .with_compaction_interval(Duration::from_secs(300)) // Compaction espacée
+            .with_batch_size(500)                       // Taille de lot par défaut
+            .build()
+            .await?; // ← Passage en asynchrone (indispensable)
 
         info!(
             path = %config.data_path,
