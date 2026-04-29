@@ -17,8 +17,7 @@ use chrono::{DateTime, Datelike, Utc};
 use serde::Serialize;
 use serde_json::json;
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, RwLock};
 
 // =============================================================================
@@ -404,12 +403,6 @@ pub struct AppState {
     /// Stockage time-series embarqué Tsink (None si désactivé dans la config).
     pub tsink: Option<Arc<TsinkHandle>>,
 
-    /// Timestamps de la dernière écriture Tsink par catégorie (epoch secondes).
-    /// Permet de throttler le débit d'écriture et d'éviter la saturation du WAL.
-    tsink_last_bms_write:   Arc<AtomicU64>,
-    tsink_last_venus_write: Arc<AtomicU64>,
-    tsink_last_et112_write: Arc<AtomicU64>,
-    tsink_last_irrad_write: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -468,26 +461,6 @@ impl AppState {
             shelly_latest: Arc::new(RwLock::new(BTreeMap::new())),
             shelly_client: Arc::new(tokio::sync::Mutex::new(None)),
             tsink: tsink.map(Arc::new),
-            tsink_last_bms_write:   Arc::new(AtomicU64::new(0)),
-            tsink_last_venus_write: Arc::new(AtomicU64::new(0)),
-            tsink_last_et112_write: Arc::new(AtomicU64::new(0)),
-            tsink_last_irrad_write: Arc::new(AtomicU64::new(0)),
-        }
-    }
-
-    /// Vérifie si l'intervalle minimum est écoulé depuis le dernier write Tsink.
-    /// Thread-safe via AtomicU64. Retourne true ET met à jour le timestamp si ok.
-    fn tsink_rate_ok(last: &AtomicU64, interval_secs: u64) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let prev = last.load(Ordering::Relaxed);
-        if now.saturating_sub(prev) >= interval_secs {
-            last.store(now, Ordering::Relaxed);
-            true
-        } else {
-            false
         }
     }
 
@@ -549,16 +522,13 @@ impl AppState {
         let latest = self.latest_snapshots().await;
         let _ = self.ws_tx.send(Arc::new(latest));
 
-        // Écriture Tsink — throttlée à 1 écriture / 10s pour ne pas saturer le WAL
         if let Some(tsink) = self.tsink.clone() {
-            if Self::tsink_rate_ok(&self.tsink_last_bms_write, 10) {
-                let rows = TsinkHandle::bms_rows(&snap);
-                tokio::spawn(async move {
-                    if let Err(e) = tsink.write_rows(rows).await {
-                        tracing::warn!("Tsink BMS write error: {}", e);
-                    }
-                });
-            }
+            let rows = TsinkHandle::bms_rows(&snap);
+            tokio::spawn(async move {
+                if let Err(e) = tsink.write_rows(rows).await {
+                    tracing::warn!("Tsink BMS write error: {}", e);
+                }
+            });
         }
     }
 
@@ -610,16 +580,13 @@ impl AppState {
                 .push(snap.clone());
         }
 
-        // Écriture Tsink — throttlée à 1 écriture / 30s
         if let Some(tsink) = self.tsink.clone() {
-            if Self::tsink_rate_ok(&self.tsink_last_et112_write, 30) {
-                let rows = TsinkHandle::et112_rows(&snap);
-                tokio::spawn(async move {
-                    if let Err(e) = tsink.write_rows(rows).await {
-                        tracing::warn!("Tsink ET112 write error: {}", e);
-                    }
-                });
-            }
+            let rows = TsinkHandle::et112_rows(&snap);
+            tokio::spawn(async move {
+                if let Err(e) = tsink.write_rows(rows).await {
+                    tracing::warn!("Tsink ET112 write error: {}", e);
+                }
+            });
         }
     }
 
@@ -652,14 +619,12 @@ impl AppState {
             "irradiance_wm2": snap.irradiance_wm2,
         })));
         if let Some(tsink) = self.tsink.clone() {
-            if Self::tsink_rate_ok(&self.tsink_last_irrad_write, 60) {
-                let rows = TsinkHandle::irradiance_rows(&snap);
-                tokio::spawn(async move {
-                    if let Err(e) = tsink.write_rows(rows).await {
-                        tracing::warn!("Tsink irradiance write error: {}", e);
-                    }
-                });
-            }
+            let rows = TsinkHandle::irradiance_rows(&snap);
+            tokio::spawn(async move {
+                if let Err(e) = tsink.write_rows(rows).await {
+                    tracing::warn!("Tsink irradiance write error: {}", e);
+                }
+            });
         }
         *self.irradiance_value.write().await = Some(snap);
     }
@@ -777,14 +742,12 @@ impl AppState {
                 "ah_discharged_today": shunt.ah_discharged_today,
             })));
             if let Some(tsink) = self.tsink.clone() {
-                if Self::tsink_rate_ok(&self.tsink_last_venus_write, 10) {
-                    let rows = TsinkHandle::smartshunt_rows(&shunt);
-                    tokio::spawn(async move {
-                        if let Err(e) = tsink.write_rows(rows).await {
-                            tracing::warn!("Tsink SmartShunt write error: {}", e);
-                        }
-                    });
-                }
+                let rows = TsinkHandle::smartshunt_rows(&shunt);
+                tokio::spawn(async move {
+                    if let Err(e) = tsink.write_rows(rows).await {
+                        tracing::warn!("Tsink SmartShunt write error: {}", e);
+                    }
+                });
             }
             *self.venus_smartshunt.write().await = Some(shunt);
             return;
@@ -830,14 +793,12 @@ impl AppState {
         })));
 
         if let Some(tsink) = self.tsink.clone() {
-            if Self::tsink_rate_ok(&self.tsink_last_venus_write, 10) {
-                let rows = TsinkHandle::smartshunt_rows(&shunt);
-                tokio::spawn(async move {
-                    if let Err(e) = tsink.write_rows(rows).await {
-                        tracing::warn!("Tsink SmartShunt write error: {}", e);
-                    }
-                });
-            }
+            let rows = TsinkHandle::smartshunt_rows(&shunt);
+            tokio::spawn(async move {
+                if let Err(e) = tsink.write_rows(rows).await {
+                    tracing::warn!("Tsink SmartShunt write error: {}", e);
+                }
+            });
         }
         *self.venus_smartshunt.write().await = Some(shunt);
     }
@@ -862,14 +823,12 @@ impl AppState {
     /// Enregistre/met à jour les données de l'onduleur Victron (MultiPlus, cgwacs, etc.).
     pub async fn on_venus_inverter(&self, inverter: VenusInverter) {
         if let Some(tsink) = self.tsink.clone() {
-            if Self::tsink_rate_ok(&self.tsink_last_venus_write, 10) {
-                let rows = TsinkHandle::inverter_rows(&inverter);
-                tokio::spawn(async move {
-                    if let Err(e) = tsink.write_rows(rows).await {
-                        tracing::warn!("Tsink inverter write error: {}", e);
-                    }
-                });
-            }
+            let rows = TsinkHandle::inverter_rows(&inverter);
+            tokio::spawn(async move {
+                if let Err(e) = tsink.write_rows(rows).await {
+                    tracing::warn!("Tsink inverter write error: {}", e);
+                }
+            });
         }
         *self.venus_inverter.write().await = Some(inverter);
     }
