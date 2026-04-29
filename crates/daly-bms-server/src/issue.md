@@ -1,129 +1,598 @@
-Samples: 74  of event 'cycles:P', 4000 Hz, Event count (approx.): 21685569 lost: 0/0 drop: 0/11
-Overhead  Shared Object     Symbol
-  19.00%  libc.so.6         [.] 0x000000000008ea90
-  11.35%  [kernel]          [k] memset
-   8.65%  daly-bms-server   [.] 0x00000000004d1724
-   7.54%  [kernel]          [k] __mark_inode_dirty
-   6.59%  libc.so.6         [.] 0x0000000000090d68
-   4.38%  libc.so.6         [.] 0x000000000008fbf8
-   4.09%  libc.so.6         [.] 0x0000000000092a04
-   4.01%  daly-bms-server   [.] 0x000000000071ae70
-   3.96%  [kernel]          [k] fpsimd_load_state
-   3.03%  [kernel]          [k] build_open_flags
-   2.81%  daly-bms-server   [.] 0x00000000004a9e68
-   2.53%  daly-bms-server   [.] 0x00000000004aa000
-   2.42%  daly-bms-server   [.] 0x00000000001fe6e8
-   2.15%  daly-bms-server   [.] 0x00000000004d171c
-   1.71%  [kernel]          [k] __sys_socket
-   1.65%  daly-bms-server   [.] 0x00000000001594d4
-   1.65%  libc.so.6         [.] 0x000000000009d158
-   1.26%  libc.so.6         [.] 0x000000000008eadc
-   1.24%  daly-bms-server   [.] 0x00000000000e3870
-   0.95%  daly-bms-server   [.] 0x00000000002cea18
-   0.85%  daly-bms-server   [.] 0x0000000000100f18
-   0.85%  daly-bms-server   [.] 0x00000000004d1708
-   0.74%  daly-bms-server   [.] 0x00000000001fd740
-   0.70%  daly-bms-server   [.] 0x00000000000b311c
-   0.65%  daly-bms-server   [.] 0x0000000000201de4
-   0.62%  daly-bms-server   [.] 0x00000000002150b4
-   0.56%  daly-bms-server   [.] 0x000000000051c690
-   0.49%  daly-bms-server   [.] 0x00000000004ab5b0
-   0.47%  [kernel]          [k] ktime_get_coarse_real_ts64
-   0.43%  daly-bms-server   [.] 0x000000000030bab4
-   0.37%  daly-bms-server   [.] 0x00000000000e9c78
-   0.37%  daly-bms-server   [.] 0x00000000000e0d54
-   0.34%  daly-bms-server   [.] 0x0000000000159a00
-   0.32%  libc.so.6         [.] xdr_long
-   0.32%  libc.so.6         [.] 0x0000000000091548
-   0.28%  daly-bms-server   [.] 0x00000000001dc70c
-   0.22%  daly-bms-server   [.] 0x00000000000df9ac
-   0.21%  [kernel]          [k] __ip4_datagram_connect
-   0.18%  libc.so.6         [.] 0x000000000010d184
-   0.04%  libc.so.6         [.] 0x000000000008e964
-   0.00%  daly-bms-server   [.] 0x00000000004ab30c
-   0.00%  [overlay]         [k] ovl_inode_version_get
-   0.00%  [kernel]          [k] override_creds
-   0.00%  [kernel]          [k] futex_wake
-   0.00%  daly-bms-server   [.] 0x00000000004ac110
-Too slow to read ring buffer (change period (-c/-F) or limit CPUs (-C)
+//! # daly-bms-server
+//!
+//! Serveur principal : charge la configuration, ouvre le port série (ou simule),
+//! démarre le polling et expose l'API Axum (REST + WebSocket).
+//!
+//! ## Démarrage
+//! ```bash
+//! # Avec hardware réel :
+//! DALY_CONFIG=/etc/daly-bms/config.toml daly-bms-server
+//!
+//! # Mode simulation (sans Pi ni BMS) :
+//! cargo run --bin daly-bms-server -- --simulate
+//! cargo run --bin daly-bms-server -- --simulate --sim-bms 0x01,0x02
+//! ```
 
-amples: 131  of event 'cycles:P', Event count (approx.): 37223230
-  Children      Self  Command          Shared Object      Symbol
-+  100.00%     0.00%  tokio-rt-worker  libc.so.6          [.] 0x00007fff0bffbf1c
-+  100.00%     0.00%  tokio-rt-worker  libc.so.6          [.] 0x00007fff0bf92030
-+  100.00%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bab97ec8
-+  100.00%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bab9fc60
-+   97.45%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bab9dee8
-+   53.99%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baba8548
-+   34.91%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba88ee14
-+   32.88%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555babaa4c8
-+   20.73%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555babaa508
-+   19.81%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] el0t_64_sync
-+   19.81%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] el0t_64_sync_handler
-+   19.81%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] el0_svc
-+   19.77%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] do_el0_svc
-+   19.77%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] el0_svc_common.constprop.0
-+   19.77%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] invoke_syscall
-+   19.18%     6.65%  tokio-rt-worker  libc.so.6          [.] malloc
-+   17.94%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baba8c78
-+   15.80%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baba9e60
-+   15.80%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555babab5b0
-+   13.61%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bababd20
-+   13.61%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555babac274
-+   13.55%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba891f78
-+   13.26%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bab9b04c
-+   13.26%     0.02%  tokio-rt-worker  libc.so.6          [.] getaddrinfo
-+   13.25%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bab9b3e4
-+   13.02%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba800cb0
-+   12.90%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba99603c
-+   11.93%     4.22%  tokio-rt-worker  libc.so.6          [.] epoll_pwait
-+   11.90%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba7e1038
-+    9.31%     9.00%  tokio-rt-worker  libc.so.6          [.] cfree
-+    8.35%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba7dd988
-+    7.92%     0.00%  tokio-rt-worker  libc.so.6          [.] _nss_files_gethostbyname4_r
-+    7.92%     0.00%  tokio-rt-worker  libc.so.6          [.] __nss_files_fopen
-+    7.71%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] __arm64_sys_epoll_pwait
-+    7.71%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] do_epoll_pwait.part.0
-+    7.70%     5.62%  tokio-rt-worker  [kernel.kallsyms]  [k] do_epoll_wait
-+    7.23%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa11dc8
-+    7.23%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa0ca80
-+    6.84%     0.00%  tokio-rt-worker  libc.so.6          [.] realloc
-+    6.62%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba7e4318
-+    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa0ec78
-+    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa15c50
+mod autodetect;
+mod config;
+mod ats;
+mod console;
+mod et112;
+mod irradiance;
+mod shelly;
+mod tasmota;
+mod state;
+mod tsink_db;
+mod api;
+mod bridges;
+mod simulator;
+mod dashboard;
+mod monitor;
 
-+      19.51%  daly-bms-server   [.] 0x00000000004aa4c4
-   9.68%  [overlay]         [k] ovl_permission
-   7.66%  daly-bms-server   [.] 0x000000000031f280
-   4.99%  libc.so.6         [.] 0x0000000000092a04
-   4.97%  [kernel]          [k] sk_destruct
-   4.45%  libc.so.6         [.] 0x000000000008ea90
-   3.35%  daly-bms-server   [.] 0x0000000000348b30
-   3.30%  daly-bms-server   [.] 0x00000000001005dc
-   3.30%  libc.so.6         [.] mtx_timedlock
-   3.30%  libc.so.6         [.] xdr_array
-   3.16%  libc.so.6         [.] mq_open
-   2.89%  daly-bms-server   [.] 0x00000000000dfec0
-   2.89%  daly-bms-server   [.] 0x00000000001e46f0
-   2.60%  daly-bms-server   [.] 0x000000000071abd0
-   2.31%  [kernel]          [k] fdget_pos
-   2.21%  daly-bms-server   [.] 0x00000000000ab5ac
-   1.97%  libc.so.6         [.] 0x00000000000911dc
-   1.76%  [kernel]          [k] _raw_spin_unlock_irq
-   1.76%  daly-bms-server   [.] 0x000000000030ea68
-   1.68%  daly-bms-server   [.] 0x000000000049bda0
-   1.68%  libc.so.6         [.] 0x0000000000090d68
-   1.67%  libc.so.6         [.] 0x0000000000090ce0
-   1.59%  daly-bms-server   [.] 0x00000000004aa080
-   1.49%  daly-bms-server   [.] 0x00000000002bc45c           
-   1.39%  [kernel]          [k] __arm64_sys_epoll_pwait
-   1.39%  libc.so.6         [.] _IO_file_xsputn
-   1.36%  libc.so.6         [.] 0x000000000008eadc
-   1.12%  [kernel]          [k] kmem_cache_alloc_noprof
-   0.49%  libc.so.6         [.] 0x000000000007b964
-   0.03%  daly-bms-server   [.] 0x000000000007e990
-   0.02%  libc.so.6         [.] 0x000000000010b694
-+    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa26fe4
-+    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa903f8
-+    5.45%     5.45%  tokio-rt-worker  libc.so.6          [.] 0x000000000009d20c
-Cannot load tips.txt file, please install perf!
+use crate::bridges::{alerts, influx, mqtt};
+use crate::config::AppConfig;
+use crate::state::{AppState, LogBuffer, LogEntry};
+use daly_bms_core::bus::{BmsConfig, DalyBusManager, DalyPort};
+use daly_bms_core::poll::{poll_loop, PollConfig, PollErrorKind};
+use std::collections::VecDeque;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
+use tracing::{error, info, warn};
+use tracing::Subscriber;
+use tracing_subscriber::Layer;
+use tracing_subscriber::layer::Context;
+use tracing_subscriber::prelude::*;
+
+// =============================================================================
+// Couche tracing → buffer web
+// =============================================================================
+
+struct WebLogLayer {
+    buffer: LogBuffer,
+}
+
+struct MsgVisitor(String);
+
+impl tracing::field::Visit for MsgVisitor {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" { self.0 = value.to_string(); }
+        else if !self.0.is_empty()   { self.0.push_str(&format!(" {}={}", field.name(), value)); }
+    }
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" { self.0 = format!("{:?}", value).trim_matches('"').to_string(); }
+        else if !self.0.is_empty()   { self.0.push_str(&format!(" {}={:?}", field.name(), value)); }
+    }
+}
+
+impl<S: Subscriber> Layer<S> for WebLogLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        let level = event.metadata().level().to_string().to_uppercase();
+        let mut v = MsgVisitor(String::new());
+        event.record(&mut v);
+        let entry = LogEntry {
+            timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+            level,
+            message: v.0,
+        };
+        if let Ok(mut buf) = self.buffer.lock() {
+            if buf.len() >= 200 { buf.pop_front(); }
+            buf.push_back(entry);
+        }
+    }
+}
+
+// =============================================================================
+// Arguments CLI du serveur
+// =============================================================================
+
+#[derive(Debug)]
+struct ServerArgs {
+    simulate:  bool,
+    sim_addrs: Vec<u8>,
+    /// Port série explicite (ex: COM3, /dev/ttyUSB0)
+    port:      Option<String>,
+    /// Adresses BMS pour le mode hardware (ex: 0x01,0x02)
+    bms_addrs: Vec<u8>,
+}
+
+impl ServerArgs {
+    fn parse() -> Self {
+        let args: Vec<String> = std::env::args().collect();
+        let simulate = args.iter().any(|a| a == "--simulate" || a == "-s");
+
+        let sim_addrs = args.windows(2)
+            .find(|w| w[0] == "--sim-bms")
+            .map(|w| Self::parse_addresses(&w[1]))
+            .unwrap_or_default();
+
+        let port = args.windows(2)
+            .find(|w| w[0] == "--port" || w[0] == "-p")
+            .map(|w| w[1].clone());
+
+        let bms_addrs = args.windows(2)
+            .find(|w| w[0] == "--bms")
+            .map(|w| Self::parse_addresses(&w[1]))
+            .unwrap_or_default();
+
+        Self { simulate, sim_addrs, port, bms_addrs }
+    }
+
+    fn parse_addresses(s: &str) -> Vec<u8> {
+        s.split(',')
+            .filter_map(|s| {
+                let s = s.trim();
+                if s.starts_with("0x") || s.starts_with("0X") {
+                    u8::from_str_radix(&s[2..], 16).ok()
+                } else {
+                    s.parse::<u8>().ok()
+                }
+            })
+            .collect()
+    }
+}
+
+// =============================================================================
+// Main
+// =============================================================================
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let args = ServerArgs::parse();
+
+    // ── Configuration ──────────────────────────────────────────────────────────
+    let config_from_file;
+    let mut config = match AppConfig::load_default() {
+        Ok(c) => {
+            config_from_file = true;
+            c
+        }
+        Err(e) => {
+            eprintln!("Config non trouvée ({}) — utilisation des valeurs par défaut", e);
+            config_from_file = false;
+            AppConfig {
+                serial:      config::SerialConfig::default(),
+                api:         config::ApiConfig::default(),
+                logging:     config::LoggingConfig::default(),
+                mqtt:        config::MqttConfig::default(),
+                influxdb:    config::InfluxConfig::default(),
+                tsink:       config::TsinkConfig::default(),
+                alerts:      config::AlertsConfig::default(),
+                read_only:   config::ReadOnlyConfig::default(),
+                bms:         Vec::new(),
+                et112:       config::Et112Config::default(),
+                irradiance:  None,
+                ats:         None,
+                tasmota:     config::TasmotaConfig::default(),
+                shelly:      config::ShellyConfig::default(),
+            }
+        }
+    };
+
+    // Validation des prérequis de configuration
+    config.influxdb.validate()?;
+
+    // ── Override port série depuis CLI ─────────────────────────────────────────
+    if let Some(ref port) = args.port {
+        config.serial.port = port.clone();
+    }
+    // Override adresses BMS hardware depuis CLI
+    if !args.bms_addrs.is_empty() {
+        config.serial.addresses = args.bms_addrs.iter()
+            .map(|a| format!("{:#04x}", a))
+            .collect();
+    }
+
+    // ── Flags d'auto-détection ────────────────────────────────────────────────
+    // Actifs uniquement si aucun fichier config ET aucun argument CLI fourni.
+    let auto_detect_port    = !args.simulate && args.port.is_none()      && (!config_from_file || config.serial.port.is_empty());
+    let auto_discover_addrs = !args.simulate && args.bms_addrs.is_empty() && !config_from_file;
+
+    // ── Logging ────────────────────────────────────────────────────────────────
+    let log_level = config.logging.level.clone();
+    let log_buffer: LogBuffer = Arc::new(Mutex::new(VecDeque::new()));
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_level)),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .with(WebLogLayer { buffer: log_buffer.clone() })
+        .init();
+
+    let mode = if args.simulate { "SIMULATION" } else { "HARDWARE" };
+    info!(
+        version = env!("CARGO_PKG_VERSION"),
+        mode,
+        api = %config.api.bind,
+        "DalyBMS Server démarrage"
+    );
+
+    // ── Tsink (stockage time-series embarqué) ─────────────────────────────────
+    let tsink_handle = if config.tsink.enabled {
+        match tsink_db::TsinkHandle::new(&config.tsink).await {
+            Ok(h) => {
+                info!("Tsink activé — stockage dans '{}'", config.tsink.data_path);
+                Some(h)
+            }
+            Err(e) => {
+                warn!("Tsink init échoué : {} — stockage désactivé", e);
+                None
+            }
+        }
+    } else {
+        info!("Tsink désactivé (tsink.enabled = false)");
+        None
+    };
+
+    // ── État partagé ───────────────────────────────────────────────────────────
+    let state = AppState::new(config.clone(), log_buffer, tsink_handle);
+
+    // ── Bridges en arrière-plan ─────────────────────────────────────────────────
+
+    // Map adresse RS485 → index topic MQTT (ex: 0x28 → "1", 0x29 → "2")
+    // Permet d'écrire santuario/bms/1/venus au lieu de santuario/bms/40/venus
+    let mqtt_addr_map: std::collections::HashMap<u8, String> = config.bms
+        .iter()
+        .enumerate()
+        .filter_map(|(i, bms_cfg)| {
+            let addr = bms_cfg.parsed_address()?;
+            let idx  = bms_cfg.mqtt_index.unwrap_or((i + 1) as u8);
+            Some((addr, idx.to_string()))
+        })
+        .collect();
+
+    tokio::spawn({
+        let (s, c, m) = (state.clone(), config.mqtt.clone(), mqtt_addr_map);
+        async move { mqtt::run_mqtt_bridge(s, c, m).await }
+    });
+    tokio::spawn({
+        let (s, c) = (state.clone(), config.influxdb.clone());
+        async move { influx::run_influx_bridge(s, c).await }
+    });
+    tokio::spawn({
+        let (s, c) = (state.clone(), config.alerts.clone());
+        async move { alerts::run_alert_engine(s, c).await }
+    });
+
+    // ── Venus OS MQTT subscriber (données D-Bus) ───────────────────────────────
+    if config.mqtt.enabled {
+        info!("Démarrage Venus OS MQTT subscriber");
+        let state_venus = state.clone();
+        let mqtt_cfg = config.mqtt.clone();
+        tokio::spawn(async move {
+            mqtt::start_venus_mqtt_subscriber(state_venus, mqtt_cfg).await
+        });
+    }
+
+    // ── Tasmota MQTT subscriber ────────────────────────────────────────────────
+    if !config.tasmota.devices.is_empty() {
+        info!(
+            count = config.tasmota.devices.len(),
+            "Démarrage Tasmota MQTT subscriber"
+        );
+        let state_ta = state.clone();
+        let devs_ta  = config.tasmota.devices.clone();
+        let mqtt_ta  = config.mqtt.clone();
+        tokio::spawn(async move {
+            tasmota::run_tasmota_mqtt_loop(
+                devs_ta,
+                mqtt_ta,
+                move |snap| {
+                    // ✅ Appel direct, sans tokio::spawn
+                    let s = state_ta.clone();
+                    async move { s.on_tasmota_snapshot(snap).await }
+                },
+            )
+            .await;
+        });
+    }
+
+    // ── Shelly Pro 2PM MQTT subscriber ────────────────────────────────────────
+    if !config.shelly.devices.is_empty() {
+        info!(
+            count = config.shelly.devices.len(),
+            "Démarrage Shelly Pro 2PM MQTT subscriber"
+        );
+        let state_sh  = state.clone();
+        let devs_sh   = config.shelly.devices.clone();
+        let mqtt_sh   = config.mqtt.clone();
+        let client_sh = state.shelly_client.clone();
+        tokio::spawn(async move {
+            shelly::run_shelly_mqtt_loop(
+                devs_sh,
+                mqtt_sh,
+                client_sh,
+                move |snap| {
+                    // ✅ Appel direct, sans tokio::spawn
+                    let s = state_sh.clone();
+                    async move { s.on_shelly_snapshot(snap).await }
+                },
+            )
+            .await;
+        });
+    }
+
+    // ── Mode SIMULATION ou HARDWARE ────────────────────────────────────────────
+    if args.simulate {
+        // Adresses depuis --sim-bms, ou depuis config.toml, ou défaut 0x01,0x02
+        let addresses = if !args.sim_addrs.is_empty() {
+            args.sim_addrs.clone()
+        } else {
+            let cfg_addrs = config.bms_addresses();
+            if !cfg_addrs.is_empty() { cfg_addrs } else { vec![0x01, 0x02] }
+        };
+
+        info!(
+            "Mode simulation : {} BMS {:?}",
+            addresses.len(),
+            addresses.iter().map(|a| format!("{:#04x}", a)).collect::<Vec<_>>()
+        );
+
+        state.polling_active.store(true, Ordering::Relaxed);
+        let state_sim = state.clone();
+        let config_sim = config.clone();
+        tokio::spawn(async move {
+            simulator::run_simulator(state_sim, config_sim, addresses).await;
+        });
+    } else {
+        // Mode hardware réel
+
+        // ── 1. Résoudre le port (auto-détection ou config) ───────────────────
+        // find_daly_port() retourne le port déjà ouvert pour éviter la double
+        // ouverture Windows ("Accès refusé" si on ouvre, ferme, puis rouvre).
+        let (resolved_port, pre_opened_port) = if auto_detect_port {
+            info!("Port non spécifié — détection automatique en cours...");
+            match autodetect::find_daly_port(config.serial.baud).await {
+                Some((name, port)) => (name, Some(port)),
+                None => {
+                    error!("Aucun Daly BMS détecté sur les ports série disponibles.");
+                    warn!("Relancez avec --port COMx pour forcer un port.");
+                    warn!("Démarrage en mode API-seule (pas de données BMS).");
+                    (String::new(), None)
+                }
+            }
+        } else {
+            (config.serial.port.clone(), None)
+        };
+
+        if !resolved_port.is_empty() {
+            // Réutiliser le port pré-ouvert (auto-détect) ou en ouvrir un nouveau
+            let dal_port = match pre_opened_port {
+                Some(p) => Ok(p),
+                None    => DalyPort::open(&resolved_port, config.serial.baud, 500),
+            };
+            match dal_port {
+                Ok(port) => {
+                    info!("Port série {} ouvert à {} baud — bus RS485 unifié", resolved_port, config.serial.baud);
+                    state.polling_active.store(true, Ordering::Relaxed);
+
+                    // Rendre le port disponible pour les commandes d'écriture
+                    state.set_port(port.clone()).await;
+
+                    // ── Bus RS485 partagé avec ET112 et PRALRAN ────────────────
+                    let shared_bus = port.shared_bus();
+
+                    // ── ET112 sur bus unifié ───────────────────────────────────
+                    if !config.et112.devices.is_empty() {
+                        info!(
+                            count = config.et112.devices.len(),
+                            "Démarrage polling ET112 (bus RS485 unifié)"
+                        );
+                        let state_et     = state.clone();
+                        let state_et_err = state.clone();
+                        let bus_et    = shared_bus.clone();
+                        let et112_cfg = config.et112.clone();
+                        tokio::spawn(async move {
+                            et112::run_et112_poll_loop(
+                                bus_et,
+                                et112_cfg.devices,
+                                std::time::Duration::from_millis(et112_cfg.poll_interval_ms),
+                                move |snap| {
+                                    // ✅ Appel direct sans tokio::spawn
+                                    let s = state_et.clone();
+                                    async move { s.on_et112_snapshot(snap).await }
+                                },
+                                move |addr, name, res| {
+                                    // ✅ Appel direct sans tokio::spawn
+                                    let s = state_et_err.clone();
+                                    let name = name.to_string();
+                                    async move {
+                                        match res {
+                                            Ok(()) => s.record_rs485_success(addr, "ET112", &name).await,
+                                            Err(msg) => s.record_rs485_error(addr, "ET112", &name, &msg).await,
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+                        });
+                    }
+
+                    // ── PRALRAN irradiance sur bus unifié ──────────────────────
+                    if let Some(irrad_cfg) = config.irradiance.clone() {
+                        info!(
+                            addr = %irrad_cfg.address,
+                            "Démarrage polling irradiance PRALRAN (bus RS485 unifié)"
+                        );
+                        let state_irrad     = state.clone();
+                        let state_irrad_err = state.clone();
+                        let bus_irrad   = shared_bus.clone();
+                        tokio::spawn(async move {
+                            irradiance::run_irradiance_poll_loop(
+                                bus_irrad,
+                                irrad_cfg,
+                                move |snap| {
+                                    // ✅ Appel direct sans tokio::spawn
+                                    let s = state_irrad.clone();
+                                    async move { s.on_irradiance_snapshot(snap).await }
+                                },
+                                move |addr, name, res| {
+                                    // ✅ Appel direct sans tokio::spawn
+                                    let s = state_irrad_err.clone();
+                                    let name = name.to_string();
+                                    async move {
+                                        match res {
+                                            Ok(()) => s.record_rs485_success(addr, "PRALRAN", &name).await,
+                                            Err(msg) => s.record_rs485_error(addr, "PRALRAN", &name, &msg).await,
+                                        }
+                                    }
+                                },
+                            )
+                            .await;
+                        });
+                    }
+
+                    // ── ATS CHINT sur bus unifié ──────────────────────────────────
+                    if let Some(ats_cfg) = config.ats.clone() {
+                        if ats_cfg.enabled {
+                            info!(
+                                addr = ats_cfg.address,
+                                name = %ats_cfg.name,
+                                "Démarrage polling ATS CHINT (bus RS485 unifié)"
+                            );
+                            let state_ats     = state.clone();
+                            let state_ats_err = state.clone();
+                            let bus_ats   = shared_bus.clone();
+                            state.set_ats_bus(shared_bus.clone()).await;
+                            tokio::spawn(async move {
+                                ats::run_ats_poll_loop(
+                                    bus_ats,
+                                    ats_cfg,
+                                    move |snap| {
+                                        // ✅ Appel direct sans tokio::spawn
+                                        let s = state_ats.clone();
+                                        async move { s.on_ats_snapshot(snap).await }
+                                    },
+                                    move |addr, name, res| {
+                                        // ✅ Appel direct sans tokio::spawn
+                                        let s = state_ats_err.clone();
+                                        let name = name.to_string();
+                                        async move {
+                                            match res {
+                                                Ok(()) => s.record_rs485_success(addr, "ATS", &name).await,
+                                                Err(msg) => s.record_rs485_error(addr, "ATS", &name, &msg).await,
+                                            }
+                                        }
+                                    },
+                                )
+                                .await;
+                            });
+                        }
+                    }
+
+                    // ── 2. Résoudre les adresses BMS (auto-découverte ou config) ──
+                    let addresses = if auto_discover_addrs {
+                        info!("Découverte automatique des BMS sur le bus RS485 (0x01..0x04)...");
+                        let mgr_tmp = DalyBusManager::new(port.clone(), vec![]);
+                        let found = mgr_tmp.discover(1, 4).await;
+                        if found.is_empty() {
+                            warn!("Aucun BMS découvert — polling désactivé.");
+                            state.polling_active.store(false, Ordering::Relaxed);
+                        }
+                        found
+                    } else {
+                        config.bms_addresses()
+                    };
+
+                    if !addresses.is_empty() {
+                        let devices: Vec<BmsConfig> = addresses
+                            .iter()
+                            .map(|&addr| {
+                                let mut bms = BmsConfig::new(addr);
+                                bms.cell_count        = config.serial.default_cell_count;
+                                bms.temp_sensor_count = config.serial.default_temp_sensors;
+                                // Surcharges depuis [[bms]] si présentes
+                                if let Some(dev_cfg) = config.bms.iter()
+                                    .find(|b| b.parsed_address() == Some(addr))
+                                {
+                                    if let Some(n)  = &dev_cfg.name           { bms.name = n.clone(); }
+                                    if let Some(c)  = dev_cfg.capacity_ah      { bms.installed_capacity_ah    = c; }
+                                    if let Some(mc) = dev_cfg.max_charge_a     { bms.max_charge_current_a    = mc; }
+                                    if let Some(md) = dev_cfg.max_discharge_a  { bms.max_discharge_current_a = md; }
+                                }
+                                bms
+                            })
+                            .collect();
+
+                        info!("Polling de {} BMS : {:?}", devices.len(),
+                              devices.iter().map(|d| format!("{:#04x}", d.address)).collect::<Vec<_>>());
+
+                        // Map adresse → nom pour enrichir les stats RS485.
+                        let bms_names: std::collections::BTreeMap<u8, String> = devices
+                            .iter()
+                            .map(|d| (d.address, d.name.clone()))
+                            .collect();
+
+                        let manager  = Arc::new(DalyBusManager::new(port, devices));
+                        let poll_cfg = PollConfig {
+                            interval_ms: config.serial.poll_interval_ms,
+                            ..Default::default()
+                        };
+                        let state_poll = state.clone();
+                        let state_err  = state.clone();
+                        tokio::spawn(async move {
+                            poll_loop(
+                                manager,
+                                poll_cfg,
+                                move |snap| {
+                                    // ✅ Appel direct sans tokio::spawn
+                                    let s = state_poll.clone();
+                                    let addr = snap.address;
+                                    let name = snap.name.clone();
+                                    async move {
+                                        s.record_rs485_success(addr, "BMS", &name).await;
+                                        s.on_snapshot(snap).await;
+                                    }
+                                },
+                                move |addr, kind, msg| {
+                                    // ✅ Appel direct sans tokio::spawn
+                                    let s = state_err.clone();
+                                    let name = bms_names
+                                        .get(&addr)
+                                        .cloned()
+                                        .unwrap_or_else(|| format!("BMS {:#04x}", addr));
+                                    let err_tag = match kind {
+                                        PollErrorKind::Timeout => "timeout",
+                                        PollErrorKind::Crc     => "crc",
+                                        PollErrorKind::Serial  => "timeout",
+                                        PollErrorKind::Other   => "other",
+                                    };
+                                    let err_msg = format!("{}: {}", err_tag, msg);
+                                    async move {
+                                        s.record_rs485_error(addr, "BMS", &name, &err_msg).await;
+                                    }
+                                },
+                            )
+                            .await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    error!("Impossible d'ouvrir {} : {:?}", resolved_port, e);
+                    warn!("Démarrage en mode API-seule (pas de données BMS).");
+                    warn!("Astuce : relancez avec --simulate pour tester sans matériel.");
+                }
+            }
+        }
+    }
+
+    // ── Agent de monitoring Pi5 ────────────────────────────────────────────────
+    tokio::spawn(monitor::run_monitor_agent(state.clone()));
+    tokio::spawn(monitor::run_watchdog_agent(state.clone()));
+
+    // ── Serveur HTTP Axum ──────────────────────────────────────────────────────
+    let router = api::build_router(state);
+    let addr: SocketAddr = config.api.bind.parse()?;
+
+    info!("API  → http://{}", addr);
+    info!("WS   → ws://{}/ws/bms/stream", addr);
+    if args.simulate {
+        info!("Docs → http://{}/api/v1/system/status", addr);
+    }
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, router).await?;
+    Ok(())
+}
