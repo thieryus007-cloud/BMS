@@ -32,7 +32,8 @@ mod monitor;
 use crate::bridges::{alerts, influx, mqtt};
 use crate::config::AppConfig;
 use crate::state::{AppState, LogBuffer, LogEntry};
-use crate::tsink_db::Row as TsinkRow;
+//use crate::tsink_db::Row as TsinkRow;
+use tsink::Row as TsinkRow;  // ✅ Import direct depuis tsink
 use daly_bms_core::bus::{BmsConfig, DalyBusManager, DalyPort};
 use daly_bms_core::poll::{poll_loop, PollConfig, PollErrorKind};
 use std::collections::VecDeque;
