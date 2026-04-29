@@ -59,9 +59,12 @@ impl TsinkHandle {
             .with_memory_limit(config.memory_limit_mb * 1024 * 1024)
             .with_cardinality_limit(config.cardinality_limit)
             // Paramètres de performance pour limiter la charge CPU
-            .with_queue_capacity(500)   // File d'attente interne
+            .with_queue_capacity(2048)   // File d'attente interne
             .with_max_writers(2)        // Limite le nombre d'écrivains simultanés
-            .with_chunk_points(500)     // Points par chunk
+            .with_chunk_points(4096)     // Points par chunk
+            .with_partition_duration(Duration::from_secs(6 * 3600)) // 6h partitions
+            .with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(5)))
+            .with_wal_buffer_size(64 * 1024)
             .build()?;                  // ← PAS de .await, build() est synchrone
 
         info!(
