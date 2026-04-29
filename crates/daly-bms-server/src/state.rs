@@ -773,7 +773,7 @@ impl AppState {
             })));
             // 🔧 Écriture Tsink — sans spawn
             if let Some(tsink) = self.tsink.clone() {
-                if Self::tsink_rate_ok(&self.tsink_last_venus_write, 10) {
+                if Self::tsink_rate_ok(&self.tsink_last_venus_write, 30) {
                     let rows = TsinkHandle::smartshunt_rows(&shunt);
                     if let Err(e) = tsink.write_rows(rows).await {
                         tracing::warn!("Tsink SmartShunt write error: {}", e);
