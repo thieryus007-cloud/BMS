@@ -1,7 +1,7 @@
 /// Central meteo pivot:
 ///  - Aggregates weather (Open-Meteo), irradiance, solar yields
 ///  - Publishes santuario/heat/1/venus and santuario/meteo/venus (retained)
-///  - Persists solar baselines to InfluxDB + MQTT retained
+///  - Persists solar baselines to MQTT retained
 ///  - Handles midnight reset (cron)
 use chrono::{Local, NaiveTime};
 use serde_json::json;
@@ -13,7 +13,7 @@ use tracing::info;
 use crate::bus::AppBus;
 use crate::config::SolarConfig;
 use crate::mqtt::topics::publish;
-use crate::types::{EnergyState, InfluxPoint, MqttOutgoing};
+use crate::types::{EnergyState, MqttOutgoing};
 
 const PUBLISH_INTERVAL_SECS: u64 = 60;
 
@@ -54,7 +54,6 @@ pub async fn publish_all(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     });
 
     // santuario/meteo/venus — irradiance + solar + wind
-    // Key "Mppts" matches daly-bms-server handle_meteo_topic (was "MpptList" — mismatch fixed)
     let meteo_payload = json!({
         "Irradiance":    s.irradiance_wm2,
         "TodaysYield":   s.total_yield_today_kwh,
@@ -88,7 +87,7 @@ pub async fn publish_all(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
 }
 
 // ---------------------------------------------------------------------------
-// Midnight reset + baseline persistence
+// Midnight reset + baseline persistence via MQTT retained
 // ---------------------------------------------------------------------------
 
 async fn midnight_reset_task(
@@ -105,29 +104,13 @@ async fn midnight_reset_task(
     }
 }
 
-async fn do_reset(cfg: &SolarConfig, bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
+async fn do_reset(_cfg: &SolarConfig, bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     info!("Midnight reset triggered");
 
     let total_today = {
         let s = state.read().await;
         s.total_yield_today_kwh
     };
-
-    // Persist to InfluxDB
-    let day_tag = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let pt = InfluxPoint::new(&cfg.persist_measurement)
-        .tag("day", &day_tag)
-        .tag("host", &cfg.host_tag)
-        .field_f("total_yield_today_kwh", total_today)
-        .field_f("mppt_yield_today_kwh", {
-            let s = state.read().await;
-            s.mppt_yield_today_kwh
-        })
-        .field_f("pvinv_yield_today_kwh", {
-            let s = state.read().await;
-            s.pvinv_yield_today_kwh
-        });
-    bus.write_influx(pt).await;
 
     // Update yield_yesterday + publish retained
     {
@@ -161,10 +144,8 @@ fn secs_until_midnight() -> u64 {
     let diff = midnight.signed_duration_since(now_time);
     let secs = diff.num_seconds();
     if secs <= 0 {
-        // Already past midnight today → wait for tomorrow
         (86400 + secs) as u64
     } else {
         secs as u64
     }
 }
-

@@ -12,7 +12,7 @@ use crate::bus::AppBus;
 use crate::config::WaterHeaterConfig;
 use crate::http_clients::lg_thinq::LgThinqClient;
 use crate::mqtt::topics::publish;
-use crate::types::{EnergyState, InfluxPoint, LiveEvent, MqttOutgoing, WaterHeaterMode};
+use crate::types::{EnergyState, LiveEvent, MqttOutgoing, WaterHeaterMode};
 
 pub async fn spawn(
     cfg: WaterHeaterConfig,
@@ -172,12 +172,6 @@ async fn control_task(
             s.water_heater_mode        = target_mode;
             s.water_heater_last_change = Some(now);
         }
-
-        // Write mode change to InfluxDB
-        let pt = InfluxPoint::new("water_heater_status")
-            .field_s("mode",  target_mode.to_lg_str())
-            .field_i("state", target_mode.to_venus_state() as i64);
-        bus.write_influx(pt).await;
 
         publish_to_venus(&bus, &state).await;
 

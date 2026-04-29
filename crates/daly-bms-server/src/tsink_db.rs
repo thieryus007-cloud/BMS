@@ -250,6 +250,16 @@ impl TsinkHandle {
         rows
     }
 
+    /// Écrit les métriques solaires (depuis energy-manager POST) dans Tsink.
+    pub fn solar_rows(solar_total_w: f32, mppt_power_w: f32, total_yield_kwh: f32) -> Vec<Row> {
+        let ts = chrono::Utc::now().timestamp_millis();
+        vec![
+            Row::new("solar_total_w",    DataPoint::new(ts, solar_total_w as f64)),
+            Row::new("mppt_power_w",     DataPoint::new(ts, mppt_power_w as f64)),
+            Row::new("solar_yield_kwh",  DataPoint::new(ts, total_yield_kwh as f64)),
+        ]
+    }
+
     /// Écrit les données Venus Inverter dans Tsink.
     pub fn inverter_rows(inv: &VenusInverter) -> Vec<Row> {
         let ts = inv.timestamp.timestamp_millis();

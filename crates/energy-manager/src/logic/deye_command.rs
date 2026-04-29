@@ -10,7 +10,7 @@ use tracing::info;
 use crate::bus::AppBus;
 use crate::config::{DeyeConfig, VictronConfig};
 use crate::mqtt::topics::publish;
-use crate::types::{EnergyState, InfluxPoint, MqttOutgoing};
+use crate::types::{EnergyState, MqttOutgoing};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum DeyeState {
@@ -177,9 +177,4 @@ async fn send_shelly(bus: &AppBus, shelly_id: &str, channel: u8, on: bool) {
     bus.publish(MqttOutgoing::transient(topic, &payload)).await;
     info!("DEYE Shelly: switch {} = {}", channel, if on { "ON" } else { "OFF" });
 
-    let pt = InfluxPoint::new("deye_relay")
-        .tag("host", "pi5")
-        .tag("shelly_id", shelly_id)
-        .field_i("on", if on { 1 } else { 0 });
-    bus.write_influx(pt).await;
 }

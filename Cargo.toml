@@ -54,10 +54,6 @@ tower-http    = { version = "0.5",  features = ["cors", "trace", "compression-gz
 # ── MQTT ───────────────────────────────────────────────────────────────────────
 rumqttc       = "0.25"
 
-# ── InfluxDB 2.x ───────────────────────────────────────────────────────────────
-influxdb2             = { version = "0.5", default-features = false, features = ["rustls"] }
-influxdb2-structmap   = "0.2"
-
 # ── SQLite (alertes) ───────────────────────────────────────────────────────────
 rusqlite      = { version = "0.31", features = ["bundled"] }
 

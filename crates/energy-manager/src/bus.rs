@@ -1,10 +1,9 @@
 use tokio::sync::{broadcast, mpsc};
-use crate::types::{InfluxPoint, LiveEvent, MqttIncoming, MqttOutgoing};
+use crate::types::{LiveEvent, MqttIncoming, MqttOutgoing};
 
 // Capacity constants
 const MQTT_IN_CAPACITY:  usize = 512;
 const MQTT_OUT_CAPACITY: usize = 256;
-const INFLUX_CAPACITY:   usize = 512;
 const LIVE_CAPACITY:     usize = 64;
 
 /// Central message bus passed to all tasks.
@@ -15,26 +14,22 @@ pub struct AppBus {
     pub mqtt_in:  broadcast::Sender<MqttIncoming>,
     /// MPSC → MQTT publisher task
     pub mqtt_out: mpsc::Sender<MqttOutgoing>,
-    /// MPSC → InfluxDB writer task
-    pub influx:   mpsc::Sender<InfluxPoint>,
     /// Broadcast → live WebSocket clients
     pub live:     broadcast::Sender<LiveEvent>,
 }
 
 pub struct AppBusReceivers {
     pub mqtt_out_rx: mpsc::Receiver<MqttOutgoing>,
-    pub influx_rx:   mpsc::Receiver<InfluxPoint>,
 }
 
 impl AppBus {
     pub fn new() -> (Self, AppBusReceivers) {
         let (mqtt_in, _)      = broadcast::channel(MQTT_IN_CAPACITY);
         let (mqtt_out, mqtt_out_rx) = mpsc::channel(MQTT_OUT_CAPACITY);
-        let (influx, influx_rx)     = mpsc::channel(INFLUX_CAPACITY);
         let (live, _)               = broadcast::channel(LIVE_CAPACITY);
 
-        let bus = Self { mqtt_in, mqtt_out, influx, live };
-        let rxs = AppBusReceivers { mqtt_out_rx, influx_rx };
+        let bus = Self { mqtt_in, mqtt_out, live };
+        let rxs = AppBusReceivers { mqtt_out_rx };
         (bus, rxs)
     }
 
@@ -50,11 +45,6 @@ impl AppBus {
     /// Publish a message to MQTT (non-blocking, drops if channel full)
     pub async fn publish(&self, msg: MqttOutgoing) {
         let _ = self.mqtt_out.send(msg).await;
-    }
-
-    /// Write a point to InfluxDB (non-blocking)
-    pub async fn write_influx(&self, pt: InfluxPoint) {
-        let _ = self.influx.send(pt).await;
     }
 
     /// Broadcast a live event to WebSocket clients

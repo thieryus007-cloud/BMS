@@ -6,7 +6,6 @@ use tracing_subscriber::EnvFilter;
 mod bus;
 mod config;
 mod http_clients;
-mod influx;
 mod live_ws;
 mod logic;
 mod mqtt;
@@ -37,12 +36,6 @@ async fn main() -> anyhow::Result<()> {
 
     // --- Bus ---
     let (bus, receivers) = AppBus::new();
-
-    // --- InfluxDB writer ---
-    influx::client::spawn(cfg.influxdb.clone(), receivers.influx_rx).await?;
-
-    // --- Restore baselines from InfluxDB (before MQTT connects) ---
-    persist::baseline::restore(&cfg.influxdb, &cfg.solar, state.clone()).await;
 
     // --- MQTT topics ---
     let topics = mqtt::topics::all_subscriptions(

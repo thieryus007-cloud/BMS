@@ -1,5 +1,4 @@
-//! Bridges vers les services externes (MQTT, InfluxDB, Alertes).
+//! Bridges vers les services externes (MQTT, Alertes).
 
 pub mod mqtt;
-pub mod influx;
 pub mod alerts;

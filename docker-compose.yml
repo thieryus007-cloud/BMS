@@ -1,10 +1,7 @@
 # =============================================================================
 # DalyBMS — Stack complète Docker Compose
 # =============================================================================
-# Inclut : Mosquitto · InfluxDB · daly-bms-server
-#
-# Prérequis :
-#   cp .env.docker .env && nano .env   # adapter les secrets
+# Inclut : Mosquitto · daly-bms-server
 #
 # Démarrage :
 #   docker compose up -d
@@ -14,14 +11,6 @@
 #   Dashboard  → http://localhost:8000/dashboard
 #   API REST   → http://localhost:8000/api/v1/bms
 #   WebSocket  → ws://localhost:8000/ws/bms/stream
-#   InfluxDB   → http://localhost:8086
-#   Node-RED   → http://localhost:1880
-#
-# Mode hardware réel (Pi) :
-#   Remplacer CMD dans le service dalybms-server par [] et ajouter :
-#     devices:
-#       - /dev/ttyUSB0:/dev/ttyUSB0
-#   Puis : docker compose up -d dalybms-server
 
 # =============================================================================
 # Services
@@ -54,39 +43,6 @@ services:
     networks:
       - dalybms-net
 
-  # ── Base de données temporelle ───────────────────────────────────────────────
-  influxdb:
-    image: influxdb:2.7.10
-    container_name: dalybms-influxdb
-    restart: unless-stopped
-    ports:
-      - "8086:8086"
-    environment:
-      DOCKER_INFLUXDB_INIT_MODE:     setup
-      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_ADMIN_USER:-admin}
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD:-supersecret123}
-      DOCKER_INFLUXDB_INIT_ORG:      ${INFLUX_ORG:-santuario}
-      DOCKER_INFLUXDB_INIT_BUCKET:   ${INFLUX_BUCKET:-daly_bms}
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:?INFLUX_TOKEN manquant dans .env}
-      # Rétention par défaut du bucket : 30 jours
-      DOCKER_INFLUXDB_INIT_RETENTION: 720h
-    volumes:
-      - influxdb-data:/var/lib/influxdb2
-      - influxdb-config:/etc/influxdb2
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 20s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - dalybms-net
-
   # ── Serveur BMS Rust (mode simulation) ──────────────────────────────────────
   dalybms-server:
     build:
@@ -102,19 +58,13 @@ services:
       DALY_CONFIG:    /etc/daly-bms/config.toml
       DALY_API_KEY:   ${DALY_API_KEY:-}
     volumes:
-      # Config Docker (MQTT=mosquitto, InfluxDB=dalybms-influxdb)
-      # Pour hardware réel, monter Config.toml à la place
       - ./Config.docker.toml:/etc/daly-bms/config.toml:ro
-      # Journal des alertes SQLite
       - dalybms-alerts:/var/lib/daly-bms
-    # Mode hardware réel — autodétection du port COM
     command: []
     devices:
       - /dev/daly-bms:/dev/ttyUSB0
     depends_on:
       mosquitto:
-        condition: service_healthy
-      influxdb:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/system/status || exit 1"]
@@ -130,10 +80,7 @@ services:
     networks:
       - dalybms-net
 
-
   # ── Venus OS keepalive ──────────────────────────────────────────────────────
-  # Venus OS exige un publish sur R/<portalId>/keepalive toutes les 60s
-  # Sans ce keepalive, Venus OS ne publie aucune donnée sur N/#
   venus-keepalive:
     image: eclipse-mosquitto:2.0.18
     container_name: dalybms-venus-keepalive
@@ -170,9 +117,5 @@ volumes:
     name: dalybms-mosquitto-data
   mosquitto-log:
     name: dalybms-mosquitto-log
-  influxdb-data:
-    name: dalybms-influxdb-data
-  influxdb-config:
-    name: dalybms-influxdb-config
   dalybms-alerts:
     name: dalybms-alerts
