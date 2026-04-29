@@ -425,7 +425,7 @@ compaction_interval_secs = 300
 [influxdb]
 # true  = activer l'écriture InfluxDB (Docker infra doit être démarré)
 # false = désactiver (pas de Docker, ou test sans InfluxDB)
-enabled = true
+enabled = false
 
 # Windows Docker Desktop ou Linux local → http://localhost:8086
 # Docker Compose interne             → http://dalybms-influxdb:8086 (Config.docker.toml)
