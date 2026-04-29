@@ -7,9 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tsink::{
     AsyncStorage, AsyncStorageBuilder, DataPoint, Label, Row, TimestampPrecision, WalSyncMode,
+    WalReplayMode,
 };
-
-
 use tsink::promql::{Engine, PromqlValue};
 use tracing::info;
 
@@ -19,8 +18,12 @@ use crate::et112::Et112Snapshot;
 use crate::irradiance::IrradianceSnapshot;
 use crate::state::{VenusSmartShunt, VenusInverter};
 
-pub use tsink::Row;
+// =============================================================================
+// Réexports publics
+// =============================================================================
 
+// ✅ Réexport propre de Row pour les modules externes (après les imports internes)
+pub use tsink::Row;
 
 // =============================================================================
 // Erreur
@@ -47,7 +50,7 @@ pub type Result<T> = std::result::Result<T, TsinkError>;
 /// Handle clonable vers le stockage Tsink.
 #[derive(Clone)]
 pub struct TsinkHandle {
-    storage: Arc<AsyncStorage>,
+    storage: Arc<tsink::AsyncStorage>,
 }
 
 impl TsinkHandle {
@@ -61,12 +64,11 @@ impl TsinkHandle {
             .with_retention(Duration::from_secs(config.retention_days * 24 * 3600))
             .with_memory_limit(config.memory_limit_mb * 1024 * 1024)
             .with_cardinality_limit(config.cardinality_limit)
-            // Batch fsyncs every 5s instead of per-append: eliminates IO-bound CPU spike.
+            // 🔥 CRITIQUE : Batch fsyncs every 5s instead of per-append
             .with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(5)))
-            // WAL directory race during segment rotation → tolerate background errors
-            // instead of shutting down the entire storage engine.
+            // 🔥 CRITIQUE : Tolerate background errors instead of shutting down
             .with_background_fail_fast(false)
-            // One read worker is sufficient for our query load; prevents runaway thread spawns.
+            // One read worker is sufficient for our query load
             .with_read_workers(1)
             .build()?;
 
@@ -163,23 +165,23 @@ impl TsinkHandle {
             };
         }
 
-        rows.push(row!("bms_voltage",      snap.dc.voltage));
-        rows.push(row!("bms_current",      snap.dc.current));
-        rows.push(row!("bms_power",        snap.dc.power));
-        rows.push(row!("bms_soc",          snap.soc));
-        rows.push(row!("bms_capacity_ah",  snap.capacity));
-        rows.push(row!("bms_cell_delta_mv",snap.system.cell_delta_mv()));
-        rows.push(row!("bms_temp_max",     snap.system.max_cell_temperature));
-        rows.push(row!("bms_temp_min",     snap.system.min_cell_temperature));
-        rows.push(row!("bms_charge_mos",   snap.io.allow_to_charge));
-        rows.push(row!("bms_discharge_mos",snap.io.allow_to_discharge));
+        rows.push(row!("bms_voltage", snap.dc.voltage));
+        rows.push(row!("bms_current", snap.dc.current));
+        rows.push(row!("bms_power", snap.dc.power));
+        rows.push(row!("bms_soc", snap.soc));
+        rows.push(row!("bms_capacity_ah", snap.capacity));
+        rows.push(row!("bms_cell_delta_mv", snap.system.cell_delta_mv()));
+        rows.push(row!("bms_temp_max", snap.system.max_cell_temperature));
+        rows.push(row!("bms_temp_min", snap.system.min_cell_temperature));
+        rows.push(row!("bms_charge_mos", snap.io.allow_to_charge));
+        rows.push(row!("bms_discharge_mos", snap.io.allow_to_discharge));
 
         for (cell_name, &v) in &snap.voltages {
             rows.push(Row::with_labels(
                 "bms_cell_voltage",
                 vec![
                     Label::new("bms_id", bms_id.as_str()),
-                    Label::new("cell",   cell_name.as_str()),
+                    Label::new("cell", cell_name.as_str()),
                 ],
                 DataPoint::new(ts, v as f64),
             ));
@@ -190,7 +192,7 @@ impl TsinkHandle {
 
     /// Convertit un Et112Snapshot en lignes Tsink.
     pub fn et112_rows(snap: &Et112Snapshot) -> Vec<Row> {
-        let ts  = snap.timestamp.timestamp_millis();
+        let ts = snap.timestamp.timestamp_millis();
         let addr = format!("{:#04x}", snap.address);
 
         macro_rules! row {
@@ -199,7 +201,7 @@ impl TsinkHandle {
                     $metric,
                     vec![
                         Label::new("address", addr.as_str()),
-                        Label::new("name",    snap.name.as_str()),
+                        Label::new("name", snap.name.as_str()),
                     ],
                     DataPoint::new(ts, $value as f64),
                 )
@@ -207,14 +209,14 @@ impl TsinkHandle {
         }
 
         vec![
-            row!("et112_voltage_v",         snap.voltage_v),
-            row!("et112_current_a",         snap.current_a),
-            row!("et112_power_w",           snap.power_w),
+            row!("et112_voltage_v", snap.voltage_v),
+            row!("et112_current_a", snap.current_a),
+            row!("et112_power_w", snap.power_w),
             row!("et112_apparent_power_va", snap.apparent_power_va),
-            row!("et112_power_factor",      snap.power_factor),
-            row!("et112_frequency_hz",      snap.frequency_hz),
-            row!("et112_energy_import_wh",  snap.energy_import_wh),
-            row!("et112_energy_export_wh",  snap.energy_export_wh),
+            row!("et112_power_factor", snap.power_factor),
+            row!("et112_frequency_hz", snap.frequency_hz),
+            row!("et112_energy_import_wh", snap.energy_import_wh),
+            row!("et112_energy_export_wh", snap.energy_export_wh),
         ]
     }
 
@@ -241,14 +243,14 @@ impl TsinkHandle {
             };
         }
 
-        push_opt!("venus_shunt_voltage_v",          shunt.voltage_v);
-        push_opt!("venus_shunt_current_a",          shunt.current_a);
-        push_opt!("venus_shunt_power_w",            shunt.power_w);
-        push_opt!("venus_shunt_soc_percent",        shunt.soc_percent);
-        push_opt!("venus_shunt_energy_in_kwh",      shunt.energy_in_kwh);
-        push_opt!("venus_shunt_energy_out_kwh",     shunt.energy_out_kwh);
-        push_opt!("venus_shunt_ah_charged_today",   shunt.ah_charged_today);
-        push_opt!("venus_shunt_ah_discharged_today",shunt.ah_discharged_today);
+        push_opt!("venus_shunt_voltage_v", shunt.voltage_v);
+        push_opt!("venus_shunt_current_a", shunt.current_a);
+        push_opt!("venus_shunt_power_w", shunt.power_w);
+        push_opt!("venus_shunt_soc_percent", shunt.soc_percent);
+        push_opt!("venus_shunt_energy_in_kwh", shunt.energy_in_kwh);
+        push_opt!("venus_shunt_energy_out_kwh", shunt.energy_out_kwh);
+        push_opt!("venus_shunt_ah_charged_today", shunt.ah_charged_today);
+        push_opt!("venus_shunt_ah_discharged_today", shunt.ah_discharged_today);
 
         rows
     }
@@ -266,12 +268,12 @@ impl TsinkHandle {
             };
         }
 
-        push_opt!("venus_inverter_voltage_v",           inv.voltage_v);
-        push_opt!("venus_inverter_current_a",           inv.current_a);
-        push_opt!("venus_inverter_power_w",             inv.power_w);
+        push_opt!("venus_inverter_voltage_v", inv.voltage_v);
+        push_opt!("venus_inverter_current_a", inv.current_a);
+        push_opt!("venus_inverter_power_w", inv.power_w);
         push_opt!("venus_inverter_ac_output_voltage_v", inv.ac_output_voltage_v);
         push_opt!("venus_inverter_ac_output_current_a", inv.ac_output_current_a);
-        push_opt!("venus_inverter_ac_output_power_w",   inv.ac_output_power_w);
+        push_opt!("venus_inverter_ac_output_power_w", inv.ac_output_power_w);
 
         rows
     }
