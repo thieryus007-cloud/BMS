@@ -9,7 +9,7 @@ use tsink::{
     AsyncStorage, AsyncStorageBuilder, DataPoint, Label, Row, TimestampPrecision, WalSyncMode,
 };
 
-pub use tsink::Row;
+
 use tsink::promql::{Engine, PromqlValue};
 use tracing::info;
 
@@ -18,6 +18,9 @@ use daly_bms_core::types::BmsSnapshot;
 use crate::et112::Et112Snapshot;
 use crate::irradiance::IrradianceSnapshot;
 use crate::state::{VenusSmartShunt, VenusInverter};
+
+pub use tsink::Row;
+
 
 // =============================================================================
 // Erreur
