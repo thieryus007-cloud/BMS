@@ -12,7 +12,7 @@ use crate::shelly::ShellyEmSnapshot;
 use crate::tasmota::TasmotaSnapshot;
 //use crate::tsink_db::{TsinkHandle, Row as TsinkRow};
 use crate::tsink_db::TsinkHandle;
-use tsink::Row as TsinkRow;  // ✅ Import direct depuis tsink
+use tsink::Row;  // Import direct depuis tsink
 
 use tokio::sync::mpsc;
 use daly_bms_core::bus::DalyPort;
