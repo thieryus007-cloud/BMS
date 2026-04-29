@@ -1,13 +1,14 @@
-error[E0599]: no method named `with_worker_threads` found for struct `AsyncStorageBuilder` in the current scope
-  --> crates/daly-bms-server/src/tsink_db.rs:60:14
+Compiling daly-bms-server v0.1.0 (/home/pi5compute/Daly-BMS-Rust/crates/daly-bms-server)
+error[E0599]: no method named `with_flush_interval` found for struct `AsyncStorageBuilder` in the current scope
+  --> crates/daly-bms-server/src/tsink_db.rs:61:14
    |
-53 |           let storage = AsyncStorageBuilder::new()
+54 |           let storage = AsyncStorageBuilder::new()
    |  _______________________-
-54 | |             .with_data_path(&config.data_path)
-55 | |             .with_timestamp_precision(TimestampPrecision::Milliseconds)
-56 | |             .with_retention(Duration::from_secs(config.retention_days * 24 * 3600))
+55 | |             .with_data_path(&config.data_path)
+56 | |             .with_timestamp_precision(TimestampPrecision::Milliseconds)
+57 | |             .with_retention(Duration::from_secs(config.retention_days * 24 * 3600))
 ...  |
-60 | |             .with_worker_threads(2)                     // Limite les threads internes
+61 | |             .with_flush_interval(Duration::from_secs(10))      // Flush périodique (10s)
    | |             -^^^^^^^^^^^^^^^^^^^ method not found in `AsyncStorageBuilder`
    | |_____________|
    |
