@@ -535,7 +535,7 @@ impl AppState {
         let _ = self.ws_tx.send(Arc::new(latest));
 
         if let Some(tx) = &self.tsink_tx {
-            let _ = tx.send(TsinkHandle::bms_rows(&snap));
+            let _ = tx.send::<Vec<tsink::Row>>(TsinkHandle::bms_rows(&snap));
         }
     }
 
@@ -588,7 +588,7 @@ impl AppState {
         }
 
         if let Some(tx) = &self.tsink_tx {
-            let _ = tx.send(TsinkHandle::et112_rows(&snap));
+            let _ = tx.send::<Vec<tsink::Row>>(TsinkHandle::et112_rows(&snap));
         }
     }
 
@@ -621,7 +621,7 @@ impl AppState {
             "irradiance_wm2": snap.irradiance_wm2,
         })));
         if let Some(tx) = &self.tsink_tx {
-            let _ = tx.send(TsinkHandle::irradiance_rows(&snap));
+            let _ = tx.send::<Vec<tsink::Row>>(TsinkHandle::irradiance_rows(&snap));
         }
         *self.irradiance_value.write().await = Some(snap);
     }
@@ -739,7 +739,7 @@ impl AppState {
                 "ah_discharged_today": shunt.ah_discharged_today,
             })));
             if let Some(tx) = &self.tsink_tx {
-                let _ = tx.send(TsinkHandle::smartshunt_rows(&shunt));
+                let _ = tx.send::<Vec<tsink::Row>>(TsinkHandle::smartshunt_rows(&snap));
             }
             *self.venus_smartshunt.write().await = Some(shunt);
             return;
@@ -785,7 +785,7 @@ impl AppState {
         })));
 
         if let Some(tx) = &self.tsink_tx {
-            let _ = tx.send(TsinkHandle::smartshunt_rows(&shunt));
+            let _ = tx.send::<Vec<tsink::Row>>(TsinkHandle::smartshunt_rows(&snap));
         }
         *self.venus_smartshunt.write().await = Some(shunt);
     }
@@ -810,7 +810,7 @@ impl AppState {
     /// Enregistre/met à jour les données de l'onduleur Victron (MultiPlus, cgwacs, etc.).
     pub async fn on_venus_inverter(&self, inverter: VenusInverter) {
         if let Some(tx) = &self.tsink_tx {
-            let _ = tx.send(TsinkHandle::inverter_rows(&inverter));
+            let _ = tx.send::<Vec<tsink::Row>>(TsinkHandle::inverter_rows(&snap));
         }
         *self.venus_inverter.write().await = Some(inverter);
     }
