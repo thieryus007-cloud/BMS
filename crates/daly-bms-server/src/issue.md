@@ -46,3 +46,52 @@ Overhead  Shared Object     Symbol
    0.00%  [kernel]          [k] futex_wake
    0.00%  daly-bms-server   [.] 0x00000000004ac110
 Too slow to read ring buffer (change period (-c/-F) or limit CPUs (-C)
+
+amples: 131  of event 'cycles:P', Event count (approx.): 37223230
+  Children      Self  Command          Shared Object      Symbol
++  100.00%     0.00%  tokio-rt-worker  libc.so.6          [.] 0x00007fff0bffbf1c
++  100.00%     0.00%  tokio-rt-worker  libc.so.6          [.] 0x00007fff0bf92030
++  100.00%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bab97ec8
++  100.00%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bab9fc60
++   97.45%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bab9dee8
++   53.99%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baba8548
++   34.91%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba88ee14
++   32.88%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555babaa4c8
++   20.73%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555babaa508
++   19.81%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] el0t_64_sync
++   19.81%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] el0t_64_sync_handler
++   19.81%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] el0_svc
++   19.77%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] do_el0_svc
++   19.77%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] el0_svc_common.constprop.0
++   19.77%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] invoke_syscall
++   19.18%     6.65%  tokio-rt-worker  libc.so.6          [.] malloc
++   17.94%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baba8c78
++   15.80%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baba9e60
++   15.80%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555babab5b0
++   13.61%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bababd20
++   13.61%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555babac274
++   13.55%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba891f78
++   13.26%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bab9b04c
++   13.26%     0.02%  tokio-rt-worker  libc.so.6          [.] getaddrinfo
++   13.25%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555bab9b3e4
++   13.02%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba800cb0
++   12.90%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba99603c
++   11.93%     4.22%  tokio-rt-worker  libc.so.6          [.] epoll_pwait
++   11.90%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba7e1038
++    9.31%     9.00%  tokio-rt-worker  libc.so.6          [.] cfree
++    8.35%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba7dd988
++    7.92%     0.00%  tokio-rt-worker  libc.so.6          [.] _nss_files_gethostbyname4_r
++    7.92%     0.00%  tokio-rt-worker  libc.so.6          [.] __nss_files_fopen
++    7.71%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] __arm64_sys_epoll_pwait
++    7.71%     0.00%  tokio-rt-worker  [kernel.kallsyms]  [k] do_epoll_pwait.part.0
++    7.70%     5.62%  tokio-rt-worker  [kernel.kallsyms]  [k] do_epoll_wait
++    7.23%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa11dc8
++    7.23%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa0ca80
++    6.84%     0.00%  tokio-rt-worker  libc.so.6          [.] realloc
++    6.62%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba7e4318
++    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa0ec78
++    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa15c50
++    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa26fe4
++    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa903f8
++    5.45%     5.45%  tokio-rt-worker  libc.so.6          [.] 0x000000000009d20c
+Cannot load tips.txt file, please install perf!
