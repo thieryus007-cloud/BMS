@@ -91,6 +91,38 @@ amples: 131  of event 'cycles:P', Event count (approx.): 37223230
 +    6.62%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555ba7e4318
 +    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa0ec78
 +    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa15c50
+
++      19.51%  daly-bms-server   [.] 0x00000000004aa4c4
+   9.68%  [overlay]         [k] ovl_permission
+   7.66%  daly-bms-server   [.] 0x000000000031f280
+   4.99%  libc.so.6         [.] 0x0000000000092a04
+   4.97%  [kernel]          [k] sk_destruct
+   4.45%  libc.so.6         [.] 0x000000000008ea90
+   3.35%  daly-bms-server   [.] 0x0000000000348b30
+   3.30%  daly-bms-server   [.] 0x00000000001005dc
+   3.30%  libc.so.6         [.] mtx_timedlock
+   3.30%  libc.so.6         [.] xdr_array
+   3.16%  libc.so.6         [.] mq_open
+   2.89%  daly-bms-server   [.] 0x00000000000dfec0
+   2.89%  daly-bms-server   [.] 0x00000000001e46f0
+   2.60%  daly-bms-server   [.] 0x000000000071abd0
+   2.31%  [kernel]          [k] fdget_pos
+   2.21%  daly-bms-server   [.] 0x00000000000ab5ac
+   1.97%  libc.so.6         [.] 0x00000000000911dc
+   1.76%  [kernel]          [k] _raw_spin_unlock_irq
+   1.76%  daly-bms-server   [.] 0x000000000030ea68
+   1.68%  daly-bms-server   [.] 0x000000000049bda0
+   1.68%  libc.so.6         [.] 0x0000000000090d68
+   1.67%  libc.so.6         [.] 0x0000000000090ce0
+   1.59%  daly-bms-server   [.] 0x00000000004aa080
+   1.49%  daly-bms-server   [.] 0x00000000002bc45c           
+   1.39%  [kernel]          [k] __arm64_sys_epoll_pwait
+   1.39%  libc.so.6         [.] _IO_file_xsputn
+   1.36%  libc.so.6         [.] 0x000000000008eadc
+   1.12%  [kernel]          [k] kmem_cache_alloc_noprof
+   0.49%  libc.so.6         [.] 0x000000000007b964
+   0.03%  daly-bms-server   [.] 0x000000000007e990
+   0.02%  libc.so.6         [.] 0x000000000010b694
 +    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa26fe4
 +    5.79%     0.00%  tokio-rt-worker  daly-bms-server    [.] 0x00005555baa903f8
 +    5.45%     5.45%  tokio-rt-worker  libc.so.6          [.] 0x000000000009d20c
