@@ -50,19 +50,21 @@ impl TsinkHandle {
     pub async fn new(config: &TsinkConfig) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&config.data_path)?;
 
+        // Configuration optimisée pour réduire la charge CPU
         let storage = AsyncStorageBuilder::new()
             .with_data_path(&config.data_path)
             .with_timestamp_precision(TimestampPrecision::Milliseconds)
             .with_retention(Duration::from_secs(config.retention_days * 24 * 3600))
             .with_memory_limit(config.memory_limit_mb * 1024 * 1024)
             .with_cardinality_limit(config.cardinality_limit)
-            // 🔧 CORRECTIONS POUR RÉDUIRE LA CONSOMMATION CPU
-            .with_worker_threads(2)                     // Limite les threads internes
-            .with_flush_interval(Duration::from_secs(10))   // Flush périodique
-            .with_compaction_interval(Duration::from_secs(300)) // Compaction espacée
-            .with_batch_size(500)                       // Taille de lot par défaut
+            // Paramètres clés pour diminuer la consommation CPU
+            .with_flush_interval(Duration::from_secs(10))      // Flush périodique (10s)
+            .with_compaction_interval(Duration::from_secs(300)) // Compaction espacée (5min)
+            .with_queue_capacity(500)                          // File d'attente interne
+            .with_chunk_points(500)                            // Points par chunk
+            .with_max_writers(2)                               // Limite des workers d'écriture
             .build()
-            .await?; // ← Passage en asynchrone (indispensable)
+            .await?;
 
         info!(
             path = %config.data_path,
