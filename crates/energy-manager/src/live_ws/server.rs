@@ -56,8 +56,16 @@ pub async fn serve(
     let addr: SocketAddr = bind.parse().unwrap_or_else(|_| "0.0.0.0:8081".parse().unwrap());
     info!("Energy-manager HTTP server listening on {addr}");
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("Cannot bind {addr}: {e}");
+            return;
+        }
+    };
+    if let Err(e) = axum::serve(listener, app).await {
+        tracing::error!("HTTP server error: {e}");
+    }
 }
 
 // ---------------------------------------------------------------------------
