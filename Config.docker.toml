@@ -50,7 +50,7 @@ format               = "json"
 [influxdb]
 enabled = true
 # "dalybms-influxdb" = nom du service dans le réseau Docker interne
-url     = "http://dalybms-influxdb:8086"
+url     = "http://192.168.1.141:8086"
 
 # !! IMPORTANT : mettre ici le même token que INFLUX_TOKEN dans votre .env !!
 # Exemple : si .env contient  INFLUX_TOKEN=montoken123
