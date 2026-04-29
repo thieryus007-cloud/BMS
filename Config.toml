@@ -429,7 +429,7 @@ enabled = true
 
 # Windows Docker Desktop ou Linux local → http://localhost:8086
 # Docker Compose interne             → http://dalybms-influxdb:8086 (Config.docker.toml)
-url = "http://localhost:8086"
+url = "http://192.168.1.141:8086"
 
 # Token généré par InfluxDB (identique à INFLUX_TOKEN dans .env)
 # Générer : docker exec dalybms-influxdb influx auth create --org santuario --all-access
@@ -564,7 +564,7 @@ reconnect_delay_secs = 5
 # --- InfluxDB ---
 [energy_manager.influxdb]
 enabled            = true
-url                = "http://localhost:8086"
+url                = "http://192.168.1.141:8086"
 token              = ""               # override par env INFLUX_TOKEN
 org                = "santuario"
 bucket             = "daly_bms"
