@@ -410,7 +410,8 @@ pub struct AppState {
     /// Canal d'envoi vers le batch writer Tsink (None si Tsink désactivé).
     /// Remplace les tokio::spawn par mesure — les rows sont accumulées et
     /// écrites en un seul appel toutes les 10 secondes.
-    pub tsink_tx: Option<mpsc::UnboundedSender<Vec<TsinkRow>>>,
+    ///pub tsink_tx: Option<mpsc::UnboundedSender<Vec<TsinkRow>>>,
+    pub tsink_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<tsink::Row>>>,
 
 }
 
