@@ -6,8 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tsink::{
-    AsyncStorage, AsyncStorageBuilder, DataPoint, Label, Row, TimestampPrecision, WalSyncMode,
-    WalReplayMode,
+    AsyncStorageBuilder, DataPoint, Label, Row, TimestampPrecision, WalSyncMode,
 };
 use tsink::promql::{Engine, PromqlValue};
 use tracing::info;
@@ -22,8 +21,8 @@ use crate::state::{VenusSmartShunt, VenusInverter};
 // Réexports publics
 // =============================================================================
 
-// ✅ Réexport propre de Row pour les modules externes (après les imports internes)
-pub use tsink::Row;
+// ✅ Row est déjà importé ci-dessus, pas besoin de le réimporter
+// Les autres modules doivent importer tsink::Row directement
 
 // =============================================================================
 // Erreur
