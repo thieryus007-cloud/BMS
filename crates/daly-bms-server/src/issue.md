@@ -58,6 +58,8 @@ Si le problème persiste, vérifiez que l'utilisateur dalybms a bien les droits 
 ```bash
 ls -ld /var/lib/daly-bms
 ```
+ls -ld /var/lib/daly-bms
+drwxr-xr-x 3 root root 4096 Apr 28 19:23 /var/lib/daly-bms
 
 Si nécessaire, ajustez avec sudo chown dalybms:dalybms /var/lib/daly-bms.
 
