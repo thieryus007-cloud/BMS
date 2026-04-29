@@ -774,6 +774,19 @@ pub async fn dashboard_console() -> Response {
     render(ConsoleTemplate {})
 }
 
+// =============================================================================
+// Dashboard Historique Énergie (Tsink)
+// =============================================================================
+
+#[derive(Template)]
+#[template(path = "history.html")]
+struct HistoryTemplate {}
+
+/// Page historique énergie — graphes kWh, W, Ah, charge/décharge.
+pub async fn dashboard_history() -> Response {
+    render(HistoryTemplate {})
+}
+
 /// Construit le routeur du dashboard (à fusionner dans le routeur principal).
 pub fn build_dashboard_router() -> Router<AppState> {
     Router::new()
@@ -791,4 +804,5 @@ pub fn build_dashboard_router() -> Router<AppState> {
         .route("/dashboard/console",           get(dashboard_console))
         .route("/dashboard/visualization",     get(dashboard_visualization))
         .route("/visualization",               get(dashboard_visualization))
+        .route("/dashboard/history",           get(dashboard_history))
 }

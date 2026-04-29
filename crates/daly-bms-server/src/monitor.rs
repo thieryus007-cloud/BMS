@@ -2,7 +2,7 @@
 //!
 //! Vérifie toutes les 30 secondes :
 //! - Services systemd daly-bms + energy-manager (via systemctl)
-//! - Services réseau via sonde TCP : mosquitto, influxdb, energy-manager, venus MQTT
+//! - Services réseau via sonde TCP : mosquitto, energy-manager, venus MQTT
 //! - Port série RS485 (/dev/ttyUSB0)
 //! - CPU, RAM, disque, charge système, uptime
 //!
@@ -19,7 +19,6 @@ use tracing::{info, warn};
 /// Services réseau à sonder : (label, host, port, conteneur_docker_pour_restart).
 const TCP_SERVICES: &[(&str, &str, u16, Option<&str>)] = &[
     ("mosquitto",      "127.0.0.1",     1883, Some("mosquitto")),
-    ("influxdb",       "127.0.0.1",     8086, Some("influxdb")),
     ("energy-manager", "127.0.0.1",     8081, None),
     ("venus-mqtt",     "192.168.1.120", 1883, None),
 ];

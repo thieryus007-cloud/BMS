@@ -10,6 +10,7 @@ pub mod et112;
 pub mod tasmota;
 pub mod shelly;
 pub mod chart;
+pub mod history;
 pub mod promql;
 pub mod health;
 
@@ -95,9 +96,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/et112/:addr/status",      get(et112::get_et112_status))
         .route("/api/v1/et112/:addr/history",     get(et112::get_et112_history))
 
-        // ── Chart historique InfluxDB ─────────────────────────────────────────
+        // ── Chart historique (Tsink) ──────────────────────────────────────────
         .route("/api/v1/chart/history",           get(chart::get_chart_history))
         .route("/api/v1/chart/edge-history",      get(chart::get_edge_history))
+        .route("/api/v1/history/energy",          get(history::get_energy_history))
 
         // ── Tasmota ──────────────────────────────────────────────────────────
         .route("/api/v1/tasmota",                 get(tasmota::list_tasmota))

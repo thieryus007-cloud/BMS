@@ -2,7 +2,7 @@
 # DalyBMS — Rust Edition — Makefile
 # =============================================================================
 # Usage :
-#   make up       → démarrer l'infra Docker (Mosquitto, InfluxDB, Grafana, Node-RED)
+#   make up       → démarrer l'infra Docker (Mosquitto uniquement)
 #   make build    → compiler en release (x86_64)
 #   make build-arm → compiler pour aarch64 (Raspberry Pi CM5 / NanoPi)
 #   make run      → lancer le serveur en dev
@@ -21,14 +21,14 @@ ARM_RELEASE_DIR := target/$(TARGET_ARM)/release
 ARMV7_RELEASE_DIR := target/$(TARGET_ARMV7)/release
 
 # =============================================================================
-# Infrastructure Docker
+# Infrastructure Docker (Mosquitto uniquement — Tsink est embarqué dans daly-bms-server)
 # =============================================================================
 
-.PHONY: up down restart logs reset reset-influx ps
+.PHONY: up down restart logs reset ps
 
 up:
 	docker compose -f docker-compose.infra.yml up -d
-	@echo "✓ Infra démarrée — MQTT:1883 InfluxDB:8086"
+	@echo "✓ Infra démarrée — Mosquitto MQTT:1883"
 
 down:
 	docker compose -f docker-compose.infra.yml down
@@ -41,14 +41,7 @@ logs:
 
 reset:
 	docker compose -f docker-compose.infra.yml down -v
-	@echo "⚠ Volumes supprimés — données InfluxDB effacées"
-
-# Reset uniquement InfluxDB
-reset-influx:
-	docker compose -f docker-compose.infra.yml stop influxdb
-	docker volume rm $$(docker volume ls -q | grep influxdb) 2>/dev/null || true
-	docker compose -f docker-compose.infra.yml up -d influxdb
-	@echo "✓ InfluxDB réinitialisé — token conservé depuis .env"
+	@echo "⚠ Volumes Mosquitto supprimés (MQTT retained perdu)"
 
 ps:
 	docker compose -f docker-compose.infra.yml ps
@@ -249,7 +242,7 @@ help:
 	@echo "DalyBMS Rust Edition — Commandes disponibles :"
 	@echo ""
 	@echo "  Infrastructure Docker :"
-	@echo "    make up            Démarrer Mosquitto + InfluxDB"
+	@echo "    make up            Démarrer Mosquitto"
 	@echo "    make down          Arrêter l'infra"
 	@echo "    make logs          Voir les logs Docker"
 	@echo "    make ps            État des containers"

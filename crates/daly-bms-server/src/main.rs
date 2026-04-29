@@ -29,7 +29,7 @@ mod simulator;
 mod dashboard;
 mod monitor;
 
-use crate::bridges::{alerts, influx, mqtt};
+use crate::bridges::{alerts, mqtt};
 use crate::config::AppConfig;
 use crate::state::{AppState, LogBuffer, LogEntry};
 use daly_bms_core::bus::{BmsConfig, DalyBusManager, DalyPort};
@@ -155,7 +155,6 @@ async fn main() -> anyhow::Result<()> {
                 api:         config::ApiConfig::default(),
                 logging:     config::LoggingConfig::default(),
                 mqtt:        config::MqttConfig::default(),
-                influxdb:    config::InfluxConfig::default(),
                 tsink:       config::TsinkConfig::default(),
                 alerts:      config::AlertsConfig::default(),
                 read_only:   config::ReadOnlyConfig::default(),
@@ -168,9 +167,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     };
-
-    // Validation des prérequis de configuration
-    config.influxdb.validate()?;
 
     // ── Override port série depuis CLI ─────────────────────────────────────────
     if let Some(ref port) = args.port {
@@ -246,10 +242,6 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn({
         let (s, c, m) = (state.clone(), config.mqtt.clone(), mqtt_addr_map);
         async move { mqtt::run_mqtt_bridge(s, c, m).await }
-    });
-    tokio::spawn({
-        let (s, c) = (state.clone(), config.influxdb.clone());
-        async move { influx::run_influx_bridge(s, c).await }
     });
     tokio::spawn({
         let (s, c) = (state.clone(), config.alerts.clone());

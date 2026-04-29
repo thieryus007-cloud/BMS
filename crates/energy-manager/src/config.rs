@@ -17,8 +17,6 @@ pub struct EnergyManagerConfig {
     #[serde(default)]
     pub mqtt: MqttConfig,
     #[serde(default)]
-    pub influxdb: InfluxConfig,
-    #[serde(default)]
     pub api: ApiConfig,
     pub victron: VictronConfig,
     #[serde(default)]
@@ -73,48 +71,6 @@ impl Default for MqttConfig {
             password: None,
             keep_alive_secs: default_keep_alive_secs(),
             reconnect_delay_secs: default_reconnect_delay_secs(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// InfluxDB
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct InfluxConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default = "default_influx_url")]
-    pub url: String,
-    #[serde(default)]
-    pub token: String,
-    #[serde(default = "default_influx_org")]
-    pub org: String,
-    #[serde(default = "default_influx_bucket")]
-    pub bucket: String,
-    #[serde(default = "default_batch_size")]
-    pub batch_size: usize,
-    #[serde(default = "default_flush_secs")]
-    pub flush_interval_sec: f64,
-}
-
-fn default_influx_url() -> String { "http://localhost:8086".into() }
-fn default_influx_org() -> String { "santuario".into() }
-fn default_influx_bucket() -> String { "daly_bms".into() }
-fn default_batch_size() -> usize { 50 }
-fn default_flush_secs() -> f64 { 5.0 }
-
-impl Default for InfluxConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            url: default_influx_url(),
-            token: String::new(),
-            org: default_influx_org(),
-            bucket: default_influx_bucket(),
-            batch_size: default_batch_size(),
-            flush_interval_sec: default_flush_secs(),
         }
     }
 }
@@ -477,10 +433,6 @@ pub fn load() -> Result<EnergyManagerConfig> {
     if let Ok(v) = std::env::var("LG_API_KEY") {
         cfg.energy_manager.lg_thinq.api_key = v;
     }
-    if let Ok(v) = std::env::var("INFLUX_TOKEN") {
-        cfg.energy_manager.influxdb.token = v;
-    }
-
     Ok(cfg.energy_manager)
 }
 

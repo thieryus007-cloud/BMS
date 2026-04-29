@@ -37,9 +37,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub mqtt: MqttConfig,
 
-    #[serde(default)]
-    pub influxdb: InfluxConfig,
-
     /// Time-series embarqué Tsink (remplace InfluxDB)
     #[serde(default)]
     pub tsink: TsinkConfig,
@@ -397,49 +394,6 @@ impl MqttConfig {
             username:             None,
             password:             None,
             format:               "json".into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct InfluxConfig {
-    pub enabled: bool,
-    pub url: String,
-    pub token: String,
-    pub org: String,
-    pub bucket: String,
-    pub bucket_downsampled: String,
-    pub batch_size: usize,
-    pub batch_flush_interval_sec: f64,
-}
-
-impl InfluxConfig {
-    /// Valide la configuration au démarrage.
-    /// Erreur uniquement si `enabled = true` et un champ critique est vide.
-    pub fn validate(&self) -> anyhow::Result<()> {
-        if !self.enabled {
-            return Ok(());
-        }
-        if self.url.trim().is_empty() {
-            anyhow::bail!("InfluxDB activé mais [influxdb].url est vide dans la config");
-        }
-        if self.token.trim().is_empty() {
-            anyhow::bail!("InfluxDB activé mais [influxdb].token est vide dans la config");
-        }
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    pub fn default_enabled() -> Self {
-        Self {
-            enabled:                  false,
-            url:                      "http://localhost:8086".into(),
-            token:                    String::new(),
-            org:                      "santuario".into(),
-            bucket:                   "daly_bms".into(),
-            bucket_downsampled:       "daly_bms_1m".into(),
-            batch_size:               50,
-            batch_flush_interval_sec: 5.0,
         }
     }
 }

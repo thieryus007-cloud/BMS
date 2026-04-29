@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::bus::AppBus;
 use crate::config::VictronConfig;
 use crate::mqtt::topics::publish;
-use crate::types::{EnergyState, InfluxPoint, LiveEvent, MqttIncoming, MqttOutgoing};
+use crate::types::{EnergyState, LiveEvent, MqttIncoming, MqttOutgoing};
 
 pub async fn spawn(
     cfg: Arc<VictronConfig>,
@@ -127,16 +127,4 @@ async fn publish_state(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     bus.publish(MqttOutgoing::retained(publish::INVERTER_VENUS, &payload)).await;
     bus.emit_live(LiveEvent::new("inverter", &payload));
 
-    let pt = InfluxPoint::new("inverter_status")
-        .tag("host", "pi5")
-        .field_f("dc_voltage_v",    dc_voltage.unwrap_or(0.0))
-        .field_f("dc_current_a",    dc_current.unwrap_or(0.0))
-        .field_f("dc_power_w",      dc_power.unwrap_or(0.0))
-        .field_f("ac_out_voltage_v", ac_voltage.unwrap_or(0.0))
-        .field_f("ac_out_current_a", ac_current.unwrap_or(0.0))
-        .field_f("ac_out_power_w",   ac_power.unwrap_or(0.0))
-        .field_f("ac_frequency_hz",  ac_freq.unwrap_or(0.0))
-        .field_i("vebus_state",      vebus_state.unwrap_or(0))
-        .field_i("ac_ignore",        ac_ignore.unwrap_or(0));
-    bus.write_influx(pt).await;
 }

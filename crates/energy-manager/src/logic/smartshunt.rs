@@ -20,7 +20,7 @@ use tracing::{debug, info};
 use crate::bus::AppBus;
 use crate::config::VictronConfig;
 use crate::mqtt::topics::publish;
-use crate::types::{EnergyState, InfluxPoint, LiveEvent, MqttIncoming, MqttOutgoing};
+use crate::types::{EnergyState, LiveEvent, MqttIncoming, MqttOutgoing};
 
 pub async fn spawn(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>) {
     tokio::spawn(run(vic, bus, state));
@@ -230,20 +230,4 @@ async fn publish_state(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     bus.publish(MqttOutgoing::retained(publish::SYSTEM_VENUS, &payload)).await;
     bus.emit_live(LiveEvent::new("battery", &payload));
 
-    // Write full SmartShunt data to InfluxDB
-    let s = state.read().await;
-    let pt = InfluxPoint::new("smartshunt")
-        .tag("host", "pi5")
-        .field_f("soc_pct",               s.soc_pct.unwrap_or(0.0))
-        .field_f("voltage_v",             s.battery_voltage_v.unwrap_or(0.0))
-        .field_f("current_a",             s.battery_current_a.unwrap_or(0.0))
-        .field_f("power_w",               s.battery_power_w.unwrap_or(0.0))
-        .field_i("state",                 s.battery_state.unwrap_or(0))
-        .field_i("time_to_go_sec",        s.time_to_go_sec.unwrap_or(0))
-        .field_f("charged_today_kwh",     s.shunt_charged_today_kwh)
-        .field_f("discharged_today_kwh",  s.shunt_discharged_today_kwh)
-        .field_f("ah_charged_today",      s.ah_charged_today)
-        .field_f("ah_discharged_today",   s.ah_discharged_today);
-    drop(s);
-    bus.write_influx(pt).await;
 }

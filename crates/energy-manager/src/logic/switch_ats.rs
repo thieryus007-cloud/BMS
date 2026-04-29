@@ -6,7 +6,7 @@ use tokio::time::{interval, Duration};
 
 use crate::bus::AppBus;
 use crate::mqtt::topics::publish;
-use crate::types::{EnergyState, InfluxPoint, MqttOutgoing};
+use crate::types::{EnergyState, MqttOutgoing};
 
 const KEEPALIVE_SECS: u64 = 60;
 
@@ -47,9 +47,4 @@ async fn publish_state(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     drop(s);
     bus.publish(MqttOutgoing::retained(publish::SWITCH_VENUS, &payload)).await;
 
-    let pt = InfluxPoint::new("switch_ats")
-        .tag("host", "pi5")
-        .field_i("position", position)
-        .field_i("state", ats_state);
-    bus.write_influx(pt).await;
 }

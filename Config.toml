@@ -422,35 +422,6 @@ flush_interval_secs = 300
 compaction_interval_secs = 300
 
 
-[influxdb]
-# true  = activer l'écriture InfluxDB (Docker infra doit être démarré)
-# false = désactiver (pas de Docker, ou test sans InfluxDB)
-enabled = false
-
-# Windows Docker Desktop ou Linux local → http://localhost:8086
-# Docker Compose interne             → http://dalybms-influxdb:8086 (Config.docker.toml)
-url = "http://192.168.1.141:8086"
-
-# Token généré par InfluxDB (identique à INFLUX_TOKEN dans .env)
-# Générer : docker exec dalybms-influxdb influx auth create --org santuario --all-access
-# Ou via UI : http://localhost:8086 → Load Data → API Tokens
-token = "TGEh4wl5TE7SEeJd7GDdyjDebo48xEJaD63MKbgdNhLz54-AWLxWtEBxoAqIEPd9KOucM_kpJGtvFu3oZ98KeQ=="
-
-org = "santuario"
-
-# Bucket principal (rétention courte ~30 jours)
-bucket = "daly_bms"
-
-# Bucket downsamplé 1 min (rétention longue ~1 an)
-bucket_downsampled = "daly_bms_1m"
-
-# Taille max d'un batch d'écriture (points)
-batch_size = 50
-
-# Délai max avant flush forcé (secondes)
-batch_flush_interval_sec = 5.0
-
-
 [alerts]
 # Chemin de la base SQLite pour journal des alertes
 # Laisser vide pour désactiver les alertes (pas de base SQLite requise)
@@ -560,16 +531,6 @@ keep_alive_secs   = 60
 reconnect_delay_secs = 10
 # username = ""
 # password = ""
-
-# --- InfluxDB ---
-[energy_manager.influxdb]
-enabled            = true
-url                = "http://192.168.1.141:8086"
-token              = ""               # override par env INFLUX_TOKEN
-org                = "santuario"
-bucket             = "daly_bms"
-batch_size         = 50
-flush_interval_sec = 5.0
 
 # --- WebSocket live ---
 [energy_manager.api]

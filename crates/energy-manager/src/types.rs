@@ -80,60 +80,6 @@ impl MqttOutgoing {
 }
 
 // ---------------------------------------------------------------------------
-// InfluxDB write point
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct InfluxPoint {
-    pub measurement: String,
-    pub tags: Vec<(String, String)>,
-    pub fields: Vec<(String, FieldValue)>,
-    pub timestamp: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum FieldValue {
-    Float(f64),
-    Int(i64),
-    Str(String),
-    Bool(bool),
-}
-
-impl InfluxPoint {
-    pub fn new(measurement: impl Into<String>) -> Self {
-        Self {
-            measurement: measurement.into(),
-            tags: Vec::new(),
-            fields: Vec::new(),
-            timestamp: Utc::now(),
-        }
-    }
-
-    pub fn tag(mut self, k: impl Into<String>, v: impl Into<String>) -> Self {
-        self.tags.push((k.into(), v.into()));
-        self
-    }
-
-    pub fn field_f(mut self, k: impl Into<String>, v: f64) -> Self {
-        self.fields.push((k.into(), FieldValue::Float(v)));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn field_i(mut self, k: impl Into<String>, v: i64) -> Self {
-        self.fields.push((k.into(), FieldValue::Int(v)));
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn field_s(mut self, k: impl Into<String>, v: impl Into<String>) -> Self {
-        self.fields.push((k.into(), FieldValue::Str(v.into())));
-        self
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Live WebSocket event (broadcast to connected clients)
 // ---------------------------------------------------------------------------
 
