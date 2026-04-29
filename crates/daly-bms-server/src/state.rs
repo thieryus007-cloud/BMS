@@ -10,7 +10,10 @@ use crate::et112::Et112Snapshot;
 use crate::irradiance::IrradianceSnapshot;
 use crate::shelly::ShellyEmSnapshot;
 use crate::tasmota::TasmotaSnapshot;
-use crate::tsink_db::{TsinkHandle, Row as TsinkRow};
+//use crate::tsink_db::{TsinkHandle, Row as TsinkRow};
+use crate::tsink_db::TsinkHandle;
+use tsink::Row as TsinkRow;  // ✅ Import direct depuis tsink
+
 use tokio::sync::mpsc;
 use daly_bms_core::bus::DalyPort;
 use daly_bms_core::types::BmsSnapshot;
@@ -74,7 +77,7 @@ impl BmsRingBuffer {
 // =============================================================================
 
 // =============================================================================
-// Ring buffer ET112
+// Ring buffer ET112            pub tsink_tx: Option<tokio::sync::mpsc::UnboundedSender<Vec<tsink::Row>>>,
 // =============================================================================
 
 /// Ring buffer de snapshots ET112 pour un compteur.
