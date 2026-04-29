@@ -20,8 +20,8 @@ Environment=ENERGY_CONFIG=/etc/daly-bms/config.toml
 
 Restart=on-failure
 RestartSec=5s
-StartLimitIntervalSec=60
-StartLimitBurst=5
+# Allow unlimited restarts — the service manages its own reconnection logic.
+StartLimitIntervalSec=0
 
 # Resource limits
 LimitNOFILE=65536

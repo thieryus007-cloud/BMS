@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tsink::{
-    AsyncStorage, AsyncStorageBuilder, DataPoint, Label, Row, TimestampPrecision,
+    AsyncStorage, AsyncStorageBuilder, DataPoint, Label, Row, TimestampPrecision, WalSyncMode,
 };
 use tsink::promql::{Engine, PromqlValue};
 use tracing::info;
@@ -56,6 +56,13 @@ impl TsinkHandle {
             .with_retention(Duration::from_secs(config.retention_days * 24 * 3600))
             .with_memory_limit(config.memory_limit_mb * 1024 * 1024)
             .with_cardinality_limit(config.cardinality_limit)
+            // Batch fsyncs every 5s instead of per-append: eliminates IO-bound CPU spike.
+            .with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(5)))
+            // WAL directory race during segment rotation → tolerate background errors
+            // instead of shutting down the entire storage engine.
+            .with_background_fail_fast(false)
+            // One read worker is sufficient for our query load; prevents runaway thread spawns.
+            .with_read_workers(1)
             .build()?;
 
         info!(
