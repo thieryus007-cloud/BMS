@@ -1,4 +1,4 @@
-// ── EDGE CHART OVERLAY (hover → mini ECharts popup 6h depuis Tsink PromQL) ────
+// ── EDGE CHART OVERLAY (hover → mini ECharts popup 6h depuis VictoriaMetrics) ────
 function EdgeChartOverlay({ labelX, labelY, history, color }) {
   const [hover, setHover]     = useState(false);
   const [payload, setPayload] = useState(null);
@@ -132,7 +132,7 @@ function EdgeChartOverlay({ labelX, labelY, history, color }) {
     hoverElements.push(h('div', { key: 'popup', style: popupStyle, onMouseEnter: scheduleShow, onMouseLeave: scheduleHide },
       h('div', { style: headerStyle },
         h('span', null, history.label || 'Courant — 6h'),
-        h('span', { style: { color: '#94a3b8', fontWeight: 400 } }, 'Tsink 6h')
+        h('span', { style: { color: '#94a3b8', fontWeight: 400 } }, 'VM 6h')
       ),
       h('div', { ref: chartDivRef, style: { flex: 1, width: '100%', minHeight: 0 } }),
       loading && h('div', { style: { position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#64748b', fontSize:11 } }, 'Chargement…'),
