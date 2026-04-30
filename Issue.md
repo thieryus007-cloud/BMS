@@ -1,18 +1,25 @@
 # 1. Stopper le service
-sudo systemctl stop daly-bms  <br> 
+```
+sudo systemctl stop daly-bms  <br>
+``` 
 
 # 2. Sauvegarder l'existant (au cas où)
-sudo -u dalybms cp -r /var/lib/daly-bms/tsink /var/lib/daly-bms/tsink.backup.$(date +%Y%m%d%H%M). 
+```
+sudo -u dalybms cp -r /var/lib/daly-bms/tsink /var/lib/daly-bms/tsink.backup.$(date +%Y%m%d%H%M)
+```
 
 # 3. Recréer un dossier tsink VIDE avec les bons droits
+```
 sudo rm -rf /var/lib/daly-bms/tsink  <br>
 sudo -u dalybms mkdir -p /var/lib/daly-bms/tsink  <br>
 sudo chmod 755 /var/lib/daly-bms/tsink  <br> 
+```
 
 # 4. Redémarrer
+```
 sudo systemctl start daly-bms  <br> 
 journalctl -u daly-bms -f --no-pager  <br> 
-
+```
 
 Une augmentation progressive du CPU (memory/CPU leak léger) est fréquente sur les services longue durée avec ingestion continue. Voici comment **diagnostiquer, stabiliser et surveiller** sans toucher au code.
 
