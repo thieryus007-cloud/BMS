@@ -139,11 +139,48 @@ Si le CPU continue de monter doucement sur plusieurs jours, ajoute un restart pr
 ```
 
 ---
+Netdata inclut nativement son interface web dans le même paquet. Il n'existe donc pas de composant "netdata web" à désinstaller séparément : la suppression du paquet ou du service retire à la fois l'agent et le tableau de bord web.
 
-**Prochaine étape** :  
-Lance les 3 commandes du point 1 et dis-moi :
-1. Quel thread domine dans `top -H` ?
-2. `VmRSS` est-il stable ou en hausse ?
-3. Combien de fichiers dans `wal/` et `segments/` ?
+La méthode dépend de la façon dont vous l'avez installé :
 
-Je te donne le réglage exact en fonction. 🛠️
+### 🔹 1. Script d'installation officiel (recommandé & le plus courant)
+```bash
+sudo /usr/libexec/netdata/netdata-uninstaller.sh --yes
+```
+Si le script est introuvable, téléchargez-le directement :
+```bash
+curl -Ss 'https://raw.githubusercontent.com/netdata/netdata/master/packaging/installer/netdata-uninstaller.sh' -o /tmp/netdata-uninstaller.sh
+chmod +x /tmp/netdata-uninstaller.sh
+sudo /tmp/netdata-uninstaller.sh --yes
+```
+
+### 🔹 2. Gestionnaire de paquets système
+- **Debian / Ubuntu** : `sudo apt remove --purge netdata`
+- **RHEL / CentOS / Fedora / Alma / Rocky** : `sudo dnf remove netdata` (ou `yum` sur les anciennes versions)
+- **Arch Linux / Manjaro** : `sudo pacman -Rns netdata`
+- **OpenSUSE** : `sudo zypper remove netdata`
+
+### 🔹 3. Installation via Docker
+```bash
+docker stop netdata
+docker rm netdata
+docker rmi netdata/netdata
+```
+
+### 🗑️ Nettoyage des fichiers résiduels (configs, données, logs)
+```bash
+sudo rm -rf /etc/netdata /var/lib/netdata /var/log/netdata /var/cache/netdata
+sudo userdel netdata 2>/dev/null || true
+sudo groupdel netdata 2>/dev/null || true
+```
+
+### ⚠️ Avant de procéder
+- La désinstallation **supprime définitivement** toutes vos métriques historiques, configurations personnalisées et alertes.
+- Si vous souhaitez les conserver, faites une sauvegarde rapide :
+  ```bash
+  sudo tar czf ~/netdata-backup.tar.gz /etc/netdata /var/lib/netdata
+  ```
+
+📖 Documentation officielle à jour : https://learn.netdata.cloud/docs/agent/packaging/installer#uninstalling-netdata
+
+Précisez votre OS ou votre méthode d'installation si vous souhaitez une commande adaptée à votre environnement.
