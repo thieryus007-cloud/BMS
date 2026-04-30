@@ -1,11 +1,9 @@
 {% extends "base.html" %}
-
 {% block title %}Monitoring Pi5 — ESS Monitor{% endblock %}
 {% block page_title %}Monitoring Pi5{% endblock %}
 {% block nav_monitor %}active{% endblock %}
 
 {% block content %}
-
 <div class="page-hdr">
   <h1>🖥 Monitoring Pi5</h1>
   <div class="page-hdr-meta">
@@ -17,325 +15,376 @@
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1.25rem;">
 
-  <!-- ── Services systemd ───────────────────────────────────── -->
+  <!-- Services systemd -->
   <div class="bms-card" id="card-systemd">
     <div class="bms-hdr bms-hdr-sky">
-      <div class="bms-hdr-left">
-        <span class="bms-hdr-name">⚙ Services Systemd</span>
-      </div>
+      <div class="bms-hdr-left"><span class="bms-hdr-name">⚙ Services Systemd</span></div>
     </div>
     <div id="systemd-list" style="padding:0.75rem;">
       <div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Chargement…</div></div>
     </div>
   </div>
 
-  <!-- ── Services réseau (TCP) ─────────────────────────────── -->
-  <div class="bms-card" id="card-network">
-    <div class="bms-hdr bms-hdr-heat">
-      <div class="bms-hdr-left">
-        <span class="bms-hdr-name">🌐 Services Réseau</span>
-      </div>
+  <!-- NEOHTOP System Overview -->
+  <div class="bms-card" id="card-sysmon" style="background:#0f172a;border:1px solid #1e293b;">
+    <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">◈ SYSTEM</span>
+      <span id="neo-uptime" style="font-family:monospace;font-size:0.72rem;color:#475569;">—</span>
     </div>
-    <div id="network-list" style="padding:0.75rem;">
-      <div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Chargement…</div></div>
+    <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.6rem;">
+
+      <div>
+        <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.72rem;margin-bottom:3px;">
+          <span style="color:#94a3b8;">CPU</span><span id="neo-cpu-val" style="color:#f1f5f9;font-weight:700;">—</span>
+        </div>
+        <div style="height:5px;background:#1e293b;border-radius:2px;overflow:hidden;">
+          <div id="neo-cpu-bar" style="height:100%;width:0%;border-radius:2px;transition:width 0.6s;background:#22c55e;"></div>
+        </div>
+      </div>
+
+      <div id="neo-temp-row" style="display:none;">
+        <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.72rem;">
+          <span style="color:#94a3b8;">Temp CPU</span><span id="neo-temp-val" style="font-weight:700;">—</span>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.72rem;margin-bottom:3px;">
+          <span style="color:#94a3b8;">RAM</span><span id="neo-ram-val" style="color:#f1f5f9;font-weight:700;">—</span>
+        </div>
+        <div style="height:5px;background:#1e293b;border-radius:2px;overflow:hidden;">
+          <div id="neo-ram-bar" style="height:100%;width:0%;border-radius:2px;transition:width 0.6s;background:#3b82f6;"></div>
+        </div>
+      </div>
+
+      <div id="neo-swap-row">
+        <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.72rem;margin-bottom:3px;">
+          <span style="color:#94a3b8;">Swap</span><span id="neo-swap-val" style="color:#f1f5f9;font-weight:700;">—</span>
+        </div>
+        <div style="height:4px;background:#1e293b;border-radius:2px;overflow:hidden;">
+          <div id="neo-swap-bar" style="height:100%;width:0%;border-radius:2px;transition:width 0.6s;background:#8b5cf6;"></div>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.72rem;margin-bottom:3px;">
+          <span style="color:#94a3b8;">Disk /</span><span id="neo-disk-val" style="color:#f1f5f9;font-weight:700;">—</span>
+        </div>
+        <div style="height:5px;background:#1e293b;border-radius:2px;overflow:hidden;">
+          <div id="neo-disk-bar" style="height:100%;width:0%;border-radius:2px;transition:width 0.6s;background:#a855f7;"></div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;margin-top:0.2rem;">
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.63rem;color:#64748b;margin-bottom:1px;">↓ RX/s</div>
+          <div id="neo-rx" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#22c55e;">—</div>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.63rem;color:#64748b;margin-bottom:1px;">↑ TX/s</div>
+          <div id="neo-tx" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#f97316;">—</div>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.63rem;color:#64748b;margin-bottom:1px;">Load 1m</div>
+          <div id="neo-load1" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#f1f5f9;">—</div>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.63rem;color:#64748b;margin-bottom:1px;">Load 5m</div>
+          <div id="neo-load5" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#f1f5f9;">—</div>
+        </div>
+      </div>
+
+      <div style="margin-top:0.3rem;border-top:1px solid #1e293b;padding-top:0.55rem;">
+        <div style="font-family:monospace;font-size:0.63rem;color:#64748b;margin-bottom:0.35rem;letter-spacing:0.05em;">SERVICES RÉSEAU</div>
+        <div id="neo-network-list" style="display:flex;flex-direction:column;gap:3px;"></div>
+      </div>
+
     </div>
   </div>
 
-  <!-- ── Métriques système ──────────────────────────────────── -->
-  <div class="bms-card" id="card-system">
-    <div class="bms-hdr bms-hdr-on">
-      <div class="bms-hdr-left">
-        <span class="bms-hdr-name">📊 Métriques Système</span>
-      </div>
-      <div class="bms-hdr-right">
-        <span id="uptime-badge" class="bms-badge">—</span>
-      </div>
-    </div>
-    <div style="padding:0.75rem 0.9rem;">
-
-      <div style="margin-bottom:0.85rem;">
-        <div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:3px;">
-          <span style="color:var(--muted2)">CPU</span>
-          <span id="cpu-val" style="font-family:monospace;font-weight:600">—</span>
-        </div>
-        <div style="height:6px;background:var(--bg2);border-radius:3px;overflow:hidden">
-          <div id="cpu-bar" style="height:100%;width:0%;background:#16a34a;border-radius:3px;transition:width 0.6s"></div>
-        </div>
-      </div>
-
-      <div style="margin-bottom:0.85rem;">
-        <div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:3px;">
-          <span style="color:var(--muted2)">RAM</span>
-          <span id="ram-val" style="font-family:monospace;font-weight:600">—</span>
-        </div>
-        <div style="height:6px;background:var(--bg2);border-radius:3px;overflow:hidden">
-          <div id="ram-bar" style="height:100%;width:0%;background:#2563eb;border-radius:3px;transition:width 0.6s"></div>
-        </div>
-      </div>
-
-      <div style="margin-bottom:0.85rem;">
-        <div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:3px;">
-          <span style="color:var(--muted2)">Disque</span>
-          <span id="disk-val" style="font-family:monospace;font-weight:600">—</span>
-        </div>
-        <div style="height:6px;background:var(--bg2);border-radius:3px;overflow:hidden">
-          <div id="disk-bar" style="height:100%;width:0%;background:#9333ea;border-radius:3px;transition:width 0.6s"></div>
-        </div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.75rem;font-size:0.72rem;">
-        <div style="background:var(--bg2);border-radius:6px;padding:0.5rem 0.65rem;">
-          <div style="color:var(--muted2);margin-bottom:2px">Charge 1 min</div>
-          <div id="load1" style="font-weight:700;font-size:0.9rem">—</div>
-        </div>
-        <div style="background:var(--bg2);border-radius:6px;padding:0.5rem 0.65rem;">
-          <div style="color:var(--muted2);margin-bottom:2px">Charge 5 min</div>
-          <div id="load5" style="font-weight:700;font-size:0.9rem">—</div>
-        </div>
-      </div>
-
-      <!-- RS485 port -->
-      <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.85rem;padding:0.5rem 0.65rem;background:var(--bg2);border-radius:6px;font-size:0.72rem;">
-        <span id="rs485-dot" style="width:10px;height:10px;border-radius:50%;background:#e2e8f0;display:inline-block;flex-shrink:0"></span>
-        <span style="color:var(--muted2)">Port RS485</span>
-        <span id="rs485-label" style="margin-left:auto;font-family:monospace;font-weight:600">/dev/ttyUSB0</span>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ── Santé bus RS485 (timeouts/CRC par appareil) ─────────── -->
+  <!-- RS485 Health -->
   <div class="bms-card" id="card-rs485" style="grid-column:1/-1">
     <div class="bms-hdr bms-hdr-indigo">
-      <div class="bms-hdr-left">
-        <span class="bms-hdr-name">🔌 Santé bus RS485</span>
-      </div>
-      <div class="bms-hdr-right">
-        <span id="rs485-totals" class="bms-badge">—</span>
-      </div>
+      <div class="bms-hdr-left"><span class="bms-hdr-name">🔌 Santé bus RS485</span></div>
+      <div class="bms-hdr-right"><span id="rs485-totals" class="bms-badge">—</span></div>
     </div>
-    <div id="rs485-table-wrap" style="padding:0.25rem 0.25rem 0.5rem 0.25rem;overflow-x:auto;">
+    <div id="rs485-table-wrap" style="padding:0.25rem 0.25rem 0.5rem;overflow-x:auto;">
       <div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Chargement…</div></div>
     </div>
   </div>
 
-  <!-- ── Journal des actions automatiques ──────────────────── -->
-  <div class="bms-card" id="card-actions">
+  <!-- NEOHTOP Process list -->
+  <div class="bms-card" id="card-proc" style="grid-column:1/-1;background:#0f172a;border:1px solid #1e293b;">
+    <div style="padding:0.65rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">◈ PROCESSUS</span>
+      <span style="font-family:monospace;font-size:0.68rem;color:#475569;">top 20 par %CPU</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-family:monospace;font-size:0.76rem;">
+        <thead>
+          <tr style="color:#475569;text-align:left;border-bottom:1px solid #1e293b;">
+            <th style="padding:0.35rem 0.6rem;font-weight:500;">PID</th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;">NOM</th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;text-align:right;">CPU%</th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;width:90px;"></th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;text-align:right;">MEM%</th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;text-align:right;">RSS</th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;">État</th>
+          </tr>
+        </thead>
+        <tbody id="proc-tbody">
+          <tr><td colspan="7" style="padding:1rem;text-align:center;color:#475569;">Chargement…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Log archive viewer -->
+  <div class="bms-card" id="card-logs" style="grid-column:1/-1;">
     <div class="bms-hdr bms-hdr-amber">
-      <div class="bms-hdr-left">
-        <span class="bms-hdr-name">📋 Actions Automatiques</span>
+      <div class="bms-hdr-left"><span class="bms-hdr-name">📁 Archives de logs</span></div>
+      <div class="bms-hdr-right" style="display:flex;align-items:center;gap:6px;">
+        <select id="log-file-select" style="font-size:0.72rem;border:1px solid var(--border);border-radius:4px;padding:2px 6px;background:var(--bg);color:var(--text);">
+          <option value="">— choisir un fichier —</option>
+        </select>
+        <button onclick="loadLogFile()" style="font-size:0.72rem;padding:3px 10px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;">Charger</button>
       </div>
     </div>
-    <div id="actions-list" style="padding:0.75rem;max-height:200px;overflow-y:auto;">
-      <div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">Aucune action</div></div>
+    <div id="log-content-wrap" style="padding:0.5rem;">
+      <div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">Sélectionner un fichier de log</div></div>
     </div>
   </div>
 
 </div>
-
 {% endblock %}
 
 {% block scripts %}
 <script>
-function barColor(p) {
-  return p > 85 ? '#dc2626' : p > 65 ? '#ca8a04' : '#16a34a';
+function barColor(p){return p>85?'#ef4444':p>65?'#eab308':'#22c55e';}
+function fmtUptime(s){
+  if(s>=86400)return Math.floor(s/86400)+'j '+Math.floor((s%86400)/3600)+'h';
+  if(s>=3600) return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+  return Math.floor(s/60)+'m '+Math.floor(s%60)+'s';
+}
+function fmtBytes(b){
+  if(b>=1e9)return (b/1e9).toFixed(1)+' GB/s';
+  if(b>=1e6)return (b/1e6).toFixed(1)+' MB/s';
+  if(b>=1e3)return (b/1e3).toFixed(0)+' KB/s';
+  return b+' B/s';
+}
+function fmtMb(mb){return mb>=1024?(mb/1024).toFixed(1)+' GB':mb+' MB';}
+function neoBar(pct,col){
+  const c=col||barColor(pct);
+  return `<div style="display:inline-block;width:80px;height:5px;background:#1e293b;border-radius:2px;vertical-align:middle;"><div style="width:${Math.min(100,pct)}%;height:100%;border-radius:2px;background:${c};"></div></div>`;
+}
+function stateDot(s){
+  const r=s&&s[0];
+  if(r==='R')return '<span style="color:#22c55e;font-weight:700;">R</span>';
+  if(r==='S')return '<span style="color:#3b82f6;">S</span>';
+  if(r==='D')return '<span style="color:#ef4444;font-weight:700;">D</span>';
+  if(r==='Z')return '<span style="color:#ef4444;">Z</span>';
+  return `<span style="color:#475569;">${s||'?'}</span>`;
 }
 
-function fmtUptime(s) {
-  if (s >= 86400) return `${Math.floor(s/86400)}j ${Math.floor((s%86400)/3600)}h`;
-  if (s >= 3600)  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
-  return `${Math.floor(s/60)}m`;
-}
+async function fetchMonitor(){
+  try{
+    const r=await fetch('/api/v1/monitor/status');
+    if(!r.ok)return;
+    const d=await r.json();
+    if(!d.available||!d.monitor)return;
+    const m=d.monitor;
 
-function renderServiceList(containerId, services) {
-  const el = document.getElementById(containerId);
-  if (!el) return;
-  if (!services || services.length === 0) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">—</div><div class="empty-title">Aucun service</div></div>';
-    return;
-  }
-  el.innerHTML = services.map(s => `
-    <div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0.1rem;border-bottom:1px solid var(--border)">
-      <span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;background:${s.active ? '#16a34a' : '#dc2626'};${s.active ? 'box-shadow:0 0 5px #16a34a55' : ''}"></span>
-      <span style="font-weight:600;font-size:0.8rem;flex:1">${s.name}</span>
-      <span style="font-size:0.68rem;color:var(--muted2);font-family:monospace">${s.status}</span>
-    </div>
-  `).join('');
-}
-
-async function fetchMonitor() {
-  try {
-    const resp = await fetch('/api/v1/monitor/status');
-    if (!resp.ok) return;
-    const d = await resp.json();
-    if (!d.available || !d.monitor) return;
-    const m = d.monitor;
-
-    // Timestamp + badge
-    const ts = new Date().toLocaleTimeString('fr-FR');
-    const tsEl = document.getElementById('mon-ts');
-    if (tsEl) tsEl.textContent = ts;
-
-    const allOk = [...(m.services || []), ...(m.network_services || [])].every(s => s.active);
-    const badge = document.getElementById('mon-status-badge');
-    if (badge) {
-      badge.textContent = allOk ? '✅ Tout nominal' : '⚠ Anomalie détectée';
-      badge.style.background = allOk ? '#dcfce7' : '#fee2e2';
-      badge.style.color = allOk ? '#15803d' : '#dc2626';
-    }
+    document.getElementById('mon-ts').textContent=new Date().toLocaleTimeString('fr-FR');
+    const allOk=[...(m.services||[]),...(m.network_services||[])].every(s=>s.active);
+    const badge=document.getElementById('mon-status-badge');
+    badge.textContent=allOk?'✅ Nominal':'⚠ Anomalie';
+    badge.style.background=allOk?'#dcfce7':'#fee2e2';
+    badge.style.color=allOk?'#15803d':'#dc2626';
 
     // Services systemd
-    renderServiceList('systemd-list', m.services);
-
-    // Services réseau
-    renderServiceList('network-list', m.network_services);
-
-    // Barres CPU/RAM/Disk
-    function updateBar(barId, valId, pct) {
-      const bar = document.getElementById(barId);
-      const val = document.getElementById(valId);
-      if (bar) { bar.style.width = pct + '%'; bar.style.background = barColor(pct); }
-      if (val) { val.style.color = barColor(pct); val.textContent = pct.toFixed(0) + '%'; }
-    }
-    updateBar('cpu-bar',  'cpu-val',  m.cpu_percent  ?? 0);
-    updateBar('ram-bar',  'ram-val',  m.memory_percent ?? 0);
-    updateBar('disk-bar', 'disk-val', m.disk_percent  ?? 0);
-
-    // Load average
-    if (m.load_avg && m.load_avg.length >= 2) {
-      const l1 = document.getElementById('load1');
-      const l5 = document.getElementById('load5');
-      if (l1) l1.textContent = m.load_avg[0].toFixed(2);
-      if (l5) l5.textContent = m.load_avg[1].toFixed(2);
+    const sysEl=document.getElementById('systemd-list');
+    if(sysEl&&m.services){
+      sysEl.innerHTML=m.services.map(s=>`
+        <div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0.1rem;border-bottom:1px solid var(--border)">
+          <span style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:${s.active?'#16a34a':'#dc2626'};${s.active?'box-shadow:0 0 5px #16a34a66':''}"></span>
+          <span style="font-weight:600;font-size:0.8rem;flex:1">${s.name}</span>
+          <span style="font-size:0.68rem;color:var(--muted2);font-family:monospace">${s.status}</span>
+        </div>`).join('');
     }
 
     // Uptime
-    const up = document.getElementById('uptime-badge');
-    if (up) up.textContent = '⏱ ' + fmtUptime(m.uptime_secs ?? 0);
+    document.getElementById('neo-uptime').textContent='uptime '+fmtUptime(m.uptime_secs||0);
 
-    // RS485
-    const dot = document.getElementById('rs485-dot');
-    const lbl = document.getElementById('rs485-label');
-    if (dot) dot.style.background = m.serial_port_ok ? '#16a34a' : '#dc2626';
-    if (lbl) lbl.textContent = m.serial_port_ok ? '/dev/ttyUSB0 ✓' : '/dev/ttyUSB0 ✗';
+    // CPU
+    const cpu=m.cpu_percent||0;
+    document.getElementById('neo-cpu-val').textContent=cpu.toFixed(1)+'%';
+    document.getElementById('neo-cpu-val').style.color=barColor(cpu);
+    const cpuBar=document.getElementById('neo-cpu-bar');
+    cpuBar.style.width=cpu+'%'; cpuBar.style.background=barColor(cpu);
 
-    // Actions automatiques
-    const actEl = document.getElementById('actions-list');
-    if (actEl) {
-      const acts = m.auto_actions || [];
-      if (acts.length === 0) {
-        actEl.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">Aucune action récente</div></div>';
-      } else {
-        actEl.innerHTML = acts.map(a => `
-          <div style="padding:0.35rem 0.1rem;border-bottom:1px solid var(--border);font-size:0.75rem;color:var(--muted2)">
-            <span style="margin-right:0.4rem">🔄</span>${a}
-          </div>
-        `).join('');
-      }
+    // Temp
+    if(m.cpu_temp_c!=null){
+      document.getElementById('neo-temp-row').style.display='block';
+      const tc=m.cpu_temp_c;
+      const tc_col=tc>75?'#ef4444':tc>60?'#eab308':'#22c55e';
+      document.getElementById('neo-temp-val').innerHTML=`<span style="color:${tc_col}">${tc.toFixed(1)} °C</span>`;
     }
 
-  } catch(e) {}
+    // RAM
+    const ram=m.memory_percent||0;
+    document.getElementById('neo-ram-val').textContent=fmtMb(m.mem_used_mb||0)+' / '+fmtMb(m.mem_total_mb||0)+' ('+ram.toFixed(0)+'%)';
+    const ramBar=document.getElementById('neo-ram-bar');
+    ramBar.style.width=ram+'%'; ramBar.style.background=barColor(ram);
+
+    // Swap
+    const swapT=m.swap_total_mb||0, swapU=m.swap_used_mb||0;
+    if(swapT>0){
+      document.getElementById('neo-swap-val').textContent=fmtMb(swapU)+' / '+fmtMb(swapT);
+      document.getElementById('neo-swap-bar').style.width=(swapU/swapT*100)+'%';
+    } else { document.getElementById('neo-swap-row').style.display='none'; }
+
+    // Disk
+    const disk=m.disk_percent||0;
+    document.getElementById('neo-disk-val').textContent=disk.toFixed(0)+'%';
+    document.getElementById('neo-disk-val').style.color=barColor(disk);
+    const diskBar=document.getElementById('neo-disk-bar');
+    diskBar.style.width=disk+'%'; diskBar.style.background=barColor(disk);
+
+    // Network I/O
+    document.getElementById('neo-rx').textContent=fmtBytes(m.net_rx_bps||0);
+    document.getElementById('neo-tx').textContent=fmtBytes(m.net_tx_bps||0);
+
+    // Load avg
+    if(m.load_avg&&m.load_avg.length>=2){
+      document.getElementById('neo-load1').textContent=m.load_avg[0].toFixed(2);
+      document.getElementById('neo-load5').textContent=m.load_avg[1].toFixed(2);
+    }
+
+    // Services réseau
+    const netEl=document.getElementById('neo-network-list');
+    if(netEl&&m.network_services){
+      netEl.innerHTML=m.network_services.map(s=>`
+        <div style="display:flex;align-items:center;gap:6px;font-family:monospace;font-size:0.72rem;">
+          <span style="width:7px;height:7px;border-radius:50%;background:${s.active?'#22c55e':'#ef4444'};flex-shrink:0;${s.active?'box-shadow:0 0 4px #22c55e66':''}"></span>
+          <span style="color:${s.active?'#94a3b8':'#ef4444'};flex:1">${s.name}</span>
+          <span style="color:#334155;font-size:0.65rem;">${s.status}</span>
+        </div>`).join('');
+    }
+
+    // Processes
+    const procs=m.processes||[];
+    const tbody=document.getElementById('proc-tbody');
+    if(procs.length===0){
+      tbody.innerHTML='<tr><td colspan="7" style="padding:1rem;text-align:center;color:#475569;">Aucun processus</td></tr>';
+    } else {
+      tbody.innerHTML=procs.map(p=>{
+        const cpuC=p.cpu_percent>50?'#ef4444':p.cpu_percent>20?'#eab308':'#22c55e';
+        const memC=p.mem_percent>20?'#ef4444':p.mem_percent>10?'#eab308':'#3b82f6';
+        return `<tr style="border-bottom:1px solid #0f172a;">
+          <td style="padding:0.28rem 0.6rem;color:#475569;">${p.pid}</td>
+          <td style="padding:0.28rem 0.6rem;color:#e2e8f0;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.name}</td>
+          <td style="padding:0.28rem 0.6rem;text-align:right;color:${cpuC};font-weight:${p.cpu_percent>5?'700':'400'};">${p.cpu_percent.toFixed(1)}%</td>
+          <td style="padding:0.28rem 0.6rem;">${neoBar(Math.min(p.cpu_percent*2,100),cpuC)}</td>
+          <td style="padding:0.28rem 0.6rem;text-align:right;color:${memC};">${p.mem_percent.toFixed(1)}%</td>
+          <td style="padding:0.28rem 0.6rem;text-align:right;color:#64748b;">${p.mem_rss_mb.toFixed(0)} MB</td>
+          <td style="padding:0.28rem 0.6rem;">${stateDot(p.state)}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch(e){ console.warn('fetchMonitor:',e); }
 }
 
-function fmtRs485Age(iso) {
-  if (!iso) return '—';
-  const ts = new Date(iso).getTime();
-  if (isNaN(ts)) return '—';
-  const age = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (age < 60)    return age + 's';
-  if (age < 3600)  return Math.floor(age / 60) + 'min';
-  if (age < 86400) return Math.floor(age / 3600) + 'h';
-  return Math.floor(age / 86400) + 'j';
+// RS485 Health
+function fmtRs485Age(iso){
+  if(!iso)return '—';
+  const ts=new Date(iso).getTime(); if(isNaN(ts))return '—';
+  const age=Math.max(0,Math.floor((Date.now()-ts)/1000));
+  if(age<60)return age+'s'; if(age<3600)return Math.floor(age/60)+'min';
+  if(age<86400)return Math.floor(age/3600)+'h'; return Math.floor(age/86400)+'j';
+}
+function kindBadge(k){
+  const pal={BMS:{bg:'#dbeafe',fg:'#1d4ed8'},ET112:{bg:'#fef3c7',fg:'#a16207'},ATS:{bg:'#f3e8ff',fg:'#7e22ce'},PRALRAN:{bg:'#dcfce7',fg:'#15803d'}};
+  const c=pal[k]||{bg:'#e2e8f0',fg:'#475569'};
+  return `<span style="background:${c.bg};color:${c.fg};padding:2px 6px;border-radius:4px;font-size:0.65rem;font-weight:600">${k}</span>`;
+}
+async function fetchRs485Health(){
+  try{
+    const r=await fetch('/api/v1/monitor/rs485-health'); if(!r.ok)return;
+    const d=await r.json();
+    const el=document.getElementById('rs485-table-wrap'); if(!el)return;
+    const devices=(d&&d.devices)||[];
+    if(devices.length===0){ el.innerHTML='<div class="empty-state"><div class="empty-icon">—</div><div class="empty-title">Aucun appareil</div></div>'; return; }
+    const rows=devices.map(dev=>{
+      const total=(dev.successful_polls||0)+(dev.timeout_count||0)+(dev.crc_error_count||0)+(dev.other_error_count||0);
+      const rate=total>0?(dev.successful_polls||0)/total*100:0;
+      const rc=rate>=95?'#16a34a':rate>=80?'#ca8a04':'#dc2626';
+      const addr='0x'+(dev.address!=null?dev.address.toString(16).padStart(2,'0'):'?');
+      const lastErr=dev.last_error_ts?`<span title="${(dev.last_error_message||'').replace(/"/g,'&quot;')}">${fmtRs485Age(dev.last_error_ts)}</span>`:'—';
+      return `<tr><td style="padding:.4rem .6rem;font-family:monospace;font-weight:600">${addr}</td>
+        <td style="padding:.4rem .6rem">${kindBadge(dev.kind||'—')}</td>
+        <td style="padding:.4rem .6rem">${dev.name||'—'}</td>
+        <td style="padding:.4rem .6rem;text-align:right;color:${rc};font-weight:600">${rate.toFixed(1)}%</td>
+        <td style="padding:.4rem .6rem;text-align:right;font-family:monospace">${dev.successful_polls||0}</td>
+        <td style="padding:.4rem .6rem;text-align:right;font-family:monospace;color:${dev.timeout_count>0?'#dc2626':'inherit'}">${dev.timeout_count||0}</td>
+        <td style="padding:.4rem .6rem;text-align:right;font-family:monospace;color:${dev.crc_error_count>0?'#dc2626':'inherit'}">${dev.crc_error_count||0}</td>
+        <td style="padding:.4rem .6rem;text-align:right;font-size:.7rem;color:var(--muted2)">${fmtRs485Age(dev.last_success_ts)}</td>
+        <td style="padding:.4rem .6rem;text-align:right;font-size:.7rem;color:var(--muted2)">${lastErr}</td></tr>`;
+    }).join('');
+    el.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:.78rem"><thead><tr style="background:var(--bg2);color:var(--muted2);text-align:left;font-size:.7rem">
+      <th style="padding:.4rem .6rem">Addr</th><th style="padding:.4rem .6rem">Type</th><th style="padding:.4rem .6rem">Nom</th>
+      <th style="padding:.4rem .6rem;text-align:right">Succès%</th><th style="padding:.4rem .6rem;text-align:right">OK</th>
+      <th style="padding:.4rem .6rem;text-align:right">Timeout</th><th style="padding:.4rem .6rem;text-align:right">CRC</th>
+      <th style="padding:.4rem .6rem;text-align:right">Dern. OK</th><th style="padding:.4rem .6rem;text-align:right">Dern. err.</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+    const t=(d&&d.totals)||{};
+    const tot=(t.successful_polls||0)+(t.timeout_count||0)+(t.crc_error_count||0)+(t.other_error_count||0);
+    const rate=tot>0?(t.successful_polls||0)/tot*100:0;
+    const badge=document.getElementById('rs485-totals');
+    if(badge){
+      badge.textContent=rate.toFixed(1)+'% ('+(t.successful_polls||0)+'/'+tot+')';
+      badge.style.background=rate>=95?'#dcfce7':rate>=80?'#fef3c7':'#fee2e2';
+      badge.style.color=rate>=95?'#15803d':rate>=80?'#a16207':'#dc2626';
+    }
+  } catch(e){}
 }
 
-function kindBadge(kind) {
-  const palette = {
-    'BMS':     { bg: '#dbeafe', fg: '#1d4ed8' },
-    'ET112':   { bg: '#fef3c7', fg: '#a16207' },
-    'ATS':     { bg: '#f3e8ff', fg: '#7e22ce' },
-    'PRALRAN': { bg: '#dcfce7', fg: '#15803d' },
-  };
-  const c = palette[kind] || { bg: '#e2e8f0', fg: '#475569' };
-  return `<span style="background:${c.bg};color:${c.fg};padding:2px 6px;border-radius:4px;font-size:0.65rem;font-weight:600">${kind}</span>`;
+// Log archive
+async function loadLogList(){
+  try{
+    const r=await fetch('/api/v1/monitor/logs'); if(!r.ok)return;
+    const d=await r.json();
+    const sel=document.getElementById('log-file-select'); if(!sel||!d.ok)return;
+    sel.innerHTML='<option value="">— choisir —</option>'+(d.files||[]).map(f=>`<option value="${f.name}">${f.name} (${f.size_kb} KB)</option>`).join('');
+  } catch(e){}
 }
-
-function renderRs485Health(payload) {
-  const el = document.getElementById('rs485-table-wrap');
-  if (!el) return;
-  const devices = (payload && payload.devices) || [];
-  if (devices.length === 0) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">—</div><div class="empty-title">Aucun appareil instrumenté</div></div>';
-    return;
-  }
-
-  const rows = devices.map(d => {
-    const total   = (d.successful_polls || 0) + (d.timeout_count || 0) + (d.crc_error_count || 0) + (d.other_error_count || 0);
-    const success = d.successful_polls || 0;
-    const rate    = total > 0 ? (success / total) * 100 : 0;
-    const rateCol = rate >= 95 ? '#16a34a' : rate >= 80 ? '#ca8a04' : '#dc2626';
-    const lastErr = d.last_error_ts
-      ? `<span title="${(d.last_error_message || '').replace(/"/g,'&quot;')}">${fmtRs485Age(d.last_error_ts)}</span>`
-      : '—';
-    const addrHex = '0x' + (d.address != null ? d.address.toString(16).padStart(2,'0') : '?');
-    return `
-      <tr>
-        <td style="padding:0.4rem 0.6rem;font-family:monospace;font-weight:600">${addrHex}</td>
-        <td style="padding:0.4rem 0.6rem">${kindBadge(d.kind || '—')}</td>
-        <td style="padding:0.4rem 0.6rem">${d.name || '—'}</td>
-        <td style="padding:0.4rem 0.6rem;text-align:right;font-family:monospace;color:${rateCol};font-weight:600">${rate.toFixed(1)}%</td>
-        <td style="padding:0.4rem 0.6rem;text-align:right;font-family:monospace">${success}</td>
-        <td style="padding:0.4rem 0.6rem;text-align:right;font-family:monospace;color:${d.timeout_count > 0 ? '#dc2626' : 'inherit'}">${d.timeout_count || 0}</td>
-        <td style="padding:0.4rem 0.6rem;text-align:right;font-family:monospace;color:${d.crc_error_count > 0 ? '#dc2626' : 'inherit'}">${d.crc_error_count || 0}</td>
-        <td style="padding:0.4rem 0.6rem;text-align:right;font-family:monospace;color:${d.other_error_count > 0 ? '#ca8a04' : 'inherit'}">${d.other_error_count || 0}</td>
-        <td style="padding:0.4rem 0.6rem;text-align:right;font-size:0.7rem;color:var(--muted2)">${fmtRs485Age(d.last_success_ts)}</td>
-        <td style="padding:0.4rem 0.6rem;text-align:right;font-size:0.7rem;color:var(--muted2)">${lastErr}</td>
-      </tr>
-    `;
-  }).join('');
-
-  el.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:0.78rem">
-      <thead>
-        <tr style="background:var(--bg2);color:var(--muted2);text-align:left;font-size:0.7rem">
-          <th style="padding:0.4rem 0.6rem">Addr</th>
-          <th style="padding:0.4rem 0.6rem">Type</th>
-          <th style="padding:0.4rem 0.6rem">Nom</th>
-          <th style="padding:0.4rem 0.6rem;text-align:right">Succès</th>
-          <th style="padding:0.4rem 0.6rem;text-align:right">OK</th>
-          <th style="padding:0.4rem 0.6rem;text-align:right">Timeout</th>
-          <th style="padding:0.4rem 0.6rem;text-align:right">CRC</th>
-          <th style="padding:0.4rem 0.6rem;text-align:right">Autre</th>
-          <th style="padding:0.4rem 0.6rem;text-align:right">Dern. OK</th>
-          <th style="padding:0.4rem 0.6rem;text-align:right">Dern. err.</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
-
-  const t = (payload && payload.totals) || {};
-  const badge = document.getElementById('rs485-totals');
-  if (badge) {
-    const tot = (t.successful_polls||0) + (t.timeout_count||0) + (t.crc_error_count||0) + (t.other_error_count||0);
-    const rate = tot > 0 ? ((t.successful_polls||0) / tot) * 100 : 0;
-    badge.textContent = `${rate.toFixed(1)}% (${t.successful_polls||0}/${tot})`;
-    badge.style.background = rate >= 95 ? '#dcfce7' : rate >= 80 ? '#fef3c7' : '#fee2e2';
-    badge.style.color      = rate >= 95 ? '#15803d' : rate >= 80 ? '#a16207' : '#dc2626';
-  }
-}
-
-async function fetchRs485Health() {
-  try {
-    const resp = await fetch('/api/v1/monitor/rs485-health');
-    if (!resp.ok) return;
-    const d = await resp.json();
-    renderRs485Health(d);
-  } catch(e) {}
+async function loadLogFile(){
+  const sel=document.getElementById('log-file-select');
+  const name=sel&&sel.value; if(!name)return;
+  const wrap=document.getElementById('log-content-wrap');
+  wrap.innerHTML='<div style="padding:1rem;color:var(--muted2);font-size:0.8rem;">Chargement…</div>';
+  try{
+    const r=await fetch('/api/v1/monitor/logs/content?name='+encodeURIComponent(name)+'&lines=500');
+    if(!r.ok){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">Erreur chargement</div>';return;}
+    const d=await r.json();
+    if(!d.ok){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">'+d.reason+'</div>';return;}
+    const lines=d.lines||[];
+    const html=lines.map(line=>{
+      let color='#94a3b8';
+      if(line.includes(' WARN ')) color='#eab308';
+      if(line.includes(' ERROR ')) color='#ef4444';
+      if(line.includes(' INFO ')) color='#86efac';
+      const e=line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return `<div style="color:${color};white-space:pre;font-size:0.72rem;line-height:1.5;">${e}</div>`;
+    }).join('');
+    wrap.innerHTML=`<div id="log-scroll" style="background:#0f172a;border-radius:8px;padding:0.75rem;max-height:420px;overflow-y:auto;font-family:monospace;">${html||'<span style="color:#475569;">Fichier vide</span>'}</div>`;
+    const sc=document.getElementById('log-scroll'); if(sc) sc.scrollTop=sc.scrollHeight;
+  } catch(e){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">Erreur: '+e.message+'</div>';}
 }
 
 fetchMonitor();
 fetchRs485Health();
+loadLogList();
 setInterval(fetchMonitor, 10000);
-setInterval(fetchRs485Health, 10000);
+setInterval(fetchRs485Health, 15000);
 </script>
 {% endblock %}

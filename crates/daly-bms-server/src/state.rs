@@ -291,6 +291,17 @@ impl Rs485DeviceStats {
     }
 }
 
+/// Informations sur un processus (pour la vue neohtop).
+#[derive(Clone, Serialize, Debug, Default)]
+pub struct ProcessInfo {
+    pub pid:         u32,
+    pub name:        String,
+    pub cpu_percent: f32,
+    pub mem_percent: f32,
+    pub mem_rss_mb:  f32,
+    pub state:       String,
+}
+
 /// Snapshot de monitoring système Pi5.
 #[derive(Clone, Serialize, Debug)]
 pub struct MonitorSnapshot {
@@ -309,6 +320,30 @@ pub struct MonitorSnapshot {
     pub uptime_secs: u64,
     /// Actions prises automatiquement (ex: "Redémarré mosquitto").
     pub auto_actions: Vec<String>,
+    /// Top processus triés par CPU% décroissant.
+    #[serde(default)]
+    pub processes: Vec<ProcessInfo>,
+    /// Mémoire totale en Mo.
+    #[serde(default)]
+    pub mem_total_mb: u64,
+    /// Mémoire utilisée en Mo.
+    #[serde(default)]
+    pub mem_used_mb: u64,
+    /// Swap total en Mo.
+    #[serde(default)]
+    pub swap_total_mb: u64,
+    /// Swap utilisé en Mo.
+    #[serde(default)]
+    pub swap_used_mb: u64,
+    /// Réseau — octets reçus/s (somme interfaces non-lo).
+    #[serde(default)]
+    pub net_rx_bps: u64,
+    /// Réseau — octets envoyés/s (somme interfaces non-lo).
+    #[serde(default)]
+    pub net_tx_bps: u64,
+    /// Température CPU en °C (None si non disponible).
+    #[serde(default)]
+    pub cpu_temp_c: Option<f32>,
 }
 
 /// État global partagé de l'application.

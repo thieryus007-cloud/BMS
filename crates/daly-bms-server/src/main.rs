@@ -43,6 +43,7 @@ use tracing::Subscriber;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::prelude::*;
+use tracing_appender::rolling;
 
 // =============================================================================
 // Couche tracing → buffer web
@@ -133,6 +134,31 @@ impl ServerArgs {
 }
 
 // =============================================================================
+// Log cleanup
+// =============================================================================
+
+/// Supprime les fichiers de log plus vieux que `keep_days` jours dans `dir`.
+fn cleanup_old_logs(dir: &str, keep_days: u64) {
+    let cutoff = std::time::SystemTime::now()
+        - std::time::Duration::from_secs(keep_days * 24 * 3600);
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().map_or(false, |e| e == "log")
+            || path.to_string_lossy().contains("daly-bms.log")
+        {
+            if let Ok(meta) = entry.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    if modified < cutoff {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
@@ -185,17 +211,59 @@ async fn main() -> anyhow::Result<()> {
     let auto_discover_addrs = !args.simulate && args.bms_addrs.is_empty() && !config_from_file;
 
     // ── Logging ────────────────────────────────────────────────────────────────
-    let log_level = config.logging.level.clone();
+    let log_level  = config.logging.level.clone();
+    let log_dir    = config.logging.log_dir.clone();
+    let keep_days  = config.logging.log_keep_days;
     let log_buffer: LogBuffer = Arc::new(Mutex::new(VecDeque::new()));
 
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_level)),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .with(WebLogLayer { buffer: log_buffer.clone() })
-        .init();
+    // Rolling file appender (daily, kept for `keep_days` days).
+    // The guard must live for the duration of the program to flush pending writes.
+    let _file_guard = if !log_dir.is_empty() {
+        match std::fs::create_dir_all(&log_dir) {
+            Ok(_) => {
+                // Clean up log files older than keep_days before starting.
+                cleanup_old_logs(&log_dir, keep_days);
+                let file_appender = rolling::daily(&log_dir, "daly-bms.log");
+                let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+                let file_layer = tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .with_writer(non_blocking);
+                tracing_subscriber::registry()
+                    .with(
+                        tracing_subscriber::EnvFilter::try_from_default_env()
+                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_level)),
+                    )
+                    .with(tracing_subscriber::fmt::layer())
+                    .with(file_layer)
+                    .with(WebLogLayer { buffer: log_buffer.clone() })
+                    .init();
+                Some(guard)
+            }
+            Err(e) => {
+                // Fall back to console-only logging if the log dir can't be created.
+                tracing_subscriber::registry()
+                    .with(
+                        tracing_subscriber::EnvFilter::try_from_default_env()
+                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_level)),
+                    )
+                    .with(tracing_subscriber::fmt::layer())
+                    .with(WebLogLayer { buffer: log_buffer.clone() })
+                    .init();
+                eprintln!("Warning: cannot create log dir {log_dir}: {e} — file logging disabled");
+                None
+            }
+        }
+    } else {
+        tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_level)),
+            )
+            .with(tracing_subscriber::fmt::layer())
+            .with(WebLogLayer { buffer: log_buffer.clone() })
+            .init();
+        None
+    };
 
     let mode = if args.simulate { "SIMULATION" } else { "HARDWARE" };
     info!(

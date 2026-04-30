@@ -358,13 +358,25 @@ pub struct LoggingConfig {
     pub level: String,
     /// Format (pretty | json)
     pub format: String,
+    /// Répertoire pour les logs tournants (daily rolling).
+    /// Laisser vide pour désactiver l'écriture sur disque.
+    #[serde(default = "default_log_dir")]
+    pub log_dir: String,
+    /// Nombre de jours de logs à conserver.
+    #[serde(default = "default_log_keep_days")]
+    pub log_keep_days: u64,
 }
+
+fn default_log_dir() -> String { "/var/log/daly-bms".into() }
+fn default_log_keep_days() -> u64 { 7 }
 
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            level:  "info".into(),
-            format: "pretty".into(),
+            level:         "info".into(),
+            format:        "pretty".into(),
+            log_dir:       default_log_dir(),
+            log_keep_days: default_log_keep_days(),
         }
     }
 }
