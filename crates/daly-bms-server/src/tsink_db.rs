@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tsink::{
-    AsyncStorage, AsyncStorageBuilder, DataPoint, Label, Row, TimestampPrecision, WalSyncMode,
+    AsyncStorage, AsyncStorageBuilder, DataPoint, Label, Row, TimestampPrecision, WalReplayMode, WalSyncMode,
 };
 use tsink::promql::{Engine, PromqlValue};
 use tracing::info;
@@ -64,6 +64,10 @@ impl TsinkHandle {
             .with_partition_duration(Duration::from_secs(24 * 3600))
             .with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(60)))
             .with_wal_buffer_size(1024 * 1024)
+            // Salvage mode: skip corrupted WAL frames on startup instead of aborting.
+            // Necessary after an unclean shutdown (power loss, reboot) which can leave
+            // the active WAL segment partially written with an invalid magic header.
+            .with_wal_replay_mode(WalReplayMode::Salvage)
             // Désactiver le fail-fast : une erreur du thread de flush ne tue pas
             // toutes les écritures. L'erreur réelle est récupérée via last_background_error().
             .with_background_fail_fast(false)

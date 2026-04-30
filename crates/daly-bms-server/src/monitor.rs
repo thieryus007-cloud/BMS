@@ -5,10 +5,11 @@
 //! - Services réseau via sonde TCP : mosquitto, energy-manager, venus MQTT
 //! - Port série RS485 (/dev/ttyUSB0)
 //! - CPU, RAM, disque, charge système, uptime
-//!
-//! Action automatique : si un conteneur Docker est injoignable → `docker restart`
+//! - Liste des processus (top 20 par CPU%)
+//! - I/O réseau (octets/s)
+//! - Température CPU
 
-use crate::state::{AppState, MonitorSnapshot, ServiceStatus};
+use crate::state::{AppState, MonitorSnapshot, ProcessInfo, ServiceStatus};
 use chrono::Utc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
@@ -26,47 +27,66 @@ const TCP_SERVICES: &[(&str, &str, u16, Option<&str>)] = &[
 /// Port série RS485.
 const RS485_PORT: &str = "/dev/ttyUSB0";
 
+// =============================================================================
+// Agent principal
+// =============================================================================
+
 /// Démarre l'agent de monitoring en arrière-plan.
 pub async fn run_monitor_agent(state: AppState) {
     info!("Agent de monitoring Pi5 démarré (intervalle: 30s)");
-    let mut ticker = interval(Duration::from_secs(30));
+    let mut ticker   = interval(Duration::from_secs(30));
+    let mut prev_net = read_net_bytes().await;
+    let mut prev_net_ts = Instant::now();
 
     loop {
         ticker.tick().await;
-        let snap = collect_snapshot(&state).await;
+
+        let curr_net    = read_net_bytes().await;
+        let elapsed_s   = prev_net_ts.elapsed().as_secs_f64().max(1.0);
+        let net_rx_bps  = ((curr_net.0.saturating_sub(prev_net.0)) as f64 / elapsed_s) as u64;
+        let net_tx_bps  = ((curr_net.1.saturating_sub(prev_net.1)) as f64 / elapsed_s) as u64;
+        prev_net        = curr_net;
+        prev_net_ts     = Instant::now();
+
+        let snap = collect_snapshot(&state, net_rx_bps, net_tx_bps).await;
         state.on_monitor_snapshot(snap).await;
     }
 }
 
-/// Collecte un snapshot complet de l'état du système.
-async fn collect_snapshot(_state: &AppState) -> MonitorSnapshot {
-    let mut services = Vec::new();
+// =============================================================================
+// Collecte complète
+// =============================================================================
+
+async fn collect_snapshot(state: &AppState, net_rx_bps: u64, net_tx_bps: u64) -> MonitorSnapshot {
+    let mut services         = Vec::new();
     let mut network_services = Vec::new();
-    let mut auto_actions = Vec::new();
+    let mut auto_actions     = Vec::new();
 
     // ── Services systemd ──────────────────────────────────────────────────────
-    // daly-bms : nous sommes le processus en cours — on force active:true.
     let daly_status = check_systemd_service("daly-bms").await;
     services.push(ServiceStatus {
-        name: "daly-bms".to_string(),
+        name:   "daly-bms".to_string(),
         active: true,
         status: if daly_status.is_empty() { "active".to_string() } else { daly_status },
     });
 
-    // energy-manager : vérification via systemctl + fallback sonde TCP :8081.
     let em_status  = check_systemd_service("energy-manager").await;
     let em_systemd = em_status == "active";
-    // Si systemd dit inactive, vérifier quand même via TCP (service démarré manuellement).
     let em_tcp_ok  = if em_systemd { true } else { tcp_probe("127.0.0.1", 8081).await };
     let em_active  = em_systemd || em_tcp_ok;
     services.push(ServiceStatus {
-        name: "energy-manager".to_string(),
+        name:   "energy-manager".to_string(),
         active: em_active,
         status: if em_active {
             if em_systemd { em_status } else { "active (port 8081)".to_string() }
-        } else {
-            if em_status.is_empty() { "unknown".to_string() } else { em_status }
-        },
+        } else if em_status.is_empty() { "unknown".to_string() } else { em_status },
+    });
+
+    let mosquitto_systemd = check_systemd_service("mosquitto").await == "active";
+    services.push(ServiceStatus {
+        name:   "mosquitto".to_string(),
+        active: mosquitto_systemd || tcp_probe("127.0.0.1", 1883).await,
+        status: if mosquitto_systemd { "active".to_string() } else { "inactive".to_string() },
     });
 
     // ── Sondes TCP ───────────────────────────────────────────────────────────
@@ -80,30 +100,22 @@ async fn collect_snapshot(_state: &AppState) -> MonitorSnapshot {
                     info!("{}", msg);
                     auto_actions.push(msg);
                     network_services.push(ServiceStatus {
-                        name: name.to_string(),
-                        active: false,
-                        status: "restarted".to_string(),
+                        name: name.to_string(), active: false, status: "restarted".to_string(),
                     });
                 } else {
                     warn!("Échec redémarrage conteneur Docker: {}", cname);
                     network_services.push(ServiceStatus {
-                        name: name.to_string(),
-                        active: false,
-                        status: "down".to_string(),
+                        name: name.to_string(), active: false, status: "down".to_string(),
                     });
                 }
             } else {
                 network_services.push(ServiceStatus {
-                    name: name.to_string(),
-                    active: false,
-                    status: "unreachable".to_string(),
+                    name: name.to_string(), active: false, status: "unreachable".to_string(),
                 });
             }
         } else {
             network_services.push(ServiceStatus {
-                name: name.to_string(),
-                active: true,
-                status: format!("{}:{}", host, port),
+                name: name.to_string(), active: true, status: format!("{}:{}", host, port),
             });
         }
     }
@@ -114,9 +126,20 @@ async fn collect_snapshot(_state: &AppState) -> MonitorSnapshot {
     // ── Métriques système ────────────────────────────────────────────────────
     let load_avg       = read_load_avg().await;
     let cpu_percent    = read_cpu_percent().await;
-    let memory_percent = read_memory_percent().await;
     let disk_percent   = read_disk_percent().await;
     let uptime_secs    = read_uptime_secs().await;
+    let (mem_total_mb, mem_used_mb, mem_avail_mb) = read_memory_detailed().await;
+    let (swap_total_mb, swap_used_mb) = read_swap().await;
+    let memory_percent = if mem_total_mb > 0 {
+        (mem_used_mb as f32 / mem_total_mb as f32) * 100.0
+    } else { 0.0 };
+    let _ = mem_avail_mb; // used only to compute mem_used_mb above
+
+    // ── Température CPU ───────────────────────────────────────────────────────
+    let cpu_temp_c = read_cpu_temp().await;
+
+    // ── Processus ─────────────────────────────────────────────────────────────
+    let processes = collect_processes().await;
 
     MonitorSnapshot {
         timestamp: Utc::now(),
@@ -129,50 +152,165 @@ async fn collect_snapshot(_state: &AppState) -> MonitorSnapshot {
         disk_percent,
         uptime_secs,
         auto_actions,
+        processes,
+        mem_total_mb,
+        mem_used_mb,
+        swap_total_mb,
+        swap_used_mb,
+        net_rx_bps,
+        net_tx_bps,
+        cpu_temp_c,
     }
 }
 
-/// Sonde TCP avec timeout 2 secondes.
-async fn tcp_probe(host: &str, port: u16) -> bool {
-    let addr = format!("{}:{}", host, port);
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        TcpStream::connect(addr),
-    )
-    .await
-    .map(|r| r.is_ok())
-    .unwrap_or(false)
+// =============================================================================
+// Processus — ps aux
+// =============================================================================
+
+async fn collect_processes() -> Vec<ProcessInfo> {
+    let out = Command::new("ps")
+        .args(["--no-headers", "-eo", "pid,%cpu,%mem,rss,stat,comm", "--sort=-%cpu"])
+        .output()
+        .await;
+    let Ok(out) = out else { return vec![] };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .take(20)
+        .filter_map(|line| {
+            let mut p = line.split_whitespace();
+            let pid: u32       = p.next()?.parse().ok()?;
+            let cpu: f32       = p.next()?.parse().ok()?;
+            let mem: f32       = p.next()?.parse().ok()?;
+            let rss_kb: u64    = p.next()?.parse().ok()?;
+            let state          = p.next().unwrap_or("?").to_string();
+            let name           = p.next().unwrap_or("?").to_string();
+            Some(ProcessInfo {
+                pid,
+                name,
+                cpu_percent: cpu,
+                mem_percent: mem,
+                mem_rss_mb: rss_kb as f32 / 1024.0,
+                state,
+            })
+        })
+        .collect()
 }
 
-/// Vérifie l'état d'un service systemd.
+// =============================================================================
+// Réseau I/O — /proc/net/dev
+// =============================================================================
+
+/// Retourne (rx_bytes_total, tx_bytes_total) pour toutes les ifaces non-loopback.
+async fn read_net_bytes() -> (u64, u64) {
+    let Ok(content) = tokio::fs::read_to_string("/proc/net/dev").await else {
+        return (0, 0);
+    };
+    let mut rx_total = 0u64;
+    let mut tx_total = 0u64;
+    for line in content.lines() {
+        let line = line.trim();
+        // Skip header lines and loopback
+        let Some(colon_pos) = line.find(':') else { continue };
+        let iface = line[..colon_pos].trim();
+        if iface == "lo" { continue; }
+        let data = &line[colon_pos + 1..];
+        let mut fields = data.split_whitespace();
+        if let Some(rx) = fields.next().and_then(|v| v.parse::<u64>().ok()) {
+            rx_total += rx;
+        }
+        // Skip 7 receive fields (packets, errs, drop, fifo, frame, compressed, multicast)
+        for _ in 0..7 { fields.next(); }
+        if let Some(tx) = fields.next().and_then(|v| v.parse::<u64>().ok()) {
+            tx_total += tx;
+        }
+    }
+    (rx_total, tx_total)
+}
+
+// =============================================================================
+// Température CPU
+// =============================================================================
+
+async fn read_cpu_temp() -> Option<f32> {
+    // Raspberry Pi 5 / generic Linux thermal zone
+    let paths = [
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/class/hwmon/hwmon0/temp1_input",
+    ];
+    for path in &paths {
+        if let Ok(s) = tokio::fs::read_to_string(path).await {
+            if let Ok(v) = s.trim().parse::<f32>() {
+                return Some(v / 1000.0);
+            }
+        }
+    }
+    None
+}
+
+// =============================================================================
+// Mémoire détaillée
+// =============================================================================
+
+/// Retourne (total_mb, used_mb, available_mb)
+async fn read_memory_detailed() -> (u64, u64, u64) {
+    let Ok(content) = tokio::fs::read_to_string("/proc/meminfo").await else {
+        return (0, 0, 0);
+    };
+    let mut total: u64 = 0;
+    let mut available: u64 = 0;
+    for line in content.lines() {
+        if line.starts_with("MemTotal:") {
+            total = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+        } else if line.starts_with("MemAvailable:") {
+            available = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+        }
+    }
+    let used = total.saturating_sub(available);
+    (total / 1024, used / 1024, available / 1024)
+}
+
+async fn read_swap() -> (u64, u64) {
+    let Ok(content) = tokio::fs::read_to_string("/proc/meminfo").await else {
+        return (0, 0);
+    };
+    let mut total: u64 = 0;
+    let mut free: u64 = 0;
+    for line in content.lines() {
+        if line.starts_with("SwapTotal:") {
+            total = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+        } else if line.starts_with("SwapFree:") {
+            free = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+        }
+    }
+    (total / 1024, total.saturating_sub(free) / 1024)
+}
+
+// =============================================================================
+// Helpers système (inchangés)
+// =============================================================================
+
+async fn tcp_probe(host: &str, port: u16) -> bool {
+    let addr = format!("{}:{}", host, port);
+    tokio::time::timeout(Duration::from_secs(2), TcpStream::connect(addr))
+        .await.map(|r| r.is_ok()).unwrap_or(false)
+}
+
 async fn check_systemd_service(name: &str) -> String {
-    match Command::new("systemctl")
-        .args(["is-active", name])
-        .output()
-        .await
-    {
+    match Command::new("systemctl").args(["is-active", name]).output().await {
         Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         Err(_) => "unknown".to_string(),
     }
 }
 
-/// Tente de redémarrer un conteneur Docker.
 async fn restart_docker_container(name: &str) -> bool {
-    match Command::new("docker")
-        .args(["restart", name])
-        .output()
-        .await
-    {
+    match Command::new("docker").args(["restart", name]).output().await {
         Ok(out) => out.status.success(),
         Err(_)  => false,
     }
 }
 
-/// Lit la charge système depuis `/proc/loadavg` → [1min, 5min, 15min].
 async fn read_load_avg() -> [f32; 3] {
-    tokio::fs::read_to_string("/proc/loadavg")
-        .await
-        .ok()
+    tokio::fs::read_to_string("/proc/loadavg").await.ok()
         .and_then(|s| {
             let mut p = s.split_whitespace();
             let a: f32 = p.next()?.parse().ok()?;
@@ -183,7 +321,6 @@ async fn read_load_avg() -> [f32; 3] {
         .unwrap_or([0.0, 0.0, 0.0])
 }
 
-/// Lit l'utilisation CPU depuis `/proc/stat` (deux lectures avec 200ms d'écart).
 async fn read_cpu_percent() -> f32 {
     let read_stat = || async {
         tokio::fs::read_to_string("/proc/stat").await.ok().and_then(|s| {
@@ -200,46 +337,21 @@ async fn read_cpu_percent() -> f32 {
             Some((total, idle + iowait))
         })
     };
-
     let before = read_stat().await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     let after  = read_stat().await;
-
     if let (Some((t1, i1)), Some((t2, i2))) = (before, after) {
         let dt = (t2 - t1) as f32;
         let di = (i2 - i1) as f32;
         if dt > 0.0 { (1.0 - di / dt) * 100.0 } else { 0.0 }
-    } else {
-        0.0
-    }
+    } else { 0.0 }
 }
 
-/// Lit l'utilisation mémoire depuis `/proc/meminfo`.
-async fn read_memory_percent() -> f32 {
-    let Ok(content) = tokio::fs::read_to_string("/proc/meminfo").await else { return 0.0; };
-    let mut total = 0u64;
-    let mut available = 0u64;
-    for line in content.lines() {
-        if line.starts_with("MemTotal:") {
-            total = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
-        } else if line.starts_with("MemAvailable:") {
-            available = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
-        }
-    }
-    if total > 0 { ((total - available) as f32 / total as f32) * 100.0 } else { 0.0 }
-}
-
-/// Lit l'utilisation disque via `df /`.
 async fn read_disk_percent() -> f32 {
-    match Command::new("df")
-        .args(["-h", "--output=pcent", "/"])
-        .output()
-        .await
-    {
+    match Command::new("df").args(["-h", "--output=pcent", "/"]).output().await {
         Ok(out) => {
             let s = String::from_utf8_lossy(&out.stdout);
-            s.lines()
-                .nth(1)
+            s.lines().nth(1)
                 .and_then(|l| l.trim().trim_end_matches('%').parse::<f32>().ok())
                 .unwrap_or(0.0)
         }
@@ -247,77 +359,53 @@ async fn read_disk_percent() -> f32 {
     }
 }
 
-/// Lit l'uptime depuis `/proc/uptime`.
 async fn read_uptime_secs() -> u64 {
-    tokio::fs::read_to_string("/proc/uptime")
-        .await
-        .ok()
+    tokio::fs::read_to_string("/proc/uptime").await.ok()
         .and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok())
         .map(|v| v as u64)
         .unwrap_or(0)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Watchdog — redémarre les services critiques en cas de crash
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// Watchdog
+// =============================================================================
 
-/// Services à surveiller : (label, host, port, commande_systemd).
-/// Si la commande est None le service n'est pas redémarré automatiquement.
 const WATCHDOG_SERVICES: &[(&str, &str, u16, Option<&str>)] = &[
-    // None = pas de restart automatique : NoNewPrivileges=true empêche sudo,
-    // systemd gère le restart via Restart=on-failure dans energy-manager.service.
     ("energy-manager", "127.0.0.1", 8081, None),
 ];
 
-/// Intervalle de vérification du watchdog.
-const WATCHDOG_INTERVAL: Duration = Duration::from_secs(15);
-/// Délai de confirmation avant redémarrage (évite les faux-positifs transitoires).
+const WATCHDOG_INTERVAL:      Duration = Duration::from_secs(15);
 const WATCHDOG_CONFIRM_DELAY: Duration = Duration::from_secs(5);
-/// Cooldown minimum entre deux redémarrages du même service.
-const WATCHDOG_COOLDOWN: Duration = Duration::from_secs(120);
+const WATCHDOG_COOLDOWN:      Duration = Duration::from_secs(120);
 
-/// Démarre le watchdog en arrière-plan.
-/// Vérifie tous les `WATCHDOG_INTERVAL` que chaque service répond.
-/// Si un service est injoignable après confirmation, il est redémarré via systemctl.
 pub async fn run_watchdog_agent(_state: AppState) {
     info!("Watchdog démarré (intervalle: {}s, cooldown: {}s)",
         WATCHDOG_INTERVAL.as_secs(), WATCHDOG_COOLDOWN.as_secs());
-
-    let mut ticker = interval(WATCHDOG_INTERVAL);
-    // Dernière tentative de redémarrage par service (même index que WATCHDOG_SERVICES).
+    let mut ticker       = interval(WATCHDOG_INTERVAL);
     let mut last_restart: Vec<Option<Instant>> = vec![None; WATCHDOG_SERVICES.len()];
 
     loop {
         ticker.tick().await;
-
         for (idx, &(name, host, port, systemd_unit)) in WATCHDOG_SERVICES.iter().enumerate() {
             if !tcp_probe(host, port).await {
-                // Sonde de confirmation après délai court.
                 tokio::time::sleep(WATCHDOG_CONFIRM_DELAY).await;
-                if tcp_probe(host, port).await {
-                    continue; // faux positif — service de nouveau joignable
-                }
+                if tcp_probe(host, port).await { continue; }
 
                 let cooldown_ok = last_restart[idx]
                     .map(|t| t.elapsed() >= WATCHDOG_COOLDOWN)
                     .unwrap_or(true);
-
                 if !cooldown_ok {
-                    warn!("Watchdog: {} injoignable mais cooldown actif ({:.0}s restantes)",
-                        name,
-                        WATCHDOG_COOLDOWN.as_secs_f32()
-                            - last_restart[idx].unwrap().elapsed().as_secs_f32());
+                    warn!("Watchdog: {} injoignable mais cooldown actif", name);
                     continue;
                 }
 
                 warn!("Watchdog: {} injoignable — tentative de redémarrage", name);
-
                 if let Some(unit) = systemd_unit {
                     if restart_systemd_service(unit).await {
-                        info!("Watchdog: {} redémarré avec succès via systemctl", name);
+                        info!("Watchdog: {} redémarré avec succès", name);
                         last_restart[idx] = Some(Instant::now());
                     } else {
-                        warn!("Watchdog: échec du redémarrage systemctl de {}", name);
+                        warn!("Watchdog: échec redémarrage de {}", name);
                     }
                 }
             }
@@ -325,23 +413,15 @@ pub async fn run_watchdog_agent(_state: AppState) {
     }
 }
 
-/// Redémarre un service systemd via `sudo systemctl restart <name>`.
 async fn restart_systemd_service(name: &str) -> bool {
-    match Command::new("sudo")
-        .args(["systemctl", "restart", name])
-        .output()
-        .await
-    {
+    match Command::new("sudo").args(["systemctl", "restart", name]).output().await {
         Ok(out) => {
             if !out.status.success() {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                warn!("systemctl restart {} → stderr: {}", name, stderr.trim());
+                warn!("systemctl restart {} → stderr: {}",
+                    name, String::from_utf8_lossy(&out.stderr).trim());
             }
             out.status.success()
         }
-        Err(e) => {
-            warn!("systemctl restart {} → erreur: {}", name, e);
-            false
-        }
+        Err(e) => { warn!("systemctl restart {} → erreur: {}", name, e); false }
     }
 }

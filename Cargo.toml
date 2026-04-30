@@ -45,6 +45,7 @@ thiserror     = "1"
 # ── Logging / tracing ──────────────────────────────────────────────────────────
 tracing               = "0.1"
 tracing-subscriber    = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender      = "0.2"
 
 # ── HTTP server (API + WebSocket) ──────────────────────────────────────────────
 axum          = { version = "0.7",  features = ["ws", "macros"] }

@@ -395,3 +395,69 @@ pub async fn get_system_totals(State(state): State<AppState>) -> impl IntoRespon
         }),
     )
 }
+
+
+// =============================================================================
+// Log archive endpoints
+// =============================================================================
+
+#[derive(Deserialize)]
+pub struct LogFileQuery {
+    /// Nom du fichier (ex: "daly-bms.log.2026-04-30")
+    pub name: Option<String>,
+    /// Nombre de lignes à retourner depuis la fin.
+    pub lines: Option<usize>,
+}
+
+/// GET /api/v1/monitor/logs — liste les fichiers de log disponibles.
+pub async fn get_monitor_logs(State(state): State<AppState>) -> Json<Value> {
+    let log_dir = &state.config.logging.log_dir;
+    if log_dir.is_empty() {
+        return Json(json!({ "ok": false, "reason": "file_logging_disabled", "files": [] }));
+    }
+    let Ok(entries) = std::fs::read_dir(log_dir) else {
+        return Json(json!({ "ok": false, "reason": "directory_not_found", "files": [] }));
+    };
+    let mut files: Vec<serde_json::Value> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if !name.contains("daly-bms") { return None; }
+            let meta = e.metadata().ok()?;
+            let size_kb = meta.len() / 1024;
+            let modified = meta.modified().ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            Some(json!({ "name": name, "size_kb": size_kb, "modified": modified }))
+        })
+        .collect();
+    // Sort by name descending (most recent first)
+    files.sort_by(|a, b| {
+        b["name"].as_str().unwrap_or("").cmp(a["name"].as_str().unwrap_or(""))
+    });
+    Json(json!({ "ok": true, "dir": log_dir, "files": files }))
+}
+
+/// GET /api/v1/monitor/logs/content?name=...&lines=500
+pub async fn get_monitor_log_content(
+    State(state): State<AppState>,
+    Query(q): Query<LogFileQuery>,
+) -> impl IntoResponse {
+    let log_dir = &state.config.logging.log_dir;
+    let Some(filename) = q.name.as_deref() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "reason": "missing name" }))).into_response();
+    };
+    // Sanitize: no path traversal
+    if filename.contains('/') || filename.contains("..") {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "reason": "invalid filename" }))).into_response();
+    }
+    let path = std::path::Path::new(log_dir).join(filename);
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "ok": false, "reason": "file not found" }))).into_response();
+    };
+    let limit = q.lines.unwrap_or(500).min(5000);
+    let lines: Vec<&str> = content.lines().rev().take(limit).collect::<Vec<_>>();
+    let lines: Vec<&str> = lines.into_iter().rev().collect();
+    Json(json!({ "ok": true, "name": filename, "lines": lines })).into_response()
+}
