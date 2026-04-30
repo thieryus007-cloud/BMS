@@ -4,6 +4,8 @@ C'est un problème classique : le dossier existe, mais **tsink ne trouve pas ce 
 
 Voici les **5 vérifications rapides**, dans l'ordre :
 
+sudo -u dalybms RUST_LOG=debug /usr/local/bin/daly-bms-server --config /etc/daly-bms/Config.toml 2>&1 | tail -50
+
 ---
 
 ## 1️⃣ Voir l'erreur exacte dans les logs
