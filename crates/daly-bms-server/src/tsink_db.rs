@@ -58,12 +58,12 @@ impl TsinkHandle {
             .with_retention(Duration::from_secs(config.retention_days * 24 * 3600))
             .with_memory_limit(config.memory_limit_mb * 1024 * 1024)
             .with_cardinality_limit(config.cardinality_limit)
-            .with_queue_capacity(4096)
-            .with_max_writers(2)
-            .with_chunk_points(16384)
+            .with_queue_capacity(8192)
+            .with_max_writers(1)
+            .with_chunk_points(32768)
             .with_partition_duration(Duration::from_secs(24 * 3600))
             .with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(60)))
-            .with_wal_buffer_size(1024 * 1024)
+            .with_wal_buffer_size(2 * 1024 * 1024)
             // Salvage mode: skip corrupted WAL frames on startup instead of aborting.
             // Necessary after an unclean shutdown (power loss, reboot) which can leave
             // the active WAL segment partially written with an invalid magic header.
