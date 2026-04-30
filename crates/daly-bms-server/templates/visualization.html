@@ -90,16 +90,16 @@ function mkEdge(id, src, tgt, color, opts = {}) {
   };
 }
 
-const HIST_ET112_7 = { measurement: 'et112_status',     field: 'current_a',           address: '0x07', label: 'Micro-Onduleurs — I (6h)' };
-const HIST_ET112_8 = { measurement: 'et112_status',     field: 'current_a',           address: '0x08', label: 'Chauffe-eau — I (6h)' };
-const HIST_ET112_9 = { measurement: 'et112_status',     field: 'current_a',           address: '0x09', label: 'Climatisation — I (6h)' };
-const HIST_BMS_1   = { measurement: 'bms_status',       field: 'current',             address: '0x01', label: 'BMS-360Ah — I (6h)' };
-const HIST_BMS_2   = { measurement: 'bms_status',       field: 'current',             address: '0x02', label: 'BMS-320Ah — I (6h)' };
-const HIST_BMS_3   = { measurement: 'bms_status',       field: 'current',             address: '0x03', label: 'BMS-3 — I (6h)' };
-const HIST_MPPT    = { measurement: 'venus_mppt_total', field: 'current_a',        label: 'MPPT total — I DC (6h)' };
-const HIST_INV_DC  = { measurement: 'inverter_status', field: 'dc_current_a',     label: 'Onduleur — I DC (6h)' };
-const HIST_INV_AC  = { measurement: 'inverter_status', field: 'ac_out_current_a', label: 'Onduleur — I AC sortie (6h)' };
-const HIST_SHUNT   = { measurement: 'venus_smartshunt', field: 'current_a',       label: 'SmartShunt — I batterie (6h)' };
+const HIST_ET112_7 = { metric: 'et112_power_w',                    address: '0x07', label: 'Micro-Onduleurs — W (6h)' };
+const HIST_ET112_8 = { metric: 'et112_power_w',                    address: '0x08', label: 'Chauffe-eau — W (6h)' };
+const HIST_ET112_9 = { metric: 'et112_power_w',                    address: '0x09', label: 'Climatisation — W (6h)' };
+const HIST_BMS_1   = { metric: 'bms_current',   bms_id: '0x01',                    label: 'BMS-360Ah — I (6h)' };
+const HIST_BMS_2   = { metric: 'bms_current',   bms_id: '0x02',                    label: 'BMS-320Ah — I (6h)' };
+const HIST_BMS_3   = { metric: 'bms_current',   bms_id: '0x03',                    label: 'BMS-3 — I (6h)' };
+const HIST_MPPT    = { metric: 'solar_total_w',                                     label: 'Solaire total — W (6h)' };
+const HIST_INV_DC  = { metric: 'venus_inverter_power_w',                            label: 'Onduleur — P DC (6h)' };
+const HIST_INV_AC  = { metric: 'venus_inverter_ac_output_power_w',                  label: 'Onduleur — P AC sortie (6h)' };
+const HIST_SHUNT   = { metric: 'venus_shunt_current_a',                             label: 'SmartShunt — I batterie (6h)' };
 
 const EDGES0 = [
   mkEdge('e-ats-maison', 'ats-main', 'et112-maison',   COLOR.ac,  { sourceHandle: 'main-right', targetHandle: 'tl', type: 'customBezier', history: HIST_ET112_8 }),

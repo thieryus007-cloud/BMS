@@ -1,4 +1,4 @@
-// ── EDGE CHART OVERLAY (hover → mini ECharts popup 6h depuis InfluxDB) ────────
+// ── EDGE CHART OVERLAY (hover → mini ECharts popup 6h depuis Tsink PromQL) ────
 function EdgeChartOverlay({ labelX, labelY, history, color }) {
   const [hover, setHover]     = useState(false);
   const [payload, setPayload] = useState(null);
@@ -7,9 +7,9 @@ function EdgeChartOverlay({ labelX, labelY, history, color }) {
   const chartRef    = useRef(null);
   const hideTimer   = useRef(null);
 
-  const measurement = history?.measurement;
-  const field       = history?.field;
-  const addr        = history?.address;
+  const metric = history?.metric;
+  const bmsId  = history?.bms_id;
+  const addr   = history?.address;
 
   function scheduleShow() {
     if (hideTimer.current) { clearTimeout(hideTimer.current); hideTimer.current = null; }
@@ -21,13 +21,12 @@ function EdgeChartOverlay({ labelX, labelY, history, color }) {
   }
 
   useEffect(function () {
-    if (!hover || !measurement) return;
+    if (!hover || !metric) return;
     let cancelled = false;
     setLoading(true);
-    let url = '/api/v1/chart/edge-history?measurement=' + encodeURIComponent(measurement)
-      + '&field=' + encodeURIComponent(field)
-      + '&minutes=360';
-    if (addr) url += '&address=' + encodeURIComponent(addr);
+    let url = '/api/v1/chart/edge-history?metric=' + encodeURIComponent(metric) + '&minutes=360';
+    if (bmsId) url += '&bms_id=' + encodeURIComponent(bmsId);
+    if (addr)  url += '&address=' + encodeURIComponent(addr);
     fetch(url)
       .then(r => r.json())
       .then(j => { if (!cancelled) { setPayload(j); setLoading(false); } })
@@ -36,7 +35,7 @@ function EdgeChartOverlay({ labelX, labelY, history, color }) {
         if (!cancelled) { setLoading(false); setPayload({ ok: false, series: [] }); }
       });
     return function () { cancelled = true; };
-  }, [hover, measurement, field, addr]);
+  }, [hover, metric, bmsId, addr]);
 
   useEffect(function () {
     if (!hover) return;
@@ -133,7 +132,7 @@ function EdgeChartOverlay({ labelX, labelY, history, color }) {
     hoverElements.push(h('div', { key: 'popup', style: popupStyle, onMouseEnter: scheduleShow, onMouseLeave: scheduleHide },
       h('div', { style: headerStyle },
         h('span', null, history.label || 'Courant — 6h'),
-        h('span', { style: { color: '#94a3b8', fontWeight: 400 } }, 'InfluxDB')
+        h('span', { style: { color: '#94a3b8', fontWeight: 400 } }, 'Tsink 6h')
       ),
       h('div', { ref: chartDivRef, style: { flex: 1, width: '100%', minHeight: 0 } }),
       loading && h('div', { style: { position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#64748b', fontSize:11 } }, 'Chargement…'),
