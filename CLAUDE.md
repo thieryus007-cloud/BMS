@@ -2,6 +2,9 @@
 
 > Chargé automatiquement à chaque session. Garder concis.
 > Procédures détaillées → **PROCEDURES.md** (lire sur demande).
+> 
+> **ATTENTION**
+> Toujours faire un PLAN et decomposer les taches pour ne pas avoir "API Error: Stream idle timeout - partial response received"
 
 ---
 
