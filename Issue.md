@@ -6,6 +6,9 @@ Voici les **5 vérifications rapides**, dans l'ordre :
 
 sudo -u dalybms RUST_LOG=debug /usr/local/bin/daly-bms-server --config /etc/daly-bms/Config.toml 2>&1 | tail -50
 
+
+.664482Z  WARN daly_bms_server: Tsink init échoué : IO error: No such file or directory (os error 2) — stockage désactivé
+
 ---
 
 ## 1️⃣ Voir l'erreur exacte dans les logs
