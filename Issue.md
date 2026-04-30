@@ -26,6 +26,10 @@ Une augmentation progressive du CPU (memory/CPU leak léger) est fréquente sur 
 ```
 wget -O /tmp/netdata-kickstart.sh https://my-netdata.io/kickstart.sh
 sh /tmp/netdata-kickstart.sh --stable-channel --dont-wait
+
+sudo apt install sysstat
+pidstat -t -p $(pgrep daly-bms-server) 1
+
 ```
 port 19999
 
