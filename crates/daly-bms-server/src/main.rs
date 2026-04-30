@@ -22,7 +22,7 @@ mod irradiance;
 mod shelly;
 mod tasmota;
 mod state;
-mod tsink_db;
+mod vm_client;
 mod api;
 mod bridges;
 mod simulator;
@@ -181,7 +181,7 @@ async fn main() -> anyhow::Result<()> {
                 api:         config::ApiConfig::default(),
                 logging:     config::LoggingConfig::default(),
                 mqtt:        config::MqttConfig::default(),
-                tsink:       config::TsinkConfig::default(),
+                victoriametrics: config::VmConfig::default(),
                 alerts:      config::AlertsConfig::default(),
                 read_only:   config::ReadOnlyConfig::default(),
                 bms:         Vec::new(),
@@ -273,25 +273,25 @@ async fn main() -> anyhow::Result<()> {
         "DalyBMS Server démarrage"
     );
 
-    // ── Tsink (stockage time-series embarqué) ─────────────────────────────────
-    let tsink_handle = if config.tsink.enabled {
-        match tsink_db::TsinkHandle::new(&config.tsink).await {
+    // ── VictoriaMetrics (client HTTP stockage time-series) ────────────────────
+    let vm_handle = if config.victoriametrics.enabled {
+        match vm_client::VmClient::new(&config.victoriametrics) {
             Ok(h) => {
-                info!("Tsink activé — stockage dans '{}'", config.tsink.data_path);
+                info!("VictoriaMetrics activé — url '{}'", config.victoriametrics.url);
                 Some(h)
             }
             Err(e) => {
-                warn!("Tsink init échoué : {} — stockage désactivé", e);
+                warn!("VictoriaMetrics init échoué : {} — stockage désactivé", e);
                 None
             }
         }
     } else {
-        info!("Tsink désactivé (tsink.enabled = false)");
+        info!("VictoriaMetrics désactivé (victoriametrics.enabled = false)");
         None
     };
 
     // ── État partagé ───────────────────────────────────────────────────────────
-    let state = AppState::new(config.clone(), log_buffer, tsink_handle);
+    let state = AppState::new(config.clone(), log_buffer, vm_handle);
 
     // ── Bridges en arrière-plan ─────────────────────────────────────────────────
 

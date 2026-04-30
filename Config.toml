@@ -396,30 +396,21 @@ name      = "DEYE — Shelly Pro 2PM"
 
 
 # =============================================================================
-# TsinkDB — Stockage time-series embarqué (remplace InfluxDB à terme)
+# VictoriaMetrics — Stockage time-series externe (service systemd sur Pi5)
 # =============================================================================
-# Tsink est embarqué dans le binaire : aucune dépendance externe, aucun Docker.
-# Les données sont stockées dans data_path en format compressé (Gorilla + zstd).
-#
-# Migration progressive :
-#   Phase 1 : tsink.enabled = true + influxdb.enabled = true  (dual-write)
-#   Phase 2 : valider les données Tsink via /api/v1/query
-#   Phase 3 : influxdb.enabled = false  (Tsink seul)
-[tsink]
+# VictoriaMetrics tourne en service systemd natif (PAS Docker) sur le Pi5.
+# Installation : /usr/local/bin/victoria-metrics
+# Service      : /etc/systemd/system/victoria-metrics.service
+# Données      : /var/lib/victoria-metrics/
+# Logs         : journalctl -u victoria-metrics -f
+[victoriametrics]
 enabled = true
 
-# Répertoire de stockage local (relatif au répertoire courant ou chemin absolu)
-data_path = "/var/lib/daly-bms/tsink"
+# URL de l'instance VictoriaMetrics (bind 127.0.0.1 = non exposé sur le réseau)
+url = "http://127.0.0.1:8428"
 
-# Rétention des données en jours (purge automatique des données anciennes)
-retention_days = 30
-
-# Limite mémoire en Mo pour le cache chaud (données récentes)
-memory_limit_mb = 512
-cardinality_limit = 10000
-chunk_points = 16384
-flush_interval_secs = 300
-compaction_interval_secs = 300
+# Timeout des requêtes HTTP vers VM en secondes
+timeout_secs = 10
 
 
 [alerts]

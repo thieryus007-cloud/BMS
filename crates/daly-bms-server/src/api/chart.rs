@@ -1,4 +1,4 @@
-//! Endpoint historique graphique — utilise Tsink pour le dashboard overview.
+//! Endpoint historique graphique — utilise VictoriaMetrics pour le dashboard overview.
 //!
 //! GET /api/v1/chart/history?minutes=60
 //! Retourne { solar:[{t,v}], soc:[{t,v}], load:[{t,v}] }
@@ -11,7 +11,6 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use chrono::Utc;
-use tsink::promql::PromqlValue;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -21,14 +20,13 @@ pub struct HistoryParams {
 
 #[derive(Deserialize)]
 pub struct EdgeHistoryParams {
-    // New direct Tsink interface
-    pub metric: Option<String>,
-    pub bms_id: Option<String>,
-    pub address: Option<String>,
-    pub minutes: Option<u32>,
-    // Legacy InfluxDB compatibility (kept for backward compat)
+    pub metric:      Option<String>,
+    pub bms_id:      Option<String>,
+    pub address:     Option<String>,
+    pub minutes:     Option<u32>,
+    // Legacy InfluxDB compat
     pub measurement: Option<String>,
-    pub field: Option<String>,
+    pub field:       Option<String>,
 }
 
 /// GET /api/v1/chart/history?minutes=X
@@ -38,23 +36,23 @@ pub async fn get_chart_history(
 ) -> impl IntoResponse {
     let minutes = q.minutes.unwrap_or(60).clamp(1, 720) as i64;
 
-    let tsink = match &state.tsink {
-        Some(t) => t,
-        None => return Json(json!({"solar": [], "soc": [], "load": [], "ok": false, "reason": "tsink_disabled"})),
+    let vm = match &state.vm {
+        Some(v) => v,
+        None => return Json(json!({"solar": [], "soc": [], "load": [], "ok": false, "reason": "vm_disabled"})),
     };
 
-    let now_ms  = Utc::now().timestamp_millis();
+    let now_ms   = Utc::now().timestamp_millis();
     let start_ms = now_ms - minutes * 60 * 1000;
     let step_ms: i64 = if minutes <= 60 { 60_000 } else if minutes <= 360 { 300_000 } else { 600_000 };
 
     let (solar_res, soc_res, load_res) = tokio::join!(
-        tsink.query_range("solar_total_w".into(), start_ms, now_ms, step_ms),
-        tsink.query_range("avg(bms_soc)".into(), start_ms, now_ms, step_ms),
-        tsink.query_range("et112_power_w{address=\"0x08\"}".into(), start_ms, now_ms, step_ms),
+        vm.query_range_json("solar_total_w",                           start_ms, now_ms, step_ms),
+        vm.query_range_json("avg(bms_soc)",                            start_ms, now_ms, step_ms),
+        vm.query_range_json("et112_power_w{address=\"0x08\"}",         start_ms, now_ms, step_ms),
     );
 
     Json(json!({
-        "ok": true,
+        "ok":    true,
         "solar": extract_series_hhmm(solar_res.ok()),
         "soc":   extract_series_hhmm(soc_res.ok()),
         "load":  extract_series_hhmm(load_res.ok()),
@@ -84,20 +82,25 @@ fn infer_unit(metric: &str) -> &'static str {
     ""
 }
 
-/// Extracts [{t: "HH:MM", v: f64}] from a PromQL range result.
-fn extract_series_hhmm(result: Option<PromqlValue>) -> Vec<Value> {
-    let series_list = match result {
-        Some(PromqlValue::RangeVector(s)) => s,
-        _ => return Vec::new(),
+/// Extrait [{t: "HH:MM", v: f64}] depuis la réponse JSON range de VM.
+/// VM retourne des timestamps en secondes (float).
+fn extract_series_hhmm(result: Option<Value>) -> Vec<Value> {
+    let result = match result { Some(v) => v, None => return Vec::new() };
+    let series_list = match result["data"]["result"].as_array() {
+        Some(a) => a,
+        None    => return Vec::new(),
     };
-    // Take the first series (or aggregate if multiple)
-    let Some(first) = series_list.into_iter().next() else { return Vec::new() };
-    first.samples.iter().map(|(ts_ms, v)| {
-        let dt = chrono::DateTime::from_timestamp_millis(*ts_ms)
+    let first = match series_list.first() { Some(s) => s, None => return Vec::new() };
+    let values = match first["values"].as_array() { Some(v) => v, None => return Vec::new() };
+
+    values.iter().map(|entry| {
+        let ts_secs = entry[0].as_f64().unwrap_or(0.0);
+        let val: f64 = entry[1].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+        let dt = chrono::DateTime::from_timestamp(ts_secs as i64, 0)
             .unwrap_or_default()
             .with_timezone(&chrono::Local);
         let t = dt.format("%H:%M").to_string();
-        json!({"t": t, "v": (v * 10.0).round() / 10.0})
+        json!({"t": t, "v": (val * 10.0).round() / 10.0})
     }).collect()
 }
 
@@ -108,13 +111,11 @@ pub async fn get_edge_history(
 ) -> impl IntoResponse {
     let minutes = q.minutes.unwrap_or(360).clamp(1, 1440) as i64;
 
-    let tsink = match &state.tsink {
-        Some(t) => t,
-        None => return Json(json!({ "ok": false, "series": [], "reason": "tsink_disabled" })),
+    let vm = match &state.vm {
+        Some(v) => v,
+        None => return Json(json!({ "ok": false, "series": [], "reason": "vm_disabled" })),
     };
 
-    // Resolve metric name and unit.
-    // Priority: direct ?metric= param, then legacy measurement+field mapping.
     let (metric, unit): (&str, &str);
     let metric_owned: String;
 
@@ -147,8 +148,6 @@ pub async fn get_edge_history(
         }
     }
 
-    // Build PromQL label filter.
-    // BMS metrics use the `bms_id` label; ET112 metrics use the `address` label.
     let is_bms = metric.starts_with("bms_");
     let query = if is_bms {
         if let Some(bms_id) = q.bms_id.as_deref().filter(|s| !s.is_empty()) {
@@ -168,21 +167,27 @@ pub async fn get_edge_history(
     let start_ms = now_ms - minutes * 60 * 1000;
     let step_ms: i64 = if minutes <= 60 { 60_000 } else if minutes <= 360 { 180_000 } else { 600_000 };
 
-    let result = tsink.query_range(query.clone(), start_ms, now_ms, step_ms).await;
+    let result = vm.query_range_json(&query, start_ms, now_ms, step_ms).await;
 
     let series: Vec<Value> = match result.ok() {
-        Some(PromqlValue::RangeVector(series_list)) => {
-            series_list.into_iter()
-                .flat_map(|s| s.samples.into_iter().map(|(ts_ms, v)| {
-                    let dt = chrono::DateTime::from_timestamp_millis(ts_ms)
+        Some(v) => {
+            let empty = vec![];
+            let series_list = v["data"]["result"].as_array().unwrap_or(&empty);
+            series_list.iter().flat_map(|s| {
+                let empty_vals = vec![];
+                let values = s["values"].as_array().unwrap_or(&empty_vals);
+                values.iter().map(|entry| {
+                    let ts_secs = entry[0].as_f64().unwrap_or(0.0);
+                    let val: f64 = entry[1].as_str().unwrap_or("0").parse().unwrap_or(0.0);
+                    let dt = chrono::DateTime::from_timestamp(ts_secs as i64, 0)
                         .unwrap_or_default()
                         .with_timezone(&chrono::Local);
                     let t = dt.format("%H:%M").to_string();
-                    json!({"t": t, "v": (v * 100.0).round() / 100.0})
-                }))
-                .collect()
+                    json!({"t": t, "v": (val * 100.0).round() / 100.0})
+                }).collect::<Vec<_>>()
+            }).collect()
         }
-        _ => Vec::new(),
+        None => Vec::new(),
     };
 
     Json(json!({
