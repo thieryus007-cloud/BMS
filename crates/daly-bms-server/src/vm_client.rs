@@ -6,7 +6,7 @@
 use std::time::Duration;
 use reqwest::Client;
 use serde_json::Value;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::VmConfig;
 use daly_bms_core::types::BmsSnapshot;
@@ -44,17 +44,16 @@ impl VmRow {
         }
     }
 
-    /// Sérialise en Prometheus text format — timestamp en secondes (requis par VM).
+    /// Sérialise en Prometheus text format — timestamp en millisecondes (requis par /api/v1/import/prometheus).
     fn to_line(&self) -> String {
-        let ts_secs = self.timestamp_ms / 1000;
         if self.labels.is_empty() {
-            format!("{} {} {}", self.metric, self.value, ts_secs)
+            format!("{} {} {}", self.metric, self.value, self.timestamp_ms)
         } else {
             let labels_str = self.labels.iter()
                 .map(|(k, v)| format!("{}=\"{}\"", k, v))
                 .collect::<Vec<_>>()
                 .join(",");
-            format!("{}{{{}}} {} {}", self.metric, labels_str, self.value, ts_secs)
+            format!("{}{{{}}} {} {}", self.metric, labels_str, self.value, self.timestamp_ms)
         }
     }
 }
@@ -92,12 +91,18 @@ impl VmClient {
             return Ok(());
         }
         let body = rows.iter().map(|r| r.to_line()).collect::<Vec<_>>().join("\n");
-        self.http
+        let resp = self.http
             .post(format!("{}/api/v1/import/prometheus", self.base_url))
+            .header("Content-Type", "text/plain")
             .body(body)
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            warn!(status = %status, body = %text, "VictoriaMetrics write failed");
+            return Err(anyhow::anyhow!("VM write error {}: {}", status, text));
+        }
         Ok(())
     }
 
