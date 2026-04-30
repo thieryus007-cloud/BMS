@@ -163,7 +163,7 @@
     </div>
     <div class="chart-wrap">
       <div id="chart-kwh" style="width:100%;height:100%"></div>
-      <div class="no-data-overlay" id="nd-kwh"><span>📊</span><span>Aucune donnée Tsink</span></div>
+      <div class="no-data-overlay" id="nd-kwh"><span>📊</span><span>Aucune donnée VictoriaMetrics</span></div>
     </div>
   </div>
 
@@ -175,7 +175,7 @@
     </div>
     <div class="chart-wrap">
       <div id="chart-w" style="width:100%;height:100%"></div>
-      <div class="no-data-overlay" id="nd-w"><span>📊</span><span>Aucune donnée Tsink</span></div>
+      <div class="no-data-overlay" id="nd-w"><span>📊</span><span>Aucune donnée VictoriaMetrics</span></div>
     </div>
   </div>
 
@@ -187,7 +187,7 @@
     </div>
     <div class="chart-wrap">
       <div id="chart-ah" style="width:100%;height:100%"></div>
-      <div class="no-data-overlay" id="nd-ah"><span>📊</span><span>Aucune donnée Tsink</span></div>
+      <div class="no-data-overlay" id="nd-ah"><span>📊</span><span>Aucune donnée VictoriaMetrics</span></div>
     </div>
   </div>
 
@@ -416,7 +416,7 @@ async function loadHistory(period) {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const data = await resp.json();
     if (!data.ok) {
-      document.getElementById('period-label').textContent = 'Tsink désactivé';
+      document.getElementById('period-label').textContent = 'VictoriaMetrics désactivé';
       return;
     }
     renderCharts(data);
