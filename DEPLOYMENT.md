@@ -6,6 +6,32 @@
 
 ---
 
+Voici la commande à copier-coller sur ton Pi5 :
+
+```bash
+make clean
+# (équivalent à `cargo clean`)
+```
+
+✅ **Ce que ça fait** : Supprime tout le dossier `target/` (anciens binaires, caches, dépendances compilées).  
+⚠️ **Note** : La prochaine `make build-arm` prendra **5 à 10 minutes** au lieu de 2 min, car tout est recompilé depuis zéro.
+
+Si tu veux aussi virer les anciens binaires installés avant de mettre les nouveaux :
+```bash
+sudo rm -f /usr/local/bin/daly-bms-server /usr/local/bin/energy-manager
+```
+
+Tu relances ensuite normalement :
+```bash
+make up
+make build-arm build-energy-arm
+sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/
+sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/
+sudo systemctl restart daly-bms energy-manager
+```
+
+C'est tout. Dis-moi si tu veux que je t'ajoute une cible `make update-clean` dans le Makefile pour faire tout ça en une ligne.
+
 ## 📊 ARCHITECTURE SYSTÈME
 
 ```
