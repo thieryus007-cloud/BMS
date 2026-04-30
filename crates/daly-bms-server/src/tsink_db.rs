@@ -62,7 +62,7 @@ impl TsinkHandle {
             .with_max_writers(2)
             .with_chunk_points(16384)
             .with_partition_duration(Duration::from_secs(24 * 3600))
-            .with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(1)))
+            .with_wal_sync_mode(WalSyncMode::Periodic(Duration::from_secs(60)))
             .with_wal_buffer_size(1024 * 1024)
             // Salvage mode: skip corrupted WAL frames on startup instead of aborting.
             // Necessary after an unclean shutdown (power loss, reboot) which can leave
