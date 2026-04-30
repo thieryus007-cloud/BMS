@@ -10,7 +10,7 @@ use crate::et112::Et112Snapshot;
 use crate::irradiance::IrradianceSnapshot;
 use crate::shelly::ShellyEmSnapshot;
 use crate::tasmota::TasmotaSnapshot;
-use crate::tsink_db::TsinkHandle;
+use crate::vm_client::VmClient;
 use daly_bms_core::bus::DalyPort;
 use daly_bms_core::types::BmsSnapshot;
 use chrono::{DateTime, Datelike, Utc};
@@ -436,19 +436,19 @@ pub struct AppState {
     /// Client MQTT Shelly (pour les commandes de contrôle Switch.Set).
     pub shelly_client: Arc<tokio::sync::Mutex<Option<rumqttc::AsyncClient>>>,
 
-    /// Stockage time-series embarqué Tsink (None si désactivé dans la config).
-    pub tsink: Option<Arc<TsinkHandle>>,
+    /// Client VictoriaMetrics (None si désactivé dans la config).
+    pub vm: Option<Arc<VmClient>>,
 
-    /// Timestamps de la dernière écriture Tsink par catégorie (epoch secondes).
-    /// Permet de throttler le débit d'écriture et d'éviter la saturation du WAL.
-    tsink_last_bms_write:   Arc<AtomicU64>,
-    tsink_last_venus_write: Arc<AtomicU64>,
-    tsink_last_et112_write: Arc<AtomicU64>,
-    tsink_last_irrad_write: Arc<AtomicU64>,
+    /// Timestamps de la dernière écriture VM par catégorie (epoch secondes).
+    /// Throttle le débit d'écriture pour éviter de surcharger VM.
+    vm_last_bms_write:   Arc<AtomicU64>,
+    vm_last_venus_write: Arc<AtomicU64>,
+    vm_last_et112_write: Arc<AtomicU64>,
+    vm_last_irrad_write: Arc<AtomicU64>,
 }
 
 impl AppState {
-    pub fn new(config: AppConfig, log_buffer: LogBuffer, tsink: Option<TsinkHandle>) -> Self {
+    pub fn new(config: AppConfig, log_buffer: LogBuffer, vm: Option<VmClient>) -> Self {
         let (ws_tx, _) = broadcast::channel(WS_BROADCAST_CAPACITY);
         let addresses = config.bms_addresses();
         let ring_size = config.serial.ring_buffer_size;
@@ -502,17 +502,17 @@ impl AppState {
             console_bus: ConsoleBus::new(),
             shelly_latest: Arc::new(RwLock::new(BTreeMap::new())),
             shelly_client: Arc::new(tokio::sync::Mutex::new(None)),
-            tsink: tsink.map(Arc::new),
-            tsink_last_bms_write:   Arc::new(AtomicU64::new(0)),
-            tsink_last_venus_write: Arc::new(AtomicU64::new(0)),
-            tsink_last_et112_write: Arc::new(AtomicU64::new(0)),
-            tsink_last_irrad_write: Arc::new(AtomicU64::new(0)),
+            vm: vm.map(Arc::new),
+            vm_last_bms_write:   Arc::new(AtomicU64::new(0)),
+            vm_last_venus_write: Arc::new(AtomicU64::new(0)),
+            vm_last_et112_write: Arc::new(AtomicU64::new(0)),
+            vm_last_irrad_write: Arc::new(AtomicU64::new(0)),
         }
     }
 
-    /// Vérifie si l'intervalle minimum est écoulé depuis le dernier write Tsink.
+    /// Vérifie si l'intervalle minimum est écoulé depuis le dernier write VM.
     /// Thread-safe via AtomicU64. Retourne true ET met à jour le timestamp si ok.
-    fn tsink_rate_ok(last: &AtomicU64, interval_secs: u64) -> bool {
+    fn vm_rate_ok(last: &AtomicU64, interval_secs: u64) -> bool {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -584,12 +584,12 @@ impl AppState {
         let latest = self.latest_snapshots().await;
         let _ = self.ws_tx.send(Arc::new(latest));
 
-        // 🔧 Écriture Tsink — throttlée à 1 écriture / 10s, sans spawn
-        if let Some(tsink) = self.tsink.clone() {
-            if Self::tsink_rate_ok(&self.tsink_last_bms_write, 10) {
-                let rows = TsinkHandle::bms_rows(&snap);
-                if let Err(e) = tsink.write_rows(rows).await {
-                    tracing::warn!("Tsink BMS write error: {}", e);
+        // Écriture VM — throttlée à 1 écriture / 10s
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_bms_write, 10) {
+                let rows = VmClient::bms_rows(&snap);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM BMS write error: {}", e);
                 }
             }
         }
@@ -643,12 +643,12 @@ impl AppState {
                 .push(snap.clone());
         }
 
-        // 🔧 Écriture Tsink — throttlée à 1 écriture / 30s, sans spawn
-        if let Some(tsink) = self.tsink.clone() {
-            if Self::tsink_rate_ok(&self.tsink_last_et112_write, 30) {
-                let rows = TsinkHandle::et112_rows(&snap);
-                if let Err(e) = tsink.write_rows(rows).await {
-                    tracing::warn!("Tsink ET112 write error: {}", e);
+        // Écriture VM — throttlée à 1 écriture / 30s
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_et112_write, 30) {
+                let rows = VmClient::et112_rows(&snap);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM ET112 write error: {}", e);
                 }
             }
         }
@@ -682,12 +682,12 @@ impl AppState {
             "address": snap.address,
             "irradiance_wm2": snap.irradiance_wm2,
         })));
-        // 🔧 Écriture Tsink — throttlée à 1 écriture / 60s, sans spawn
-        if let Some(tsink) = self.tsink.clone() {
-            if Self::tsink_rate_ok(&self.tsink_last_irrad_write, 60) {
-                let rows = TsinkHandle::irradiance_rows(&snap);
-                if let Err(e) = tsink.write_rows(rows).await {
-                    tracing::warn!("Tsink irradiance write error: {}", e);
+        // Écriture VM — throttlée à 1 écriture / 60s
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_irrad_write, 60) {
+                let rows = VmClient::irradiance_rows(&snap);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM irradiance write error: {}", e);
                 }
             }
         }
@@ -806,12 +806,12 @@ impl AppState {
                 "ah_charged_today": shunt.ah_charged_today,
                 "ah_discharged_today": shunt.ah_discharged_today,
             })));
-            // 🔧 Écriture Tsink — sans spawn
-            if let Some(tsink) = self.tsink.clone() {
-                if Self::tsink_rate_ok(&self.tsink_last_venus_write, 30) {
-                    let rows = TsinkHandle::smartshunt_rows(&shunt);
-                    if let Err(e) = tsink.write_rows(rows).await {
-                        tracing::warn!("Tsink SmartShunt write error: {}", e);
+            // Écriture VM
+            if let Some(vm) = self.vm.clone() {
+                if Self::vm_rate_ok(&self.vm_last_venus_write, 30) {
+                    let rows = VmClient::smartshunt_rows(&shunt);
+                    if let Err(e) = vm.write_rows(rows).await {
+                        tracing::warn!("VM SmartShunt write error: {}", e);
                     }
                 }
             }
@@ -858,12 +858,12 @@ impl AppState {
             "ah_discharged_today": shunt.ah_discharged_today,
         })));
 
-        // 🔧 Écriture Tsink — sans spawn
-        if let Some(tsink) = self.tsink.clone() {
-            if Self::tsink_rate_ok(&self.tsink_last_venus_write, 10) {
-                let rows = TsinkHandle::smartshunt_rows(&shunt);
-                if let Err(e) = tsink.write_rows(rows).await {
-                    tracing::warn!("Tsink SmartShunt write error: {}", e);
+        // Écriture VM
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_venus_write, 10) {
+                let rows = VmClient::smartshunt_rows(&shunt);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM SmartShunt write error: {}", e);
                 }
             }
         }
@@ -889,12 +889,12 @@ impl AppState {
 
     /// Enregistre/met à jour les données de l'onduleur Victron (MultiPlus, cgwacs, etc.).
     pub async fn on_venus_inverter(&self, inverter: VenusInverter) {
-        // 🔧 Écriture Tsink — sans spawn
-        if let Some(tsink) = self.tsink.clone() {
-            if Self::tsink_rate_ok(&self.tsink_last_venus_write, 10) {
-                let rows = TsinkHandle::inverter_rows(&inverter);
-                if let Err(e) = tsink.write_rows(rows).await {
-                    tracing::warn!("Tsink inverter write error: {}", e);
+        // Écriture VM
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_venus_write, 10) {
+                let rows = VmClient::inverter_rows(&inverter);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM inverter write error: {}", e);
                 }
             }
         }

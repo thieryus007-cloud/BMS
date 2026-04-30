@@ -77,9 +77,6 @@ zvariant      = { version = "4",    default-features = false }
 # ── UUID ───────────────────────────────────────────────────────────────────────
 uuid          = { version = "1",    features = ["v4"] }
 
-# ── Time-series embarqué (remplace InfluxDB) ──────────────────────────────────
-tsink         = "0.10.1"
-
 # ── Misc ───────────────────────────────────────────────────────────────────────
 bytes         = "1"
 futures       = "0.3"

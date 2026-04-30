@@ -60,7 +60,7 @@ pub async fn get_config(State(state): State<AppState>) -> Json<Value> {
         },
         "addresses": addresses,
         "mqtt_enabled": cfg.mqtt.enabled,
-        "tsink_enabled": cfg.tsink.enabled,
+        "vm_enabled": cfg.victoriametrics.enabled,
         "read_only": cfg.read_only.enabled,
     }))
 }
@@ -158,13 +158,13 @@ pub async fn set_mppt_yield(
         *state.house_power_w.write().await = hw;
     }
 
-    // Write solar metrics to Tsink for history
-    if let Some(tsink) = &state.tsink {
-        let kwh_val  = *state.mppt_yield_kwh.read().await;
-        let pw_val   = *state.mppt_power_w.read().await;
-        let total_w  = *state.solar_total_w.read().await;
-        let rows = crate::tsink_db::TsinkHandle::solar_rows(total_w, pw_val, kwh_val);
-        let _ = tsink.write_rows(rows).await;
+    // Write solar metrics to VictoriaMetrics for history
+    if let Some(vm) = &state.vm {
+        let kwh_val = *state.mppt_yield_kwh.read().await;
+        let pw_val  = *state.mppt_power_w.read().await;
+        let total_w = *state.solar_total_w.read().await;
+        let rows = crate::vm_client::VmClient::solar_rows(total_w, pw_val, kwh_val);
+        let _ = vm.write_rows(rows).await;
     }
 
     let kwh  = *state.mppt_yield_kwh.read().await;

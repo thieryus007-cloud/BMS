@@ -37,9 +37,9 @@ pub struct AppConfig {
     #[serde(default)]
     pub mqtt: MqttConfig,
 
-    /// Time-series embarqué Tsink (remplace InfluxDB)
+    /// Client VictoriaMetrics (stockage time-series externe)
     #[serde(default)]
-    pub tsink: TsinkConfig,
+    pub victoriametrics: VmConfig,
 
     #[serde(default)]
     pub alerts: AlertsConfig,
@@ -410,29 +410,26 @@ impl MqttConfig {
     }
 }
 
-/// Configuration du stockage Tsink embarqué.
+/// Configuration du client VictoriaMetrics.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TsinkConfig {
-    /// Activer le stockage Tsink
+pub struct VmConfig {
+    /// Activer l'écriture/lecture VictoriaMetrics
     pub enabled: bool,
-    /// Répertoire de stockage des données
-    pub data_path: String,
-    /// Rétention en jours
-    pub retention_days: u64,
-    /// Limite mémoire en Mo
-    pub memory_limit_mb: usize,
-    /// Limite de cardinalité (nombre de séries max)
-    pub cardinality_limit: usize,
+    /// URL de base de l'instance VM (ex: http://127.0.0.1:8428)
+    pub url: String,
+    /// Timeout des requêtes HTTP en secondes
+    #[serde(default = "default_vm_timeout")]
+    pub timeout_secs: u64,
 }
 
-impl Default for TsinkConfig {
+fn default_vm_timeout() -> u64 { 10 }
+
+impl Default for VmConfig {
     fn default() -> Self {
         Self {
-            enabled:           true,
-            data_path:         "/var/lib/daly-bms/tsink".to_string(),
-            retention_days:    30,
-            memory_limit_mb:   512,
-            cardinality_limit: 100_000,
+            enabled:      false,
+            url:          "http://127.0.0.1:8428".to_string(),
+            timeout_secs: 10,
         }
     }
 }
