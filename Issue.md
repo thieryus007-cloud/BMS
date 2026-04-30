@@ -104,4 +104,65 @@ ls -laR /var/lib/daly-bms/tsink/ | head -20
 grep -A2 -B2 "tsink\|data_path" /etc/daly-bms/Config.toml
 ```
 
-Je te dirai exactement quoi corriger. 🛠️
+pi5compute@pi5compute:~/Daly-BMS-Rust $ ls -la /var/lib/daly-bms/
+ls -la /var/lib/daly-bms/tsink/
+total 12
+drwxr-xr-x  3 dalybms dalybms 4096 Apr 28 19:23 .
+drwxr-xr-x 30 root    root    4096 Apr 28 19:23 ..
+drwxr-xr-x  4 dalybms dalybms 4096 Apr 30 09:39 tsink
+total 8588
+drwxr-xr-x 4 dalybms dalybms    4096 Apr 30 09:39 .
+drwxr-xr-x 3 dalybms dalybms    4096 Apr 28 19:23 ..
+drwxr-xr-x 4 dalybms dalybms    4096 Apr 28 21:24 lane_numeric
+-rw-r--r-- 1 dalybms dalybms    1038 Apr 30 09:18 series_index.bin
+-rw-r--r-- 1 dalybms dalybms 8773323 Apr 30 09:39 series_index.catalog.json
+-rw-r--r-- 1 dalybms dalybms       0 Apr 28 21:23 .tsink.lock
+drwxr-xr-x 2 dalybms dalybms    4096 Apr 30 09:17 wal
+
+pi5compute@pi5compute:~/Daly-BMS-Rust $ ls -laR /var/lib/daly-bms/tsink/ | head -20
+/var/lib/daly-bms/tsink/:
+total 8588
+drwxr-xr-x 4 dalybms dalybms    4096 Apr 30 09:39 .
+drwxr-xr-x 3 dalybms dalybms    4096 Apr 28 19:23 ..
+drwxr-xr-x 4 dalybms dalybms    4096 Apr 28 21:24 lane_numeric
+-rw-r--r-- 1 dalybms dalybms    1038 Apr 30 09:18 series_index.bin
+-rw-r--r-- 1 dalybms dalybms 8773323 Apr 30 09:39 series_index.catalog.json
+-rw-r--r-- 1 dalybms dalybms       0 Apr 28 21:23 .tsink.lock
+drwxr-xr-x 2 dalybms dalybms    4096 Apr 30 09:17 wal
+
+/var/lib/daly-bms/tsink/lane_numeric:
+total 16
+drwxr-xr-x 4 dalybms dalybms 4096 Apr 28 21:24 .
+drwxr-xr-x 4 dalybms dalybms 4096 Apr 30 09:39 ..
+drwxr-xr-x 2 dalybms dalybms 4096 Apr 30 09:39 .compaction-replacements
+drwxr-xr-x 5 dalybms dalybms 4096 Apr 29 15:34 segments
+
+/var/lib/daly-bms/tsink/lane_numeric/.compaction-replacements:
+total 8
+drwxr-xr-x 2 dalybms dalybms 4096 Apr 30 09:39 .
+
+pi5compute@pi5compute:~/Daly-BMS-Rust $ grep -A2 -B2 "tsink\|data_path" /etc/daly-bms/Config.toml
+# =============================================================================
+# Tsink est embarqué dans le binaire : aucune dépendance externe, aucun Docker.
+# Les données sont stockées dans data_path en format compressé (Gorilla + zstd).
+#
+# Migration progressive :
+#   Phase 1 : tsink.enabled = true + influxdb.enabled = true  (dual-write)
+#   Phase 2 : valider les données Tsink via /api/v1/query
+#   Phase 3 : influxdb.enabled = false  (Tsink seul)
+[tsink]
+enabled = true
+
+# Répertoire de stockage local (relatif au répertoire courant ou chemin absolu)
+data_path = "/var/lib/daly-bms/tsink"
+
+# Rétention des données en jours (purge automatique des données anciennes)
+pi5compute@pi5compute:~/Daly-BMS-Rust $ sudo -u dalybms touch /var/lib/daly-bms/tsink/test_write.tmp && \
+  sudo -u dalybms rm /var/lib/daly-bms/tsink/test_write.tmp && \
+  echo "✓ Écriture OK" || echo "❌ Écriture échouée"
+✓ Écriture OK
+pi5compute@pi5compute:~/Daly-BMS-Rust $
+
+pi5compute@pi5compute:~/Daly-BMS-Rust $ sudo -u dalybms RUST_LOG=debug /usr/local/bin/daly-bms-server --config /etc/daly-bms/Config.toml
+Warning: cannot create log dir /var/log/daly-bms: Permission denied (os error 13) — file logging disabled
+2026-04-30T07:59:01.164970Z  INFO daly_bms_server: DalyBMS Server démarrage version="0.1.0" mode="HARDWARE" api=0.0.0.0:8080
