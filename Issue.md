@@ -23,7 +23,11 @@ journalctl -u daly-bms -f --no-pager
 
 Une augmentation progressive du CPU (memory/CPU leak léger) est fréquente sur les services longue durée avec ingestion continue. Voici comment **diagnostiquer, stabiliser et surveiller** sans toucher au code.
 
----
+```
+wget -O /tmp/netdata-kickstart.sh https://my-netdata.io/kickstart.sh
+sh /tmp/netdata-kickstart.sh --stable-channel --dont-wait
+```
+port 19999
 
 ## 🔍 1. Diagnostic immédiat (3 commandes)
 
