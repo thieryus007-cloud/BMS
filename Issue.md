@@ -17,8 +17,8 @@ sudo chmod 755 /var/lib/daly-bms/tsink
 
 # 4. Redémarrer
 ```
-sudo systemctl start daly-bms  <br> 
-journalctl -u daly-bms -f --no-pager  <br> 
+sudo systemctl start daly-bms 
+journalctl -u daly-bms -f --no-pager 
 ```
 
 Une augmentation progressive du CPU (memory/CPU leak léger) est fréquente sur les services longue durée avec ingestion continue. Voici comment **diagnostiquer, stabiliser et surveiller** sans toucher au code.
