@@ -57,7 +57,7 @@ pub async fn run_monitor_agent(state: AppState) {
 // Collecte complète
 // =============================================================================
 
-async fn collect_snapshot(state: &AppState, net_rx_bps: u64, net_tx_bps: u64) -> MonitorSnapshot {
+async fn collect_snapshot(_state: &AppState, net_rx_bps: u64, net_tx_bps: u64) -> MonitorSnapshot {
     let mut services         = Vec::new();
     let mut network_services = Vec::new();
     let mut auto_actions     = Vec::new();
