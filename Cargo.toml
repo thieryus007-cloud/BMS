@@ -91,12 +91,39 @@ tokio-modbus  = { version = "0.14", features = ["rtu"] }
 # =============================================================================
 # Release profile — optimisé taille + vitesse pour le Pi
 # =============================================================================
-[profile.release]
-opt-level     = 3
-lto           = true
-codegen-units = 1
-strip         = true
-panic         = "abort"
+#[profile.release]
+#opt-level     = 3
+#lto           = true
+#codegen-units = 1
+#strip         = true
+#panic         = "abort"
 
-[profile.dev]
-opt-level = 1
+#[profile.dev]
+#opt-level = 1
+
+# =============================================================================
+# Profiles de compilation optimisés
+# =============================================================================
+
+[profile.release]
+opt-level = 3                    # Optimisations maximales
+lto = "fat"                      # Link-Time Optimization (+10-30% perf)
+codegen-units = 1                # Meilleure optimisation, compilation plus lente
+panic = "abort"                  # Réduit taille, évite unwind tables
+strip = "symbols"                # Supprime symboles de debug
+debug = false
+rpath = false
+incremental = false
+
+# Profile pour le profiling avec perf/flamegraph (symboles conservés)
+[profile.release-debug]
+inherits = "release"
+debug = true                     # Garde les symboles pour perf
+strip = "none"                   # Ne pas strip pour le profiling
+panic = "unwind"                 # Permet backtrace pour debug
+
+# Profile "size" si espace disque critique (optionnel)
+[profile.release-size]
+inherits = "release"
+opt-level = "z"                  # Optimise pour la taille
+lto = "thin"                     # LTO plus rapide
