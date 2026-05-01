@@ -51,7 +51,7 @@ if ! systemctl is-active --quiet daly-bms; then
 fi
 info "daly-bms actif"
 
-# Vérification Tsink
+# Vérification VictoriaMetrics
 sleep 2
 TSINK_LOG=$(journalctl -u daly-bms --since "30 seconds ago" 2>/dev/null | grep -i tsink | head -3)
 if echo "${TSINK_LOG}" | grep -q "activé"; then
