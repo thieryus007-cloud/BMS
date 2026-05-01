@@ -63,6 +63,7 @@ else
 fi
 
 # ── 6. Déploiement energy-manager ────────────────────────────────────────────
+sleep 3
 step "Déploiement energy-manager…"
 sudo systemctl stop energy-manager
 sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/
