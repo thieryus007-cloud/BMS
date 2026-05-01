@@ -7,7 +7,7 @@
 - Courant de charge/décharge (1)
 - Tension totale
 - État de santé (SOC, SOH, etc.) (2)
-Total par BMS : ~40 métriques
+Total par BMS : ~40 métriques.  
 Total pour 3 BMS : \( 40 imes 3 = 120 \) séries temporelles
 
 ##  3 x ET112 Energy Management
