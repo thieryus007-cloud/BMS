@@ -445,6 +445,7 @@ pub struct AppState {
     vm_last_bms_write:     Arc<AtomicU64>,
     vm_last_shunt_write:   Arc<AtomicU64>,  // SmartShunt — séparé de l'inverter
     vm_last_inverter_write: Arc<AtomicU64>, // Inverter — séparé du SmartShunt
+    vm_last_solar_write:   Arc<AtomicU64>,  // Solar — POST /api/v1/solar/mppt-yield appelé 1x/s
     vm_last_et112_write:   Arc<AtomicU64>,
     vm_last_irrad_write:   Arc<AtomicU64>,
 }
@@ -508,6 +509,7 @@ impl AppState {
             vm_last_bms_write:      Arc::new(AtomicU64::new(0)),
             vm_last_shunt_write:    Arc::new(AtomicU64::new(0)),
             vm_last_inverter_write: Arc::new(AtomicU64::new(0)),
+            vm_last_solar_write:    Arc::new(AtomicU64::new(0)),
             vm_last_et112_write:    Arc::new(AtomicU64::new(0)),
             vm_last_irrad_write:    Arc::new(AtomicU64::new(0)),
         }
@@ -527,6 +529,12 @@ impl AppState {
         } else {
             false
         }
+    }
+
+    /// Vérifie le throttle pour les writes solaires (interval 5s).
+    /// Utilisé par POST /api/v1/solar/mppt-yield (appelé 1x/s par energy-manager).
+    pub fn vm_solar_rate_ok(&self) -> bool {
+        Self::vm_rate_ok(&self.vm_last_solar_write, 5)
     }
 
     /// Incrémente le compteur de polls réussis pour un appareil RS485.

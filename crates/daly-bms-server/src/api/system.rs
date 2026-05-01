@@ -158,13 +158,16 @@ pub async fn set_mppt_yield(
         *state.house_power_w.write().await = hw;
     }
 
-    // Write solar metrics to VictoriaMetrics for history
+    // Write solar metrics to VictoriaMetrics — throttlé à 1 écriture / 5s
+    // (energy-manager appelle cet endpoint toutes les secondes)
     if let Some(vm) = &state.vm {
-        let kwh_val = *state.mppt_yield_kwh.read().await;
-        let pw_val  = *state.mppt_power_w.read().await;
-        let total_w = *state.solar_total_w.read().await;
-        let rows = crate::vm_client::VmClient::solar_rows(total_w, pw_val, kwh_val);
-        let _ = vm.write_rows(rows).await;
+        if state.vm_solar_rate_ok() {
+            let kwh_val = *state.mppt_yield_kwh.read().await;
+            let pw_val  = *state.mppt_power_w.read().await;
+            let total_w = *state.solar_total_w.read().await;
+            let rows = crate::vm_client::VmClient::solar_rows(total_w, pw_val, kwh_val);
+            let _ = vm.write_rows(rows).await;
+        }
     }
 
     let kwh  = *state.mppt_yield_kwh.read().await;

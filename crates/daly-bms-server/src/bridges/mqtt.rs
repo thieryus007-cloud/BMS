@@ -692,17 +692,17 @@ async fn handle_temperature_topic(state: &AppState, json: &Value) {
 
 /// Traite le topic `santuario/system/venus`
 ///
-/// Payload v1 : { "Soc": 75.2, "Voltage": 48.32, "Current": 5.5, "Power": 266.0, "EnergyIn": 1000000, "EnergyOut": 500000 }
-/// Payload v2 : { ..., "State": 3, "TimeToGo": 3600 }
-///   State : 0=Idle, 1=Charging, 2=Discharging
-///   TimeToGo : secondes (None si en charge)
+/// Payload energy-manager : { "Soc":75.2, "Voltage":48.3, "Current":5.5, "Power":266.0,
+///   "State":2, "TimeToGo":3600, "ChargedTodayKwh":5.2, "DischargedTodayKwh":2.1,
+///   "AhChargedToday":108.0, "AhDischargedToday":43.0 }
 async fn handle_system_topic(state: &AppState, json: &Value) {
     if let Some(soc) = json.get("Soc").and_then(|v| v.as_f64()).map(|v| v as f32) {
         let voltage    = json.get("Voltage").and_then(|v| v.as_f64()).map(|v| v as f32);
         let current    = json.get("Current").and_then(|v| v.as_f64()).map(|v| v as f32);
         let power      = json.get("Power").and_then(|v| v.as_f64()).map(|v| v as f32);
-        let energy_in  = json.get("EnergyIn").and_then(|v| v.as_f64()).map(|v| v as f32);
-        let energy_out = json.get("EnergyOut").and_then(|v| v.as_f64()).map(|v| v as f32);
+        // ChargedTodayKwh / DischargedTodayKwh — publiés par energy-manager en kWh
+        let energy_in  = json.get("ChargedTodayKwh").and_then(|v| v.as_f64()).map(|v| v as f32);
+        let energy_out = json.get("DischargedTodayKwh").and_then(|v| v.as_f64()).map(|v| v as f32);
 
         // State : entier Victron → libellé
         let state_str = json.get("State").and_then(|v| v.as_u64()).map(|s| match s {
@@ -727,8 +727,8 @@ async fn handle_system_topic(state: &AppState, json: &Value) {
             voltage_v: voltage,
             current_a: current,
             power_w: power,
-            energy_in_kwh: energy_in.map(|e| e / 1000.0),
-            energy_out_kwh: energy_out.map(|e| e / 1000.0),
+            energy_in_kwh: energy_in,   // déjà en kWh
+            energy_out_kwh: energy_out, // déjà en kWh
             state: state_str,
             time_to_go_min,
             ah_charged_today:    ah_charged,
