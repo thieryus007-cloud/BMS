@@ -12,7 +12,10 @@ use crate::config::VmConfig;
 use daly_bms_core::types::BmsSnapshot;
 use crate::et112::Et112Snapshot;
 use crate::irradiance::IrradianceSnapshot;
-use crate::state::{VenusSmartShunt, VenusInverter};
+use crate::ats::AtsSnapshot;
+use crate::tasmota::TasmotaSnapshot;
+use crate::shelly::ShellyEmSnapshot;
+use crate::state::{VenusMppt, VenusSmartShunt, VenusInverter, VenusTemperature, VenusHeatpump};
 
 // =============================================================================
 // VmRow — métrique en format Prometheus text
@@ -147,7 +150,7 @@ impl VmClient {
     }
 
     // -------------------------------------------------------------------------
-    // Conversions snapshots → VmRow (mêmes métriques qu'avec Tsink)
+    // Conversions snapshots → VmRow
     // -------------------------------------------------------------------------
 
     pub fn bms_rows(snap: &BmsSnapshot) -> Vec<VmRow> {
@@ -275,6 +278,201 @@ impl VmClient {
         push_opt!("venus_inverter_ac_output_voltage_v", inv.ac_output_voltage_v);
         push_opt!("venus_inverter_ac_output_current_a", inv.ac_output_current_a);
         push_opt!("venus_inverter_ac_output_power_w",   inv.ac_output_power_w);
+        push_opt!("venus_inverter_ac_freq_hz",          inv.ac_out_frequency_hz);
+        if let Some(ignore) = inv.ac_in_ignore {
+            rows.push(VmRow::new("venus_inverter_ac_in_ignore", if ignore { 1.0 } else { 0.0 }, ts));
+        }
+
+        rows
+    }
+
+    /// Métriques par MPPT Victron (SmartSolar).
+    /// Label `instance` = numéro d'instance Venus OS (ex: "273", "289").
+    pub fn mppt_rows(mppt: &VenusMppt) -> Vec<VmRow> {
+        let ts       = mppt.timestamp.timestamp_millis();
+        let instance = mppt.instance.to_string();
+        let inst     = instance.as_str();
+        let mut rows = Vec::new();
+
+        macro_rules! push_opt {
+            ($metric:expr, $opt:expr) => {
+                if let Some(v) = $opt {
+                    rows.push(VmRow::with_labels(
+                        $metric, vec![("instance", inst), ("name", mppt.name.as_str())],
+                        v as f64, ts,
+                    ));
+                }
+            };
+        }
+
+        push_opt!("venus_mppt_power_w",         mppt.power_w);
+        push_opt!("venus_mppt_pv_voltage_v",    mppt.pv_voltage_v);
+        push_opt!("venus_mppt_dc_current_a",    mppt.dc_current_a);
+        push_opt!("venus_mppt_yield_today_kwh", mppt.yield_today_kwh);
+        push_opt!("venus_mppt_max_power_today_w", mppt.max_power_today_w);
+
+        rows
+    }
+
+    /// Métriques capteur température/humidité (Venus OS temperature.mqtt_*).
+    /// Label `instance` = DeviceInstance Venus OS (ex: "20").
+    pub fn temperature_rows(temp: &VenusTemperature) -> Vec<VmRow> {
+        let ts       = temp.timestamp.timestamp_millis();
+        let instance = temp.instance.to_string();
+        let inst     = instance.as_str();
+        let mut rows = Vec::new();
+
+        if let Some(t) = temp.temp_c {
+            rows.push(VmRow::with_labels(
+                "venus_temp_c",
+                vec![("instance", inst), ("name", temp.name.as_str()), ("type", temp.temp_type.as_str())],
+                t as f64, ts,
+            ));
+        }
+        if let Some(h) = temp.humidity_percent {
+            rows.push(VmRow::with_labels(
+                "venus_humidity_percent",
+                vec![("instance", inst), ("name", temp.name.as_str())],
+                h as f64, ts,
+            ));
+        }
+
+        rows
+    }
+
+    /// Métriques chauffe-eau / PAC (heatpump MQTT).
+    /// Label `idx` = mqtt_index (ex: "8" pour ET112 PAC Chauffe-eau).
+    pub fn heatpump_rows(hp: &VenusHeatpump) -> Vec<VmRow> {
+        let ts  = hp.timestamp.timestamp_millis();
+        let idx = hp.mqtt_index.to_string();
+        let i   = idx.as_str();
+        let mut rows = Vec::new();
+
+        rows.push(VmRow::with_labels(
+            "venus_heatpump_state",
+            vec![("idx", i)],
+            hp.state as f64, ts,
+        ));
+        rows.push(VmRow::with_labels(
+            "venus_heatpump_power_w",
+            vec![("idx", i)],
+            hp.ac_power as f64, ts,
+        ));
+        rows.push(VmRow::with_labels(
+            "venus_heatpump_energy_kwh",
+            vec![("idx", i)],
+            hp.ac_energy_forward as f64, ts,
+        ));
+        if let Some(t) = hp.temperature {
+            rows.push(VmRow::with_labels(
+                "venus_heatpump_temp_c",
+                vec![("idx", i)],
+                t as f64, ts,
+            ));
+        }
+        if let Some(t) = hp.target_temperature {
+            rows.push(VmRow::with_labels(
+                "venus_heatpump_target_temp_c",
+                vec![("idx", i)],
+                t as f64, ts,
+            ));
+        }
+
+        rows
+    }
+
+    /// Métriques ATS CHINT NXZB/NXZBN.
+    /// Pas de label (un seul ATS dans l'installation).
+    pub fn ats_rows(snap: &AtsSnapshot) -> Vec<VmRow> {
+        let ts = snap.timestamp.timestamp_millis();
+
+        // active_source : 0=Onduleur(src1) 1=Réseau(src2) 2=Neutre
+        let src_val = snap.active_source.venus_position() as f64;
+
+        let mut rows = vec![
+            VmRow::new("ats_sw1_closed",    if snap.sw1_closed { 1.0 } else { 0.0 }, ts),
+            VmRow::new("ats_sw2_closed",    if snap.sw2_closed { 1.0 } else { 0.0 }, ts),
+            VmRow::new("ats_active_source", src_val,                                  ts),
+        ];
+
+        // Tensions Source 1 (Onduleur) par phase
+        for (phase, v) in [("a", snap.v1a), ("b", snap.v1b), ("c", snap.v1c)] {
+            rows.push(VmRow::with_labels(
+                "ats_voltage_v",
+                vec![("source", "1"), ("phase", phase)],
+                v as f64, ts,
+            ));
+        }
+        // Tensions Source 2 (Réseau) par phase
+        for (phase, v) in [("a", snap.v2a), ("b", snap.v2b), ("c", snap.v2c)] {
+            rows.push(VmRow::with_labels(
+                "ats_voltage_v",
+                vec![("source", "2"), ("phase", phase)],
+                v as f64, ts,
+            ));
+        }
+        // Fréquences (MN uniquement)
+        if let Some(f) = snap.freq1_hz {
+            rows.push(VmRow::with_labels("ats_freq_hz", vec![("source", "1")], f as f64, ts));
+        }
+        if let Some(f) = snap.freq2_hz {
+            rows.push(VmRow::with_labels("ats_freq_hz", vec![("source", "2")], f as f64, ts));
+        }
+
+        rows
+    }
+
+    /// Métriques prise Tasmota Tongou.
+    /// Labels `id` + `name` identifient l'appareil.
+    pub fn tasmota_rows(snap: &TasmotaSnapshot) -> Vec<VmRow> {
+        let ts   = snap.timestamp.timestamp_millis();
+        let id   = snap.id.to_string();
+        let id_s = id.as_str();
+
+        macro_rules! row {
+            ($metric:expr, $value:expr) => {
+                VmRow::with_labels(
+                    $metric,
+                    vec![("id", id_s), ("name", snap.name.as_str())],
+                    $value as f64, ts,
+                )
+            };
+        }
+
+        vec![
+            row!("tasmota_power_on",         if snap.power_on { 1.0_f32 } else { 0.0_f32 }),
+            row!("tasmota_power_w",          snap.power_w),
+            row!("tasmota_voltage_v",        snap.voltage_v),
+            row!("tasmota_current_a",        snap.current_a),
+            row!("tasmota_energy_today_kwh", snap.energy_today_kwh),
+        ]
+    }
+
+    /// Métriques Shelly Pro 2PM (2 canaux).
+    /// Label `ch` = "0" ou "1".
+    pub fn shelly_rows(snap: &ShellyEmSnapshot) -> Vec<VmRow> {
+        let ts   = snap.timestamp.timestamp_millis();
+        let id   = snap.id.to_string();
+        let id_s = id.as_str();
+
+        let mut rows = Vec::new();
+
+        for (ch_str, ch) in [("0", &snap.channel_0), ("1", &snap.channel_1)] {
+            macro_rules! row {
+                ($metric:expr, $value:expr) => {
+                    VmRow::with_labels(
+                        $metric,
+                        vec![("id", id_s), ("name", snap.name.as_str()), ("ch", ch_str)],
+                        $value as f64, ts,
+                    )
+                };
+            }
+            rows.push(row!("shelly_output",     if ch.output { 1.0_f32 } else { 0.0_f32 }));
+            rows.push(row!("shelly_power_w",    ch.power_w));
+            rows.push(row!("shelly_voltage_v",  ch.voltage_v));
+            rows.push(row!("shelly_current_a",  ch.current_a));
+            rows.push(row!("shelly_energy_wh",  ch.energy_wh as f32));
+        }
 
         rows
     }

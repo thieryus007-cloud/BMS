@@ -442,12 +442,18 @@ pub struct AppState {
     /// Timestamps de la dernière écriture VM par catégorie (epoch secondes).
     /// Throttle le débit d'écriture pour éviter de surcharger VM.
     /// Chaque source a son propre timer — ne jamais partager entre sources différentes.
-    vm_last_bms_write:     Arc<AtomicU64>,
-    vm_last_shunt_write:   Arc<AtomicU64>,  // SmartShunt — séparé de l'inverter
-    vm_last_inverter_write: Arc<AtomicU64>, // Inverter — séparé du SmartShunt
-    vm_last_solar_write:   Arc<AtomicU64>,  // Solar — POST /api/v1/solar/mppt-yield appelé 1x/s
-    vm_last_et112_write:   Arc<AtomicU64>,
-    vm_last_irrad_write:   Arc<AtomicU64>,
+    vm_last_bms_write:      Arc<AtomicU64>,
+    vm_last_shunt_write:    Arc<AtomicU64>,
+    vm_last_inverter_write: Arc<AtomicU64>,
+    vm_last_solar_write:    Arc<AtomicU64>,
+    vm_last_et112_write:    Arc<AtomicU64>,
+    vm_last_irrad_write:    Arc<AtomicU64>,
+    vm_last_mppt_write:     Arc<AtomicU64>,
+    vm_last_temp_write:     Arc<AtomicU64>,
+    vm_last_heat_write:     Arc<AtomicU64>,
+    vm_last_ats_write:      Arc<AtomicU64>,
+    vm_last_tasmota_write:  Arc<AtomicU64>,
+    vm_last_shelly_write:   Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -512,6 +518,12 @@ impl AppState {
             vm_last_solar_write:    Arc::new(AtomicU64::new(0)),
             vm_last_et112_write:    Arc::new(AtomicU64::new(0)),
             vm_last_irrad_write:    Arc::new(AtomicU64::new(0)),
+            vm_last_mppt_write:     Arc::new(AtomicU64::new(0)),
+            vm_last_temp_write:     Arc::new(AtomicU64::new(0)),
+            vm_last_heat_write:     Arc::new(AtomicU64::new(0)),
+            vm_last_ats_write:      Arc::new(AtomicU64::new(0)),
+            vm_last_tasmota_write:  Arc::new(AtomicU64::new(0)),
+            vm_last_shelly_write:   Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -712,6 +724,15 @@ impl AppState {
 
     /// Enregistre un snapshot Tasmota dans le ring buffer correspondant.
     pub async fn on_tasmota_snapshot(&self, snap: TasmotaSnapshot) {
+        // Écriture VM — throttlée à 1/10s (partagée entre tous les Tasmota)
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_tasmota_write, 10) {
+                let rows = VmClient::tasmota_rows(&snap);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM Tasmota write error: {}", e);
+                }
+            }
+        }
         self.console_bus.emit(ConsoleEvent::state(EventDevice::Tasmota, &format!("Tasmota {} — {}", snap.name, if snap.power_on { "ON" } else { "OFF" }), json!({
             "id": snap.id,
             "name": snap.name,
@@ -756,6 +777,15 @@ impl AppState {
 
     /// Enregistre/met à jour un snapshot MPPT unique (format v1 legacy).
     pub async fn on_venus_mppt(&self, mppt: VenusMppt) {
+        // Écriture VM — throttlée à 1/10s par instance
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_mppt_write, 10) {
+                let rows = VmClient::mppt_rows(&mppt);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM MPPT write error: {}", e);
+                }
+            }
+        }
         let mut mppts = self.venus_mppts.write().await;
         mppts.insert(mppt.instance, mppt);
     }
@@ -765,6 +795,15 @@ impl AppState {
     /// Utilisé quand Venus OS publie un snapshot complet de tous les chargeurs.
     /// Les entrées orphelines (MPPT déconnecté) sont ainsi purgées automatiquement.
     pub async fn on_venus_mppts_replace(&self, mppts: Vec<VenusMppt>) {
+        // Écriture VM — throttlée à 1/10s (toutes instances en un batch)
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_mppt_write, 10) {
+                let rows: Vec<_> = mppts.iter().flat_map(VmClient::mppt_rows).collect();
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM MPPT replace write error: {}", e);
+                }
+            }
+        }
         let mut map = self.venus_mppts.write().await;
         map.clear();
         for mppt in mppts {
@@ -888,6 +927,15 @@ impl AppState {
 
     /// Enregistre/met à jour un capteur de température.
     pub async fn on_venus_temperature(&self, temp: VenusTemperature) {
+        // Écriture VM — throttlée à 1/60s (temp/humidité varient lentement)
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_temp_write, 60) {
+                let rows = VmClient::temperature_rows(&temp);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM temperature write error: {}", e);
+                }
+            }
+        }
         let mut temps = self.venus_temperatures.write().await;
         temps.insert(temp.instance, temp);
     }
@@ -923,6 +971,15 @@ impl AppState {
 
     /// Enregistre/met à jour un snapshot heatpump.
     pub async fn on_venus_heatpump(&self, hp: VenusHeatpump) {
+        // Écriture VM — throttlée à 1/10s
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_heat_write, 10) {
+                let rows = VmClient::heatpump_rows(&hp);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM heatpump write error: {}", e);
+                }
+            }
+        }
         let mut hps = self.venus_heatpumps.write().await;
         hps.insert(hp.mqtt_index, hp);
     }
@@ -960,6 +1017,15 @@ impl AppState {
 
     /// Enregistre le dernier snapshot ATS.
     pub async fn on_ats_snapshot(&self, snap: AtsSnapshot) {
+        // Écriture VM — throttlée à 1/5s
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_ats_write, 5) {
+                let rows = VmClient::ats_rows(&snap);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM ATS write error: {}", e);
+                }
+            }
+        }
         self.console_bus.emit(ConsoleEvent::rs485(EventDevice::Ats, &format!("ATS CHINT — {}", snap.active_source.label()), json!({
             "source": snap.active_source.label(),
             "v1a": snap.v1a, "v1b": snap.v1b, "v1c": snap.v1c,
@@ -988,6 +1054,15 @@ impl AppState {
 
     /// Enregistre le dernier snapshot Shelly et émet un événement console.
     pub async fn on_shelly_snapshot(&self, snap: ShellyEmSnapshot) {
+        // Écriture VM — throttlée à 1/10s
+        if let Some(vm) = self.vm.clone() {
+            if Self::vm_rate_ok(&self.vm_last_shelly_write, 10) {
+                let rows = VmClient::shelly_rows(&snap);
+                if let Err(e) = vm.write_rows(rows).await {
+                    tracing::warn!("VM Shelly write error: {}", e);
+                }
+            }
+        }
         self.console_bus.emit(ConsoleEvent::state(
             EventDevice::Shelly,
             &format!("Shelly {} — {:.0}W total", snap.name, snap.total_power_w),
