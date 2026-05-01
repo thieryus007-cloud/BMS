@@ -502,7 +502,36 @@ pub fn spawn_rule_hot_reload(
     Ok(())
 }
 ```
+# Hot-reload:
+// Ajouter un watcher sur le fichier .grl pour recharger sans restart
+use notify::{Watcher, RecursiveMode};
 
+pub fn spawn_rule_hot_reload(
+    engine: Arc<RwLock<WaterHeaterEngine>>,
+    path: &str,
+) -> anyhow::Result<()> {
+    let path = path.to_string();
+    std::thread::spawn(move || {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher = notify::recommended_watcher(tx)?;
+        watcher.watch(path.as_ref(), RecursiveMode::NonRecursive)?;
+        
+        for event in rx {
+            if let notify::EventKind::Modify(_) = event? {
+                tracing::info!("Rule file changed, reloading...");
+                match WaterHeaterEngine::new(cfg.clone()) {
+                    Ok(new_engine) => {
+                        *engine.blocking_write() = new_engine;
+                        tracing::info!("Rules reloaded successfully");
+                    }
+                    Err(e) => tracing::error!("Reload failed: {}", e),
+                }
+            }
+        }
+        Ok::<_, anyhow::Error>(())
+    });
+    Ok(())
+}
 ---
 
 > 💡 **Recommandation finale** : Commencez par migrer **seulement la règle SOC < 95%** vers GRL, gardez le reste en Rust le temps de valider l'approche. Cela réduit le risque et vous permet d'itérer rapidement.
