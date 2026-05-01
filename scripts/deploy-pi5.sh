@@ -29,15 +29,15 @@ step "Déploiement Config.toml → /etc/daly-bms/config.toml…"
 sudo cp Config.toml /etc/daly-bms/config.toml
 info "Config.toml déployée"
 
-# ── 4. Répertoire Tsink ──────────────────────────────────────────────────────
-TSINK_DIR="/var/lib/daly-bms/tsink"
+# ── 4. Répertoire VictoriaMetrics ────────────────────────────────────────────
+VM_DIR="/var/lib/victoria-metrics"
 # Récupère l'utilisateur qui exécute le service (ExecStart user, pas root)
-SERVICE_USER=$(systemctl show daly-bms --property=User --value 2>/dev/null)
-SERVICE_USER="${SERVICE_USER:-dalybms}"
-step "Vérification répertoire Tsink (${TSINK_DIR}) → owner=${SERVICE_USER}…"
-sudo mkdir -p "${TSINK_DIR}"
-sudo chown "${SERVICE_USER}:${SERVICE_USER}" "${TSINK_DIR}"
-info "Répertoire Tsink OK (owner=${SERVICE_USER})"
+SERVICE_USER=$(systemctl show victoriametrics --property=User --value 2>/dev/null)
+SERVICE_USER="${SERVICE_USER:-victoriametrics}"
+step "Vérification répertoire VictoriaMetrics (${VM_DIR}) → owner=${SERVICE_USER}…"
+sudo mkdir -p "${VM_DIR}"
+sudo chown "${SERVICE_USER}:${SERVICE_USER}" "${VM_DIR}"
+info "Répertoire VictoriaMetrics OK (owner=${SERVICE_USER})"
 
 # ── 5. Déploiement daly-bms-server ───────────────────────────────────────────
 step "Déploiement daly-bms-server…"
@@ -51,15 +51,15 @@ if ! systemctl is-active --quiet daly-bms; then
 fi
 info "daly-bms actif"
 
-# Vérification Tsink
+# Vérification VictoriaMetrics
 sleep 2
-TSINK_LOG=$(journalctl -u daly-bms --since "30 seconds ago" 2>/dev/null | grep -i tsink | head -3)
-if echo "${TSINK_LOG}" | grep -q "activé"; then
-    info "Tsink initialisé : ${TSINK_DIR}"
-elif echo "${TSINK_LOG}" | grep -q "échoué\|error\|Error"; then
-    warn "Tsink init a échoué — voir : journalctl -u daly-bms -n 30 | grep -i tsink"
+VM_LOG=$(journalctl -u daly-bms --since "30 seconds ago" 2>/dev/null | grep -i victoriametrics | head -3)
+if echo "${VM_LOG}" | grep -q "activé"; then
+    info "VictoriaMetrics initialisé : ${VM_DIR}"
+elif echo "${VM_LOG}" | grep -q "échoué\|error\|Error"; then
+    warn "VictoriaMetrics init a échoué — voir : journalctl -u daly-bms -n 30 | grep -i victoriametrics"
 else
-    warn "Tsink : aucun message de démarrage détecté (vérifier la config)"
+    warn "VictoriaMetrics : aucun message de démarrage détecté (vérifier la config)"
 fi
 
 # ── 6. Déploiement energy-manager ────────────────────────────────────────────
@@ -83,7 +83,7 @@ echo -e "${GREEN}═════════════════════
 echo ""
 systemctl status daly-bms energy-manager --no-pager -l | grep -E "Active:|Loaded:" || true
 echo ""
-step "Vérification Tsink via API…"
+step "Vérification VictoriaMetrics via API…"
 sleep 1
-curl -sf 'http://localhost:8080/health' 2>/dev/null | python3 -m json.tool 2>/dev/null || \
-    warn "Endpoint /health non accessible"
+curl -sf 'http://localhost:8428/-/healthy' 2>/dev/null || \
+    warn "Endpoint VictoriaMetrics non accessible"
