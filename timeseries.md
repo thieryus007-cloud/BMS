@@ -65,11 +65,12 @@ Total : 6 séries temporelles
 ## 1 x Easysolar II GX Victron
 - Métriques :
 - Puissance totale (3)
+- Frequency
 - Tension (3)
 - Courant (3)
 - Température (1)
 - Ingnore AC IN.  
-Total : 8 séries temporelles
+Total : 9 séries temporelles
 
 ## 1 x Capteur Température + Humidité
 - Métriques :
@@ -104,7 +105,7 @@ Total : 6 séries temporelles
 | 1 x ATS | 10 |
 | 2 x MPPT Victron | 10 |
 | 1 x SmartShunt Victron | 6 |
-| 1 x Easysolar II GX Victron | 8 |
+| 1 x Easysolar II GX Victron | 9 |
 | 1 x Capteur Température/Humidité | 2 |
 | 6 x Switchs Tasmota Tonguou | 30 |
 | 1 x Switch Shelly Pro 2 PM | 6|
