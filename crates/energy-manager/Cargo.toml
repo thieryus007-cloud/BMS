@@ -30,5 +30,8 @@ futures           = { workspace = true }
 uuid              = { workspace = true }
 bytes             = { workspace = true }
 
+# ── Rule engine ────────────────────────────────────────────────────────────────
+rust-rule-engine = { workspace = true }
+
 # ── Crate-specific ─────────────────────────────────────────────────────────────
 dotenvy = "0.15"
