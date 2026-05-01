@@ -101,5 +101,6 @@ Total : 6 séries temporelles
 | 1 x Switch Shelly Pro 2 PM | 6|
 | Total | ~222 |
 
-Conclusion:
-Nombre mini/maximal de séries temporelles : ~230/240 (en incluant des métriques supplémentaires ou des tags supplémentaires dans VictoriaMetrics).
+Conclusion:.  
+Nombre mini/maximal de séries temporelles : .  
+# ~230/240 (en incluant des métriques supplémentaires ou des tags supplémentaires dans VictoriaMetrics).
