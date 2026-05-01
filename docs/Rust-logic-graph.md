@@ -284,9 +284,3 @@ Notes supplémentaires
 
 ---
 
-Prochaine étape : créez la branche feature/rlg-migration et ouvrez une PR dès que charge_current fonctionne avec le moteur. Je reste disponible pour relire votre code ou ajuster les YAML.
-
-```
-
-Ce plan est prêt à être copié dans votre dépôt. Il vous donne une feuille de route concrète, des exemples de code et un calendrier indicatif. Adaptez les chemins et les règles métier selon votre code réel.
-```
