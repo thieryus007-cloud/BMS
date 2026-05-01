@@ -26,6 +26,14 @@ Total pour 3 ET112 : \( 6 imes 3 = 18 \) séries temporelles
 - Irradiance (1).  
 Total : 1 série temporelle
 
+## 2 x Chauffe-eau & Climatisation)
+- Métriques :
+- State
+- Current temperature
+- Target temperature
+- Today kWh .  
+Total : 4 x 2 = 8 série temporelle
+
 ## 1 x ATS (Automatic Transfer Switch)
 - Métriques :
 - État (ON/OFF) (3)
@@ -92,6 +100,7 @@ Total : 6 séries temporelles
 | 3 x Daly BMS 16 cellules | 105 |
 | 3 x ET112 Energy Management | 12 |
 | 1 x Capteur Irradiance | 1 |
+| 2 x Chauffe-eau & Cmlimatisation | 8 |
 | 1 x ATS | 10 |
 | 2 x MPPT Victron | 10 |
 | 1 x SmartShunt Victron | 6 |
@@ -99,7 +108,7 @@ Total : 6 séries temporelles
 | 1 x Capteur Température/Humidité | 2 |
 | 6 x Switchs Tasmota Tonguou | 30 |
 | 1 x Switch Shelly Pro 2 PM | 6|
-| Total | ~222 |
+| Total | ~230 |
 
 Conclusion:.  
 Nombre mini/maximal de séries temporelles : .  
