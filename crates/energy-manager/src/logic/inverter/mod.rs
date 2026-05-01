@@ -1,7 +1,10 @@
 /// Aggregates VEBus topics into santuario/inverter/venus (retained).
+/// AC power availability is determined by the rule engine (rules/inverter.grl).
+mod rules;
+
 use serde_json::json;
-use tokio::sync::RwLock;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::bus::AppBus;
 use crate::config::VictronConfig;
@@ -27,15 +30,23 @@ async fn run(
     let pfx_vebus  = format!("N/{pid}/vebus/{vb}/");
     let pfx_system = format!("N/{pid}/system/0/");
 
+    let mut rule_engine = match rules::InverterRuleEngine::new() {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!("Failed to init inverter rule engine: {e}");
+            return;
+        }
+    };
+
     let mut rx = bus.subscribe_mqtt();
     loop {
         let msg = match rx.recv().await {
-            Ok(m) => m,
+            Ok(m)  => m,
             Err(_) => continue,
         };
 
         if handle(&msg, &pfx_vebus, &pfx_system, &state).await {
-            publish_state(&bus, &state).await;
+            publish_state(&mut rule_engine, &bus, &state).await;
         }
     }
 }
@@ -92,7 +103,11 @@ async fn handle(
     false
 }
 
-async fn publish_state(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
+async fn publish_state(
+    rule_engine: &mut rules::InverterRuleEngine,
+    bus: &AppBus,
+    state: &Arc<RwLock<EnergyState>>,
+) {
     let s = state.read().await;
 
     let dc_voltage  = s.dc_voltage_v;
@@ -103,9 +118,16 @@ async fn publish_state(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     let ac_freq     = s.ac_frequency_hz;
     let ac_ignore   = s.ac_ignore;
     let vebus_state = s.vebus_state;
-    let ac_power = match (ac_voltage, ac_current) {
-        (Some(v), Some(i)) => Some(v * i),
-        _ => None,
+    drop(s);
+
+    // Rule engine decides whether ac_power can be computed
+    let ac_power = match rule_engine.ac_power_ready(ac_voltage.is_some(), ac_current.is_some()) {
+        Ok(true)  => ac_voltage.zip(ac_current).map(|(v, i)| v * i),
+        Ok(false) => None,
+        Err(e) => {
+            tracing::error!("Inverter rule engine error: {e}");
+            None
+        }
     };
 
     let payload = json!({
@@ -122,9 +144,6 @@ async fn publish_state(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
         "VebusState":  vebus_state,
     });
 
-    drop(s);
-
     bus.publish(MqttOutgoing::retained(publish::INVERTER_VENUS, &payload)).await;
     bus.emit_live(LiveEvent::new("inverter", &payload));
-
 }
