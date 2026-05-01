@@ -71,9 +71,11 @@ Total : 2 séries temporelles
 - Métriques par switch :
 - État (ON/OFF) (1)
 - Puissance (1)
-- Énergie totale (1)
-Total par switch : ~3 métriques
-Total pour 6 switchs : \( 3 imes 6 = 18 \) séries temporelles
+- Tension
+- Courant
+- Jours Énergie totale kWh(1)
+Total par switch : ~5 métriques
+Total pour 6 switchs : \( 5 imes 6 = 30 \) séries temporelles
 
 ## 1 x Switch Shelly Pro 2 PM
 - Métriques :
@@ -82,7 +84,7 @@ Total pour 6 switchs : \( 3 imes 6 = 18 \) séries temporelles
 - Énergie totale (2)
 Total : 6 séries temporelles
 
-Total des Séries Temporelles
+## Total des Séries Temporelles
 | Appareil | Séries Temporelles |
 |------------------------------|--------------------|
 | 3 x Daly BMS 16 cellules | 105 |
@@ -93,9 +95,9 @@ Total des Séries Temporelles
 | 1 x SmartShunt Victron | 6 |
 | 1 x Easysolar II GX Victron | 8 |
 | 1 x Capteur Température/Humidité | 2 |
-| 6 x Switchs Tasmota Tonguou | 18 |
+| 6 x Switchs Tasmota Tonguou | 30 |
 | 1 x Switch Shelly Pro 2 PM | 6|
-| Total | ~210 |
-Conclusion
-Nombre minimal de séries temporelles : ~210
-Nombre maximal de séries temporelles : ~240 (en incluant des métriques supplémentaires ou des tags supplémentaires dans VictoriaMetrics)
+| Total | ~222 |
+
+Conclusion:
+Nombre mini/maximal de séries temporelles : ~230/240 (en incluant des métriques supplémentaires ou des tags supplémentaires dans VictoriaMetrics).
