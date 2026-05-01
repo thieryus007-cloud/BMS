@@ -2,8 +2,10 @@
 3 x Daly BMS 16 cellules
 - Métriques par BMS :
 - Tension par cellule (16)
-- Température par cellule (16)
+- Delta cellule mV
+- Température par BMS (2)
 - Courant de charge/décharge (1)
+- Tension totale
 - État de santé (SOC, SOH, etc.) (2)
 Total par BMS : ~40 métriques
 Total pour 3 BMS : \( 40 imes 3 = 120 \) séries temporelles
