@@ -216,11 +216,11 @@ poll_interval_ms = 5000
 #   0x09 = PAC Climatisation → D-Bus pvinverter ou acload
 
 [et112]
-# Intervalle de polling en millisecondes (5000 = toutes les 5 secondes)
-poll_interval_ms = 5000
+# Intervalle de polling en millisecondes (2000 = toutes les 2 secondes)
+poll_interval_ms = 2000
 
-# Taille du ring buffer (720 = 1 heure à 1 mesure/5s)
-ring_buffer_size = 720
+# Taille du ring buffer (1800 = 1 heure à 1 mesure/2s)
+ring_buffer_size = 1800
 
 [[et112.devices]]               # SN: 119253X — branché ✅
 address          = "0x07"
@@ -301,8 +301,8 @@ address = 6
 # Nom affiché dans le dashboard web et les logs
 name = "ATS CHINT NXZB"
 
-# Intervalle de polling en millisecondes (5000 = toutes les 5 secondes)
-poll_interval_ms = 5000
+# Intervalle de polling en millisecondes (2000 = toutes les 2 secondes)
+poll_interval_ms = 2000
 
 # Index MQTT → topic santuario/switch/{mqtt_index}/venus
 # Doit correspondre à [[switches]].mqtt_index dans nanoPi/config-nanopi.toml

@@ -441,10 +441,12 @@ pub struct AppState {
 
     /// Timestamps de la dernière écriture VM par catégorie (epoch secondes).
     /// Throttle le débit d'écriture pour éviter de surcharger VM.
-    vm_last_bms_write:   Arc<AtomicU64>,
-    vm_last_venus_write: Arc<AtomicU64>,
-    vm_last_et112_write: Arc<AtomicU64>,
-    vm_last_irrad_write: Arc<AtomicU64>,
+    /// Chaque source a son propre timer — ne jamais partager entre sources différentes.
+    vm_last_bms_write:     Arc<AtomicU64>,
+    vm_last_shunt_write:   Arc<AtomicU64>,  // SmartShunt — séparé de l'inverter
+    vm_last_inverter_write: Arc<AtomicU64>, // Inverter — séparé du SmartShunt
+    vm_last_et112_write:   Arc<AtomicU64>,
+    vm_last_irrad_write:   Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -503,10 +505,11 @@ impl AppState {
             shelly_latest: Arc::new(RwLock::new(BTreeMap::new())),
             shelly_client: Arc::new(tokio::sync::Mutex::new(None)),
             vm: vm.map(Arc::new),
-            vm_last_bms_write:   Arc::new(AtomicU64::new(0)),
-            vm_last_venus_write: Arc::new(AtomicU64::new(0)),
-            vm_last_et112_write: Arc::new(AtomicU64::new(0)),
-            vm_last_irrad_write: Arc::new(AtomicU64::new(0)),
+            vm_last_bms_write:      Arc::new(AtomicU64::new(0)),
+            vm_last_shunt_write:    Arc::new(AtomicU64::new(0)),
+            vm_last_inverter_write: Arc::new(AtomicU64::new(0)),
+            vm_last_et112_write:    Arc::new(AtomicU64::new(0)),
+            vm_last_irrad_write:    Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -584,9 +587,9 @@ impl AppState {
         let latest = self.latest_snapshots().await;
         let _ = self.ws_tx.send(Arc::new(latest));
 
-        // Écriture VM — throttlée à 1 écriture / 10s
+        // Écriture VM — throttlée à 1 écriture / 5s
         if let Some(vm) = self.vm.clone() {
-            if Self::vm_rate_ok(&self.vm_last_bms_write, 10) {
+            if Self::vm_rate_ok(&self.vm_last_bms_write, 5) {
                 let rows = VmClient::bms_rows(&snap);
                 if let Err(e) = vm.write_rows(rows).await {
                     tracing::warn!("VM BMS write error: {}", e);
@@ -643,9 +646,9 @@ impl AppState {
                 .push(snap.clone());
         }
 
-        // Écriture VM — throttlée à 1 écriture / 30s
+        // Écriture VM — throttlée à 1 écriture / 5s
         if let Some(vm) = self.vm.clone() {
-            if Self::vm_rate_ok(&self.vm_last_et112_write, 30) {
+            if Self::vm_rate_ok(&self.vm_last_et112_write, 5) {
                 let rows = VmClient::et112_rows(&snap);
                 if let Err(e) = vm.write_rows(rows).await {
                     tracing::warn!("VM ET112 write error: {}", e);
@@ -682,9 +685,9 @@ impl AppState {
             "address": snap.address,
             "irradiance_wm2": snap.irradiance_wm2,
         })));
-        // Écriture VM — throttlée à 1 écriture / 60s
+        // Écriture VM — throttlée à 1 écriture / 30s
         if let Some(vm) = self.vm.clone() {
-            if Self::vm_rate_ok(&self.vm_last_irrad_write, 60) {
+            if Self::vm_rate_ok(&self.vm_last_irrad_write, 30) {
                 let rows = VmClient::irradiance_rows(&snap);
                 if let Err(e) = vm.write_rows(rows).await {
                     tracing::warn!("VM irradiance write error: {}", e);
@@ -808,7 +811,7 @@ impl AppState {
             })));
             // Écriture VM
             if let Some(vm) = self.vm.clone() {
-                if Self::vm_rate_ok(&self.vm_last_venus_write, 30) {
+                if Self::vm_rate_ok(&self.vm_last_shunt_write, 5) {
                     let rows = VmClient::smartshunt_rows(&shunt);
                     if let Err(e) = vm.write_rows(rows).await {
                         tracing::warn!("VM SmartShunt write error: {}", e);
@@ -860,7 +863,7 @@ impl AppState {
 
         // Écriture VM
         if let Some(vm) = self.vm.clone() {
-            if Self::vm_rate_ok(&self.vm_last_venus_write, 10) {
+            if Self::vm_rate_ok(&self.vm_last_shunt_write, 5) {
                 let rows = VmClient::smartshunt_rows(&shunt);
                 if let Err(e) = vm.write_rows(rows).await {
                     tracing::warn!("VM SmartShunt write error: {}", e);
@@ -891,7 +894,7 @@ impl AppState {
     pub async fn on_venus_inverter(&self, inverter: VenusInverter) {
         // Écriture VM
         if let Some(vm) = self.vm.clone() {
-            if Self::vm_rate_ok(&self.vm_last_venus_write, 10) {
+            if Self::vm_rate_ok(&self.vm_last_inverter_write, 5) {
                 let rows = VmClient::inverter_rows(&inverter);
                 if let Err(e) = vm.write_rows(rows).await {
                     tracing::warn!("VM inverter write error: {}", e);
