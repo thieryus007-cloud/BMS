@@ -8,6 +8,13 @@
 **2. Via l'API — liste de toutes les métriques reçues :**
 ```
 http://192.168.1.141:8428/api/v1/label/__name__/values
+
+http://192.168.1.141:8428/api/v1/export?match[]={__name__=~'.*'}
+
+http://192.168.1.141:8428/prometheus/api/v1/labels
+
+http://192.168.1.141:8428/prometheus/api/v1/series?match[]={__name__=~'.*'}&start=...&end=...&limit=100
+
 ```
 
 ---
