@@ -61,8 +61,232 @@ nodes:
         set: "max_charge_current_a = 30"
 ```
 
-Cette approche ne change pas fondamentalement la performance de votre système, mais pose les bases d'une architecture plus modulaire, testable et maintenable au fil du temps.
 
-En conclusion, si vous anticipez des évolutions critiques de vos règles métier, RLG est un excellent investissement stratégique. Si votre objectif est exclusivement la performance brute sur votre système actuel, la migration n'est pas prioritaire.
+# Plan de migration détaillé pour trois modules clés de votre energy-manager. 
 
-Pour aller plus loin, je vous suggère de consulter la documentation officielle de RLG, notamment la section Use Cases et Extending, qui pourraient vous inspirer pour des intégrations spécifiques (bases de données ou agents IA).
+```markdown
+# Plan de migration vers rust-logic-graph (RLG)
+
+## Objectif
+Remplacer progressivement la logique métier codée en dur dans les modules `charge_current`, `water_heater` et `solar_power` par des graphes de règles définis en YAML, exécutés via `rust-logic-graph`.  
+La migration est **incrémentale** : chaque module reste fonctionnel pendant la transition.
+
+---
+
+## Architecture cible (par module)
+
+```
+
+energy-manager/
+├── src/
+│   ├── energy_state.rs          ← inchangé (état partagé)
+│   ├── mqtt_client.rs           ← inchangé
+│   ├── app_bus.rs               ← inchangé
+│   ├── decision_engine/         ← NOUVEAU
+│   │   ├── mod.rs
+│   │   ├── executor.rs          ← wrapper autour de RLG
+│   │   └── rules/               ← fichiers YAML par module
+│   │       ├── charge_current.yaml
+│   │       ├── water_heater.yaml
+│   │       └── solar_power.yaml
+│   ├── charge_current.rs        ← refactoré (appel au moteur)
+│   ├── water_heater.rs          ← refactoré
+│   └── solar_power.rs           ← refactoré
+
+```
+
+---
+
+## Migration étape par étape
+
+### Phase 0 – Prérequis (1 soirée)
+1. Ajouter `rust-logic-graph` et `serde_yaml` dans `Cargo.toml` :
+   ```toml
+   [dependencies]
+   rust-logic-graph = "0.4"   # ou dernière version
+   serde_yaml = "0.9"
+   tokio = { version = "1", features = ["full"] }
+```
+
+1. Créer le module decision_engine avec un exécuteur basique :
+   ```rust
+   // decision_engine/mod.rs
+   use rust_logic_graph::{Graph, Executor, Context, Value};
+   use std::collections::HashMap;
+   use anyhow::Result;
+   
+   pub struct RuleEngine {
+       executor: Executor,
+   }
+   
+   impl RuleEngine {
+       pub fn from_yaml(path: &str) -> Result<Self> {
+           let graph = Graph::from_yaml_file(path)?;
+           Ok(Self { executor: Executor::new(graph) })
+       }
+       
+       pub async fn evaluate(&mut self, inputs: HashMap<String, Value>) -> Result<HashMap<String, Value>> {
+           let ctx = Context::from(inputs);
+           let output = self.executor.execute(ctx).await?;
+           Ok(output.into())
+       }
+   }
+   ```
+
+---
+
+Phase 1 – Migration de charge_current (2 jours)
+
+1. Écrire les règles YAML
+
+Fichier decision_engine/rules/charge_current.yaml :
+
+```yaml
+name: "Charge current decision"
+nodes:
+  - id: "excess_pv"
+    type: "rule"
+    fields:
+      - name: "excess_w"
+        expr: "pv_power_w - house_consumption_w"
+      - name: "battery_soc_percent"
+        expr: "battery_soc"
+  - id: "current_limits"
+    type: "conditional"
+    depends_on: ["excess_pv"]
+    conditions:
+      - when: "is_offgrid == true"
+        set:
+          max_charge_current_a: 50
+          max_discharge_current_a: 50
+      - when: "excess_w > 500 && battery_soc_percent < 85"
+        set: "max_charge_current_a = 30"
+      - when: "excess_w <= 500 && battery_soc_percent < 90"
+        set: "max_charge_current_a = 10"
+      - default:
+          max_charge_current_a: 0
+```
+
+2. Modifier charge_current.rs
+
+Avant (logique codée en dur) → Après (délégation au moteur) :
+
+```rust
+// NOUVEAU : appel au moteur de règles
+use crate::decision_engine::RuleEngine;
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+
+static CHARGE_ENGINE: Lazy<Mutex<RuleEngine>> = Lazy::new(|| {
+    Mutex::new(RuleEngine::from_yaml("rules/charge_current.yaml").unwrap())
+});
+
+pub async fn handle_charge_current(state: Arc<RwLock<EnergyState>>) -> Result<()> {
+    let state_guard = state.read().await;
+    let inputs = HashMap::from([
+        ("pv_power_w".into(), state_guard.pv_power.into()),
+        ("house_consumption_w".into(), state_guard.house_consumption.into()),
+        ("battery_soc".into(), state_guard.battery_soc.into()),
+        ("is_offgrid".into(), state_guard.is_offgrid.into()),
+    ]);
+    drop(state_guard);
+
+    let mut engine = CHARGE_ENGINE.lock().unwrap();
+    let outputs = engine.evaluate(inputs).await?;
+    
+    let new_current = outputs.get("max_charge_current_a")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    
+    // Publier sur MQTT/AppBus (inchangé)
+    publish_charge_current(new_current as u16).await?;
+    Ok(())
+}
+```
+
+3. Tester
+
+· Conserver l’ancienne logique commentée pour comparaison.
+· Jouer des scénarios (offgrid, excédent PV faible/fort) et vérifier la décision.
+
+---
+
+Phase 2 – Migration de water_heater (1.5 jour)
+
+Règles typiques : chauffe-eau activé si excédent solaire > seuil ET température eau < max.
+
+Fichier rules/water_heater.yaml :
+
+```yaml
+nodes:
+  - id: "excess_pv"
+    expr: "pv_power_w - house_consumption_w"
+  - id: "should_heat"
+    type: "conditional"
+    conditions:
+      - when: "excess_pv > 1000 && water_temp_c < 65"
+        set: "heater_state = 'ON'"
+      - when: "water_temp_c >= 65"
+        set: "heater_state = 'OFF'"
+      - default: "heater_state = 'OFF'"
+```
+
+Dans water_heater.rs : même pattern que pour charge_current.
+Point d’attention : certaines règles peuvent dépendre d’une valeur horodatée (ex: heater_duration). Ajoutez un champ duration_minutes dans le contexte si nécessaire.
+
+---
+
+Phase 3 – Migration de solar_power (1 jour)
+
+Ce module contient probablement de la logique de limitation d’injection ou de priorisation. Exemple de règle :
+
+```yaml
+nodes:
+  - id: "grid_export"
+    expr: "pv_power_w - house_consumption_w - charge_power_w"
+  - id: "curtailment"
+    type: "conditional"
+    conditions:
+      - when: "grid_export > 3000 && grid_limit_w == 2500"
+        set: "pv_curtailment_w = grid_export - 2500"
+      - default: "pv_curtailment_w = 0"
+```
+
+Intégration : le module solar_power calcule une consigne de limitation et la publie (MQTT solar/setpoint).
+
+---
+
+Tests recommandés :
+
+· Pour chaque module, comparer l’ancienne et la nouvelle décision sur des traces réelles (via tracing).
+· Injecter des valeurs extrêmes (PV=0, batterie pleine, eau bouillante…).
+
+---
+
+Rollback
+
+Garder l’ancienne implémentation dans un module charge_current_v1 avec un feature flag :
+
+```rust
+#[cfg(feature = "legacy_charge")]
+pub async fn handle_charge_current(...) { ... }
+```
+
+En cas de problème, recompilez avec --features legacy_charge.
+
+---
+
+Notes supplémentaires
+
+· rust-logic-graph étant synchrone (bloquant) au sein de l’exécution du graphe, mais son exécution est async. Dans vos handlers, appelez .await sans crainte.
+· Si vous utilisez tokio-cron-scheduler à côté, vous pouvez lancer l’évaluation périodique du graphe (ex: toutes les 5 secondes) et stocker les décisions dans un cache partagé.
+· Pour la persistance des historiques de décision, envisagez d’ajouter un export vers victoriametrics.
+
+---
+
+Prochaine étape : créez la branche feature/rlg-migration et ouvrez une PR dès que charge_current fonctionne avec le moteur. Je reste disponible pour relire votre code ou ajuster les YAML.
+
+```
+
+Ce plan est prêt à être copié dans votre dépôt. Il vous donne une feuille de route concrète, des exemples de code et un calendrier indicatif. Adaptez les chemins et les règles métier selon votre code réel.
+```
