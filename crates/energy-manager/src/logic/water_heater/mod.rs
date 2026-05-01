@@ -1,6 +1,9 @@
 /// Automatic management of the LG ThinQ water heater.
 /// Switches between HEAT_PUMP and VACATION based on solar, SOC, grid and battery conditions.
-/// Implements 5-minute debounce and 15-minute minimum interval between mode changes.
+/// Decision logic is handled by rust-rule-engine (rules/water_heater.grl).
+/// Debounce timers and rate limiting remain in Rust (time-based, not rule-based).
+mod rules;
+
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use std::sync::Arc;
@@ -24,10 +27,8 @@ pub async fn spawn(
     let state2 = state.clone();
     let cfg2   = cfg.clone();
 
-    // Keepalive: republish last known state every 25s for Venus OS watchdog
     tokio::spawn(keepalive_task(cfg.keepalive_secs, bus2, state2));
 
-    // Control logic
     if let Some(lg_client) = lg {
         tokio::spawn(control_task(cfg2, lg_client, bus, state));
     } else {
@@ -65,7 +66,7 @@ async fn publish_to_venus(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
 }
 
 // ---------------------------------------------------------------------------
-// Control logic — evaluates conditions every 30 seconds
+// Control logic — evaluates conditions every 30 seconds via rule engine
 // ---------------------------------------------------------------------------
 
 async fn control_task(
@@ -74,9 +75,17 @@ async fn control_task(
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
 ) {
-    // Condition timestamps: when each condition first appeared
-    let mut discharge_since: Option<DateTime<Utc>>      = None;
-    let mut low_solar_since:  Option<DateTime<Utc>>      = None;
+    let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::error!("Failed to init water heater rule engine: {e}");
+            return;
+        }
+    };
+
+    // Debounce timestamps — kept in Rust because they track wall-clock duration
+    let mut discharge_since: Option<DateTime<Utc>> = None;
+    let mut low_solar_since: Option<DateTime<Utc>> = None;
 
     let mut ticker = interval(Duration::from_secs(30));
 
@@ -97,71 +106,77 @@ async fn control_task(
             )
         };
 
-        // --- Evaluate conditions ---
-
-        // Condition 1: grid connected
-        let grid_on = ac_ignore == 0;
-
-        // Condition 2: SOC < 95%
-        let soc_low = soc < 95.0;
-
-        // Condition 3: battery discharging for > debounce_secs
+        // Debounce: track when each condition first appeared
         let discharging = batt_current < 0.0;
         if discharging {
             discharge_since.get_or_insert(now);
         } else {
             discharge_since = None;
         }
-        let discharge_too_long = discharge_since.map(|t| {
-            (now - t).num_seconds() as u64 >= cfg.debounce_secs
-        }).unwrap_or(false);
+        let discharge_debounced = discharge_since
+            .map(|t| (now - t).num_seconds() as u64 >= cfg.debounce_secs)
+            .unwrap_or(false);
 
-        // Condition 4: solar too low for > debounce_secs
         let solar_low = solar_total <= cfg.solar_min_w;
         if solar_low {
             low_solar_since.get_or_insert(now);
         } else {
             low_solar_since = None;
         }
-        let solar_too_low = low_solar_since.map(|t| {
-            (now - t).num_seconds() as u64 >= cfg.debounce_secs
-        }).unwrap_or(false);
+        let solar_low_debounced = low_solar_since
+            .map(|t| (now - t).num_seconds() as u64 >= cfg.debounce_secs)
+            .unwrap_or(false);
 
-        // Condition 5: irradiance below minimum threshold (immediate, no debounce)
         let irradiance_low = irradiance.map(|w| w < cfg.irradiance_min_wm2).unwrap_or(true);
+        let grid_connected  = ac_ignore == 0;
 
-        let want_vacation = grid_on || soc_low || discharge_too_long || solar_too_low || irradiance_low;
-        let target_mode = if want_vacation { WaterHeaterMode::Vacation } else { WaterHeaterMode::HeatPump };
+        // Rule engine evaluation
+        let target_mode_str = match rule_engine.evaluate(
+            grid_connected,
+            soc,
+            discharge_debounced,
+            solar_low_debounced,
+            irradiance_low,
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!("Water heater rule engine error: {e} — defaulting to Vacation");
+                "Vacation".to_string()
+            }
+        };
+
+        let target_mode = match target_mode_str.as_str() {
+            "HeatPump" => WaterHeaterMode::HeatPump,
+            _          => WaterHeaterMode::Vacation,
+        };
 
         debug!(
-            "Water heater conditions: grid_on={grid_on} soc={soc:.1}% soc_low={soc_low} \
-            batt_current={batt_current:.1}A discharge_too_long={discharge_too_long} \
-            solar_total={solar_total:.0}W solar_too_low={solar_too_low} \
-            irradiance={:?}W/m² irradiance_low={irradiance_low} \
-            → want_vacation={want_vacation} current={current_mode:?}",
-            irradiance
+            "Water heater rule engine: grid={grid_connected} soc={soc:.1}% \
+            discharge_debounced={discharge_debounced} solar_low_debounced={solar_low_debounced} \
+            irradiance_low={irradiance_low} → {target_mode_str}"
         );
 
-        // --- Rate limiting ---
-        let can_change = last_change.map(|t| {
-            (now - t).num_seconds() as u64 >= cfg.mode_change_min_secs
-        }).unwrap_or(true);
+        // Rate limiting — stays in Rust
+        let can_change = last_change
+            .map(|t| (now - t).num_seconds() as u64 >= cfg.mode_change_min_secs)
+            .unwrap_or(true);
 
         if target_mode == current_mode || !can_change {
             if target_mode != current_mode && !can_change {
                 let wait = cfg.mode_change_min_secs.saturating_sub(
-                    last_change.map(|t| (now - t).num_seconds() as u64).unwrap_or(0)
+                    last_change.map(|t| (now - t).num_seconds() as u64).unwrap_or(0),
                 );
                 debug!("Water heater: mode change blocked — rate limit, {wait}s remaining");
             }
             continue;
         }
 
-        info!("Water heater: changing mode {:?} → {:?} (grid={grid_on}, soc={soc:.1}%, \
-            discharge={discharge_too_long}, solar={solar_total:.0}W solar_low={solar_too_low}, irradiance_low={irradiance_low})",
-            current_mode, target_mode);
+        info!(
+            "Water heater: changing mode {:?} → {:?} (grid={grid_connected}, soc={soc:.1}%, \
+            discharge={discharge_debounced}, solar_low={solar_low_debounced}, irradiance_low={irradiance_low})",
+            current_mode, target_mode
+        );
 
-        // --- Apply change ---
         if let Err(e) = lg.set_mode(target_mode).await {
             tracing::error!("LG set_mode error: {e}");
             continue;
@@ -175,15 +190,15 @@ async fn control_task(
 
         publish_to_venus(&bus, &state).await;
 
-        // After mode change, set temperature after delay
+        // Set target temperature after a short delay
         let delay_secs = cfg.temp_set_delay_secs;
         let target_temp = match target_mode {
             WaterHeaterMode::HeatPump => cfg.heat_pump_target_c,
-            _                        => cfg.vacation_target_c,
+            _                         => cfg.vacation_target_c,
         };
-        let lg2     = lg.clone();
-        let bus2    = bus.clone();
-        let state2  = state.clone();
+        let lg2    = lg.clone();
+        let bus2   = bus.clone();
+        let state2 = state.clone();
         tokio::spawn(async move {
             sleep(Duration::from_secs(delay_secs)).await;
             if let Err(e) = lg2.set_target_temp(target_temp).await {

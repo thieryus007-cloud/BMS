@@ -1,0 +1,66 @@
+// Water heater automation rules.
+// Decides between HeatPump and Vacation mode based on energy conditions.
+//
+// Input facts (injected from Rust before evaluate):
+//   WH.want_vacation        (bool, initialised to false — set true by any condition rule)
+//   WH.grid_connected       (bool, true = grid on = ac_ignore == 0)
+//   WH.soc_pct              (number, battery SOC %)
+//   WH.discharge_debounced  (bool, pre-computed in Rust: discharging > debounce_secs)
+//   WH.solar_low_debounced  (bool, pre-computed in Rust: solar <= min for > debounce_secs)
+//   WH.irradiance_low       (bool, immediate, no debounce)
+//
+// Output facts (read from Rust after execute):
+//   WH.target_mode          (string: "HeatPump" | "Vacation")
+
+// ── Condition rules (salience 100) ──────────────────────────────────────────
+
+rule "WH_Cond_Grid" salience 100 no-loop {
+    when
+        WH.grid_connected == true
+    then
+        WH.want_vacation = true;
+}
+
+rule "WH_Cond_SOC_Low" salience 100 no-loop {
+    when
+        WH.soc_pct < 95.0
+    then
+        WH.want_vacation = true;
+}
+
+rule "WH_Cond_Discharge_Long" salience 100 no-loop {
+    when
+        WH.discharge_debounced == true
+    then
+        WH.want_vacation = true;
+}
+
+rule "WH_Cond_Solar_Low" salience 100 no-loop {
+    when
+        WH.solar_low_debounced == true
+    then
+        WH.want_vacation = true;
+}
+
+rule "WH_Cond_Irradiance_Low" salience 100 no-loop {
+    when
+        WH.irradiance_low == true
+    then
+        WH.want_vacation = true;
+}
+
+// ── Decision rules (salience 200, evaluated after all conditions) ────────────
+
+rule "WH_Decide_Vacation" salience 200 no-loop {
+    when
+        WH.want_vacation == true
+    then
+        WH.target_mode = "Vacation";
+}
+
+rule "WH_Decide_HeatPump" salience 200 no-loop {
+    when
+        WH.want_vacation == false
+    then
+        WH.target_mode = "HeatPump";
+}
