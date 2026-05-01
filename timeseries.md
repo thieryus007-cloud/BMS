@@ -1,14 +1,14 @@
 ## Appareils et Métriques:
-3 x Daly BMS 16 cellules
+2 x Daly BMS 16 cellules
 - Métriques par BMS :
 - Tension par cellule (16)
 - Delta cellule mV
-- Température par BMS (2)
-- Courant de charge/décharge (1)
+- Température par BMS 
+- Courant de charge/décharge
 - Tension totale
-- État de santé (SOC, SOH, etc.) (2).  
+- État de santé (SOC, SOH, etc.) 
 Total par BMS : ~40 métriques.  
-Total pour 3 BMS : \( 40 imes 3 = 120 \) séries temporelles
+Total pour 2 BMS : \( 40 imes 3 = 80 \) séries temporelles
 
 ##  3 x ET112 Energy Management
 - Métriques par ET112 :
@@ -98,7 +98,7 @@ Total : 6 séries temporelles
 ## Total des Séries Temporelles
 | Appareil | Séries Temporelles |
 |------------------------------|--------------------|
-| 3 x Daly BMS 16 cellules | 105 |
+| 2 x Daly BMS 16 cellules | 80 |
 | 3 x ET112 Energy Management | 12 |
 | 1 x Capteur Irradiance | 1 |
 | 2 x Chauffe-eau & Cmlimatisation | 8 |
@@ -109,8 +109,8 @@ Total : 6 séries temporelles
 | 1 x Capteur Température/Humidité | 2 |
 | 6 x Switchs Tasmota Tonguou | 30 |
 | 1 x Switch Shelly Pro 2 PM | 6|
-| Total | ~230 |
+| Total | ~200 |
 
 Conclusion:.  
 Nombre mini/maximal de séries temporelles : .  
-# ~230/240 (en incluant des métriques supplémentaires ou des tags supplémentaires dans VictoriaMetrics).
+# ~200/240 (en incluant des métriques supplémentaires ou des tags supplémentaires dans VictoriaMetrics).
