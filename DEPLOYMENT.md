@@ -74,7 +74,7 @@ C'est tout. Dis-moi si tu veux que je t'ajoute une cible `make update-clean` dan
 └────────────────────┬────────────────────────────────────┘
          │           │           │
     RS485│       MQTT│       MQTT│
-    BUS  │      BRIDGE       INFLUX
+    BUS  │      BRIDGE       VictoriaMetrics
          │           │           │
 ┌────────▼───────────▼───────────▼────────────────────────┐
 │           MQTT BROKER (192.168.1.120:1883)              │
@@ -86,8 +86,8 @@ C'est tout. Dis-moi si tu veux que je t'ajoute une cible `make update-clean` dan
              │                      └──────────────┐
              │                                     │
     ┌────────▼──────────────────┐    ┌──────────▼──────────────┐
-    │  NanoPi (Venus OS GX)      │    │  InfluxDB (Pi5 Docker)   │
-    │  192.168.1.120             │    │  http://localhost:8086   │
+    │  NanoPi (Venus OS GX)      │    │  VictoriaMetrics         │
+    │  192.168.1.120             │    │  http://localhost:8428   │
     ├────────────────────────────┤    ├──────────────────────────┤
     │  dbus-mqtt-venus           │    │  Bucket: daly_bms        │
     │  (runit service)           │    │  Retention: 30 days      │
@@ -98,9 +98,9 @@ C'est tout. Dis-moi si tu veux que je t'ajoute une cible `make update-clean` dan
     │  ├─ santuario/heatpump/*/v │    │  ├─ venus_mppt          │
     │  └─ santuario/system/venus │    │  └─ tasmota_snapshot    │
     │                            │    │                          │
-    │  D-Bus services créés:     │    │  Grafana (Pi5 Docker)    │
-    │  ├─ com.victronenergy....  │    │  http://192.168.1.141:3001
-    │  │    .battery.mqtt_*      │    │  (visualisation longue durée)
+    │  D-Bus services créés:     │    │                          │
+    │  ├─ com.victronenergy....  │    │                           
+    │  │    .battery.mqtt_*      │    │                          
     │  ├─ .pvinverter.mqtt_*     │    └──────────────────────────┘
     │  ├─ .heatpump.mqtt_*       │
     │  ├─ .temperature.mqtt_*    │
@@ -442,8 +442,7 @@ NanoPi
 [ ] D-Bus services actifs (dbus -y | grep victron)
 
 OPTIONNEL
-[ ] InfluxDB reçoit les données (check bucket)
-[ ] Grafana dashboard affiche les historiques
+[ ] VictoriaMetrics
 [ ] Alertes configurées (seuils SOC, temp, etc.)
 [ ] VRM Portal synchronisé
 ```
