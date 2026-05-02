@@ -41,23 +41,125 @@ abs(avg_over_time(clamp_max(venus_shunt_current_a, 0)[24h]) * 24)
 
 🧮 Synthèse de la requête
 
-· Fonction integrate : Elle calcule l’aire sous la courbe de courant sur une fenêtre de 6 heures [6h]. C’est la méthode recommandée pour ce type de calcul de charge.
-· Division par 3600 : L’intégrale est, par défaut, exprimée en A·s (Ampères-secondes). La division par 3600 est donc indispensable pour convertir le résultat en A·h (Ampères-heures).
-· Détails de l’appel API :
-  · Point d’entrée : /api/v1/query_range est l’URL de l’API de VictoriaMetrics.
-  · Principaux paramètres :
-    · query : Contient l’expression PromQL décrite ci-dessus.
-    · start=-6h : Définit le début de la plage à il y a 6 heures.
-    · end=now : Définit la fin de la plage à l’heure actuelle.
-    · step=1m : Définit une résolution pour la série de données, ici une donnée par minute.
+---
 
-⚠️ À éviter : La fonction sum_over_time(metric_current_amperes[6h]) est parfois utilisée pour ce type de calcul, mais elle n’est pas adaptée. Elle fonctionne en sommant des points discrets sans tenir compte de la surface réelle sous la courbe de l’historique, ce qui la rend imprécise pour toutes les données variant dans le temps. Pour résumer :
+### 📐 Formule du taux de cyclage
+```
+Taux de cyclage (%) = (Ah chargés + Ah déchargés) / Capacité batterie × 100
+```
+> ⚠️ On additionne les valeurs absolues : une batterie qui charge 50 Ah puis décharge 50 Ah a échangé **100 Ah**, soit un cyclage de 50% sur une batterie de 200 Ah.
 
-· Mauvaise approche : sum_over_time(metric_current_amperes[6h]) (simple somme des points).
-· Bonne approche : integrate(metric_current_amperes[6h])/3600 (intégrale correcte de la surface sous la courbe).
+---
 
-la documentation officielle de MetricsQL sur les fonctions de roulage.
+### ✅ Requête PromQL pour votre configuration
 
+#### 🔹 Avec capacité en dur (ex: 200 Ah)
+```promql
+(
+  avg_over_time(clamp_min(venus_shunt_current_a, 0)[24h]) 
+  - avg_over_time(clamp_max(venus_shunt_current_a, 0)[24h])
+) * 24 / 200 * 100
+```
+
+| Élément | Rôle |
+|---------|------|
+| `clamp_min(..., 0)` | Garde les courants ≥ 0 → **charge** (positif dans votre cas) |
+| `clamp_max(..., 0)` | Garde les courants ≤ 0 → **décharge** (négatif dans votre cas) |
+| `- avg_over_time(clamp_max...)` | Soustraire une moyenne négative = ajouter sa valeur absolue |
+| `* 24` | Conversion A moyen → Ah sur 24h |
+| `/ 200 * 100` | Normalisation par capacité et conversion en % |
+
+#### 🔹 Avec capacité dynamique (via un metric)
+Si votre exporter Victron expose la capacité nominale (ex: `venus_battery_capacity_ah`), utilisez :
+```promql
+(
+  avg_over_time(clamp_min(venus_shunt_current_a, 0)[24h]) 
+  - avg_over_time(clamp_max(venus_shunt_current_a, 0)[24h])
+) * 24 / venus_battery_capacity_ah * 100
+```
+> ✅ Avantage : la requête s'adapte automatiquement si vous changez de batterie.
+
+---
+
+### 🌐 URL API prête à l'emploi
+```
+http://192.168.1.141:8428/api/v1/query?query=(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h])-avg_over_time(clamp_max(venus_shunt_current_a,0)[24h]))*24/200*100
+```
+
+#### 🧪 Test rapide avec `curl`
+```bash
+# Taux de cyclage sur 24h (capacité 200 Ah)
+curl -s "http://192.168.1.141:8428/api/v1/query" \
+  --data-urlencode "query=(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h])-avg_over_time(clamp_max(venus_shunt_current_a,0)[24h]))*24/200*100" \
+  | jq -r '.data.result[0].value[1] + " %"'
+```
+→ Résultat attendu : `XX.XX %`
+
+---
+
+### 📊 Interprétation des résultats
+
+| Taux de cyclage | Interprétation | Impact batterie |
+|----------------|----------------|-----------------|
+| **0–20 %** | Usage léger | ✅ Longévité maximale |
+| **20–50 %** | Usage modéré | ✅ Normal pour usage quotidien |
+| **50–80 %** | Usage intensif | ⚠️ Surveiller la température et la tension |
+| **> 80 %** | Cyclage profond | 🔋 Privilégier batteries LiFePO4 ; éviter sur plomb |
+
+> 💡 Pour les batteries au plomb, il est recommandé de ne pas dépasser **50 % de profondeur de décharge** (DoD) pour préserver leur durée de vie.
+
+---
+
+### 🎨 Intégration Grafana (bonus)
+
+#### 1. Panel "Taux de cyclage quotidien"
+- **Type** : `Stat` ou `Gauge`
+- **Requête** :
+  ```promql
+  (avg_over_time(clamp_min(venus_shunt_current_a,0)[24h]) - avg_over_time(clamp_max(venus_shunt_current_a,0)[24h])) * 24 / 200 * 100
+  ```
+- **Unit** : `Percent (0–100)`
+- **Min/Max** : `0` / `150` (pour visualiser les sur-cyclages)
+- **Thresholds** :
+  - `50` → orange
+  - `80` → rouge
+
+#### 2. Variable pour la capacité (optionnel)
+Dans *Dashboard Settings → Variables* :
+```
+Name: battery_capacity
+Type: Custom
+Values: 100,200,300,400
+```
+Puis dans la requête :
+```promql
+... * 24 / $battery_capacity * 100
+```
+
+---
+
+### ⚠️ Points de vigilance
+
+1. **Fenêtre glissante vs jour calendaire**  
+   `[24h]` calcule sur les dernières 24h glissantes. Pour un jour calendaire (minuit → maintenant), il faut calculer un `offset` dynamique côté client.
+
+2. **Précision**  
+   L'approximation par `avg_over_time` est fiable si votre intervalle de scrape est ≤ 30s. Pour plus de précision, utilisez une sous-requête :
+   ```promql
+   [24h:10s]  # Échantillonnage interne à 10s
+   ```
+
+3. **Données manquantes**  
+   Vérifiez la continuité des données :
+   ```promql
+   count_over_time(venus_shunt_current_a[24h])
+   ```
+   Si le résultat est bien inférieur à `24*60*(60/scrape_interval)`, des données manquent et le calcul sera sous-estimé.
+
+4. **Capacité réelle vs nominale**  
+   La capacité d'une batterie diminue avec l'âge. Pour un calcul plus réaliste, vous pouvez créer un metric `battery_effective_capacity_ah` mis à jour manuellement ou via un test de décharge.
+
+---
 
 ## Récapitulatif des métriques par appareil
 
