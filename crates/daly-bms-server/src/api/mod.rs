@@ -5,6 +5,7 @@
 pub mod system;
 pub mod bms;
 pub mod ats;
+pub mod alerts;
 pub mod console;
 pub mod et112;
 pub mod tasmota;
@@ -116,6 +117,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/query",          get(promql::query_instant))
         .route("/api/v1/query_range",    get(promql::query_range))
         .route("/api/v1/labels",         get(promql::list_metrics))
+
+        // ── Alertes (journal SQLite) ──────────────────────────────────────────
+        .route("/api/v1/alerts/list",              get(alerts::list_alerts))
+        .route("/api/v1/alerts/stats",             get(alerts::get_stats))
+        .route("/api/v1/alerts/:id/acknowledge",   post(alerts::acknowledge_alert))
 
         // ── Health check ──────────────────────────────────────────────────────
         .route("/health",                get(health::health_check))

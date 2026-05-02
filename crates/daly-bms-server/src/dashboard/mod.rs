@@ -787,6 +787,22 @@ pub async fn dashboard_history() -> Response {
     render(HistoryTemplate {})
 }
 
+// =============================================================================
+// Dashboard Alertes
+// =============================================================================
+
+#[derive(Template)]
+#[template(path = "alerts.html")]
+struct AlertsTemplate {
+    alerts_enabled: bool,
+}
+
+/// Page journal des alertes.
+pub async fn dashboard_alerts(State(state): State<AppState>) -> Response {
+    let alerts_enabled = state.alert_engine.is_some();
+    render(AlertsTemplate { alerts_enabled })
+}
+
 /// Construit le routeur du dashboard (à fusionner dans le routeur principal).
 pub fn build_dashboard_router() -> Router<AppState> {
     Router::new()
@@ -805,4 +821,5 @@ pub fn build_dashboard_router() -> Router<AppState> {
         .route("/dashboard/visualization",     get(dashboard_visualization))
         .route("/visualization",               get(dashboard_visualization))
         .route("/dashboard/history",           get(dashboard_history))
+        .route("/dashboard/alerts",            get(dashboard_alerts))
 }

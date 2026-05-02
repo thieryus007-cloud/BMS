@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}Alertes — ESS Monitor{% endblock %}
+{% block page_title %}Alertes{% endblock %}
+{% block nav_alerts %}active{% endblock %}
+
+{% block content %}
+<div class="page-hdr">
+  <h1>🔔 Alertes</h1>
+  <div class="page-hdr-meta">
+    <span>Màj : <span id="alert-ts">—</span></span>
+    <span class="sep">·</span>
+    <span id="alert-status-badge" class="bms-badge" style="background:#e2e8f0;color:#64748b">Chargement…</span>
+    <button onclick="loadAlerts()" style="margin-left:0.5rem;padding:0.25rem 0.75rem;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:0.8rem;">↻ Rafraîchir</button>
+  </div>
+</div>
+
+{% if !alerts_enabled %}
+<div class="bms-card" style="padding:2rem;text-align:center;color:#64748b;">
+  <div style="font-size:2rem;margin-bottom:0.5rem;">⚠️</div>
+  <div style="font-weight:600;margin-bottom:0.25rem;">AlertEngine désactivé</div>
+  <div style="font-size:0.85rem;">Activez <code>alerts.db_path</code> dans <code>Config.toml</code> pour utiliser le journal d'alertes.</div>
+</div>
+{% else %}
+
+<!-- Stats bar -->
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem;margin-bottom:1.25rem;">
+  <div class="bms-card" style="padding:1rem;text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:#ef4444;" id="stat-triggered">—</div>
+    <div style="font-size:0.75rem;color:#64748b;margin-top:0.2rem;">Actives</div>
+  </div>
+  <div class="bms-card" style="padding:1rem;text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:#f59e0b;" id="stat-unack">—</div>
+    <div style="font-size:0.75rem;color:#64748b;margin-top:0.2rem;">Non acquittées</div>
+  </div>
+  <div class="bms-card" style="padding:1rem;text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:#dc2626;" id="stat-critical">—</div>
+    <div style="font-size:0.75rem;color:#64748b;margin-top:0.2rem;">Critiques (total)</div>
+  </div>
+  <div class="bms-card" style="padding:1rem;text-align:center;">
+    <div style="font-size:1.6rem;font-weight:700;color:#475569;" id="stat-total">—</div>
+    <div style="font-size:0.75rem;color:#64748b;margin-top:0.2rem;">Total journalisés</div>
+  </div>
+</div>
+
+<!-- Filtres -->
+<div class="bms-card" style="padding:0.75rem 1rem;margin-bottom:1.25rem;display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;">
+  <label style="font-size:0.8rem;color:#64748b;font-weight:500;">Sévérité :</label>
+  <select id="filter-severity" onchange="loadAlerts()" style="padding:0.25rem 0.5rem;border-radius:6px;border:1px solid #cbd5e1;font-size:0.8rem;">
+    <option value="">Toutes</option>
+    <option value="critical">Critique</option>
+    <option value="warning">Warning</option>
+  </select>
+  <label style="font-size:0.8rem;color:#64748b;font-weight:500;">Statut :</label>
+  <select id="filter-active" onchange="loadAlerts()" style="padding:0.25rem 0.5rem;border-radius:6px;border:1px solid #cbd5e1;font-size:0.8rem;">
+    <option value="">Tous</option>
+    <option value="true">Actives seulement</option>
+  </select>
+  <button onclick="resetFilters()" style="padding:0.25rem 0.6rem;border-radius:6px;border:1px solid #cbd5e1;background:#f1f5f9;cursor:pointer;font-size:0.8rem;color:#64748b;">Réinitialiser</button>
+</div>
+
+<!-- Liste des événements -->
+<div class="bms-card">
+  <div class="bms-hdr bms-hdr-sky">
+    <div class="bms-hdr-left"><span class="bms-hdr-name">📋 Journal d'alertes</span></div>
+    <div id="alert-count-label" style="font-size:0.75rem;color:#94a3b8;margin-right:0.75rem;"></div>
+  </div>
+  <div id="alerts-list" style="padding:0.5rem;">
+    <div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Chargement…</div></div>
+  </div>
+  <!-- Pagination simple -->
+  <div id="pagination" style="display:none;padding:0.75rem 1rem;border-top:1px solid #e2e8f0;display:flex;gap:0.5rem;align-items:center;font-size:0.8rem;color:#64748b;">
+    <button id="btn-prev" onclick="prevPage()" style="padding:0.2rem 0.6rem;border-radius:6px;border:1px solid #cbd5e1;cursor:pointer;background:#f8fafc;">‹ Préc.</button>
+    <span id="page-info">Page 1</span>
+    <button id="btn-next" onclick="nextPage()" style="padding:0.2rem 0.6rem;border-radius:6px;border:1px solid #cbd5e1;cursor:pointer;background:#f8fafc;">Suiv. ›</button>
+  </div>
+</div>
+
+{% endif %}
+
+<script>
+const PAGE_SIZE = 50;
+let currentPage = 0;
+let totalEvents = 0;
+
+function severityColor(sev) {
+  return sev === 'critical' ? '#dc2626' : '#f59e0b';
+}
+function severityBg(sev) {
+  return sev === 'critical' ? '#fef2f2' : '#fffbeb';
+}
+function severityBorder(sev) {
+  return sev === 'critical' ? '#fca5a5' : '#fde68a';
+}
+function eventIcon(ev) {
+  return ev === 'triggered' ? '🔴' : '✅';
+}
+
+async function loadStats() {
+  try {
+    const r = await fetch('/api/v1/alerts/stats');
+    if (!r.ok) return;
+    const s = await r.json();
+    document.getElementById('stat-triggered').textContent  = s.triggered;
+    document.getElementById('stat-unack').textContent      = s.unacknowledged;
+    document.getElementById('stat-critical').textContent   = s.critical;
+    document.getElementById('stat-total').textContent      = s.total;
+
+    const badge = document.getElementById('alert-status-badge');
+    if (s.triggered > 0) {
+      badge.style.background = '#fef2f2';
+      badge.style.color      = '#dc2626';
+      badge.textContent      = s.triggered + ' alerte(s) active(s)';
+    } else {
+      badge.style.background = '#f0fdf4';
+      badge.style.color      = '#16a34a';
+      badge.textContent      = 'Aucune alerte active';
+    }
+    document.getElementById('alert-ts').textContent = new Date().toLocaleTimeString('fr-FR');
+  } catch(e) { /* silencieux */ }
+}
+
+async function loadAlerts() {
+  const severity = document.getElementById('filter-severity').value;
+  const active   = document.getElementById('filter-active').value;
+  const offset   = currentPage * PAGE_SIZE;
+
+  let url = `/api/v1/alerts/list?limit=${PAGE_SIZE}&offset=${offset}`;
+  if (severity) url += `&severity=${severity}`;
+  if (active)   url += `&active=${active}`;
+
+  const list = document.getElementById('alerts-list');
+  list.innerHTML = '<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Chargement…</div></div>';
+
+  try {
+    const r = await fetch(url);
+    if (!r.ok) { list.innerHTML = '<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-title">Erreur chargement</div></div>'; return; }
+    const data = await r.json();
+    totalEvents = data.total;
+
+    document.getElementById('alert-count-label').textContent = `${data.total} événement(s)`;
+    updatePagination();
+    renderAlerts(data.events);
+    loadStats();
+  } catch(e) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-title">Erreur réseau</div></div>';
+  }
+}
+
+function renderAlerts(events) {
+  const list = document.getElementById('alerts-list');
+  if (!events || events.length === 0) {
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">Aucun événement</div></div>';
+    return;
+  }
+
+  list.innerHTML = events.map(ev => {
+    const bg     = ev.event === 'triggered' ? severityBg(ev.severity)     : '#f8fafc';
+    const border = ev.event === 'triggered' ? severityBorder(ev.severity) : '#e2e8f0';
+    const col    = ev.event === 'triggered' ? severityColor(ev.severity)  : '#64748b';
+    const ackBtn = (ev.event === 'triggered' && !ev.acknowledged)
+      ? `<button onclick="ackAlert(${ev.id})" style="padding:0.2rem 0.6rem;border-radius:6px;border:1px solid ${border};background:white;cursor:pointer;font-size:0.75rem;color:${col};white-space:nowrap;">Acquitter</button>`
+      : (ev.acknowledged ? '<span style="font-size:0.7rem;color:#16a34a;white-space:nowrap;">✓ Acquittée</span>' : '');
+
+    return `<div style="padding:0.6rem 0.75rem;margin:0.3rem 0;border-radius:8px;border:1px solid ${border};background:${bg};display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem;">
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;margin-bottom:0.15rem;">
+          <span>${eventIcon(ev.event)}</span>
+          <span style="font-weight:600;font-size:0.85rem;color:${col};">${ev.description}</span>
+          <span style="font-size:0.7rem;padding:0.1rem 0.4rem;border-radius:4px;background:${border};color:${col};">${ev.severity}</span>
+          <span style="font-size:0.7rem;color:#94a3b8;">${ev.rule_id}</span>
+          <span style="font-size:0.7rem;color:#94a3b8;">BMS ${ev.bms_address}</span>
+        </div>
+        <div style="font-size:0.75rem;color:#475569;">
+          Valeur : <strong>${ev.value.toFixed(2)}</strong>
+          &nbsp;·&nbsp;${ev.timestamp}
+          ${ev.acknowledged_at ? `&nbsp;·&nbsp;Ack : ${ev.acknowledged_at}` : ''}
+        </div>
+      </div>
+      <div style="flex-shrink:0;">${ackBtn}</div>
+    </div>`;
+  }).join('');
+}
+
+async function ackAlert(id) {
+  try {
+    const r = await fetch(`/api/v1/alerts/${id}/acknowledge`, { method: 'POST' });
+    if (r.ok) loadAlerts();
+  } catch(e) { /* silencieux */ }
+}
+
+function updatePagination() {
+  const totalPages = Math.ceil(totalEvents / PAGE_SIZE);
+  const pag = document.getElementById('pagination');
+  if (totalEvents <= PAGE_SIZE) { pag.style.display = 'none'; return; }
+  pag.style.display = 'flex';
+  document.getElementById('page-info').textContent = `Page ${currentPage + 1} / ${totalPages}`;
+  document.getElementById('btn-prev').disabled = currentPage === 0;
+  document.getElementById('btn-next').disabled = currentPage >= totalPages - 1;
+}
+
+function prevPage() { if (currentPage > 0) { currentPage--; loadAlerts(); } }
+function nextPage() { currentPage++; loadAlerts(); }
+function resetFilters() {
+  document.getElementById('filter-severity').value = '';
+  document.getElementById('filter-active').value   = '';
+  currentPage = 0;
+  loadAlerts();
+}
+
+// Chargement initial + auto-refresh 30s
+loadAlerts();
+setInterval(loadAlerts, 30000);
+</script>
+{% endblock %}

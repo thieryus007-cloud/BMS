@@ -414,9 +414,9 @@ timeout_secs = 10
 
 
 [alerts]
-# Chemin de la base SQLite pour journal des alertes
-# Laisser vide pour désactiver les alertes (pas de base SQLite requise)
-db_path = ""
+# Chemin de la base SQLite pour journal des alertes.
+# Laisser vide pour désactiver complètement les alertes.
+db_path = "/var/lib/daly-bms/alerts.db"
 
 # Intervalle d'évaluation des règles (secondes)
 check_interval_sec = 1.0
@@ -433,15 +433,25 @@ smtp_password = ""
 smtp_from = "dalybms@santuario.local"
 smtp_to = "admin@santuario.local"
 
+# Durées minimales "for:" avant déclenchement (secondes).
+# 0 = déclencher immédiatement (comportement legacy).
+soc_critical_for_secs = 180   # 3 minutes
+soc_low_for_secs      = 300   # 5 minutes
+temp_high_for_secs    = 180   # 3 minutes
+current_high_for_secs = 120   # 2 minutes
+voltage_for_secs      = 60    # 1 minute
+
 # Seuils d'alertes logicielles (indépendants des seuils hardware BMS)
 [alerts.thresholds]
-cell_ovp_v          = 3.60
-cell_uvp_v          = 2.90
-cell_delta_mv       = 100
-soc_low_percent     = 20.0
-soc_critical_percent= 10.0
-temp_high_c         = 45.0
-current_high_a      = 80.0
+cell_ovp_v           = 3.60
+cell_uvp_v           = 2.90
+cell_delta_mv        = 100
+soc_low_percent      = 20.0
+soc_critical_percent = 15.0   # SOC critique ESS (était 10, aligné avec vmalert plan)
+temp_high_c          = 45.0
+current_high_a       = 100.0  # Courant décharge max via SmartShunt (était 80A BMS seul)
+pack_ovp_v           = 57.0   # Tension pack trop haute (V)
+pack_uvp_v           = 44.0   # Tension pack trop basse (V)
 
 
 [read_only]

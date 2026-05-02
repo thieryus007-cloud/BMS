@@ -448,6 +448,17 @@ pub struct AlertsConfig {
     pub smtp_to: String,
     #[serde(default)]
     pub thresholds: AlertThresholds,
+    /// Durée minimale avant déclenchement (secondes). 0 = immédiat (comportement legacy).
+    #[serde(default)]
+    pub soc_critical_for_secs: u64,
+    #[serde(default)]
+    pub soc_low_for_secs: u64,
+    #[serde(default)]
+    pub temp_high_for_secs: u64,
+    #[serde(default)]
+    pub current_high_for_secs: u64,
+    #[serde(default)]
+    pub voltage_for_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -459,6 +470,12 @@ pub struct AlertThresholds {
     pub soc_critical_percent: f32,
     pub temp_high_c: f32,
     pub current_high_a: f32,
+    /// Tension de pack trop haute (V) — règle ESS pack_ovp.
+    #[serde(default = "default_pack_ovp_v")]
+    pub pack_ovp_v: f32,
+    /// Tension de pack trop basse (V) — règle ESS pack_uvp.
+    #[serde(default = "default_pack_uvp_v")]
+    pub pack_uvp_v: f32,
 }
 
 // Seuils d'alerte par défaut — valeurs de production (voir CLAUDE.md §5).
@@ -470,6 +487,11 @@ const DEFAULT_SOC_LOW_PERCENT:      f32 = 20.0;
 const DEFAULT_SOC_CRITICAL_PERCENT: f32 = 10.0;
 const DEFAULT_TEMP_HIGH_C:          f32 = 45.0;
 const DEFAULT_CURRENT_HIGH_A:       f32 = 80.0;
+const DEFAULT_PACK_OVP_V:           f32 = 57.0;
+const DEFAULT_PACK_UVP_V:           f32 = 44.0;
+
+fn default_pack_ovp_v() -> f32 { DEFAULT_PACK_OVP_V }
+fn default_pack_uvp_v() -> f32 { DEFAULT_PACK_UVP_V }
 
 impl Default for AlertThresholds {
     fn default() -> Self {
@@ -481,6 +503,8 @@ impl Default for AlertThresholds {
             soc_critical_percent:  DEFAULT_SOC_CRITICAL_PERCENT,
             temp_high_c:           DEFAULT_TEMP_HIGH_C,
             current_high_a:        DEFAULT_CURRENT_HIGH_A,
+            pack_ovp_v:            DEFAULT_PACK_OVP_V,
+            pack_uvp_v:            DEFAULT_PACK_UVP_V,
         }
     }
 }
@@ -668,6 +692,8 @@ mod tests {
         assert_eq!(t.soc_critical_percent, 10.0);
         assert_eq!(t.temp_high_c, 45.0);
         assert_eq!(t.current_high_a, 80.0);
+        assert_eq!(t.pack_ovp_v, 57.0);
+        assert_eq!(t.pack_uvp_v, 44.0);
     }
 }
 
