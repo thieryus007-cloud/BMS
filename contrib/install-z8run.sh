@@ -39,6 +39,18 @@ if [[ ! -d "$Z8RUN_SRC" ]]; then
     exit 1
 fi
 
+# ── Node.js 22+ ───────────────────────────────────────────────────────────────
+
+NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v\([0-9]*\).*/\1/' || echo 0)
+if [[ "$NODE_MAJOR" -lt 22 ]]; then
+    echo "→ Node.js ${NODE_MAJOR} détecté, installation de Node.js 22 via NodeSource…"
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    apt-get install -y nodejs
+    echo "→ Node.js $(node --version) installé"
+else
+    echo "→ Node.js $(node --version) OK"
+fi
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 echo "→ Build frontend React (npm install + npm run build)…"
