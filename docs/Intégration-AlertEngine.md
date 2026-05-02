@@ -6,14 +6,22 @@ Attention : ce plan DOIT etre adapté pour etre en cohérence avec l'infrastruct
 
 ### 🎯 Résumé des changements
 
-Cette PR ajoute un système d'alerting complet basé sur **vmalert** (VictoriaMetrics) avec :
-- Configuration Docker de vmalert : **Attention, je PREFERE SANS DOCKER**.
-- Règles d'alerte pour l'ESS (SOC, courant, cyclage)
-- Endpoint webhook Rust pour recevoir les alertes
-- Persistance SQLite des alertes
-- Affichage temps réel dans le dashboard React/Askama
-- API REST pour gérer les alertes (acknowledge, historique)
+1. Charger les règles depuis un fichier externe (TOML ou YAML)
+   → modifier bridge/alerts.rs pour lire /etc/daly-bms/alert-rules.toml
+   
+2. Étendre AlertContext avec toutes les sources
+   → BmsSnapshot (déjà là)
+   → VenusSmartShunt (venus_shunt_current_a, soc)  
+   → Et112Snapshot (puissance réseau)
+   → VenusInverter (tension DC bus)
 
+3. Support `for: duration` per règle
+   → Remplacer cooldown par un début de déclenchement + durée requise
+   → Déjà partiellement là avec RuleState, ajouter pending_since: Option<Instant>
+
+4. API REST + dashboard Askama
+   → Lire la table alert_events existante
+   → Ajouter acknowledge
 ---
 
 ### 📁 Fichiers ajoutés/modifiés en fonction de notre infrastructure
