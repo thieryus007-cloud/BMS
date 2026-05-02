@@ -105,6 +105,13 @@ systemctl daemon-reload
 systemctl enable z8run
 systemctl restart z8run
 
+# ── Firewall ──────────────────────────────────────────────────────────────────
+
+if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
+    echo "→ Ouverture port 7700 dans UFW"
+    ufw allow 7700/tcp
+fi
+
 sleep 2
 
 # ── Résultat ─────────────────────────────────────────────────────────────────
