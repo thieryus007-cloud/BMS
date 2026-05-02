@@ -7,7 +7,7 @@ Attention : ce plan DOIT etre adapté pour etre en cohérence avec l'infrastruct
 ### 🎯 Résumé des changements
 
 Cette PR ajoute un système d'alerting complet basé sur **vmalert** (VictoriaMetrics) avec :
-- Configuration Docker de vmalert
+- Configuration Docker de vmalert : **Attention, je PREFERE SANS DOCKER**.
 - Règles d'alerte pour l'ESS (SOC, courant, cyclage)
 - Endpoint webhook Rust pour recevoir les alertes
 - Persistance SQLite des alertes
@@ -18,7 +18,7 @@ Cette PR ajoute un système d'alerting complet basé sur **vmalert** (VictoriaMe
 
 ### 📁 Fichiers ajoutés/modifiés en fonction de notre infrastructure
 
-#### 1️⃣ **docker-compose.infra.yml** - Ajout du service vmalert
+#### 1️⃣ **docker-compose.infra.yml** - Ajout du service vmalert **Attention, je PREFERE SANS DOCKER**
 
 ```yaml
 # Ajouter après VictoriaMetrics dans docker-compose.infra.yml
@@ -55,7 +55,8 @@ volumes:
 
 ---
 
-#### 2️⃣ **vmalert/rules/ess-alerts.yaml** - Règles d'alerte
+#### 2️⃣ **vmalert/rules/ess-alerts.yaml** - Règles d'alerte 
+**Attention, je PREFERE pouvoir changer les regles sans re-compilation si possible, VERIFIER si POSSIBLE integration avec rust-rule-engine**
 
 ```yaml
 groups:
