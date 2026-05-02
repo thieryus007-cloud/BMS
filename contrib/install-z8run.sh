@@ -41,8 +41,11 @@ fi
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
-echo "→ Build z8run en release (sur Pi5, ~10-20 min première fois)…"
-# Utiliser un shell login pour avoir ~/.cargo/bin dans le PATH (rustup)
+echo "→ Build frontend React (npm install + npm run build)…"
+sudo -u "$REAL_USER" bash -l -c "cd '$Z8RUN_SRC/frontend' && npm install && npm run build"
+
+echo "→ Build z8run en release (Rust embarque le frontend)…"
+# Shell login pour avoir ~/.cargo/bin dans le PATH (rustup)
 sudo -u "$REAL_USER" bash -l -c "cd '$Z8RUN_SRC' && cargo build --release"
 
 BINARY_SRC="${Z8RUN_SRC}/target/release/z8run"
