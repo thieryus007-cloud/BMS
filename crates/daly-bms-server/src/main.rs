@@ -273,6 +273,27 @@ async fn main() -> anyhow::Result<()> {
         "DalyBMS Server démarrage"
     );
 
+    // ── AlertEngine (SQLite + règles ESS) ─────────────────────────────────────
+    let alert_engine = if !config.alerts.db_path.is_empty() {
+        // Créer le répertoire parent si nécessaire
+        if let Some(parent) = std::path::Path::new(&config.alerts.db_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match alerts::AlertEngine::new(config.alerts.clone()) {
+            Ok(e) => {
+                info!(db = %config.alerts.db_path, "AlertEngine initialisé");
+                Some(e)
+            }
+            Err(e) => {
+                warn!("AlertEngine init échoué : {} — alertes désactivées", e);
+                None
+            }
+        }
+    } else {
+        info!("AlertEngine désactivé (alerts.db_path vide)");
+        None
+    };
+
     // ── VictoriaMetrics (client HTTP stockage time-series) ────────────────────
     let vm_handle = if config.victoriametrics.enabled {
         match vm_client::VmClient::new(&config.victoriametrics) {
@@ -291,7 +312,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // ── État partagé ───────────────────────────────────────────────────────────
-    let state = AppState::new(config.clone(), log_buffer, vm_handle);
+    let state = AppState::new(config.clone(), log_buffer, vm_handle, alert_engine.clone());
 
     // ── Bridges en arrière-plan ─────────────────────────────────────────────────
 
@@ -311,10 +332,12 @@ async fn main() -> anyhow::Result<()> {
         let (s, c, m) = (state.clone(), config.mqtt.clone(), mqtt_addr_map);
         async move { mqtt::run_mqtt_bridge(s, c, m).await }
     });
-    tokio::spawn({
-        let (s, c) = (state.clone(), config.alerts.clone());
-        async move { alerts::run_alert_engine(s, c).await }
-    });
+    if let Some(ref engine) = alert_engine {
+        tokio::spawn({
+            let (s, e) = (state.clone(), engine.clone());
+            async move { alerts::run_alert_engine(s, e).await }
+        });
+    }
 
     // ── Venus OS MQTT subscriber (données D-Bus) ───────────────────────────────
     if config.mqtt.enabled {

@@ -4,6 +4,7 @@
 //! et les handlers Axum.
 
 use crate::ats::AtsSnapshot;
+use crate::bridges::alerts::AlertEngine;
 use crate::config::AppConfig;
 use crate::console::{ConsoleBus, ConsoleEvent, EventDevice};
 use crate::et112::Et112Snapshot;
@@ -436,6 +437,9 @@ pub struct AppState {
     /// Client MQTT Shelly (pour les commandes de contrôle Switch.Set).
     pub shelly_client: Arc<tokio::sync::Mutex<Option<rumqttc::AsyncClient>>>,
 
+    /// Moteur d'alertes (None si alerts.db_path vide dans la config).
+    pub alert_engine: Option<Arc<AlertEngine>>,
+
     /// Client VictoriaMetrics (None si désactivé dans la config).
     pub vm: Option<Arc<VmClient>>,
 
@@ -457,7 +461,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(config: AppConfig, log_buffer: LogBuffer, vm: Option<VmClient>) -> Self {
+    pub fn new(config: AppConfig, log_buffer: LogBuffer, vm: Option<VmClient>, alert_engine: Option<Arc<AlertEngine>>) -> Self {
         let (ws_tx, _) = broadcast::channel(WS_BROADCAST_CAPACITY);
         let addresses = config.bms_addresses();
         let ring_size = config.serial.ring_buffer_size;
@@ -511,6 +515,7 @@ impl AppState {
             console_bus: ConsoleBus::new(),
             shelly_latest: Arc::new(RwLock::new(BTreeMap::new())),
             shelly_client: Arc::new(tokio::sync::Mutex::new(None)),
+            alert_engine,
             vm: vm.map(Arc::new),
             vm_last_bms_write:      Arc::new(AtomicU64::new(0)),
             vm_last_shunt_write:    Arc::new(AtomicU64::new(0)),
