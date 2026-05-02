@@ -4,6 +4,33 @@
 > URL API  : `http://192.168.1.141:8428/api/v1/query?query=<PROMQL>`
 
 ---
+Pour convertir une courbe d’intensité (en Ampères) en une charge totale en Ampères-heures (Ah) sur une période définie, VictoriaMetrics met à disposition une fonction integrate dédiée dans son langage de requête MetricsQL.
+
+Voici la commande PromQL complète, à exécuter via l’API REST depuis la ligne de commande avec curl. Cette requête simule une intégration sur les 6 dernières heures et convertit le résultat en Ampères-heures.
+
+```bash
+curl 'http://192.168.1.141:8428/api/v1/query_range?query=integrate(metric_current_amperes[6h])/3600&start=-6h&end=now&step=1m' --get
+```
+
+🧮 Synthèse de la requête
+
+· Fonction integrate : Elle calcule l’aire sous la courbe de courant sur une fenêtre de 6 heures [6h]. C’est la méthode recommandée pour ce type de calcul de charge.
+· Division par 3600 : L’intégrale est, par défaut, exprimée en A·s (Ampères-secondes). La division par 3600 est donc indispensable pour convertir le résultat en A·h (Ampères-heures).
+· Détails de l’appel API :
+  · Point d’entrée : /api/v1/query_range est l’URL de l’API de VictoriaMetrics.
+  · Principaux paramètres :
+    · query : Contient l’expression PromQL décrite ci-dessus.
+    · start=-6h : Définit le début de la plage à il y a 6 heures.
+    · end=now : Définit la fin de la plage à l’heure actuelle.
+    · step=1m : Définit une résolution pour la série de données, ici une donnée par minute.
+
+⚠️ À éviter : La fonction sum_over_time(metric_current_amperes[6h]) est parfois utilisée pour ce type de calcul, mais elle n’est pas adaptée. Elle fonctionne en sommant des points discrets sans tenir compte de la surface réelle sous la courbe de l’historique, ce qui la rend imprécise pour toutes les données variant dans le temps. Pour résumer :
+
+· Mauvaise approche : sum_over_time(metric_current_amperes[6h]) (simple somme des points).
+· Bonne approche : integrate(metric_current_amperes[6h])/3600 (intégrale correcte de la surface sous la courbe).
+
+la documentation officielle de MetricsQL sur les fonctions de roulage.
+
 
 ## Récapitulatif des métriques par appareil
 
