@@ -4,7 +4,7 @@
 Remplacement total de la stack Python/FastAPI par **Rust** (workspace multi-crates : `daly-bms-core` + `daly-bms-server` + `daly-bms-cli` + `daly-bms-probe` + `dbus-mqtt-venus`).
 
 > Dashboard intégré **SSR Rust** (Askama + ECharts) — aucun npm.
-> Infrastructure Docker **inchangée** (Mosquitto, InfluxDB ).
+> Infrastructure Docker **inchangée** (Mosquitto, VictoriaMetrics ).
 > Déploiement ultra-léger : **un seul binaire statique** (~12–18 Mo).
 > Compatible **Windows** (testé) et **Linux/aarch64** (Raspberry Pi).
 
@@ -33,8 +33,8 @@ Remplacement total de la stack Python/FastAPI par **Rust** (workspace multi-crat
 │                                │                                    │
 │    ┌──────────────┬────────────┴──────────┬────────────────────┐   │
 │    ▼              ▼                       ▼                    ▼   │
-│ InfluxDB       AlertEngine           energy-manager              Dashboard│
-│ :8086          (SQLite)              :8081 (Pi5)            SSR     │
+│ VictoriaMetrics       AlertEngine           energy-manager              Dashboard│
+│ :8428          (SQLite)              :8081 (Pi5)            SSR     │
 │    │                                                               │
 │ Grafana :3001                                                       │
 └────────────────────────────────┬────────────────────────────────────┘
@@ -61,7 +61,7 @@ Remplacement total de la stack Python/FastAPI par **Rust** (workspace multi-crat
 ```
 
 > **Adresses BMS production** : `0x01` (BMS-360Ah) et `0x02` (BMS-320Ah)
-> **Validé en production** sur RPi5 au 17 mars 2026 — données confirmées dans InfluxDB.
+> **Validé en production** sur RPi5 au 17 mars 2026 — données confirmées dans VictoriaMetrics.
 > **Pi5 = master** : tous les capteurs RS485 y sont connectés, le NanoPi reste dédié Venus OS / D-Bus.
 
 ### Flux MQTT par domaine
@@ -83,7 +83,7 @@ Remplacement total de la stack Python/FastAPI par **Rust** (workspace multi-crat
 |---------|------|------|------|
 | **daly-bms-server** | Pi5 | 8080 | Serveur principal Rust : polling RS485, REST API, WebSocket, Dashboard SSR |
 | **Mosquitto** | Pi5 | 1883 (MQTT), 9001 (WS) | Broker MQTT — relaye toutes les données capteurs vers Venus OS et energy-manager |
-| **InfluxDB** | Pi5 | 8086 | Base de données séries temporelles — stockage 30 jours de métriques |
+| **VictoriaMetrics** | Pi5 | 8428 | Base de données séries temporelles — stockage 30 jours de métriques |
 | **energy-manager** | Pi5 | 8081 | Automatisation — flows MQTT, alertes, webhooks (migré NanoPi → Pi5) |
 | **dbus-mqtt-venus** | NanoPi | — | Bridge MQTT → D-Bus Venus OS (Rust pur, zbus) — unique binaire sur NanoPi, enregistre tous les capteurs sur Venus |
 
@@ -108,11 +108,11 @@ Simulateur ──► run_simulator()              ← mode --simulate (sans mat�
        ring_buffer                      broadcast (tokio)
        (3600 snaps/BMS)         ┌────────┬──────┴──────┬───────────┐
                                 ▼        ▼              ▼           ▼
-                           MqttBridge InfluxBridge AlertEngine WebSocket
-                           (rumqttc)  (influxdb2)  (rusqlite)  (/ws/bms/*)
+                           MqttBridge              AlertEngine WebSocket
+                           (rumqttc)  (VictoriaMetrics2)  (rusqlite)  (/ws/bms/*)
                                │           │
                                ▼           ▼
-                          Mosquitto     InfluxDB
+                          Mosquitto     VictoriaMetrics
                                │           │
              dbus-mqtt-venus   
              com.victronenergy.battery.*
@@ -164,7 +164,7 @@ RS485 Bus 3 ──► daly-bms-ats::poll_loop()
 | Crate / Binaire | Hôte | Statut | Rôle |
 |---|---|---|---|
 | `daly-bms-core` | — | ✅ Production | Lib : protocole UART Daly, parsing trames, types (`BmsSnapshot`), polling |
-| `daly-bms-server` | Pi5 | ✅ Production | Binaire Pi5 : API Axum (REST + WebSocket) + Dashboard SSR + bridges (MQTT, InfluxDB, Alertes) |
+| `daly-bms-server` | Pi5 | ✅ Production | Binaire Pi5 : API Axum (REST + WebSocket) + Dashboard SSR + bridges (MQTT, VictoriaMetrics, Alertes) |
 | `dbus-mqtt-venus` | NanoPi | ✅ Production | Binaire NanoPi : MQTT → D-Bus Venus OS (zbus pur Rust) — tous les services `com.victronenergy.*` |
 | `daly-bms-cli` | Pi5 | ✅ Stable | Outil CLI de diagnostic et contrôle RS485 |
 | `daly-bms-probe` | Pi5 | ✅ Stable | Outil diagnostic bas niveau — trames brutes, test 3 variantes d'adressage |
@@ -186,7 +186,7 @@ Daly-BMS-Rust/
 ├── Makefile                   ← Commandes build/test/deploy/docker
 ├── Dockerfile                 ← Image Docker multi-stage (builder + runtime)
 ├── docker-compose.yml         ← Stack complète (serveur + infra)
-├── docker-compose.infra.yml   ← Infra seule (Mosquitto, InfluxDB, energy-manager)
+├── docker-compose.infra.yml   ← Infra seule (Mosquitto, VictoriaMetrics, energy-manager)
 ├── .env.docker                ← Template variables d'environnement (à copier en .env)
 ├── .env                       ← Variables secrètes Docker (gitignored)
 ├── .gitignore
@@ -217,7 +217,7 @@ Daly-BMS-Rust/
 │   │       ├── bridges/
 │   │       │   ├── mod.rs
 │   │       │   ├── mqtt.rs    ← rumqttc, topics, Venus OS payload
-│   │       │   ├── influx.rs  ← influxdb2-client, batch write
+│   │       │   ├── influx.rs  ← VictoriaMetrics2-client, batch write
 │   │       │   └── alerts.rs  ← AlertEngine, SQLite, Telegram/SMTP (Todo)
 │   │       └── dashboard/
 │   │           ├── mod.rs     ← Routes /dashboard, templates Askama
@@ -269,7 +269,7 @@ Daly-BMS-Rust/
 |----------------------------|-------------|-----------------|
 | daly-bms-server (Rust)     | ~25 MB      | ~50 MB          |
 | Mosquitto                  | ~12 MB      | ~20 MB          |
-| InfluxDB 2.x (Go)          | ~200 MB     | ~350 MB         |
+| VictoriaMetrics 2.x (Go)   | ~150 MB     | ~350 MB         |
 | energy-manager (Node.js)         | ~150 MB     | ~250 MB         |
 | OS Raspberry Pi OS Lite    | ~150 MB     | ~200 MB         |
 | Docker Engine + overhead   | ~100 MB     | ~150 MB         |
@@ -291,7 +291,7 @@ Daly-BMS-Rust/
 | Composant | Version | Usage |
 |-----------|---------|-------|
 | Rust      | 1.80+   | Compilation |
-| Docker    | 24+     | Infra (MQTT, InfluxDB) |
+| Docker    | 24+     | Infra MQTT |
 | Docker Compose v2 | — | `make up` |
 | cross     | dernière | Cross-compilation ARM (optionnel) |
 
@@ -334,7 +334,7 @@ make run-simulate
 
 ```bash
 cp .env.docker .env            # adapter les tokens et mots de passe
-make up                        # Mosquitto:1883 InfluxDB:8086 energy-manager:8081
+make up                        # Mosquitto:1883 VictoriaMetrics:8428 energy-manager
 make ps                        # vérifier l'état des containers
 ```
 
@@ -354,7 +354,7 @@ make run-debug
 
 # Production sur le Pi (cross-compile)
 make build-arm
-make deploy PI_HOST=pi@192.168.1.100
+make deploy PI_HOST=pi@192.168.1.141
 ```
 
 ### Service systemd (Linux/RPi5)
@@ -472,7 +472,7 @@ make restart       # Redémarrer les containers
 make ps            # État des containers
 make logs          # Logs de tous les containers (follow)
 make reset         # Arrêter + supprimer volumes + redémarrer (reset complet)
-make reset-influx  # Purger uniquement les données InfluxDB
+make reset-influx  # Purger uniquement les données VictoriaMetrics
 
 make build         # Compiler (release, local)
 make build-arm     # Cross-compiler pour aarch64 (RPi)
@@ -502,8 +502,8 @@ Tous les containers utilisent le driver `json-file` avec rotation automatique :
 |---------|-----------|---------|
 | dalybms-server | 20 Mo | 5 fichiers |
 | Mosquitto | 10 Mo | 3 fichiers |
-| InfluxDB | 10 Mo | 3 fichiers |
-| energy-manager | 10 Mo | 3 fichiers |
+| VictoriaMetrics | 10 Mo | 3 fichiers |
+| energy-manager | 5 Mo | 3 fichiers |
 
 ```bash
 # Voir les logs en temps réel
@@ -511,7 +511,7 @@ make logs
 
 # Logs d'un service spécifique
 docker logs dalybms-server -f --tail 100
-docker logs dalybms-influxdb -f --tail 100
+docker logs dalybms-VictoriaMetrics -f --tail 100
 docker logs dalybms-mosquitto -f --tail 100
 
 # Taille des fichiers log Docker
@@ -540,28 +540,15 @@ sudo journalctl --vacuum-time=7d
 sudo journalctl --vacuum-size=100M
 ```
 
-### Rétention des données InfluxDB
+### Rétention des données VictoriaMetrics
 
 Par défaut : **30 jours** (720h), configurable dans `.env` :
 
 ```bash
 # Dans .env
-DOCKER_INFLUXDB_INIT_RETENTION=720h    # 30 jours (défaut)
-# DOCKER_INFLUXDB_INIT_RETENTION=2160h  # 90 jours
-# DOCKER_INFLUXDB_INIT_RETENTION=0      # Infini (déconseillé sur SD/eMMC)
-```
-
-```bash
-# Purger uniquement les données InfluxDB (garde la configuration)
-make reset-influx
-
-# Vérifier l'espace disque utilisé par InfluxDB
-docker exec dalybms-influxdb du -sh /var/lib/influxdb2/
-
-# Interroger InfluxDB directement
-docker exec dalybms-influxdb influx query \
-  'from(bucket:"daly_bms") |> range(start: -5m) |> limit(n:5)' \
-  --org santuario
+DOCKER_VictoriaMetrics_INIT_RETENTION=720h    # 30 jours (défaut)
+# DOCKER_VictoriaMetrics_INIT_RETENTION=2160h  # 90 jours
+# DOCKER_VictoriaMetrics_INIT_RETENTION=0      # Infini (déconseillé sur SD/eMMC)
 ```
 
 ### Nettoyage complet (reset usine)
@@ -569,9 +556,6 @@ docker exec dalybms-influxdb influx query \
 ```bash
 # Arrêter tout + supprimer tous les volumes (DONNÉES PERDUES)
 make reset
-
-# Reset uniquement InfluxDB ( MQTT…)
-make reset-influx
 
 # Nettoyer les images Docker inutilisées
 docker system prune -f
@@ -581,7 +565,7 @@ docker system prune -a --volumes
 ```
 
 > **Note RPi/eMMC** : Sur Raspberry Pi avec carte SD ou eMMC, surveiller l'espace disque.
-> InfluxDB peut écrire ~50–200 Mo/jour selon la fréquence de polling et le nombre de BMS.
+> VictoriaMetrics peut écrire ~50–200 Mo/jour selon la fréquence de polling et le nombre de BMS.
 > La rétention 30j = environ 1,5–6 Go max.
 
 ---
@@ -607,7 +591,7 @@ cargo run --bin daly-bms-server -- --simulate --sim-bms 0x01,0x02
 - Équilibrage : activé automatiquement quand delta > 10 mV
 - Alarmes : déclenchées sur seuils SOC/delta
 
-Le simulateur alimente les mêmes bridges que le hardware réel : **MQTT, InfluxDB, AlertEngine, WebSocket, Dashboard**.
+Le simulateur alimente les mêmes bridges que le hardware réel : **MQTT, VictoriaMetrics, AlertEngine, WebSocket, Dashboard**.
 
 ---
 
@@ -685,8 +669,8 @@ curl http://localhost:8080/api/v1/system/status | jq
 # Test WebSocket
 wscat -c ws://localhost:8080/ws/bms/stream
 
-# Vérifier les données InfluxDB (5 dernières minutes)
-docker exec dalybms-influxdb influx query \
+# Vérifier les données VictoriaMetrics (5 dernières minutes)
+docker exec dalybms-VictoriaMetrics influx query \
   'from(bucket:"daly_bms") |> range(start: -5m) |> limit(n:3)' \
   --org santuario
 
@@ -702,21 +686,21 @@ docker compose -f docker-compose.infra.yml ps
 
 # Redémarrer un container spécifique
 docker compose -f docker-compose.infra.yml restart grafana
-docker compose -f docker-compose.infra.yml restart dalybms-influxdb
+docker compose -f docker-compose.infra.yml restart dalybms-VictoriaMetrics
 ```
 
 ---
 
-## Configuration InfluxDB
+## Configuration VictoriaMetrics
 
 ### Accès initial
 
 | Service | URL | Identifiants par défaut |
 |---------|-----|------------------------|
-| InfluxDB | `http://RPi5:8086` | admin / voir `.env` |
+| VictoriaMetrics | `http://RPi5:8428` | admin / voir `.env` |
 | energy-manager | `http://RPi5:8081` | aucun (à sécuriser si exposé) |
 
-> **Après un `make reset`** : utiliser l'URL de base sans chemin (ex. `http://192.168.1.141:8086`).
+> **Après un `make reset`** : utiliser l'URL de base sans chemin (ex. `http://192.168.1.141:8428`).
 > L'ancien org ID dans l'URL bookmarkée devient invalide — se reconnecter depuis la page d'accueil.
 
 
@@ -741,13 +725,13 @@ Il affiche pour chaque BMS :
 - [x] Protocole UART + checksum + tests unitaires
 - [x] API Axum (toutes les routes définies)
 - [x] AppState + ring buffer + broadcast WebSocket
-- [x] Bridges (MQTT, InfluxDB, AlertEngine)
+- [x] Bridges (MQTT, VictoriaMetrics, AlertEngine)
 - [x] CLI (clap, toutes les commandes)
 - [x] Outil probe (diagnostic bas niveau)
 
 ### Phase 1 — Infrastructure & Intégration ✅
 
-- [x] Infrastructure Docker (Mosquitto, InfluxDB, energy-manager)
+- [x] Infrastructure Docker (Mosquitto, VictoriaMetrics, energy-manager)
 - [x] Docker complet (Dockerfile + docker-compose.yml stack complète)
 - [x] Simulateur BMS avec physique LiFePO4 (validé Windows + Linux)
 - [x] Auto-détection port série et adresses BMS
@@ -759,10 +743,10 @@ Il affiche pour chaque BMS :
 
 ### Phase 2 — Production RPi5 ✅
 
-- [x] RPi5 CM opérationnel — données BMS 0x01 et 0x02 confirmées dans InfluxDB
+- [x] RPi5 CM opérationnel — données BMS 0x01 et 0x02 confirmées dans VictoriaMetrics
 - [x] Dashboard Grafana fonctionnel en production (17 mars 2026)
 - [x] Correction adresses BMS (0x28/0x29 → 0x01/0x02)
-- [x] Rotation logs Docker configurée + rétention InfluxDB 30j
+- [x] Rotation logs Docker configurée + rétention VictoriaMetrics 30j
 - [ ] Validation commandes d'écriture (MOS, SOC, reset) sur hardware réel
 - [ ] Tests intégration 24h stabilité
 
