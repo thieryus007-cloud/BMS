@@ -1,7 +1,7 @@
 [Unit]
 Description=z8run — Moteur de workflow visuel (alternative Node-RED)
 Documentation=https://github.com/z8run/z8run
-After=network-online.target mosquitto.service
+After=network-online.target mosquitto.service nginx.service
 Wants=network-online.target
 
 [Service]

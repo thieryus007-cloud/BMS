@@ -2,9 +2,14 @@
 # =============================================================================
 # install-z8run.sh — Installation de z8run sur Pi5
 #
+# Architecture :
+#   nginx :7700 (public)  → sert frontend/dist/ + proxifie vers z8run :7701
+#   z8run :7701 (interne) → API REST/WS uniquement
+#
 # Prérequis :
 #   - Rust 1.91+ (rustup)
-#   - Node.js 22+ (nvm ou apt)
+#   - Node.js 22+ (installé automatiquement si absent)
+#   - nginx (sudo apt install nginx)
 #   - Source clonée dans ~/z8run
 #
 # Usage (sur le Pi5) :
@@ -22,6 +27,8 @@ Z8RUN_SRC="${REAL_HOME}/z8run"
 BINARY_DEST="/usr/local/bin/z8run"
 SERVICE_SRC="$(dirname "$0")/z8run.service"
 SERVICE_DEST="/etc/systemd/system/z8run.service"
+NGINX_CONF_SRC="$(dirname "$0")/nginx-z8run.conf"
+NGINX_CONF_DEST="/etc/nginx/sites-available/z8run"
 ENV_DIR="/etc/z8run"
 ENV_FILE="${ENV_DIR}/.env"
 DATA_DIR="/var/lib/z8run"
@@ -51,14 +58,22 @@ else
     echo "→ Node.js $(node --version) OK"
 fi
 
-# ── Build ─────────────────────────────────────────────────────────────────────
+# ── nginx ─────────────────────────────────────────────────────────────────────
+
+if ! command -v nginx &>/dev/null; then
+    echo "→ Installation de nginx…"
+    apt-get install -y nginx
+fi
+
+# ── Build frontend React ──────────────────────────────────────────────────────
 
 echo "→ Build frontend React (npm install + npm run build)…"
 sudo -u "$REAL_USER" bash -l -c "cd '$Z8RUN_SRC/frontend' && npm install && npm run build"
 
-echo "→ Build z8run en release (Rust embarque le frontend)…"
-# touch build.rs pour forcer cargo à re-embarquer le frontend même si le cache est valide
-sudo -u "$REAL_USER" bash -l -c "touch '$Z8RUN_SRC/build.rs' && cd '$Z8RUN_SRC' && cargo build --release"
+# ── Build Rust ────────────────────────────────────────────────────────────────
+
+echo "→ Build z8run backend en release…"
+sudo -u "$REAL_USER" bash -l -c "touch '$Z8RUN_SRC/build.rs' 2>/dev/null; cd '$Z8RUN_SRC' && cargo build --release"
 
 BINARY_SRC="${Z8RUN_SRC}/target/release/z8run"
 if [[ ! -f "$BINARY_SRC" ]]; then
@@ -82,44 +97,59 @@ if [[ ! -f "$ENV_FILE" ]]; then
     echo "→ Génération du fichier .env"
     JWT_SECRET=$(openssl rand -hex 32)
     cat > "$ENV_FILE" <<EOF
-Z8_PORT=7700
-Z8_BIND=0.0.0.0
+# z8run écoute sur 7701 (interne) — nginx proxifie sur 7700 (public)
+Z8_PORT=7701
+Z8_BIND=127.0.0.1
 Z8_DATA_DIR=${DATA_DIR}
-# SQLite embarqué par défaut — remplacer par postgres:// si besoin
-# Z8_DB_URL=sqlite://${DATA_DIR}/z8run.db
 Z8_JWT_SECRET=${JWT_SECRET}
 EOF
     chmod 600 "$ENV_FILE"
-    echo "→ .env généré avec JWT_SECRET aléatoire"
+    echo "→ .env généré"
 else
-    echo "→ .env existant conservé : $ENV_FILE"
+    # Mettre à jour le port si nécessaire
+    sed -i 's/^Z8_PORT=7700/Z8_PORT=7701/' "$ENV_FILE"
+    sed -i 's/^Z8_BIND=0\.0\.0\.0/Z8_BIND=127.0.0.1/' "$ENV_FILE"
+    echo "→ .env existant mis à jour (port 7701, bind 127.0.0.1)"
 fi
 
-# ── Service systemd ───────────────────────────────────────────────────────────
+# ── Service systemd z8run ─────────────────────────────────────────────────────
 
-echo "→ Installation du service systemd"
+echo "→ Installation du service systemd z8run"
 cp "$SERVICE_SRC" "$SERVICE_DEST"
 chmod 644 "$SERVICE_DEST"
-
 systemctl daemon-reload
 systemctl enable z8run
 systemctl restart z8run
 
-# ── Firewall ──────────────────────────────────────────────────────────────────
+# ── Config nginx ──────────────────────────────────────────────────────────────
 
-if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
-    echo "→ Ouverture port 7700 dans UFW"
-    ufw allow 7700/tcp
+echo "→ Installation de la config nginx"
+cp "$NGINX_CONF_SRC" "$NGINX_CONF_DEST"
+ln -sf "$NGINX_CONF_DEST" /etc/nginx/sites-enabled/z8run
+
+# Désactiver le site default si présent (évite conflit de port)
+if [[ -L /etc/nginx/sites-enabled/default ]]; then
+    rm -f /etc/nginx/sites-enabled/default
+    echo "→ Site nginx 'default' désactivé"
 fi
 
-sleep 2
+nginx -t
+systemctl enable nginx
+systemctl restart nginx
 
 # ── Résultat ─────────────────────────────────────────────────────────────────
 
+sleep 2
 echo ""
-systemctl status z8run --no-pager -l
+echo "=== z8run backend ==="
+systemctl status z8run --no-pager -l | head -20
+echo ""
+echo "=== nginx ==="
+systemctl status nginx --no-pager -l | head -10
 echo ""
 echo "Installation terminée."
 echo "  UI z8run  : http://192.168.1.141:7700"
-echo "  Logs      : journalctl -u z8run -f"
+echo "  API santé : curl http://localhost:7701/api/v1/health"
+echo "  Logs z8run: journalctl -u z8run -f"
+echo "  Logs nginx: tail -f /var/log/nginx/z8run_error.log"
 echo "  Config env: sudo nano $ENV_FILE"

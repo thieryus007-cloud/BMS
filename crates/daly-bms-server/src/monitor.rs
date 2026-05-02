@@ -21,7 +21,7 @@ use tracing::{info, warn};
 const TCP_SERVICES: &[(&str, &str, u16, Option<&str>)] = &[
     ("mosquitto",      "127.0.0.1",     1883, Some("mosquitto")),
     ("energy-manager", "127.0.0.1",     8081, None),
-    ("z8run",          "127.0.0.1",     7700, None),
+    ("z8run",          "127.0.0.1",     7701, None),
     ("venus-mqtt",     "192.168.1.120", 1883, None),
 ];
 
