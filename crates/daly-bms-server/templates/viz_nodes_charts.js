@@ -1,6 +1,6 @@
 // ── SPIRAL RACE NODE ──────────────────────────────────────────────────────────
 // 3 anneaux concentriques plein-cercle animés :
-//   anneau extérieur = Production journalière (kWh, max 18)
+//   anneau extérieur = Production journalière (kWh, max 40)
 //   anneau milieu    = SOC batteries (%, max 100)
 //   anneau intérieur = Irradiance instantanée (W/m², max 1200)
 const SpiralRaceNode = function SpiralRaceNode({ data }) {
