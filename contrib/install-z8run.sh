@@ -25,7 +25,6 @@ SERVICE_DEST="/etc/systemd/system/z8run.service"
 ENV_DIR="/etc/z8run"
 ENV_FILE="${ENV_DIR}/.env"
 DATA_DIR="/var/lib/z8run"
-USER="pi5compute"
 
 # ── Vérifications ─────────────────────────────────────────────────────────────
 
@@ -43,8 +42,8 @@ fi
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 echo "→ Build z8run en release (sur Pi5, ~10-20 min première fois)…"
-cd "$Z8RUN_SRC"
-sudo -u "$USER" cargo build --release
+# Utiliser un shell login pour avoir ~/.cargo/bin dans le PATH (rustup)
+sudo -u "$REAL_USER" bash -l -c "cd '$Z8RUN_SRC' && cargo build --release"
 
 BINARY_SRC="${Z8RUN_SRC}/target/release/z8run"
 if [[ ! -f "$BINARY_SRC" ]]; then
@@ -61,7 +60,7 @@ install -m 755 -o root -g root "$BINARY_SRC" "$BINARY_DEST"
 
 echo "→ Création des répertoires"
 mkdir -p "$DATA_DIR" "$ENV_DIR"
-chown "$USER:$USER" "$DATA_DIR"
+chown "$REAL_USER:$REAL_USER" "$DATA_DIR"
 chmod 750 "$DATA_DIR"
 
 if [[ ! -f "$ENV_FILE" ]]; then
