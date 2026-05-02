@@ -57,8 +57,8 @@ echo "→ Build frontend React (npm install + npm run build)…"
 sudo -u "$REAL_USER" bash -l -c "cd '$Z8RUN_SRC/frontend' && npm install && npm run build"
 
 echo "→ Build z8run en release (Rust embarque le frontend)…"
-# Shell login pour avoir ~/.cargo/bin dans le PATH (rustup)
-sudo -u "$REAL_USER" bash -l -c "cd '$Z8RUN_SRC' && cargo build --release"
+# touch build.rs pour forcer cargo à re-embarquer le frontend même si le cache est valide
+sudo -u "$REAL_USER" bash -l -c "touch '$Z8RUN_SRC/build.rs' && cd '$Z8RUN_SRC' && cargo build --release"
 
 BINARY_SRC="${Z8RUN_SRC}/target/release/z8run"
 if [[ ! -f "$BINARY_SRC" ]]; then
@@ -107,7 +107,7 @@ systemctl restart z8run
 
 # ── Firewall ──────────────────────────────────────────────────────────────────
 
-if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
+if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
     echo "→ Ouverture port 7700 dans UFW"
     ufw allow 7700/tcp
 fi
