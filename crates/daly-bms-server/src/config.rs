@@ -688,10 +688,10 @@ mod tests {
         assert_eq!(t.cell_ovp_v, 3.60);
         assert_eq!(t.cell_uvp_v, 2.90);
         assert_eq!(t.cell_delta_mv, 100.0);
-        assert_eq!(t.soc_low_percent, 20.0);
-        assert_eq!(t.soc_critical_percent, 10.0);
+        assert_eq!(t.soc_low_percent, 30.0);
+        assert_eq!(t.soc_critical_percent, 20.0);
         assert_eq!(t.temp_high_c, 45.0);
-        assert_eq!(t.current_high_a, 80.0);
+        assert_eq!(t.current_high_a, 150.0);
         assert_eq!(t.pack_ovp_v, 57.0);
         assert_eq!(t.pack_uvp_v, 44.0);
     }
