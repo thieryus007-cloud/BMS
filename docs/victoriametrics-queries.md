@@ -9,7 +9,7 @@ Pour convertir une courbe d’intensité (en Ampères) en une charge totale en A
 Voici la commande PromQL complète, à exécuter via l’API REST depuis la ligne de commande avec curl. Cette requête simule une intégration sur les 6 dernières heures et convertit le résultat en Ampères-heures.
 
 ```bash
-curl 'http://192.168.1.141:8428/api/v1/query_range?query=integrate(metric_current_amperes[6h])/3600&start=-6h&end=now&step=1m' --get
+curl 'http://192.168.1.141:8428/api/v1/query_range?query=integrate(venus_shunt_current_a[6h])/3600&start=-6h&end=now&step=1m' --get
 ```
 
 🧮 Synthèse de la requête
