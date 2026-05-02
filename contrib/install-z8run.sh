@@ -14,7 +14,11 @@
 
 set -euo pipefail
 
-Z8RUN_SRC="${HOME}/z8run"
+# Résoudre le home de l'utilisateur réel même sous sudo
+REAL_USER="${SUDO_USER:-${USER}}"
+REAL_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+
+Z8RUN_SRC="${REAL_HOME}/z8run"
 BINARY_DEST="/usr/local/bin/z8run"
 SERVICE_SRC="$(dirname "$0")/z8run.service"
 SERVICE_DEST="/etc/systemd/system/z8run.service"
