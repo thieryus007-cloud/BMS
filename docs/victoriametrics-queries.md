@@ -9,7 +9,26 @@ Pour convertir une courbe d’intensité (en Ampères) en une charge totale en A
 Voici la commande PromQL complète, à exécuter via l’API REST depuis la ligne de commande avec curl. Cette requête simule une intégration sur les 6 dernières heures et convertit le résultat en Ampères-heures.
 
 ```bash
-curl 'http://192.168.1.141:8428/api/v1/query_range?query=integrate(venus_shunt_current_a[6h])/3600&start=-6h&end=now&step=1m' --get
+curl -s "http://192.168.1.141:8428/api/v1/query" \
+  --data-urlencode "query=-avg_over_time(clamp_max(venus_shunt_current_a,0)[2h])*2" \
+  | jq -r '.data.result[0].value[1]'
+# → Affiche : 11.950000127156335
+
+http://192.168.1.141:8428/api/v1/query?query=-avg_over_time(clamp_max(venus_shunt_current_a,0)[2h])*2
+
+http://192.168.1.141:8428/api/v1/query?query=-avg_over_time(clamp_max(venus_shunt_current_a,0)[10h])*10
+
+# 🔋 Ah chargés (24h)
+curl -s "http://192.168.1.141:8428/api/v1/query" \
+  --data-urlencode "query=-avg_over_time(clamp_max(venus_shunt_current_a,0)[24h])*24"
+
+# 🔌 Ah déchargés (24h)
+curl -s "http://192.168.1.141:8428/api/v1/query" \
+  --data-urlencode "query=avg_over_time(clamp_min(venus_shunt_current_a,0)[24h])*24"
+
+# ⚖️ Ah nets (24h)
+curl -s "http://192.168.1.141:8428/api/v1/query" \
+  --data-urlencode "query=avg_over_time(venus_shunt_current_a[24h])*24"
 ```
 
 🧮 Synthèse de la requête
