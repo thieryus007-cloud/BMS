@@ -249,13 +249,16 @@ check:
 # Installation (systemd)
 # =============================================================================
 
-.PHONY: install uninstall
+.PHONY: install uninstall install-z8run
 
 install: build
 	sudo bash contrib/install-systemd.sh
 
 uninstall:
 	sudo bash contrib/uninstall-systemd.sh
+
+install-z8run:
+	sudo bash contrib/install-z8run.sh
 
 # =============================================================================
 # Cross-compile + déploiement SSH vers le Pi
@@ -379,7 +382,8 @@ help:
 	@echo "  make check           Check + fmt + lint"
 	@echo ""
 	@echo " Déploiement :"
-	@echo "  make install         Installer le service systemd"
+	@echo "  make install         Installer le service systemd daly-bms"
+	@echo "  make install-z8run   Installer z8run (build + service systemd, sur Pi5)"
 	@echo "  make deploy          Déployer sur pi5compute@192.168.1.141 [gnu]"
 	@echo "  make deploy-musl     Déployer binaire statique portable [musl]"
 	@echo "  make install-venus   Déployer dbus-mqtt-venus sur GX (ARM64)"
