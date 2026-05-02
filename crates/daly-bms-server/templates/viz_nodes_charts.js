@@ -2,7 +2,7 @@
 // 3 anneaux concentriques plein-cercle animés :
 //   anneau extérieur = Production journalière (kWh, max 18)
 //   anneau milieu    = SOC batteries (%, max 100)
-//   anneau intérieur = Irradiance instantanée (W/m², max 900)
+//   anneau intérieur = Irradiance instantanée (W/m², max 1200)
 const SpiralRaceNode = function SpiralRaceNode({ data }) {
   const chartRef = useRef(null);
   const instRef  = useRef(null);
@@ -68,7 +68,7 @@ const SpiralRaceNode = function SpiralRaceNode({ data }) {
       series: [
         mkGauge('88%',  40,   prodKwh, '#fbbf24', 'Production', 'kWh',  '78%', '90%'),
         mkGauge('65%', 100,   soc,     socCol,    'SOC',        '%',    '48%', '60%'),
-        mkGauge('42%', 2000,  irrWm2,  '#38bdf8', 'Irradiance', 'W/m²', '18%', '30%'),
+        mkGauge('42%', 1200,  irrWm2,  '#38bdf8', 'Irradiance', 'W/m²', '18%', '30%'),
         // Tick marks radiaux fins traversant les 3 anneaux sans atteindre le centre
         {
           type: 'gauge', radius: '88%',
