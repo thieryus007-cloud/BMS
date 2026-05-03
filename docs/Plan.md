@@ -16,7 +16,7 @@
 5. [Structures de données](#5-structures-de-données)
 6. [Plan d'implémentation par phases](#6-plan-dimplémentation-par-phases)
 7. [API REST et WebSocket](#7-api-rest-et-websocket)
-8. [Bridges (MQTT, InfluxDB, Alertes)](#8-bridges-mqtt-influxdb-alertes)
+8. [Bridges (MQTT, Alertes)](#8-bridges-mqtt-alertes)
 9. [Tests et validation](#9-tests-et-validation)
 10. [Déploiement et opérations](#10-déploiement-et-opérations)
 
@@ -28,7 +28,7 @@
 
 Réécrire **entièrement** le projet Python Daly-BMS en Rust, en conservant :
 - **100% des fonctionnalités** du projet Python (protocole, API, bridges, alertes)
-- **La même infrastructure Docker** (Mosquitto, InfluxDB, energy-manager)
+- **La même infrastructure Docker** (Mosquitto, energy-manager)
 - **Le même dashboard React** (WebSocket compatible)
 - **La même intégration Venus OS** (dbus-mqtt-battery via MQTT)
 
@@ -62,7 +62,7 @@ Réécrire **entièrement** le projet Python Daly-BMS en Rust, en conservant :
     ├── Axum 0.7            HTTP server (API REST + WebSocket)
     ├── Tower               Middleware (CORS, rate-limit, auth)
     ├── rumqttc 0.24        Client MQTT asynchrone
-    ├── influxdb2 0.5       Client InfluxDB v2
+    ├── influxdb2 0.5       Client
     ├── rusqlite 0.31       SQLite (journal alertes) — bundled
     ├── reqwest 0.12        HTTP client (Telegram notifications)
     └── lettre 0.11         Email SMTP
@@ -82,7 +82,7 @@ Réécrire **entièrement** le projet Python Daly-BMS en Rust, en conservant :
 Thread principal (Tokio runtime)
 ├── Tâche poll_loop()       → tokio::spawn (polling RS485)
 ├── Tâche MQTT bridge       → tokio::spawn (interval 5s)
-├── Tâche InfluxDB bridge   → tokio::spawn (batch flush)
+├── 
 ├── Tâche AlertEngine       → tokio::spawn (rx broadcast)
 └── Axum serve()            → listeners HTTP/WS
 
@@ -282,7 +282,7 @@ pub struct BmsSnapshot {
 **Durée** : 30 min
 
 ```bash
-make up     # Mosquitto:1883 InfluxDB:8086 energy-manager:8081
+make up     # Mosquitto:1883 energy-manager:8081
 make ps     # vérifier
 ```
 
@@ -296,7 +296,7 @@ make ps     # vérifier
 - **Activation** : `--simulate` ou `--simulate --sim-bms 0x28,0x29`
 - **Physique LiFePO4** : SOC, tension OCV, courant, température, déséquilibre cellules, équilibrage
 - **Validé sur Windows 10/11 et Linux x86_64**
-- Alimente tous les bridges (MQTT, InfluxDB, AlertEngine, WebSocket, Dashboard)
+- Alimente tous les bridges (MQTT, AlertEngine, WebSocket, Dashboard)
 
 #### Dashboard SSR intégré
 
@@ -365,19 +365,6 @@ Trame correcte : A5 40 90 08 00 00 00 00 00 00 00 00 7D
 bind = "0.0.0.0:8080"
 ```
 
-#### Correction — UID datasource (17 mars 2026)
-
-**Bug** : Le fichier `grafana/provisioning/datasources/influxdb.yaml` déclarait
-`uid: influxdb-dalybms-flux` mais les **33 panels** du dashboard utilisaient
-`uid: influxdb-dalybms` → tous les panels affichaient "Datasource not found".
-
-**Fix** : Aligner le UID dans le YAML sur celui utilisé par le dashboard :
-```yaml
-# Avant (cassé)
-uid: influxdb-dalybms-flux
-
-# Après (correct)
-uid: influxdb-dalybms
 ```
 
 ```
@@ -433,7 +420,6 @@ Services démarrés avec `docker compose -f docker-compose.infra.yml up -d` :
 | Service | Port | URL |
 |---------|------|-----|
 | Mosquitto MQTT | 1883 | mqtt://localhost:1883 |
-| InfluxDB 2.7 | 8086 | http://localhost:8086 |
 | energy-manager | 8081 | http://localhost:8081 |
 
 Serveur Rust (natif, hors Docker) :
@@ -444,59 +430,6 @@ Serveur Rust (natif, hors Docker) :
 | Dashboard SSR | 8080 | http://localhost:8080/dashboard |
 
 ---
-
-### Phase 1.8 — Reset base InfluxDB (données parasites 0x28/0x29) ✅ COMPLÉTÉ (17 mars 2026)
-
-#### Problème observé
-
-Grafana affichait 4 BMS (0x01, 0x02, 0x28, 0x29) alors que seuls 0x01 et 0x02 sont connectés.
-Les adresses 0x28/0x29 correspondent aux anciennes adresses RS485 utilisées pendant la phase NanoPi.
-Ces données résiduelles polluaient tous les panels Grafana.
-
-#### Solution : repartir avec une base InfluxDB vierge
-
-Le token est **conservé** car `DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}` est dans
-`docker-compose.infra.yml` — InfluxDB se réinitialise avec le même token au redémarrage.
-
-**Commandes sur le RPi5 :**
-```bash
-cd ~/Daly-BMS-Rust
-
-# Option 1 — Reset InfluxDB uniquement (Grafana et energy-manager conservés)
-make reset-influx
-
-# Option 2 — Reset complet (tout efface, tout recrée proprement)
-make reset
-make up
-```
-
-**Vérification après reset :**
-```bash
-# Attendre ~15 secondes que InfluxDB démarre
-docker logs dalybms-influxdb --tail 20
-
-# Relancer le serveur Rust pour qu'il recommence à écrire
-sudo systemctl restart daly-bms    # si installé en service systemd
-```
-
-Grafana affichera uniquement 0x01 et 0x02 dès les premières données reçues (< 5 secondes).
-
-#### Makefile — cibles disponibles
-
-| Commande | Effet |
-|---|---|
-| `make up` | Démarre toute l'infra Docker |
-| `make down` | Arrête les containers (volumes conservés) |
-| `make reset-influx` | Supprime uniquement le volume InfluxDB, redémarre |
-| `make reset` | Supprime TOUS les volumes (InfluxDB + energy-manager) |
-| `make logs` | Suit les logs de tous les containers |
-| `make ps` | État des containers |
-
----
-
-### Phase 2 — Validation hardware réel (PROCHAINE ÉTAPE — RPi5 + BMS physiques)
-
-**Durée estimée** : 3–5 jours | **Prérequis** : Matériel BMS physique
 
 #### 2.1 Préparation matérielle
 ```bash
@@ -576,10 +509,6 @@ mosquitto_sub -h localhost -t "santuario/bms/#" -v
 # Attendre : santuario/bms/1/soc → 56.4
 ```
 
-#### InfluxDB
-```bash
-# http://localhost:8086
-# Query : from(bucket:"daly_bms") |> range(start:-1h) |> filter(fn:(r) => r._measurement == "bms_status")
 ```
 
 #### Alertes
@@ -678,7 +607,7 @@ Format `{id}` accepté : `"0x01"`, `"1"`, `"01"`.
 
 ---
 
-## 8. Bridges (MQTT, InfluxDB, Alertes)
+## 8. Bridges (MQTT, Alertes)
 
 ### MQTT — Topics publiés
 
@@ -692,13 +621,6 @@ Format `{id}` accepté : `"0x01"`, `"1"`, `"01"`.
 {prefix}/{addr}/alarms        → JSON alarmes
 {prefix}/{addr}/venus         → JSON dbus-mqtt-battery (retain=true)
 ```
-
-### InfluxDB — Measurements
-
-| Measurement | Tags | Champs principaux |
-|-------------|------|------------------|
-| `bms_status` | `address` | soc, voltage, current, power, temp_max, cell_delta_mv, any_alarm |
-| `bms_cell_voltage` | `address`, `cell` | voltage |
 
 ### AlertEngine — Règles avec hysteresis
 
@@ -739,7 +661,7 @@ cargo test -p daly-bms-core
 - [ ] API : `curl http://localhost:8000/api/v1/system/status`
 - [ ] WebSocket : `wscat -c ws://localhost:8000/ws/bms/stream`
 - [ ] MQTT : `mosquitto_sub -h localhost -t 'santuario/bms/#' -v`
-- [ ] InfluxDB : données visibles dans le dashboard
+- [ ] Victoriametrics : données visibles dans le dashboard
 - [ ] Alertes : SQLite créé et journal fonctionnel
 - [ ] Service systemd actif et démarrage auto
 - [ ] Stabilité 24h validée
