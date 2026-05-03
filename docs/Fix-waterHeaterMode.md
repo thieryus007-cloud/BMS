@@ -1,23 +1,23 @@
 # Rules:
-Si les trois conditions sont réunies, **alors** POST mode: "HEAT_PUMP".
-  1- On se trouve en mode Offgrid: AC IN ingnore Actif
-  2- Le SOC est supérieure à 90%
-  3- l'irradiance est superieure à 300 w/m2
-  >> Sinon alors POST mode: "VACATION".  
+Si les trois conditions sont réunies, **alors** POST mode: "HEAT_PUMP".  
+  1- On se trouve en mode Offgrid: AC IN ingnore Actif.  
+  2- Le SOC est supérieure à 90%.  
+  3- l'irradiance est superieure à 300 w/m2.  
+  >> Sinon alors POST mode: "VACATION".    
 
-Attention respécter la notation LG: 'HEAT_PUMP', 'TURBO', 'VACATION' 
+Attention respécter la notation LG: 'HEAT_PUMP', 'TURBO', 'VACATION' .  
 ---
 
-# 🧾 🧠 PR — Fix reliable mode switching for LG ThinQ water heater
+# 🧾 🧠 PR — Fix reliable mode switching for LG ThinQ water heater.  
 
 ## 🎯 Objectif
 
 Garantir que :
 
 * ✅ un **POST est envoyé quand nécessaire**
-* ✅ pas de spam inutile vers LG
-* ✅ comportement déterministe (indépendant d’un état local potentiellement faux)
-* ✅ robuste aux erreurs LG / reboot / désync
+* ✅ pas de spam inutile vers LG.  
+* ✅ comportement déterministe (indépendant d’un état local potentiellement faux).  
+* ✅ robuste aux erreurs LG / reboot / désync.  
 
 ---
 
