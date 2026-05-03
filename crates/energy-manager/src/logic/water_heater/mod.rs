@@ -24,9 +24,9 @@ pub async fn spawn(
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
 ) {
-    let bus2   = bus.clone();
+    let bus2 = bus.clone();
     let state2 = state.clone();
-    let cfg2   = cfg.clone();
+    let cfg2 = cfg.clone();
 
     tokio::spawn(keepalive_task(cfg.keepalive_secs, bus2, state2));
 
@@ -56,10 +56,10 @@ async fn keepalive_task(
 async fn publish_to_venus(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     let s = state.read().await;
     let payload = json!({
-        "State":             s.water_heater_mode.to_venus_state(),
-        "Temperature":       s.water_heater_temp_c,
+        "State": s.water_heater_mode.to_venus_state(),
+        "Temperature": s.water_heater_temp_c,
         "TargetTemperature": s.water_heater_target_c,
-        "Position":          0,
+        "Position": 0,
     });
     drop(s);
     bus.publish(MqttOutgoing::retained(publish::HEATPUMP_VENUS, &payload)).await;
@@ -117,14 +117,16 @@ async fn control_task(
             }
         };
 
+        // ⚠️ IMPORTANT : Le rule engine retourne "HeatPump" ou "Vacation" (PascalCase)
+        // Voir rules/water_heater.grl pour la définition exacte des sorties
         let target_mode = match target_mode_str.as_str() {
-            "HEAT_PUMP" => WaterHeaterMode::HeatPump,
-            _          => WaterHeaterMode::Vacation,
+            "HeatPump" => WaterHeaterMode::HeatPump,
+            _ => WaterHeaterMode::Vacation,
         };
 
         debug!(
             "Water heater rule engine: grid={grid_connected} soc={soc:.1}% \
-            irradiance_low={irradiance_low} → {target_mode_str}"
+             irradiance_low={irradiance_low} → {target_mode_str}"
         );
 
         // Rate limiting
@@ -155,7 +157,7 @@ async fn control_task(
         last_change = Some(now);
         {
             let mut s = state.write().await;
-            s.water_heater_mode        = target_mode;
+            s.water_heater_mode = target_mode;
             s.water_heater_last_change = Some(now);
         }
 
@@ -165,10 +167,10 @@ async fn control_task(
         let delay_secs = cfg.temp_set_delay_secs;
         let target_temp = match target_mode {
             WaterHeaterMode::HeatPump => cfg.heat_pump_target_c,
-            _                         => cfg.vacation_target_c,
+            _ => cfg.vacation_target_c,
         };
-        let lg2    = lg.clone();
-        let bus2   = bus.clone();
+        let lg2 = lg.clone();
+        let bus2 = bus.clone();
         let state2 = state.clone();
         tokio::spawn(async move {
             sleep(Duration::from_secs(delay_secs)).await;
