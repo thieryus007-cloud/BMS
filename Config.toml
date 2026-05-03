@@ -586,7 +586,7 @@ lockout_secs          = 120           # s — anti-oscillation après coupure
 
 # --- Chauffe-eau LG ThinQ ---
 [energy_manager.water_heater]
-solar_min_w           = 2000.0        # W — production min pour HEAT_PUMP
+solar_min_w           = 1000.0        # W — production min pour HEAT_PUMP
 debounce_secs         = 300           # s — 5 min avant changement de mode
 mode_change_min_secs  = 900           # s — 15 min entre deux changements
 heat_pump_target_c    = 60.0          # °C cible en HEAT_PUMP
