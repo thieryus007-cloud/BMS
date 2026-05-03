@@ -396,7 +396,7 @@ fn default_true() -> bool { true }
 // ---------------------------------------------------------------------------
 
 pub fn load() -> Result<EnergyManagerConfig> {
-    // Load .env first (secrets: LG tokens, InfluxDB token, etc.)
+    // Load .env first (secrets: LG tokens, etc.)
     dotenvy::dotenv().ok();
 
     let path = std::env::var("ENERGY_CONFIG")
