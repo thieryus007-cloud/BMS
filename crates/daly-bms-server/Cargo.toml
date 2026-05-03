@@ -1,6 +1,6 @@
 [package]
 name        = "daly-bms-server"
-description = "Serveur Axum (API REST + WebSocket) + bridges (MQTT, InfluxDB, Alertes)"
+description = "Serveur Axum (API REST + WebSocket) + bridges (MQTT, VictoriaMetrics, Alertes)"
 version.workspace   = true
 edition.workspace   = true
 authors.workspace   = true
