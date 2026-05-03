@@ -23,7 +23,7 @@ rule "WH_Cond_Grid" salience 100 no-loop {
 
 rule "WH_Cond_SOC_Low" salience 100 no-loop {
     when
-        WH.soc_pct < 95.0
+        WH.soc_pct < 90
     then
         WH.want_vacation = true;
 }
