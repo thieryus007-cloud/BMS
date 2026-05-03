@@ -217,7 +217,7 @@ Daly-BMS-Rust/
 │   │       ├── bridges/
 │   │       │   ├── mod.rs
 │   │       │   ├── mqtt.rs    ← rumqttc, topics, Venus OS payload
-│   │       │   ├── influx.rs  ← VictoriaMetrics2-client, batch write
+│   │       │   ├── victoriaMetrics  ← VictoriaMetrics2-client, batch write
 │   │       │   └── alerts.rs  ← AlertEngine, SQLite, Telegram/SMTP (Todo)
 │   │       └── dashboard/
 │   │           ├── mod.rs     ← Routes /dashboard, templates Askama
