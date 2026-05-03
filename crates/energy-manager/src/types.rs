@@ -18,7 +18,7 @@ impl MqttIncoming {
     }
 
     /// Parse `{"value": <T>}` envelope used by Victron MQTT topics.
-    pub fn victron_value<T: for<'de> Deserialize<'de>>(&self) -> Option<T> {
+    pub fn victron_value<'de, T: Deserialize<'de>>(&self) -> Option<T> {
         #[derive(Deserialize)]
         struct Wrapper<T> { value: T }
         serde_json::from_slice::<Wrapper<T>>(&self.payload)
@@ -26,7 +26,7 @@ impl MqttIncoming {
             .map(|w| w.value)
     }
 
-    pub fn json<T: for<'de> Deserialize<'de>>(&self) -> Option<T> {
+    pub fn json<'de, T: Deserialize<'de>>(&self) -> Option<T> {
         serde_json::from_slice(&self.payload).ok()
     }
 }
@@ -101,7 +101,7 @@ impl LiveEvent {
 }
 
 // ---------------------------------------------------------------------------
-// Shared application state (behind Arc<RwLock<EnergyState>>)
+// Shared application state (behind Arc<RwLock<>>)
 // ---------------------------------------------------------------------------
 // Some fields are written by logic tasks but not yet read by any consumer
 // (reserved for future API exposure). Suppress the lint globally on the struct.
@@ -125,12 +125,12 @@ pub struct EnergyState {
     pub battery_current_a: Option<f64>,
     pub battery_voltage_v: Option<f64>,
     pub battery_power_w: Option<f64>,
-    pub battery_state: Option<i64>,
+    pub battery_state: Option<String>,
     pub time_to_go_sec: Option<i64>,
 
     // --- Grid / AC ---
-    pub ac_ignore: Option<i64>,         // IgnoreAcIn1: 0=grid, 1=off-grid
-    pub ac_connected: Option<i64>,      // ActiveIn/Connected
+    pub ac_ignore: Option<i64>, // IgnoreAcIn1: 0=grid, 1=off-grid
+    pub ac_connected: Option<i64>, // ActiveIn/Connected
     pub ac_frequency_hz: Option<f64>,
 
     // --- VEBus (inverter) ---
@@ -140,7 +140,7 @@ pub struct EnergyState {
     pub ac_out_voltage_v: Option<f64>,
     pub ac_out_current_a: Option<f64>,
     pub ac_out_power_w: Option<f64>,
-    pub vebus_state: Option<i64>,
+    pub vebus_state: Option<String>,
 
     // --- Water heater (LG ThinQ) ---
     pub water_heater_mode: WaterHeaterMode,
@@ -165,8 +165,8 @@ pub struct EnergyState {
     // --- Solar production counters ---
     pub mppt_yield_today_kwh: f64,
     pub pvinv_yield_today_kwh: f64,
-    pub pvinv_baseline_kwh: Option<f64>,   // ET112 cumulative counter at start of day
-    pub pvinv_baseline_day: i32,           // day ordinal when baseline was set (reset at midnight)
+    pub pvinv_baseline_kwh: Option<f64>, // ET112 cumulative counter at start of day
+    pub pvinv_baseline_day: i32, // day ordinal when baseline was set (reset at midnight)
     pub total_yield_today_kwh: f64,
     pub yield_yesterday_kwh: f64,
 
@@ -176,15 +176,15 @@ pub struct EnergyState {
     pub tasmota_wh_energy_today_kwh: Option<f64>,
 
     // --- ATS switch ---
-    pub ats_position: i64,  // 0=réseau, 1=génératrice
-    pub ats_state: i64,     // 0=inactif, 1=actif, 2=alerte
+    pub ats_position: i64, // 0=réseau, 1=génératrice
+    pub ats_state: i64, // 0=inactif, 1=actif, 2=alerte
 
     // --- Platform backup status ---
-    pub platform_backup_status: i64,  // 0=idle, 1=running, 2=ok, 3=error
+    pub platform_backup_status: i64, // 0=idle, 1=running, 2=ok, 3=error
 
     // --- Charge current (last published) ---
     pub last_charge_current_a: Option<f64>,
-    pub last_power_assist: Option<i64>,
+    pub last_power_assist: Option<bool>,
 
     // --- SmartShunt Ah accumulators (backup: current integration, reset at midnight) ---
     pub ah_charged_today: f64,
@@ -193,12 +193,12 @@ pub struct EnergyState {
     pub ah_last_day: i32,
 
     // --- SmartShunt kWh from native History/ChargedEnergy & DischargedEnergy ---
-    pub shunt_charged_today_kwh:         f64,
-    pub shunt_discharged_today_kwh:      f64,
-    pub shunt_charged_baseline_kwh:      Option<f64>,
-    pub shunt_discharged_baseline_kwh:   Option<f64>,
-    pub shunt_charged_day:               i32,
-    pub shunt_discharged_day:            i32,
+    pub shunt_charged_today_kwh: f64,
+    pub shunt_discharged_today_kwh: f64,
+    pub shunt_charged_baseline_kwh: Option<f64>,
+    pub shunt_discharged_baseline_kwh: Option<f64>,
+    pub shunt_charged_day: i32,
+    pub shunt_discharged_day: i32,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -208,38 +208,47 @@ pub struct MpptState {
     pub pv_voltage_v: Option<f64>,
     pub dc_current_a: Option<f64>,
     pub yield_today_kwh: Option<f64>,
-    pub state: Option<i64>,
+    pub state: Option<String>,
 }
+
+// =============================================================================
+// ENUM WaterHeaterMode — CORRECTED: PascalCase variants (Rust convention)
+// =============================================================================
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WaterHeaterMode {
     #[default]
-    VACATION,
-    HEAT_PUMP,
-    TURBO,
+    Vacation,
+    HeatPump,
+    Turbo,
 }
 
 impl WaterHeaterMode {
+    /// Convertit l'enum en état Venus OS (0=Vacation, 1=HeatPump, 2=Turbo)
     pub fn to_venus_state(self) -> i64 {
         match self {
-            WaterHeaterMode::VACATION  => 0,
-            WaterHeaterMode::HEAT_PUMP  => 1,
-            WaterHeaterMode::TURBO     => 2,
+            WaterHeaterMode::Vacation => 0,
+            WaterHeaterMode::HeatPump => 1,
+            WaterHeaterMode::Turbo => 2,
         }
     }
 
+    /// Parse une chaîne LG API ("HEAT_PUMP", "TURBO", ...) en enum
+    /// Format d'entrée : SCREAMING_SNAKE_CASE (convention LG ThinQ)
     pub fn from_lg_str(s: &str) -> Self {
         match s {
             "HEAT_PUMP" => WaterHeaterMode::HeatPump,
-            "TURBO"     => WaterHeaterMode::Turbo,
-            _           => WaterHeaterMode::Vacation,
+            "TURBO" => WaterHeaterMode::Turbo,
+            _ => WaterHeaterMode::Vacation,
         }
     }
 
+    /// Convertit l'enum en chaîne LG API pour les commandes
+    /// Format de sortie : SCREAMING_SNAKE_CASE (convention LG ThinQ)
     pub fn to_lg_str(self) -> &'static str {
         match self {
             WaterHeaterMode::HeatPump => "HEAT_PUMP",
-            WaterHeaterMode::Turbo    => "TURBO",
+            WaterHeaterMode::Turbo => "TURBO",
             WaterHeaterMode::Vacation => "VACATION",
         }
     }
