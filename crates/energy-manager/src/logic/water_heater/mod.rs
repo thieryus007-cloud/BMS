@@ -117,7 +117,7 @@ async fn control_task(
             }
         };
         
-        tracing::info!("👉 CHAÎNE BRUTE REÇUE : [{}]", target_mode_str);
+        // tracing::info!("👉 CHAÎNE BRUTE REÇUE : [{}]", target_mode_str);
         
         let target_mode = match target_mode_str.as_str() {
             "HEAT_PUMP" => WaterHeaterMode::HeatPump,
