@@ -17,32 +17,14 @@ impl WaterHeaterRuleEngine {
         })
     }
 
-    /// Evaluates conditions and returns "HeatPump" or "Vacation".
-    /// HEAT_PUMP requires: SOC >= 90%, irradiance >= threshold, grid disconnected (ac_ignore=1).
+    /// ⚠️ VERSION TEST : Force "HeatPump" pour valider le pipeline Rust → LG
+    /// Remplace temporairement la logique GRL pour isoler le problème.
     pub fn evaluate(
         &mut self,
-        grid_connected: bool,
-        soc_pct: f64,
-        irradiance_low: bool,
+        _grid_connected: bool,
+        _soc_pct: f64,
+        _irradiance_low: bool,
     ) -> anyhow::Result<String> {
-        let facts = Facts::new();
-        facts.set("WH.want_vacation",  Value::Boolean(false));
-        facts.set("WH.grid_connected", Value::Boolean(grid_connected));
-        facts.set("WH.soc_pct",        Value::Number(soc_pct));
-        facts.set("WH.irradiance_low", Value::Boolean(irradiance_low));
-
-        self.engine
-            .execute(&facts)
-            .context("Water heater rule engine evaluation failed")?;
-
-        let mode = facts
-            .get("WH.target_mode")
-            .and_then(|v| match v {
-                Value::String(s) => Some(s),
-                _ => None,
-            })
-            .unwrap_or_else(|| "Vacation".to_string());
-
-        Ok(mode)
+        Ok("HeatPump".to_string())
     }
 }
