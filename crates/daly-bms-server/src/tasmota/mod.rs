@@ -1,7 +1,7 @@
 //! Module Tasmota — prises connectées WiFi avec mesure d'énergie.
 //!
 //! Reçoit les payloads MQTT natifs Tasmota (tele/.../SENSOR, stat/.../POWER)
-//! et les expose via l'API REST, le dashboard et les bridges InfluxDB/MQTT Venus.
+//! et les expose via l'API REST, le dashboard et les bridges DB/MQTT Venus.
 
 pub mod types;
 pub mod mqtt;
