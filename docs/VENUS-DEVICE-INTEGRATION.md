@@ -73,7 +73,7 @@ com.victronenergy.acload (when used as consumer to measure an acload)
 
 | Machine | IP | Rôle |
 |---|---|---|
-| Pi5 (Raspberry Pi 5) | 192.168.1.141 | Docker : Mosquitto, energy-manager, InfluxDB, Grafana |
+| Pi5 (Raspberry Pi 5) | 192.168.1.141 | Docker : Mosquitto, energy-manager |
 | NanoPi Neo3 | 192.168.1.120 | Venus OS, service Rust dbus-mqtt-venus, D-Bus |
 
 ---
@@ -176,7 +176,7 @@ Fichier : `docker/mosquitto/config/mosquitto.conf`
 ```
 topic santuario/# in 0
 ```
-Sert à InfluxDB/Grafana pour lire les données BMS.
+Sert à victoria pour lire les données BMS.
 
 ### Direction Pi5 → NanoPi (commandes energy-manager → service Rust)
 ```
