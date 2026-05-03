@@ -309,7 +309,7 @@ pub struct MonitorSnapshot {
     pub timestamp: DateTime<Utc>,
     /// Services systemd (daly-bms).
     pub services: Vec<ServiceStatus>,
-    /// Services réseau vérifiés par sonde TCP (mosquitto, influxdb, energy-manager, venus).
+    /// Services réseau vérifiés par sonde TCP (mosquitto, victoriametrics, energy-manager, venus).
     pub network_services: Vec<ServiceStatus>,
     /// Port série RS485 présent sur le système.
     pub serial_port_ok: bool,
