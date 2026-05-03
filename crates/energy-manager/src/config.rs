@@ -294,12 +294,13 @@ impl Default for DeyeConfig {
 // Water heater management
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct WaterHeaterConfig {
-    /// Minimum solar production to run water heater (W)
+    /// Kept for TOML compatibility — no longer used in rule evaluation
     #[serde(default = "default_solar_min_w")]
     pub solar_min_w: f64,
-    /// Debounce delay for unstable conditions (seconds)
+    /// Kept for TOML compatibility — no longer used in rule evaluation
     #[serde(default = "default_debounce_secs")]
     pub debounce_secs: u64,
     /// Minimum time between two mode changes (seconds)

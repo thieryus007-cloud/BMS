@@ -90,15 +90,46 @@ function MPPTGroupNode({ data }) {
 
 // ── SMARTSHUNT NODE ───────────────────────────────────────────────────────────
 function SmartShuntNode({ data }) {
-  const live       = data.live;
-  const soc        = live?.soc_percent        ?? null;
-  const voltage    = live?.voltage_v          ?? null;
-  const current    = live?.current_a          ?? null;
-  const power      = live?.power_w            ?? null;
-  const ahIn       = live?.ah_charged_today   ?? null;
-  const ahOut      = live?.ah_discharged_today ?? null;
-  const state      = live?.state              ?? null;
-  const ttgMin     = live?.time_to_go_min     ?? null;
+  const live    = data.live;
+  const soc     = live?.soc_percent    ?? null;
+  const voltage = live?.voltage_v      ?? null;
+  const current = live?.current_a      ?? null;
+  const power   = live?.power_w        ?? null;
+  const state   = live?.state          ?? null;
+  const ttgMin  = live?.time_to_go_min ?? null;
+
+  const [vmCharge,    setVmCharge]    = useState(null);
+  const [vmDischarge, setVmDischarge] = useState(null);
+
+  useEffect(function() {
+    async function fetchDailyTotals() {
+      const now = new Date();
+      const h = Math.max(1, Math.round(now.getHours() + now.getMinutes() / 60));
+      const win = h + 'h';
+      const qDis = '-avg_over_time(clamp_max(venus_shunt_current_a,0)[' + win + '])*' + h;
+      const qCha = '-avg_over_time(clamp_min(venus_shunt_current_a,0)[' + win + '])*' + h;
+      try {
+        const [rDis, rCha] = await Promise.all([
+          fetch('/api/v1/query?query=' + encodeURIComponent(qDis)).then(r => r.ok ? r.json() : null),
+          fetch('/api/v1/query?query=' + encodeURIComponent(qCha)).then(r => r.ok ? r.json() : null),
+        ]);
+        const parseVm = (resp) => {
+          if (!resp || resp.status !== 'success') return null;
+          const v = resp.data?.result?.[0]?.value?.[1];
+          if (v == null) return null;
+          const n = parseFloat(v);
+          return isNaN(n) ? null : n;
+        };
+        const dis = parseVm(rDis);
+        const cha = parseVm(rCha);
+        setVmDischarge(dis != null ? Math.abs(dis) : null);
+        setVmCharge(cha != null ? Math.abs(cha) : null);
+      } catch (_) {}
+    }
+    fetchDailyTotals();
+    const t = setInterval(fetchDailyTotals, 60000);
+    return () => clearInterval(t);
+  }, []);
 
   const stateClass = state === 'Charging' ? 'charging' : state === 'Discharging' ? 'discharging' : 'idle';
 
@@ -151,12 +182,12 @@ function SmartShuntNode({ data }) {
           h('span', { className: 'ss-row-val ttg' }, fmtTtg(ttgMin))
         ),
         h('div', { className: 'ss-row', style: { flex: '1 1 0', minWidth: 0 } },
-          h('span', { className: 'ss-row-lbl' }, '⬆ Chargée (24h)'),
-          h('span', { className: 'ss-row-val pos' }, ahIn  != null ? `${ahIn.toFixed(1)} Ah`  : '—')
+          h('span', { className: 'ss-row-lbl' }, '⬆ Chargée (auj.)'),
+          h('span', { className: 'ss-row-val pos' }, vmCharge    != null ? `${vmCharge.toFixed(1)} Ah`    : '—')
         ),
         h('div', { className: 'ss-row', style: { flex: '1 1 0', minWidth: 0 } },
-          h('span', { className: 'ss-row-lbl' }, '⬇ Déchargée (24h)'),
-          h('span', { className: 'ss-row-val neg' }, ahOut != null ? `${ahOut.toFixed(1)} Ah` : '—')
+          h('span', { className: 'ss-row-lbl' }, '⬇ Déchargée (auj.)'),
+          h('span', { className: 'ss-row-val neg' }, vmDischarge != null ? `${vmDischarge.toFixed(1)} Ah` : '—')
         )
       )
     ) : h('div', { className: 'ss-wait' }, 'En attente…')
