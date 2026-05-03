@@ -263,7 +263,7 @@ impl SimBmsState {
 /// Démarre la boucle de simulation en remplacement du polling RS485.
 ///
 /// Génère des snapshots réalistes et les injecte dans [`AppState`],
-/// déclenchant ainsi les bridges (MQTT, InfluxDB, AlertEngine) et le WebSocket.
+/// déclenchant ainsi les bridges (MQTT, VictoriaMetrics, AlertEngine) et le WebSocket.
 pub async fn run_simulator(state: AppState, cfg: AppConfig, addresses: Vec<u8>) {
     let interval_ms = cfg.serial.poll_interval_ms;
     let dt_sec = interval_ms as f32 / 1000.0;
