@@ -6,7 +6,7 @@ Référence complète pour modifier, ajouter ou supprimer une fonctionnalité du
 
 ## 1. Vue d'ensemble
 
-`energy-manager` est un binaire Rust autonome qui remplace les flows energy-manager. Il tourne en service systemd sur le Pi5 (`energy-manager.service`), écoute le broker MQTT Mosquitto, applique la logique métier, et publie sur MQTT, InfluxDB et WebSocket.
+`energy-manager` est un binaire Rust autonome qui remplace les flows energy-manager. Il tourne en service systemd sur le Pi5 (`energy-manager.service`), écoute le broker MQTT Mosquitto, applique la logique métier, et publie sur MQT et WebSocket.
 
 ### Flux de données
 
@@ -24,13 +24,13 @@ MQTT (Mosquitto :1883)
              ┌──────────┴─────────────┴──────────────────────┘
              │         │                     │
              ▼         ▼                     ▼
-     AppBus.influx  AppBus.mqtt_out     AppBus.live
+     AppBus.  AppBus.mqtt_out     AppBus.live
              │         │                     │
-      influx/      mqtt/client.rs       live_ws/server.rs
+      /      mqtt/client.rs       live_ws/server.rs
       client.rs    (publisher)          (WebSocket :8081/live)
              │         │
-      InfluxDB      MQTT publish
-      :8086         (W/... Victron, santuario/...)
+            MQTT publish
+               (W/... Victron, santuario/...)
 ```
 
 ### AppBus — le bus central
@@ -41,7 +41,7 @@ MQTT (Mosquitto :1883)
 |-------|------|-------|
 | `mqtt_in` | `broadcast::Sender<MqttIncoming>` | Tous les messages MQTT entrants → tous les modules |
 | `mqtt_out` | `mpsc::Sender<MqttOutgoing>` | Publish MQTT depuis n'importe quel module |
-| `influx` | `mpsc::Sender<InfluxPoint>` | Écriture InfluxDB |
+| 
 | `live` | `broadcast::Sender<LiveEvent>` | Événements WebSocket live |
 
 Cloner `AppBus` est gratuit (tous les champs sont `Arc`-backed).
@@ -56,8 +56,8 @@ Cloner `AppBus` est gratuit (tous les champs sont `Arc`-backed).
 
 | Fichier | Rôle | Entrées MQTT | Sorties |
 |---------|------|--------------|---------|
-| `solar_power.rs` | Puissance solaire temps réel | MPPT power/yield, PVInverter power/energy | InfluxDB `solar_power` (1/s), POST daly-bms, LiveEvent `solar` |
-| `meteo.rs` | Publication météo Venus + reset minuit | état partagé | MQTT `santuario/meteo/venus`, `santuario/heat/1/venus`, InfluxDB `solar_persist` (1/jour) |
+| `solar_power.rs` | Puissance solaire temps réel | MPPT power/yield, PVInverter power/energy |  `solar_power` (1/s), POST daly-bms, LiveEvent `solar` |
+| `meteo.rs` | Publication météo Venus + reset minuit | état partagé | MQTT `santuario/meteo/venus`, `santuario/heat/1/venus`,  `solar_persist` (1/jour) |
 | `inverter.rs` | Données onduleur VEBus | N/.../vebus/... | EnergyState, LiveEvent `inverter` |
 | `smartshunt.rs` | Données batterie SmartShunt | N/.../system/0/Dc/Battery/... | EnergyState, LiveEvent `battery` |
 | `irradiance.rs` | Capteur irradiance PRALRAN | `santuario/irradiance/raw` | EnergyState, LiveEvent `irradiance` |
@@ -107,13 +107,6 @@ grid_pv_excess_a     = 4.0
 grid_no_excess_a     = 0.0
 pv_excess_threshold_w = 50.0
 
-[energy_manager.influxdb]
-enabled          = true
-url              = "http://localhost:8086"
-org              = "santuario"
-bucket           = "daly_bms"
-# token lu depuis /etc/daly-bms/.env → INFLUX_TOKEN
-
 [energy_manager.lg_thinq]
 enabled          = false   # true si LG ThinQ utilisé
 # device_id / bearer_token / api_key → /etc/daly-bms/.env
@@ -124,7 +117,6 @@ enabled          = false   # true si LG ThinQ utilisé
 Les valeurs sensibles sont lues depuis `/etc/daly-bms/.env` :
 
 ```env
-INFLUX_TOKEN=<token InfluxDB>
 LG_DEVICE_ID=<ID appareil LG>
 LG_BEARER_TOKEN=<Bearer token LG>
 LG_API_KEY=<API key LG>
@@ -132,7 +124,7 @@ LG_API_KEY=<API key LG>
 
 ---
 
-## 4. InfluxDB — inventaire complet des écritures
+## 4. — inventaire complet des écritures
 
 ### Measurement `solar_power`
 
@@ -361,8 +353,8 @@ Exemples de modifications courantes :
 | Délai debounce chauffe-eau | `config.rs` (WaterHeaterConfig) + `Config.toml` | `debounce_secs` |
 | Ajouter un MPPT | `config.rs` (VictronConfig), `mqtt/topics.rs`, `solar_power.rs`, `types.rs` | Nouvelle instance + topic |
 | Nouveau topic Victron à surveiller | `mqtt/topics.rs` (`all_subscriptions`) + module concerné | Abonnement + handler |
-| Changer fréquence d'écriture InfluxDB | `logic/solar_power.rs` ligne `interval(Duration::from_secs(1))` | Valeur en secondes |
-| Ajouter un champ InfluxDB | Module concerné, appel `.field_f(...)` sur `InfluxPoint` | Nouveau field |
+| Changer fréquence d'écriture DB | `logic/solar_power.rs` ligne `interval(Duration::from_secs(1))` | Valeur en secondes |
+| Ajouter un champ DB | Module concerné, appel `.field_f(...)` sur `DB` | Nouveau field |
 
 ---
 
@@ -411,21 +403,6 @@ bus.publish(MqttOutgoing::raw(publish::MON_TOPIC, "valeur", false)).await;
 
 ---
 
-## 10. Ajouter une écriture InfluxDB
-
-```rust
-use crate::types::InfluxPoint;
-
-let pt = InfluxPoint::new("ma_measurement")
-    .tag("host", "pi5")
-    .tag("device", "mon_appareil")
-    .field_f("ma_valeur_w", 123.4)
-    .field_i("mon_entier", 42);
-
-bus.write_influx(pt).await;
-```
-
-Les points sont batchwisés par `influx/client.rs` (flush sur `batch_size` points ou `flush_interval_sec` secondes — configurable dans `[energy_manager.influxdb]`).
 
 ---
 
@@ -448,8 +425,6 @@ mosquitto_sub -h 192.168.1.141 -t "N/c0619ab9929a/#" -v
 # WebSocket live events
 websocat ws://192.168.1.141:8081/live
 
-# Vérifier écriture InfluxDB (depuis Pi5)
-influx query -o santuario 'from(bucket:"daly_bms") |> range(start:-5m) |> filter(fn:(r)=>r._measurement=="solar_power")'
 ```
 
 ---
@@ -462,7 +437,7 @@ make build-energy-arm
 sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/
 sudo cp contrib/energy-manager.service /etc/systemd/system/
 sudo cp Config.toml /etc/daly-bms/config.toml
-# Créer /etc/daly-bms/.env avec INFLUX_TOKEN etc.
+# Créer /etc/daly-bms/.env  etc.
 sudo systemctl daemon-reload
 sudo systemctl enable energy-manager
 sudo systemctl start energy-manager
