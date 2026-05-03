@@ -89,6 +89,11 @@ async fn handle(
             state.write().await.ac_frequency_hz = Some(v);
             return true;
         }
+    } else if t.contains("/vebus/") && t.ends_with("/Ac/Out/L1/P") {
+        if let Some(v) = msg.victron_value::<f64>() {
+            state.write().await.ac_out_power_w = Some(v);
+            return true;
+        }
     } else if t.contains("/vebus/") && t.ends_with("/State") {
         if let Some(v) = msg.victron_value::<i64>() {
             state.write().await.vebus_state = Some(v);
@@ -110,23 +115,28 @@ async fn publish_state(
 ) {
     let s = state.read().await;
 
-    let dc_voltage  = s.dc_voltage_v;
-    let dc_current  = s.dc_current_a;
-    let dc_power    = s.dc_power_w;
-    let ac_voltage  = s.ac_out_voltage_v;
-    let ac_current  = s.ac_out_current_a;
-    let ac_freq     = s.ac_frequency_hz;
-    let ac_ignore   = s.ac_ignore;
-    let vebus_state = s.vebus_state;
+    let dc_voltage   = s.dc_voltage_v;
+    let dc_current   = s.dc_current_a;
+    let dc_power     = s.dc_power_w;
+    let ac_voltage   = s.ac_out_voltage_v;
+    let ac_current   = s.ac_out_current_a;
+    let ac_freq      = s.ac_frequency_hz;
+    let ac_ignore    = s.ac_ignore;
+    let vebus_state  = s.vebus_state;
+    let ac_out_power = s.ac_out_power_w;
     drop(s);
 
-    // Rule engine decides whether ac_power can be computed
-    let ac_power = match rule_engine.ac_power_ready(ac_voltage.is_some(), ac_current.is_some()) {
-        Ok(true)  => ac_voltage.zip(ac_current).map(|(v, i)| v * i),
-        Ok(false) => None,
-        Err(e) => {
-            tracing::error!("Inverter rule engine error: {e}");
-            None
+    // Prefer direct power measurement (Ac/Out/L1/P); fall back to V*I when available
+    let ac_power = if ac_out_power.is_some() {
+        ac_out_power
+    } else {
+        match rule_engine.ac_power_ready(ac_voltage.is_some(), ac_current.is_some()) {
+            Ok(true)  => ac_voltage.zip(ac_current).map(|(v, i)| v * i),
+            Ok(false) => None,
+            Err(e) => {
+                tracing::error!("Inverter rule engine error: {e}");
+                None
+            }
         }
     };
 

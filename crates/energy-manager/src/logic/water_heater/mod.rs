@@ -1,7 +1,8 @@
 /// Automatic management of the LG ThinQ water heater.
-/// Switches between HEAT_PUMP and VACATION based on solar, SOC, grid and battery conditions.
+/// Switches between HEAT_PUMP and VACATION based on SOC, irradiance and grid status.
+/// HEAT_PUMP requires: SOC >= 90%, irradiance >= irradiance_min_wm2, grid disconnected (ac_ignore=1).
 /// Decision logic is handled by rust-rule-engine (rules/water_heater.grl).
-/// Debounce timers and rate limiting remain in Rust (time-based, not rule-based).
+/// Rate limiting remains in Rust (mode_change_min_secs).
 mod rules;
 
 use chrono::{DateTime, Utc};
@@ -83,61 +84,32 @@ async fn control_task(
         }
     };
 
-    // Debounce timestamps — kept in Rust because they track wall-clock duration
-    let mut discharge_since: Option<DateTime<Utc>> = None;
-    let mut low_solar_since: Option<DateTime<Utc>> = None;
-
+    let mut last_change: Option<DateTime<Utc>> = None;
     let mut ticker = interval(Duration::from_secs(30));
 
     loop {
         ticker.tick().await;
         let now = Utc::now();
 
-        let (ac_ignore, soc, batt_current, solar_total, irradiance, current_mode, last_change) = {
+        let (ac_ignore, soc, irradiance, current_mode, stored_last_change) = {
             let s = state.read().await;
             (
                 s.ac_ignore.unwrap_or(0),
                 s.soc_pct.unwrap_or(0.0),
-                s.battery_current_a.unwrap_or(0.0),
-                s.solar_total_w,
                 s.irradiance_wm2,
                 s.water_heater_mode,
                 s.water_heater_last_change,
             )
         };
-
-        // Debounce: track when each condition first appeared
-        let discharging = batt_current < 0.0;
-        if discharging {
-            discharge_since.get_or_insert(now);
-        } else {
-            discharge_since = None;
+        // Sync last_change from persisted state on first tick
+        if last_change.is_none() {
+            last_change = stored_last_change;
         }
-        let discharge_debounced = discharge_since
-            .map(|t| (now - t).num_seconds() as u64 >= cfg.debounce_secs)
-            .unwrap_or(false);
-
-        let solar_low = solar_total <= cfg.solar_min_w;
-        if solar_low {
-            low_solar_since.get_or_insert(now);
-        } else {
-            low_solar_since = None;
-        }
-        let solar_low_debounced = low_solar_since
-            .map(|t| (now - t).num_seconds() as u64 >= cfg.debounce_secs)
-            .unwrap_or(false);
 
         let irradiance_low = irradiance.map(|w| w < cfg.irradiance_min_wm2).unwrap_or(true);
-        let grid_connected  = ac_ignore == 0;
+        let grid_connected = ac_ignore == 0;
 
-        // Rule engine evaluation
-        let target_mode_str = match rule_engine.evaluate(
-            grid_connected,
-            soc,
-            discharge_debounced,
-            solar_low_debounced,
-            irradiance_low,
-        ) {
+        let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
             Ok(m) => m,
             Err(e) => {
                 tracing::error!("Water heater rule engine error: {e} — defaulting to Vacation");
@@ -152,11 +124,10 @@ async fn control_task(
 
         debug!(
             "Water heater rule engine: grid={grid_connected} soc={soc:.1}% \
-            discharge_debounced={discharge_debounced} solar_low_debounced={solar_low_debounced} \
             irradiance_low={irradiance_low} → {target_mode_str}"
         );
 
-        // Rate limiting — stays in Rust
+        // Rate limiting
         let can_change = last_change
             .map(|t| (now - t).num_seconds() as u64 >= cfg.mode_change_min_secs)
             .unwrap_or(true);
@@ -172,8 +143,7 @@ async fn control_task(
         }
 
         info!(
-            "Water heater: changing mode {:?} → {:?} (grid={grid_connected}, soc={soc:.1}%, \
-            discharge={discharge_debounced}, solar_low={solar_low_debounced}, irradiance_low={irradiance_low})",
+            "Water heater: changing mode {:?} → {:?} (grid={grid_connected}, soc={soc:.1}%, irradiance_low={irradiance_low})",
             current_mode, target_mode
         );
 
@@ -182,6 +152,7 @@ async fn control_task(
             continue;
         }
 
+        last_change = Some(now);
         {
             let mut s = state.write().await;
             s.water_heater_mode        = target_mode;

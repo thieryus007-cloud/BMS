@@ -2,15 +2,15 @@
 // Decides between HeatPump and Vacation mode based on energy conditions.
 //
 // Input facts (injected from Rust before evaluate):
-//   WH.want_vacation        (bool, initialised to false — set true by any condition rule)
-//   WH.grid_connected       (bool, true = grid on = ac_ignore == 0)
-//   WH.soc_pct              (number, battery SOC %)
-//   WH.discharge_debounced  (bool, pre-computed in Rust: discharging > debounce_secs)
-//   WH.solar_low_debounced  (bool, pre-computed in Rust: solar <= min for > debounce_secs)
-//   WH.irradiance_low       (bool, immediate, no debounce)
+//   WH.want_vacation   (bool, initialised to false — set true by any condition rule)
+//   WH.grid_connected  (bool, true = ac_ignore == 0, grid ON → Vacation)
+//   WH.soc_pct         (number, battery SOC %)
+//   WH.irradiance_low  (bool, true when irradiance < irradiance_min_wm2)
 //
 // Output facts (read from Rust after execute):
-//   WH.target_mode          (string: "HeatPump" | "Vacation")
+//   WH.target_mode     (string: "HeatPump" | "Vacation")
+//
+// HEAT_PUMP requires ALL: SOC >= 90%, irradiance >= 300 W/m², grid disconnected (ac_ignore = 1)
 
 // ── Condition rules (salience 100) ──────────────────────────────────────────
 
@@ -24,20 +24,6 @@ rule "WH_Cond_Grid" salience 100 no-loop {
 rule "WH_Cond_SOC_Low" salience 100 no-loop {
     when
         WH.soc_pct < 90
-    then
-        WH.want_vacation = true;
-}
-
-rule "WH_Cond_Discharge_Long" salience 100 no-loop {
-    when
-        WH.discharge_debounced == true
-    then
-        WH.want_vacation = true;
-}
-
-rule "WH_Cond_Solar_Low" salience 100 no-loop {
-    when
-        WH.solar_low_debounced == true
     then
         WH.want_vacation = true;
 }

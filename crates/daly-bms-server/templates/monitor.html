@@ -102,6 +102,24 @@
     </div>
   </div>
 
+  <!-- Rules Status -->
+  <div class="bms-card" id="card-rules" style="background:#0f172a;border:1px solid #1e293b;">
+    <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">◈ RÈGLES CHAUFFE-EAU</span>
+      <span id="rules-mode-badge" style="font-family:monospace;font-size:0.72rem;padding:2px 8px;border-radius:4px;background:#1e293b;color:#475569;">—</span>
+    </div>
+    <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.55rem;">
+
+      <div id="rule-grid" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
+
+      <div style="margin-top:0.4rem;border-top:1px solid #1e293b;padding-top:0.5rem;display:flex;align-items:center;gap:0.5rem;">
+        <span style="font-family:monospace;font-size:0.68rem;color:#475569;">Résultat :</span>
+        <span id="rules-decision" style="font-family:monospace;font-size:0.75rem;font-weight:700;color:#94a3b8;">—</span>
+      </div>
+
+    </div>
+  </div>
+
   <!-- RS485 Health -->
   <div class="bms-card" id="card-rs485" style="grid-column:1/-1">
     <div class="bms-hdr bms-hdr-indigo">
@@ -381,10 +399,79 @@ async function loadLogFile(){
   } catch(e){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">Erreur: '+e.message+'</div>';}
 }
 
+// ── Rules Status (water heater) ──────────────────────────────────────────────
+function ruleRow(label, ok, valueStr, detail) {
+  const dot = `<span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:${ok?'#22c55e':'#ef4444'};${ok?'box-shadow:0 0 5px #22c55e66':''}"></span>`;
+  return `<div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
+    ${dot}
+    <span style="color:#94a3b8;flex:1;">${label}</span>
+    <span style="color:${ok?'#22c55e':'#ef4444'};font-weight:600;">${valueStr}</span>
+    ${detail?`<span style="color:#475569;font-size:0.65rem;">${detail}</span>`:''}
+  </div>`;
+}
+
+async function fetchRulesStatus() {
+  try {
+    const safe = p => p.catch(() => null);
+    const [bms1r, bms2r, irrR, invR] = await Promise.all([
+      safe(fetch('/api/v1/bms/1/status').then(r => r.ok ? r.json() : null)),
+      safe(fetch('/api/v1/bms/2/status').then(r => r.ok ? r.json() : null)),
+      safe(fetch('/api/v1/irradiance/status').then(r => r.ok ? r.json() : null)),
+      safe(fetch('/api/v1/venus/inverter').then(r => r.ok ? r.json() : null)),
+    ]);
+
+    // SOC — moyenne des BMS disponibles
+    const validBms = [bms1r, bms2r].filter(b => b && b.Soc != null);
+    const avgSoc = validBms.length ? validBms.reduce((s, b) => s + b.Soc, 0) / validBms.length : null;
+    const socOk  = avgSoc != null && avgSoc >= 90;
+
+    // Irradiance
+    const irr    = irrR?.irradiance_wm2 ?? null;
+    const irrOk  = irr != null && irr >= 300;
+
+    // AC IN Ignored (grid disconnected)
+    const inv       = invR?.inverter ?? null;
+    const acIgnore  = inv?.ac_in_ignore ?? null;
+    const gridOffOk = acIgnore === true;
+
+    // Mode actuel (heatpump mqtt_index=1)
+    const hpR = await safe(fetch('/api/v1/venus/heatpumps').then(r => r.ok ? r.json() : null));
+    const hp1 = (hpR?.heatpumps ?? []).find(h => h.mqtt_index === 1) ?? null;
+    const venusState = hp1?.State ?? null;
+    const modeLabel  = venusState === 1 ? 'HEAT_PUMP' : venusState === 0 ? 'VACATION' : '—';
+    const modeOk     = venusState === 1;
+
+    const badge = document.getElementById('rules-mode-badge');
+    if (badge) {
+      badge.textContent = modeLabel;
+      badge.style.background = modeOk ? '#14532d' : '#1c1917';
+      badge.style.color      = modeOk ? '#4ade80' : '#78716c';
+    }
+
+    const grid = document.getElementById('rule-grid');
+    if (grid) {
+      grid.innerHTML = [
+        ruleRow('SOC ≥ 90 %',          socOk,    avgSoc  != null ? `${avgSoc.toFixed(1)} %`   : '—', '(condition remplie si vert)'),
+        ruleRow('Irradiance ≥ 300 W/m²', irrOk,  irr     != null ? `${irr.toFixed(0)} W/m²`  : '—', null),
+        ruleRow('Grid déconnecté (AC IN Ignored)', gridOffOk, acIgnore != null ? (acIgnore ? 'ACTIF' : 'Normal') : '—', null),
+      ].join('');
+    }
+
+    const allOk = socOk && irrOk && gridOffOk;
+    const dec = document.getElementById('rules-decision');
+    if (dec) {
+      dec.textContent = allOk ? '→ HEAT_PUMP activé' : '→ VACATION (en attente des conditions)';
+      dec.style.color = allOk ? '#4ade80' : '#94a3b8';
+    }
+  } catch(e) { console.warn('fetchRulesStatus:', e); }
+}
+
 fetchMonitor();
 fetchRs485Health();
+fetchRulesStatus();
 loadLogList();
 setInterval(fetchMonitor, 10000);
 setInterval(fetchRs485Health, 15000);
+setInterval(fetchRulesStatus, 15000);
 </script>
 {% endblock %}
