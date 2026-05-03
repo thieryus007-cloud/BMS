@@ -211,10 +211,6 @@ pub struct MpptState {
     pub state: Option<String>,
 }
 
-// =============================================================================
-// ENUM WaterHeaterMode — CORRECTED: PascalCase variants (Rust convention)
-// =============================================================================
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WaterHeaterMode {
     #[default]
@@ -224,7 +220,6 @@ pub enum WaterHeaterMode {
 }
 
 impl WaterHeaterMode {
-    /// Convertit l'enum en état Venus OS (0=Vacation, 1=HeatPump, 2=Turbo)
     pub fn to_venus_state(self) -> i64 {
         match self {
             WaterHeaterMode::Vacation => 0,
@@ -233,13 +228,11 @@ impl WaterHeaterMode {
         }
     }
 
-    /// Parse une chaîne LG API ("HEAT_PUMP", "TURBO", ...) en enum
-    /// Format d'entrée : SCREAMING_SNAKE_CASE (convention LG ThinQ)
     pub fn from_lg_str(s: &str) -> Self {
         match s {
             "HEAT_PUMP" => WaterHeaterMode::HeatPump,
-            "TURBO" => WaterHeaterMode::Turbo,
-            _ => WaterHeaterMode::Vacation,
+            "TURBO"     => WaterHeaterMode::Turbo,
+            _           => WaterHeaterMode::Vacation,
         }
     }
 
