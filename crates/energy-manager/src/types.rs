@@ -214,17 +214,17 @@ pub struct MpptState {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WaterHeaterMode {
     #[default]
-    Vacation,
-    HeatPump,
-    Turbo,
+    VACATION,
+    HEAT_PUMP,
+    TURBO,
 }
 
 impl WaterHeaterMode {
     pub fn to_venus_state(self) -> i64 {
         match self {
-            WaterHeaterMode::Vacation  => 0,
-            WaterHeaterMode::HeatPump  => 1,
-            WaterHeaterMode::Turbo     => 2,
+            WaterHeaterMode::VACATION  => 0,
+            WaterHeaterMode::HEAT_PUMP  => 1,
+            WaterHeaterMode::TURBO     => 2,
         }
     }
 
