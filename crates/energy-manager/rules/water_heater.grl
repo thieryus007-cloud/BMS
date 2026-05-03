@@ -41,12 +41,12 @@ rule "WH_Decide_Vacation" salience 200 no-loop {
     when
         WH.want_vacation == true
     then
-        WH.target_mode = "Vacation";
+        WH.target_mode = "VACATION";
 }
 
 rule "WH_Decide_HeatPump" salience 200 no-loop {
     when
         WH.want_vacation == false
     then
-        WH.target_mode = "HeatPump";
+        WH.target_mode = "HEAT_PUMP";
 }
