@@ -116,7 +116,9 @@ async fn control_task(
                 "Vacation".to_string()
             }
         };
-
+        
+        tracing::info!("👉 CHAÎNE BRUTE REÇUE : [{}]", target_mode_str);
+        
         let target_mode = match target_mode_str.as_str() {
             "HEAT_PUMP" => WaterHeaterMode::HeatPump,
             _          => WaterHeaterMode::Vacation,
