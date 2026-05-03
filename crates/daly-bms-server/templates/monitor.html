@@ -25,34 +25,6 @@
     </div>
   </div>
 
-  <!-- z8run -->
-  <div class="bms-card" id="card-z8run">
-    <div class="bms-hdr bms-hdr-indigo">
-      <div class="bms-hdr-left"><span class="bms-hdr-name">⚡ z8run — Workflow Engine</span></div>
-      <div class="bms-hdr-right">
-        <span id="z8run-badge" class="bms-badge" style="background:#e2e8f0;color:#64748b">—</span>
-      </div>
-    </div>
-    <div style="padding:0.75rem;">
-      <div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0.1rem;border-bottom:1px solid var(--border);">
-        <span id="z8run-dot" style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:#94a3b8;"></span>
-        <span style="font-weight:600;font-size:0.8rem;flex:1">Service systemd</span>
-        <span id="z8run-status-text" style="font-size:0.68rem;color:var(--muted2);font-family:monospace">—</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0.1rem;border-bottom:1px solid var(--border);">
-        <span style="font-size:0.75rem;color:var(--muted2);">Port</span>
-        <span style="font-family:monospace;font-size:0.78rem;flex:1">7700</span>
-        <a id="z8run-link" href="http://192.168.1.141:7700" target="_blank"
-           style="font-size:0.72rem;padding:3px 10px;background:#6366f1;color:#fff;border-radius:4px;text-decoration:none;font-weight:600;">
-          Ouvrir UI →
-        </a>
-      </div>
-      <div style="padding:0.5rem 0.1rem 0.1rem;font-size:0.7rem;color:var(--muted2);">
-        Flow SmartShunt : <code style="font-size:0.68rem;">N/c0619ab9929a/battery/290/#</code>
-      </div>
-    </div>
-  </div>
-
   <!-- NEOHTOP System Overview -->
   <div class="bms-card" id="card-sysmon" style="background:#0f172a;border:1px solid #1e293b;">
     <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
@@ -286,18 +258,6 @@ async function fetchMonitor(){
     if(m.load_avg&&m.load_avg.length>=2){
       document.getElementById('neo-load1').textContent=m.load_avg[0].toFixed(2);
       document.getElementById('neo-load5').textContent=m.load_avg[1].toFixed(2);
-    }
-
-    // z8run card
-    const z8runSvc=(m.services||[]).find(s=>s.name==='z8run');
-    if(z8runSvc){
-      const ok=z8runSvc.active;
-      const dot=document.getElementById('z8run-dot');
-      const badge=document.getElementById('z8run-badge');
-      const txt=document.getElementById('z8run-status-text');
-      if(dot){ dot.style.background=ok?'#16a34a':'#dc2626'; dot.style.boxShadow=ok?'0 0 5px #16a34a66':'none'; }
-      if(badge){ badge.textContent=ok?'active':'inactive'; badge.style.background=ok?'#dcfce7':'#fee2e2'; badge.style.color=ok?'#15803d':'#dc2626'; }
-      if(txt){ txt.textContent=z8runSvc.status||'—'; }
     }
 
     // Services réseau
