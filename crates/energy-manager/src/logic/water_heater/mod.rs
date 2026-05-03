@@ -118,7 +118,7 @@ async fn control_task(
         };
 
         let target_mode = match target_mode_str.as_str() {
-            "HeatPump" => WaterHeaterMode::HeatPump,
+            "HEAT_PUMP" => WaterHeaterMode::HeatPump,
             _          => WaterHeaterMode::Vacation,
         };
 
