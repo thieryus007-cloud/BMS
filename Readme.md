@@ -472,7 +472,6 @@ make restart       # Redémarrer les containers
 make ps            # État des containers
 make logs          # Logs de tous les containers (follow)
 make reset         # Arrêter + supprimer volumes + redémarrer (reset complet)
-make reset-influx  # Purger uniquement les données VictoriaMetrics
 
 make build         # Compiler (release, local)
 make build-arm     # Cross-compiler pour aarch64 (RPi)
@@ -668,11 +667,6 @@ curl http://localhost:8080/api/v1/system/status | jq
 
 # Test WebSocket
 wscat -c ws://localhost:8080/ws/bms/stream
-
-# Vérifier les données VictoriaMetrics (5 dernières minutes)
-docker exec dalybms-VictoriaMetrics influx query \
-  'from(bucket:"daly_bms") |> range(start: -5m) |> limit(n:3)' \
-  --org santuario
 
 # Niveau de logs augmenté
 RUST_LOG=debug daly-bms-server
