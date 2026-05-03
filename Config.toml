@@ -520,7 +520,7 @@ device_instance = 152
 # Binaire séparé : energy-manager
 # Port WebSocket live : 8081 (/live)
 # Service systemd    : energy-manager
-# Secrets dans .env  : LG_DEVICE_ID, LG_BEARER_TOKEN, LG_API_KEY, INFLUX_TOKEN
+# Secrets dans .env  : LG_DEVICE_ID, LG_BEARER_TOKEN, LG_API_KEY
 
 [energy_manager]
 
