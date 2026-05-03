@@ -21,7 +21,6 @@ use tracing::{info, warn};
 const TCP_SERVICES: &[(&str, &str, u16, Option<&str>)] = &[
     ("mosquitto",      "127.0.0.1",     1883, Some("mosquitto")),
     ("energy-manager", "127.0.0.1",     8081, None),
-    ("z8run",          "127.0.0.1",     7700, None),
     ("venus-mqtt",     "192.168.1.120", 1883, None),
 ];
 
@@ -88,18 +87,6 @@ async fn collect_snapshot(_state: &AppState, net_rx_bps: u64, net_tx_bps: u64) -
         name:   "mosquitto".to_string(),
         active: mosquitto_systemd || tcp_probe("127.0.0.1", 1883).await,
         status: if mosquitto_systemd { "active".to_string() } else { "inactive".to_string() },
-    });
-
-    let z8run_status   = check_systemd_service("z8run").await;
-    let z8run_systemd  = z8run_status == "active";
-    let z8run_tcp_ok   = if z8run_systemd { true } else { tcp_probe("127.0.0.1", 7700).await };
-    let z8run_active   = z8run_systemd || z8run_tcp_ok;
-    services.push(ServiceStatus {
-        name:   "z8run".to_string(),
-        active: z8run_active,
-        status: if z8run_active {
-            if z8run_systemd { z8run_status } else { "active (port 7700)".to_string() }
-        } else if z8run_status.is_empty() { "unknown".to_string() } else { z8run_status },
     });
 
     // ── Sondes TCP ───────────────────────────────────────────────────────────
