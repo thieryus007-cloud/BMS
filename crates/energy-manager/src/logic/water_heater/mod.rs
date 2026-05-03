@@ -109,7 +109,7 @@ async fn control_task(
         let irradiance_low = irradiance.map(|w| w < cfg.irradiance_min_wm2).unwrap_or(true);
         let grid_connected = ac_ignore == 0;
 
-tracing::info!("⚙️ INPUTS → SOC: {}% | IRR: {} | Grid: {}", soc, irradiance.unwrap_or(0.0), ac_ignore == 0);
+        // tracing::info!("⚙️ INPUTS → SOC: {}% | IRR: {} | Grid: {}", soc, irradiance.unwrap_or(0.0), ac_ignore == 0);
         
         let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
             Ok(m) => m,
