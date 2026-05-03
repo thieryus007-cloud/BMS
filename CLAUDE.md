@@ -61,13 +61,13 @@ Pi5 (192.168.1.141, pi5compute)
     ├── RS485 /dev/ttyUSB0 → 2 BMS + 3 ET112 + 1 PRALRAN
     ├── REST API + WebSocket :8080
     ├── MQTT publish → 192.168.1.120:1883
-    └── InfluxDB → localhost:8086
+    └── VictoriaMetrics → localhost:8428
   energy-manager (systemd, :8081)
     ├── MQTT subscribe/publish → 192.168.1.120:1883
     ├── Logique solaire, DEYE, chauffe-eau, charge, météo
     ├── WebSocket live events :8081/live
-    └── InfluxDB → localhost:8086
-  Docker: mosquitto:1883, influxdb:8086
+    └── VictoriaMetrics → localhost:8428
+  Docker: mosquitto:1883
 
 NanoPi (192.168.1.120, root)
   dbus-mqtt-venus (runit /service/dbus-mqtt-venus)
@@ -107,11 +107,11 @@ crates/daly-bms-server/src/             ← serveur principal RS485/API
 crates/energy-manager/src/              ← gestionnaire énergie (remplace Node-RED)
   config.rs                             ← chargement [energy_manager] depuis Config.toml
   types.rs                              ← types partagés (EnergyState, MqttIncoming, ...)
-  bus.rs                                ← AppBus (broadcast MQTT + mpsc InfluxDB/publish)
+  bus.rs                                ← AppBus (broadcast MQTT )
   main.rs                               ← démarrage séquentiel de tous les modules
   logic/                                ← modules logiques métier
   mqtt/                                 ← client MQTT rumqttc + topics
-  influx/                               ← client InfluxDB writer
+  VictoriaMetrics/                               ← client VictoriaMetrics writer
   http_clients/                         ← Open-Meteo + LG ThinQ
   live_ws/                              ← WebSocket live events
   persist/                              ← restauration baselines au démarrage
@@ -213,7 +213,6 @@ Dashboard SSR : `/dashboard/et112/{addr}`
 | `missing field energy_manager` | `sudo cp Config.toml /etc/daly-bms/config.toml` — section `[energy_manager]` absente |
 | energy-manager ne reçoit pas MQTT | Vérifier `portal_id` dans Config.toml et que Mosquitto est accessible sur `mqtt.host` |
 | LG ThinQ ne répond pas | Vérifier `LG_BEARER_TOKEN` et `LG_API_KEY` dans `/etc/daly-bms/.env` |
-| InfluxDB non écrit | Vérifier `INFLUX_TOKEN` dans `.env` et que `influx.enabled = true` dans Config.toml |
 
 ---
 
@@ -243,4 +242,4 @@ Dashboard SSR : `/dashboard/et112/{addr}`
 | Validation déploiement / checklist | `IMPLEMENTATION_VERIFICATION.md` |
 | Debug MQTT | `MQTT_DEBUGGING_GUIDE.md` |
 | Debug onduleur / SmartShunt | `DEBUG_ONDULEUR_SMARTSHUNT.md` |
-| Guide energy-manager — modifier/ajouter/retirer une fonctionnalité, InfluxDB | `docs/energy-manager-guide.md` |
+| Guide energy-manager — modifier/ajouter/retirer une fonctionnalité | `docs/energy-manager-guide.md` |
