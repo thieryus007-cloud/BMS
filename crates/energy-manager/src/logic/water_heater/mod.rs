@@ -9,7 +9,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep, Duration};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use crate::bus::AppBus;
 use crate::config::WaterHeaterConfig;
 use crate::http_clients::lg_thinq::LgThinqClient;
@@ -70,22 +70,28 @@ async fn control_task(
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
 ) {
-    let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
-        Ok(e) => e,
-        Err(e) => {
-            error!("Failed to init water heater rule engine: {e}");
-            return;
-        }
-    };
+    // NOTE: Rule engine is recreated each cycle because rules use `no-loop`.
+    // This ensures rules re-evaluate fresh conditions every tick.
 
     let mut last_change: Option<DateTime<Utc>> = None;
     let mut last_sent_mode: Option<WaterHeaterMode> = None;
-
     let mut ticker = interval(Duration::from_secs(30));
 
     loop {
         ticker.tick().await;
         let now = Utc::now();
+
+        // ------------------------------------------------------------------
+        // Recreate rule engine each cycle (required due to no-loop in .grl)
+        // ------------------------------------------------------------------
+        let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
+            Ok(e) => e,
+            Err(e) => {
+                error!("Failed to init water heater rule engine: {e}");
+                sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
         // ------------------------------------------------------------------
         // Read inputs (NO MORE current_mode for decision!)
@@ -108,10 +114,13 @@ async fn control_task(
         // Evaluate rules
         // ------------------------------------------------------------------
         let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
-            Ok(m) => m,
+            Ok(m) => {
+                debug!("✅ Rule engine returned: '{}'", m);
+                m
+            }
             Err(e) => {
                 error!("Rule engine error: {e} — fallback VACATION");
-                "VACATION".to_string()  // ✅ Notation LG en majuscules
+                "VACATION".to_string()  // ✅ Uppercase to match LG notation
             }
         };
 
@@ -119,6 +128,11 @@ async fn control_task(
             "HEAT_PUMP" => WaterHeaterMode::HeatPump,
             _ => WaterHeaterMode::Vacation,
         };
+
+        debug!(
+            "🔍 Eval: grid={} soc={:.1}% irr_low={} → {:?}",
+            grid_connected, soc, irradiance_low, target_mode
+        );
 
         // ------------------------------------------------------------------
         // Rate limiting
@@ -145,7 +159,7 @@ async fn control_task(
         }
 
         info!(
-            "Water heater: SEND {:?} (soc={:.1}%, grid={}, irradiance_low={})",
+            "💧 Water heater: SEND {:?} (soc={:.1}%, grid={}, irradiance_low={})",
             target_mode, soc, grid_connected, irradiance_low
         );
 
@@ -195,8 +209,5 @@ async fn control_task(
             }
             publish_to_venus(&bus2, &state2).await;
         });
-
-        // Note: Periodic LG sync (get_mode) omitted as method not implemented.
-        // The force_refresh mechanism handles potential desync.
     }
 }
