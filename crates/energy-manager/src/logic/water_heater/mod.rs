@@ -88,7 +88,7 @@ async fn control_task(
         let now = Utc::now();
 
         // ------------------------------------------------------------------
-        // Read inputs
+        // Read inputs (NO MORE current_mode for decision!)
         // ------------------------------------------------------------------
         let (ac_ignore, soc, irradiance) = {
             let s = state.read().await;
@@ -99,7 +99,9 @@ async fn control_task(
             )
         };
 
-        let irradiance_low = irradiance.map(|w| w < cfg.irradiance_min_wm2).unwrap_or(true);
+        let irradiance_low = irradiance
+            .map(|w| w < cfg.irradiance_min_wm2)
+            .unwrap_or(true);
         let grid_connected = ac_ignore == 0;
 
         // ------------------------------------------------------------------
@@ -108,8 +110,8 @@ async fn control_task(
         let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
             Ok(m) => m,
             Err(e) => {
-                error!("Rule engine error: {e} — fallback Vacation");
-                "VACATION".to_string()
+                error!("Rule engine error: {e} — fallback VACATION");
+                "VACATION".to_string()  // ✅ Notation LG en majuscules
             }
         };
 
@@ -126,14 +128,14 @@ async fn control_task(
             .unwrap_or(true);
 
         // ------------------------------------------------------------------
-        // Decide if we should send
+        // Decide if we should send (source of truth = last_sent_mode)
         // ------------------------------------------------------------------
         let should_send = match last_sent_mode {
             Some(last) => last != target_mode,
             None => true, // first run
         };
 
-        // Safety refresh (anti-stuck / recovery after reboot)
+        // Safety refresh: force send every 10 minutes to recover from desync
         let force_refresh = last_change
             .map(|t| (now - t).num_minutes() >= 10)
             .unwrap_or(true);
@@ -148,17 +150,18 @@ async fn control_task(
         );
 
         // ------------------------------------------------------------------
-        // Send command
+        // Send command to LG
         // ------------------------------------------------------------------
         if let Err(e) = lg.set_mode(target_mode).await {
             error!("LG set_mode error: {e}");
             continue;
         }
 
+        // ✅ Update source of truth AFTER successful send
         last_sent_mode = Some(target_mode);
         last_change = Some(now);
 
-        // Update local state (for UI/MQTT only, no longer used for decision)
+        // Update local state for UI/MQTT only (NOT for decision)
         {
             let mut s = state.write().await;
             s.water_heater_mode = target_mode;
@@ -168,7 +171,7 @@ async fn control_task(
         publish_to_venus(&bus, &state).await;
 
         // ------------------------------------------------------------------
-        // Set temperature (delayed)
+        // Set target temperature (delayed)
         // ------------------------------------------------------------------
         let delay_secs = cfg.temp_set_delay_secs;
         let target_temp = match target_mode {
@@ -193,8 +196,7 @@ async fn control_task(
             publish_to_venus(&bus2, &state2).await;
         });
 
-        // Note: Periodic LG sync (get_mode) intentionally omitted as the method 
-        // is not implemented in LgThinqClient. The logic relies on last_sent_mode 
-        // as the source of truth, with force_refresh handling potential desync.
+        // Note: Periodic LG sync (get_mode) omitted as method not implemented.
+        // The force_refresh mechanism handles potential desync.
     }
 }
