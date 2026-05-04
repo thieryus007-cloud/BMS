@@ -10,3 +10,22 @@ Dans l'interface victoriametrics sont present seulement:
 
 Il faut investiguer pour savoir pourquoi /api/v1/venus/inverter renvois cette valeur "null". 
 ```
+
+Dans : 
+```
+else if t.contains("/vebus/") && t.ends_with("/Ac/Out/L1/I") {
+        if let Some(v) = msg.victron_value::<f64>() {
+            state.write().await.ac_out_current_a = Some(v);
+            return true;
+        }
+    } else if t.contains("/vebus/") && t.ends_with("/Ac/Out/L1/F") {
+        if let Some(v) = msg.victron_value::<f64>() {
+            state.write().await.ac_frequency_hz = Some(v);
+            return true;
+        }
+    } else if t.contains("/vebus/") && t.ends_with("/Ac/Out/L1/P") {
+        if let Some(v) = msg.victron_value::<f64>() {
+            state.write().await.ac_out_power_w = Some(v);
+            return true;
+   ```
+   
