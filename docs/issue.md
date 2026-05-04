@@ -32,6 +32,7 @@ Par ailleur, il arrive que la valeur d'irridiance au niveau du Victron VRM soit 
 >> ** Nous devrions avoir le process suivant **
 >>>	- Au demarage, evaluation des trois conditions, envois de la commande correspondante vers LG ThinQ.
 >>>	- A interval regulier, 5 minutes, lire les informations (mode, temperature actuelle, temperature target)depuis LG ThinQ suivie d'evaluation des trois conditions et envois de la commande correspondante si necessaire.
+>>> - mettre en place une relecture depuis LG ThinQ et resend si necessaire. alerter en cas de resend trop frequent.
 >>>	- les trois informations,Doivent etre enregistrées dans victoriametrics.
 
 ```
