@@ -14,7 +14,7 @@ pi5compute@pi5compute:~/Daly-BMS-Rust/z8run $
 
 ---
 
-## Prérequis
+[## Prérequis](https://lib.rs/crates/adk-studio)
 
 error: failed to run custom build command for `adk-studio v0.6.1`
 
