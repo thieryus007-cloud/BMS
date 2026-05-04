@@ -70,8 +70,8 @@ async fn control_task(
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
 ) {
-    // NOTE: Rule engine is recreated each cycle because rules use `no-loop`.
-    // This ensures rules re-evaluate fresh conditions every tick.
+    // NOTE: Rule engine is recreated inside the loop because .grl rules use `no-loop`.
+    // This forces a fresh evaluation of facts at every tick.
 
     let mut last_change: Option<DateTime<Utc>> = None;
     let mut last_sent_mode: Option<WaterHeaterMode> = None;
@@ -91,7 +91,7 @@ async fn control_task(
             Err(e) => {
                 error!("Failed to init water heater rule engine: {e}");
                 sleep(Duration::from_secs(5)).await;
-                continue;  // ✅ continue au lieu de return
+                continue;
             }
         };
 
@@ -116,10 +116,7 @@ async fn control_task(
         // Evaluate rules
         // ------------------------------------------------------------------
         let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
-            Ok(m) => {
-                debug!("✅ Rule engine returned: '{}'", m);
-                m
-            }
+            Ok(m) => m,
             Err(e) => {
                 error!("Rule engine error: {e} — fallback VACATION");
                 "VACATION".to_string()  // ✅ Uppercase to match LG notation
@@ -127,7 +124,7 @@ async fn control_task(
         };
 
         let target_mode = match target_mode_str.as_str() {
-            "HEAT_PUMP" => WaterHeaterMode::HeatPump,  // ✅ Majuscules LG
+            "HEAT_PUMP" => WaterHeaterMode::HeatPump,
             _ => WaterHeaterMode::Vacation,
         };
 
@@ -144,7 +141,7 @@ async fn control_task(
             .unwrap_or(true);
 
         // ------------------------------------------------------------------
-        // ✅ Decide if we should send (source of truth = last_sent_mode)
+        // Decide if we should send (source of truth = last_sent_mode)
         // ------------------------------------------------------------------
         let should_send = match last_sent_mode {
             Some(last) => last != target_mode,
