@@ -14,21 +14,21 @@
 
 // ── Condition rules (salience 100) ──────────────────────────────────────────
 
-rule "WH_Cond_Grid" salience 100 no-loop {
+rule "WH_Cond_Grid" salience 100 {
     when
         WH.grid_connected == true
     then
         WH.want_vacation = true;
 }
 
-rule "WH_Cond_SOC_Low" salience 100 no-loop {
+rule "WH_Cond_SOC_Low" salience 100 {
     when
         WH.soc_pct < 90
     then
         WH.want_vacation = true;
 }
 
-rule "WH_Cond_Irradiance_Low" salience 100 no-loop {
+rule "WH_Cond_Irradiance_Low" salience 100 {
     when
         WH.irradiance_low == true
     then
@@ -37,14 +37,14 @@ rule "WH_Cond_Irradiance_Low" salience 100 no-loop {
 
 // ── Decision rules (salience 200, evaluated after all conditions) ────────────
 
-rule "WH_Decide_Vacation" salience 200 no-loop {
+rule "WH_Decide_Vacation" salience 200 {
     when
         WH.want_vacation == true
     then
         WH.target_mode = "VACATION";
 }
 
-rule "WH_Decide_HeatPump" salience 200 no-loop {
+rule "WH_Decide_HeatPump" salience 200  {
     when
         WH.want_vacation == false
     then
