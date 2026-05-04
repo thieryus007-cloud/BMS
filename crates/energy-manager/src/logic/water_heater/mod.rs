@@ -5,7 +5,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep, Duration};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 use crate::bus::AppBus;
 use crate::config::WaterHeaterConfig;
 use crate::http_clients::lg_thinq::LgThinqClient;
@@ -60,17 +60,18 @@ async fn control_task(
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
 ) {
+    // ✅ Rule engine recreated each cycle (no more no-loop issue)
     let mut last_change: Option<DateTime<Utc>> = None;
-    let mut last_sent_mode: Option<WaterHeaterMode> = None;
+    let mut last_sent_mode: Option<WaterHeaterMode> = None; // ← NOUVEAU
     let mut ticker = interval(Duration::from_secs(30));
 
-    info!("💧 Water heater control task started");
+    info!("Water heater control task started");
 
     loop {
         ticker.tick().await;
         let now = Utc::now();
 
-        // ✅ Recreate rule engine EACH cycle (no more no-loop issue)
+        // ✅ Recreate rule engine each cycle
         let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
             Ok(e) => e,
             Err(e) => {
@@ -90,12 +91,6 @@ async fn control_task(
             )
         };
 
-        // 🔍 DEBUG: Show exactly what we're reading
-        debug!(
-            "📊 RAW STATE → soc={:.1}% irr={:?} ac_ignore={} min_cfg={}",
-            soc, irradiance, ac_ignore, cfg.irradiance_min_wm2
-        );
-
         let irradiance_low = irradiance
             .map(|w| w < cfg.irradiance_min_wm2)
             .unwrap_or(true);
@@ -103,10 +98,7 @@ async fn control_task(
 
         // Evaluate rules
         let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
-            Ok(m) => {
-                debug!("✅ Rule engine returned: '{}'", m);
-                m
-            }
+            Ok(m) => m,
             Err(e) => {
                 error!("Rule engine error: {e} — fallback VACATION");
                 "VACATION".to_string()  // ✅ Uppercase!
@@ -118,23 +110,18 @@ async fn control_task(
             _ => WaterHeaterMode::Vacation,
         };
 
-        debug!(
-            "🔍 Eval: grid={} soc={:.1}% irr_low={} → {:?}",
-            grid_connected, soc, irradiance_low, target_mode
-        );
-
         // Rate limiting
         let can_change = last_change
             .map(|t| (now - t).num_seconds() as u64 >= cfg.mode_change_min_secs)
             .unwrap_or(true);
 
-        // ✅ Use last_sent_mode (NOT current_mode!)
+        // ✅ DECISION BASED ON last_sent_mode (NOT current_mode!)
         let should_send = match last_sent_mode {
             Some(last) => last != target_mode,
-            None => true,
+            None => true, // first run
         };
 
-        // Safety refresh
+        // Safety refresh every 10 minutes
         let force_refresh = last_change
             .map(|t| (now - t).num_minutes() >= 10)
             .unwrap_or(true);
@@ -143,16 +130,19 @@ async fn control_task(
             continue;
         }
 
+        // ✅ THIS LINE MUST APPEAR
         info!(
-            "💧 Water heater: SEND {:?} (soc={:.1}%, grid={}, irradiance_low={})",
+            "Water heater: SEND {:?} (soc={:.1}%, grid={}, irradiance_low={})",
             target_mode, soc, grid_connected, irradiance_low
         );
 
+        // Send command to LG
         if let Err(e) = lg.set_mode(target_mode).await {
             error!("LG set_mode error: {e}");
             continue;
         }
 
+        // ✅ Update last_sent_mode AFTER successful send
         last_sent_mode = Some(target_mode);
         last_change = Some(now);
 
