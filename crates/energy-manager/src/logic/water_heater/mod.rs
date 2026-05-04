@@ -60,7 +60,6 @@ async fn control_task(
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
 ) {
-    // NOTE: Rule engine recreated each cycle (no longer using no-loop)
     let mut last_change: Option<DateTime<Utc>> = None;
     let mut last_sent_mode: Option<WaterHeaterMode> = None;
     let mut ticker = interval(Duration::from_secs(30));
@@ -71,7 +70,7 @@ async fn control_task(
         ticker.tick().await;
         let now = Utc::now();
 
-        // ✅ Recreate rule engine each cycle for fresh evaluation
+        // ✅ Recreate rule engine EACH cycle (no more no-loop issue)
         let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
             Ok(e) => e,
             Err(e) => {
@@ -81,7 +80,7 @@ async fn control_task(
             }
         };
 
-        // Read fresh inputs from state
+        // Read inputs
         let (ac_ignore, soc, irradiance) = {
             let s = state.read().await;
             (
@@ -91,12 +90,18 @@ async fn control_task(
             )
         };
 
+        // 🔍 DEBUG: Show exactly what we're reading
+        debug!(
+            "📊 RAW STATE → soc={:.1}% irr={:?} ac_ignore={} min_cfg={}",
+            soc, irradiance, ac_ignore, cfg.irradiance_min_wm2
+        );
+
         let irradiance_low = irradiance
             .map(|w| w < cfg.irradiance_min_wm2)
             .unwrap_or(true);
         let grid_connected = ac_ignore == 0;
 
-        // Evaluate rules with FRESH data
+        // Evaluate rules
         let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
             Ok(m) => {
                 debug!("✅ Rule engine returned: '{}'", m);
@@ -104,7 +109,7 @@ async fn control_task(
             }
             Err(e) => {
                 error!("Rule engine error: {e} — fallback VACATION");
-                "VACATION".to_string()
+                "VACATION".to_string()  // ✅ Uppercase!
             }
         };
 
@@ -123,13 +128,13 @@ async fn control_task(
             .map(|t| (now - t).num_seconds() as u64 >= cfg.mode_change_min_secs)
             .unwrap_or(true);
 
-        // ✅ Use last_sent_mode (not current_mode!)
+        // ✅ Use last_sent_mode (NOT current_mode!)
         let should_send = match last_sent_mode {
             Some(last) => last != target_mode,
             None => true,
         };
 
-        // Safety refresh every 10 minutes
+        // Safety refresh
         let force_refresh = last_change
             .map(|t| (now - t).num_minutes() >= 10)
             .unwrap_or(true);
