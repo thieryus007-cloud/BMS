@@ -30,9 +30,9 @@ Le passage manuellement en mode HEAT_PUMP fonctionne.
 Par ailleur, il arrive que la valeur d'irridiance au niveau du Victron VRM soit bloquée a une ancienne valeure, il serait preferable que la valeure utilisée pour la logic waterheater soit obtenue directement du capteur d 'irridiance. (actuellement, victoriametrics recoit directement cette valeur).
 
 >> ** Nous devrions avoir le process suivant **
->>>	Au demarage, evaluation des trois conditions, envois de la commande correspondante vers LG ThinQ.
->>>	A interval regulier, 5 minutes, lire les informations (mode, temperature actuelle, temperature target)depuis LG ThinQ suivie d'evaluation des trois conditions et envois de la commande correspondante si necessaire.
->>>	les trois informations,Doivent etre enregistrées dans victoriametrics.
+>>>	- Au demarage, evaluation des trois conditions, envois de la commande correspondante vers LG ThinQ.
+>>>	- A interval regulier, 5 minutes, lire les informations (mode, temperature actuelle, temperature target)depuis LG ThinQ suivie d'evaluation des trois conditions et envois de la commande correspondante si necessaire.
+>>>	- les trois informations,Doivent etre enregistrées dans victoriametrics.
 
 ```
 
