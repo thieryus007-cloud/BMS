@@ -1,8 +1,4 @@
 /// Automatic management of the LG ThinQ water heater.
-/// Switches between HEAT_PUMP and VACATION based on SOC, irradiance and grid status.
-/// HEAT_PUMP requires: SOC >= 90%, irradiance >= irradiance_min_wm2, grid disconnected (ac_ignore=1).
-/// Decision logic is handled by rust-rule-engine (rules/water_heater.grl).
-/// Rate limiting remains in Rust (mode_change_min_secs).
 mod rules;
 use chrono::{DateTime, Utc};
 use serde_json::json;
@@ -33,9 +29,6 @@ pub async fn spawn(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Keepalive — republish current mode to Venus OS every N seconds
-// ---------------------------------------------------------------------------
 async fn keepalive_task(
     interval_secs: u64,
     bus: AppBus,
@@ -61,18 +54,13 @@ async fn publish_to_venus(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     bus.emit_live(LiveEvent::new("water_heater_venus", &payload));
 }
 
-// ---------------------------------------------------------------------------
-// Control logic — evaluates conditions every 30 seconds via rule engine
-// ---------------------------------------------------------------------------
 async fn control_task(
     cfg: WaterHeaterConfig,
     lg: Arc<LgThinqClient>,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
 ) {
-    // NOTE: Rule engine is recreated inside the loop because .grl rules use `no-loop`.
-    // This forces a fresh evaluation of facts at every tick.
-
+    // NOTE: Rule engine recreated each cycle (no longer using no-loop)
     let mut last_change: Option<DateTime<Utc>> = None;
     let mut last_sent_mode: Option<WaterHeaterMode> = None;
     let mut ticker = interval(Duration::from_secs(30));
@@ -83,9 +71,7 @@ async fn control_task(
         ticker.tick().await;
         let now = Utc::now();
 
-        // ------------------------------------------------------------------
-        // ✅ CRITICAL: Recreate rule engine each cycle (required due to no-loop)
-        // ------------------------------------------------------------------
+        // ✅ Recreate rule engine each cycle for fresh evaluation
         let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
             Ok(e) => e,
             Err(e) => {
@@ -95,9 +81,7 @@ async fn control_task(
             }
         };
 
-        // ------------------------------------------------------------------
-        // Read inputs (NO current_mode for decision!)
-        // ------------------------------------------------------------------
+        // Read fresh inputs from state
         let (ac_ignore, soc, irradiance) = {
             let s = state.read().await;
             (
@@ -112,14 +96,15 @@ async fn control_task(
             .unwrap_or(true);
         let grid_connected = ac_ignore == 0;
 
-        // ------------------------------------------------------------------
-        // Evaluate rules
-        // ------------------------------------------------------------------
+        // Evaluate rules with FRESH data
         let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
-            Ok(m) => m,
+            Ok(m) => {
+                debug!("✅ Rule engine returned: '{}'", m);
+                m
+            }
             Err(e) => {
                 error!("Rule engine error: {e} — fallback VACATION");
-                "VACATION".to_string()  // ✅ Uppercase to match LG notation
+                "VACATION".to_string()
             }
         };
 
@@ -133,22 +118,18 @@ async fn control_task(
             grid_connected, soc, irradiance_low, target_mode
         );
 
-        // ------------------------------------------------------------------
         // Rate limiting
-        // ------------------------------------------------------------------
         let can_change = last_change
             .map(|t| (now - t).num_seconds() as u64 >= cfg.mode_change_min_secs)
             .unwrap_or(true);
 
-        // ------------------------------------------------------------------
-        // Decide if we should send (source of truth = last_sent_mode)
-        // ------------------------------------------------------------------
+        // ✅ Use last_sent_mode (not current_mode!)
         let should_send = match last_sent_mode {
             Some(last) => last != target_mode,
-            None => true, // first run
+            None => true,
         };
 
-        // Safety refresh: force send every 10 minutes to recover from desync
+        // Safety refresh every 10 minutes
         let force_refresh = last_change
             .map(|t| (now - t).num_minutes() >= 10)
             .unwrap_or(true);
@@ -162,19 +143,14 @@ async fn control_task(
             target_mode, soc, grid_connected, irradiance_low
         );
 
-        // ------------------------------------------------------------------
-        // Send command to LG
-        // ------------------------------------------------------------------
         if let Err(e) = lg.set_mode(target_mode).await {
             error!("LG set_mode error: {e}");
             continue;
         }
 
-        // ✅ Update source of truth AFTER successful send
         last_sent_mode = Some(target_mode);
         last_change = Some(now);
 
-        // Update local state for UI/MQTT only (NOT for decision)
         {
             let mut s = state.write().await;
             s.water_heater_mode = target_mode;
@@ -183,9 +159,7 @@ async fn control_task(
 
         publish_to_venus(&bus, &state).await;
 
-        // ------------------------------------------------------------------
-        // Set target temperature (delayed)
-        // ------------------------------------------------------------------
+        // Set temperature (delayed)
         let delay_secs = cfg.temp_set_delay_secs;
         let target_temp = match target_mode {
             WaterHeaterMode::HeatPump => cfg.heat_pump_target_c,
