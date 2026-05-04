@@ -9,7 +9,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep, Duration};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
 use crate::bus::AppBus;
 use crate::config::WaterHeaterConfig;
 use crate::http_clients::lg_thinq::LgThinqClient;
@@ -80,7 +80,6 @@ async fn control_task(
 
     let mut last_change: Option<DateTime<Utc>> = None;
     let mut last_sent_mode: Option<WaterHeaterMode> = None;
-    let mut last_lg_check: Option<DateTime<Utc>> = None;
 
     let mut ticker = interval(Duration::from_secs(30));
 
@@ -134,7 +133,7 @@ async fn control_task(
             None => true, // first run
         };
 
-        // Safety refresh (anti-stuck)
+        // Safety refresh (anti-stuck / recovery after reboot)
         let force_refresh = last_change
             .map(|t| (now - t).num_minutes() >= 10)
             .unwrap_or(true);
@@ -194,31 +193,8 @@ async fn control_task(
             publish_to_venus(&bus2, &state2).await;
         });
 
-        // ------------------------------------------------------------------
-        // Periodic LG sync (every 5 min)
-        // ------------------------------------------------------------------
-        let need_sync = last_lg_check
-            .map(|t| (now - t).num_minutes() >= 5)
-            .unwrap_or(true);
-
-        if need_sync {
-            last_lg_check = Some(now);
-            match lg.get_mode().await {
-                Ok(real_mode_str) => {
-                    // Note: Ensure `WaterHeaterMode::from_lg_str` is implemented in `crate::types`
-                    let real_mode = WaterHeaterMode::from_lg_str(&real_mode_str);
-                    if Some(real_mode) != last_sent_mode {
-                        warn!(
-                            "LG desync detected → real={:?}, last_sent={:?}",
-                            real_mode, last_sent_mode
-                        );
-                        last_sent_mode = Some(real_mode);
-                    }
-                }
-                Err(e) => {
-                    warn!("LG get_mode failed: {e}");
-                }
-            }
-        }
+        // Note: Periodic LG sync (get_mode) intentionally omitted as the method 
+        // is not implemented in LgThinqClient. The logic relies on last_sent_mode 
+        // as the source of truth, with force_refresh handling potential desync.
     }
 }
