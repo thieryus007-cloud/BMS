@@ -11,7 +11,7 @@ Dans l'interface victoriametrics sont present seulement:
 Il faut investiguer pour savoir pourquoi /api/v1/venus/inverter renvois cette valeur "null". 
 ```
 
-Dans : 
+Dans : crates/energy-manager/src/logic/inverter/mod.rs
 ```
 else if t.contains("/vebus/") && t.ends_with("/Ac/Out/L1/I") {
         if let Some(v) = msg.victron_value::<f64>() {
