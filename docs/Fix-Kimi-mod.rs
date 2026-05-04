@@ -86,7 +86,6 @@ async fn control_task(
 
     let mut last_change: Option<DateTime<Utc>> = None;
     let mut last_sent_mode: Option<WaterHeaterMode> = None;
-    let mut last_lg_check: Option<DateTime<Utc>> = None;
 
     let mut ticker = interval(Duration::from_secs(30));
 
@@ -152,7 +151,7 @@ async fn control_task(
             None => true, // first run
         };
 
-        // Safety refresh (anti-stuck)
+        // Safety refresh (anti-stuck): force resend every 10 min even if same mode
         let force_refresh = last_change
             .map(|t| (now - t).num_minutes() >= 10)
             .unwrap_or(true);
@@ -168,8 +167,8 @@ async fn control_task(
         }
 
         info!(
-            "Water heater: changing mode {:?} → {:?} (grid={grid_connected}, soc={soc:.1}%, irradiance_low={irradiance_low})",
-            last_sent_mode, target_mode
+            "Water heater: SEND {:?} (last_sent={:?}, soc={:.1}%, grid={}, irradiance_low={})",
+            target_mode, last_sent_mode, soc, grid_connected, irradiance_low
         );
 
         // ------------------------------------------------------------------
@@ -215,35 +214,5 @@ async fn control_task(
             }
             publish_to_venus(&bus2, &state2).await;
         });
-
-        // ------------------------------------------------------------------
-        // Periodic LG sync (every 5 min)
-        // ------------------------------------------------------------------
-        let need_sync = last_lg_check
-            .map(|t| (now - t).num_minutes() >= 5)
-            .unwrap_or(true);
-
-        if need_sync {
-            last_lg_check = Some(now);
-
-            match lg.get_mode().await {
-                Ok(real_mode_str) => {
-                    let real_mode = WaterHeaterMode::from_lg_str(&real_mode_str);
-
-                    if Some(real_mode) != last_sent_mode {
-                        tracing::warn!(
-                            "LG desync detected → real={:?}, last_sent={:?}",
-                            real_mode,
-                            last_sent_mode
-                        );
-
-                        last_sent_mode = Some(real_mode);
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("LG get_mode failed: {e}");
-                }
-            }
-        }
     }
 }
