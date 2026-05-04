@@ -68,7 +68,7 @@ const SpiralRaceNode = function SpiralRaceNode({ data }) {
       series: [
         mkGauge('88%',  40,   prodKwh, '#fbbf24', 'Production', 'kWh',  '78%', '90%'),
         mkGauge('65%', 100,   soc,     socCol,    'SOC',        '%',    '48%', '60%'),
-        mkGauge('42%', 1200,  irrWm2,  '#38bdf8', 'Irradiance', 'W/m²', '18%', '30%'),
+        mkGauge('42%', 1500,  irrWm2,  '#38bdf8', 'Irradiance', 'W/m²', '18%', '30%'),
         // Tick marks radiaux fins traversant les 3 anneaux sans atteindre le centre
         {
           type: 'gauge', radius: '88%',
