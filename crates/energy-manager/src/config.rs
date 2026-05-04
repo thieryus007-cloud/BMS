@@ -323,7 +323,7 @@ pub struct WaterHeaterConfig {
     pub irradiance_min_wm2: f64,
 }
 
-fn default_solar_min_w() -> f64 { 2000.0 }
+fn default_solar_min_w() -> f64 { 1000.0 }
 fn default_debounce_secs() -> u64 { 300 }
 fn default_mode_change_min_secs() -> u64 { 900 }
 fn default_hp_target_c() -> f64 { 60.0 }
