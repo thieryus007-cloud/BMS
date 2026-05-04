@@ -77,6 +77,8 @@ async fn control_task(
     let mut last_sent_mode: Option<WaterHeaterMode> = None;
     let mut ticker = interval(Duration::from_secs(30));
 
+    info!("💧 Water heater control task started");
+
     loop {
         ticker.tick().await;
         let now = Utc::now();
@@ -94,7 +96,7 @@ async fn control_task(
         };
 
         // ------------------------------------------------------------------
-        // Read inputs (NO MORE current_mode for decision!)
+        // Read inputs (NO current_mode for decision!)
         // ------------------------------------------------------------------
         let (ac_ignore, soc, irradiance) = {
             let s = state.read().await;
