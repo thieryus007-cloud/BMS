@@ -84,7 +84,7 @@ async fn control_task(
         let now = Utc::now();
 
         // ------------------------------------------------------------------
-        // ✅ Recreate rule engine each cycle (required due to no-loop in rules)
+        // ✅ CRITICAL: Recreate rule engine each cycle (required due to no-loop)
         // ------------------------------------------------------------------
         let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
             Ok(e) => e,
