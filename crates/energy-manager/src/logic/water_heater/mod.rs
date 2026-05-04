@@ -4,12 +4,14 @@
 /// Decision logic is handled by rust-rule-engine (rules/water_heater.grl).
 /// Rate limiting remains in Rust (mode_change_min_secs).
 mod rules;
+
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep, Duration};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
+
 use crate::bus::AppBus;
 use crate::config::WaterHeaterConfig;
 use crate::http_clients::lg_thinq::LgThinqClient;
@@ -25,7 +27,9 @@ pub async fn spawn(
     let bus2   = bus.clone();
     let state2 = state.clone();
     let cfg2   = cfg.clone();
+
     tokio::spawn(keepalive_task(cfg.keepalive_secs, bus2, state2));
+
     if let Some(lg_client) = lg {
         tokio::spawn(control_task(cfg2, lg_client, bus, state));
     } else {
@@ -36,6 +40,7 @@ pub async fn spawn(
 // ---------------------------------------------------------------------------
 // Keepalive — republish current mode to Venus OS every N seconds
 // ---------------------------------------------------------------------------
+
 async fn keepalive_task(
     interval_secs: u64,
     bus: AppBus,
@@ -64,6 +69,7 @@ async fn publish_to_venus(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
 // ---------------------------------------------------------------------------
 // Control logic — evaluates conditions every 30 seconds via rule engine
 // ---------------------------------------------------------------------------
+
 async fn control_task(
     cfg: WaterHeaterConfig,
     lg: Arc<LgThinqClient>,
@@ -73,7 +79,7 @@ async fn control_task(
     let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
         Ok(e) => e,
         Err(e) => {
-            error!("Failed to init water heater rule engine: {e}");
+            tracing::error!("Failed to init water heater rule engine: {e}");
             return;
         }
     };
@@ -100,16 +106,23 @@ async fn control_task(
             )
         };
 
-        let irradiance_low = irradiance.map(|w| w < cfg.irradiance_min_wm2).unwrap_or(true);
+        let irradiance_low = irradiance
+            .map(|w| w < cfg.irradiance_min_wm2)
+            .unwrap_or(true);
+
         let grid_connected = ac_ignore == 0;
 
         // ------------------------------------------------------------------
         // Evaluate rules
         // ------------------------------------------------------------------
-        let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
+        let target_mode_str = match rule_engine.evaluate(
+            grid_connected,
+            soc,
+            irradiance_low,
+        ) {
             Ok(m) => m,
             Err(e) => {
-                error!("Rule engine error: {e} — fallback Vacation");
+                tracing::error!("Rule engine error: {e} — fallback Vacation");
                 "VACATION".to_string()
             }
         };
@@ -118,6 +131,11 @@ async fn control_task(
             "HEAT_PUMP" => WaterHeaterMode::HeatPump,
             _ => WaterHeaterMode::Vacation,
         };
+
+        debug!(
+            "Water heater rule engine: grid={grid_connected} soc={soc:.1}% \
+            irradiance_low={irradiance_low} → {target_mode_str}"
+        );
 
         // ------------------------------------------------------------------
         // Rate limiting
@@ -140,26 +158,32 @@ async fn control_task(
             .unwrap_or(true);
 
         if (!should_send && !force_refresh) || !can_change {
+            if target_mode != last_sent_mode.unwrap_or(target_mode) && !can_change {
+                let wait = cfg.mode_change_min_secs.saturating_sub(
+                    last_change.map(|t| (now - t).num_seconds() as u64).unwrap_or(0),
+                );
+                debug!("Water heater: mode change blocked — rate limit, {wait}s remaining");
+            }
             continue;
         }
 
         info!(
-            "Water heater: SEND {:?} (soc={:.1}%, grid={}, irradiance_low={})",
-            target_mode, soc, grid_connected, irradiance_low
+            "Water heater: changing mode {:?} → {:?} (grid={grid_connected}, soc={soc:.1}%, irradiance_low={irradiance_low})",
+            last_sent_mode, target_mode
         );
 
         // ------------------------------------------------------------------
         // Send command
         // ------------------------------------------------------------------
         if let Err(e) = lg.set_mode(target_mode).await {
-            error!("LG set_mode error: {e}");
+            tracing::error!("LG set_mode error: {e}");
             continue;
         }
 
         last_sent_mode = Some(target_mode);
         last_change = Some(now);
 
-        // Update local state (for UI/MQTT only, no longer used for decision)
+        // Update local state (for UI only)
         {
             let mut s = state.write().await;
             s.water_heater_mode = target_mode;
@@ -169,22 +193,20 @@ async fn control_task(
         publish_to_venus(&bus, &state).await;
 
         // ------------------------------------------------------------------
-        // Set temperature (delayed)
+        // Set target temperature (delayed)
         // ------------------------------------------------------------------
         let delay_secs = cfg.temp_set_delay_secs;
         let target_temp = match target_mode {
             WaterHeaterMode::HeatPump => cfg.heat_pump_target_c,
-            _ => cfg.vacation_target_c,
+            _                         => cfg.vacation_target_c,
         };
-
-        let lg2 = lg.clone();
-        let bus2 = bus.clone();
+        let lg2    = lg.clone();
+        let bus2   = bus.clone();
         let state2 = state.clone();
-
         tokio::spawn(async move {
             sleep(Duration::from_secs(delay_secs)).await;
             if let Err(e) = lg2.set_target_temp(target_temp).await {
-                error!("LG set_target_temp error: {e}");
+                tracing::error!("LG set_target_temp error: {e}");
                 return;
             }
             {
@@ -203,20 +225,23 @@ async fn control_task(
 
         if need_sync {
             last_lg_check = Some(now);
+
             match lg.get_mode().await {
                 Ok(real_mode_str) => {
-                    // Note: Ensure `WaterHeaterMode::from_lg_str` is implemented in `crate::types`
                     let real_mode = WaterHeaterMode::from_lg_str(&real_mode_str);
+
                     if Some(real_mode) != last_sent_mode {
-                        warn!(
+                        tracing::warn!(
                             "LG desync detected → real={:?}, last_sent={:?}",
-                            real_mode, last_sent_mode
+                            real_mode,
+                            last_sent_mode
                         );
+
                         last_sent_mode = Some(real_mode);
                     }
                 }
                 Err(e) => {
-                    warn!("LG get_mode failed: {e}");
+                    tracing::warn!("LG get_mode failed: {e}");
                 }
             }
         }
