@@ -84,14 +84,14 @@ async fn control_task(
         let now = Utc::now();
 
         // ------------------------------------------------------------------
-        // Recreate rule engine each cycle (required due to no-loop in .grl)
+        // ✅ Recreate rule engine each cycle (required due to no-loop in rules)
         // ------------------------------------------------------------------
         let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
             Ok(e) => e,
             Err(e) => {
                 error!("Failed to init water heater rule engine: {e}");
                 sleep(Duration::from_secs(5)).await;
-                continue;
+                continue;  // ✅ continue au lieu de return
             }
         };
 
@@ -127,7 +127,7 @@ async fn control_task(
         };
 
         let target_mode = match target_mode_str.as_str() {
-            "HEAT_PUMP" => WaterHeaterMode::HeatPump,
+            "HEAT_PUMP" => WaterHeaterMode::HeatPump,  // ✅ Majuscules LG
             _ => WaterHeaterMode::Vacation,
         };
 
@@ -144,7 +144,7 @@ async fn control_task(
             .unwrap_or(true);
 
         // ------------------------------------------------------------------
-        // Decide if we should send (source of truth = last_sent_mode)
+        // ✅ Decide if we should send (source of truth = last_sent_mode)
         // ------------------------------------------------------------------
         let should_send = match last_sent_mode {
             Some(last) => last != target_mode,
