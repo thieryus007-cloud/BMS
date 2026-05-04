@@ -4,6 +4,14 @@
 Ce guide vous permet d’installer **Z8RUN** (plateforme IoT/Edge) sur un **Raspberry Pi Compute Module 5** où Docker est déjà présent.  
 Nous utiliserons **SQLite** comme base de données intégrée, sans serveur PostgreSQL supplémentaire, pour une installation plus légère.
 
+pi5compute@pi5compute:~/Daly-BMS-Rust/z8run $ docker compose up -d
+[+] up 2/2
+ ✘ Image ghcr.io/z8run/z8run-api:latest   Error no matching manifest for linux/arm64/v8 in the manifest list entries: no match for platform in manifest: ...       1.3s
+ ! Image ghcr.io/z8run/z8run-nginx:latest Interrupted                                                                                                              1.3s
+Error response from daemon: no matching manifest for linux/arm64/v8 in the manifest list entries: no match for platform in manifest: not found
+pi5compute@pi5compute:~/Daly-BMS-Rust/z8run $ 
+
+
 ---
 
 ## Prérequis
