@@ -16,9 +16,50 @@ pi5compute@pi5compute:~/Daly-BMS-Rust/z8run $
 
 ## Prérequis
 
-- Raspberry Pi 5 (ou Compute Module 5) avec **Docker** et **Docker Compose** installés.
-- **Mosquitto** (MQTT) déjà opérationnel sous Docker (optionnel, pour les nœuds MQTT).
-- **Git** installé (`sudo apt install git -y` si nécessaire).
+error: failed to run custom build command for `adk-studio v0.6.1`
+
+Caused by:
+  process didn't exit successfully: `/tmp/cargo-installtkmVHt/release/build/adk-studio-4adf7df9e74ca69b/build-script-build` (exit status: 101)
+  --- stdout
+  cargo:rerun-if-env-changed=ADK_STUDIO_SKIP_UI_BUILD
+  cargo:rerun-if-changed=ui/index.html
+  cargo:rerun-if-changed=ui/package.json
+  cargo:rerun-if-changed=ui/package-lock.json
+  cargo:rerun-if-changed=ui/vite.config.ts
+  cargo:rerun-if-changed=ui/src
+
+  --- stderr
+  npm error code EUSAGE
+  npm error
+  npm error The `npm ci` command can only install with an existing package-lock.json or
+  npm error npm-shrinkwrap.json with lockfileVersion >= 1. Run an install with npm@5 or
+  npm error later to generate a package-lock.json file, then try again.
+  npm error
+  npm error Clean install a project
+  npm error
+  npm error Usage:
+  npm error npm ci
+  npm error
+  npm error Options:
+  npm error [--install-strategy <hoisted|nested|shallow|linked>] [--legacy-bundling]
+  npm error [--global-style] [--omit <dev|optional|peer> [--omit <dev|optional|peer> ...]]
+  npm error [--include <prod|dev|optional|peer> [--include <prod|dev|optional|peer> ...]]
+  npm error [--strict-peer-deps] [--foreground-scripts] [--ignore-scripts] [--no-audit]
+  npm error [--no-bin-links] [--no-fund] [--dry-run]
+  npm error [-w|--workspace <workspace-name> [-w|--workspace <workspace-name> ...]]
+  npm error [-ws|--workspaces] [--include-workspace-root] [--install-links]
+  npm error
+  npm error aliases: clean-install, ic, install-clean, isntall-clean
+  npm error
+  npm error Run "npm help ci" for more info
+  npm error A complete log of this run can be found in: /home/pi5compute/.npm/_logs/2026-05-04T17_26_48_143Z-debug-0.log
+
+  thread 'main' (48579) panicked at /home/pi5compute/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/adk-studio-0.6.1/build.rs:76:9:
+  `npm ci` failed with status exit status: 1
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
+error: failed to compile `adk-studio v0.6.1`, intermediate artifacts can be found at `/tmp/cargo-installtkmVHt`.
+To reuse those artifacts with a future compilation, set the environment variable `CARGO_TARGET_DIR` to that path.
 
 ---
 
