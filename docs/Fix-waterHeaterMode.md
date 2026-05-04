@@ -1,6 +1,6 @@
 # Rules:
 Si les trois conditions sont réunies, **alors** POST mode: "HEAT_PUMP".  
-  1- On se trouve en mode Offgrid: AC IN ingnore Actif.  
+  1- On se trouve en mode Offgrid: AC IN ingnore Actif.  // IgnoreAcIn1: 0=grid, 1=off-grid.  
   2- Le SOC est supérieure à 90%.  
   3- l'irradiance est superieure à 300 w/m2.  
   >> Sinon alors POST mode: "VACATION".    
