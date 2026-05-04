@@ -15,9 +15,10 @@ Il faut investiguer pour savoir pourquoi /api/v1/venus/inverter renvois cette va
 
 # 2/
 ```
-> On ne voit pas d'animation concernant la circulation du courant sur les edges entre:
+> On ne voit pas d'animation concernant la circulation du courant sur les edges entre.
+>
 >> 1- Onduleur et ATS-Onduleur.
->> 2- ATS-Onduleur et ATS-main
+>> 2- ATS-Onduleur et ATS-main.
 ```
 
 # 3/
