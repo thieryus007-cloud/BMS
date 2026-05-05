@@ -501,19 +501,19 @@ async function fetchRulesStatus() {
     safe(fetch(EM_BASE + '/api/rules-status').then(r => r.ok ? r.json() : null)),
   ]);
 
-  // ── SOC ──────────────────────────────────────────────────────────────────
-  const validBms = [bms1r, bms2r].filter(b => b && b.Soc != null);
-  const avgSoc = validBms.length ? validBms.reduce((s, b) => s + b.Soc, 0) / validBms.length : null;
-  const socOk  = avgSoc != null && avgSoc >= 90;
+  // ── SOC — SmartShunt Victron (valeur exacte utilisée par l'energy-manager) ─
+  const emSoc  = emR?.soc_pct ?? null;
+  const socOk  = emSoc != null && emSoc >= 90;
 
-  // ── Irradiance ──────────────────────────────────────────────────────────
-  const irr   = irrR?.irradiance_wm2 ?? null;
+  // ── Irradiance — valeur vue par l'energy-manager (santuario/irradiance/raw)
+  const irr   = emR?.irradiance_wm2 ?? irrR?.irradiance_wm2 ?? null;
   const irrOk = irr != null && irr >= 300;
 
-  // ── Grid / AC IN ─────────────────────────────────────────────────────────
-  const inv       = invR?.inverter ?? null;
-  const acIgnore  = inv?.ac_in_ignore ?? null;
-  const gridOffOk = acIgnore === true;
+  // ── Grid / AC IN — valeur vue par l'energy-manager (VEBus IgnoreAcIn1) ───
+  const emAcIgnore = emR?.ac_ignore ?? null;          // 0=grid, 1=off-grid (i64)
+  const inv        = invR?.inverter ?? null;
+  const acIgnore   = emAcIgnore != null ? (emAcIgnore === 1) : (inv?.ac_in_ignore ?? null);
+  const gridOffOk  = acIgnore === true;
 
   const tsEl2 = document.getElementById('rules-ts');
   if (tsEl2) tsEl2.textContent = 'Màj ' + new Date().toLocaleTimeString('fr-FR');
@@ -544,7 +544,7 @@ async function fetchRulesStatus() {
     const grid = document.getElementById('rule-grid');
     if (grid) {
       grid.innerHTML = [
-        ruleRow('SOC ≥ 90 %',                      socOk,    avgSoc != null ? `${avgSoc.toFixed(1)} %`  : '—', null),
+        ruleRow('SOC ≥ 90 % (SmartShunt)',           socOk,    emSoc  != null ? `${emSoc.toFixed(1)} %`   : '—', null),
         ruleRow('Irradiance ≥ 300 W/m²',           irrOk,    irr    != null ? `${irr.toFixed(0)} W/m²` : '—', null),
         ruleRow('Grid déconnecté (AC IN Ignored)', gridOffOk, acIgnore != null ? (acIgnore ? 'ACTIF' : 'Normal') : '—', null),
       ].join('');
@@ -585,7 +585,7 @@ async function fetchRulesStatus() {
     if (cGrid) {
       cGrid.innerHTML = [
         ruleRow('Mode réseau', !offgrid, offgrid ? 'Off-grid' : 'Grid', null),
-        ruleRow('SOC batteries', avgSoc != null, avgSoc != null ? `${avgSoc.toFixed(1)} %` : '—', null),
+        ruleRow('SOC (SmartShunt)', emSoc != null, emSoc != null ? `${emSoc.toFixed(1)} %` : '—', null),
         ruleRow('Courant VEBus appliqué', currentA != null, currentA != null ? `${currentA} A` : '—', null),
       ].join('');
     }

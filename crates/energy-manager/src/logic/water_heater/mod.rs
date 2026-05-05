@@ -87,8 +87,13 @@ async fn control_task(
         let now = Utc::now();
 
         // Read actual state from LG ThinQ before deciding
+        info!("Water heater: calling lg.get_state()...");
         let lg_snapshot = match lg.get_state().await {
             Ok(snap) => {
+                info!(
+                    "Water heater: LG get_state OK → mode={:?}, temp={:?}°C, target={:?}°C",
+                    snap.mode, snap.current_temp_c, snap.target_temp_c
+                );
                 {
                     let mut s = state.write().await;
                     s.water_heater_mode     = snap.mode;
@@ -105,7 +110,7 @@ async fn control_task(
                 Some(snap)
             }
             Err(e) => {
-                error!("LG ThinQ get_state error: {e}");
+                error!("LG ThinQ get_state FAILED: {e} — will skip mode comparison this tick");
                 None
             }
         };
@@ -116,15 +121,41 @@ async fn control_task(
             (s.ac_ignore, s.soc_pct, s.irradiance_wm2)
         };
 
+        info!(
+            "Water heater tick — ac_ignore={:?}, soc={:?}, irradiance={:?} W/m² (min={})",
+            ac_ignore_opt, soc_opt, irradiance, cfg.irradiance_min_wm2
+        );
+
         if ac_ignore_opt.is_none() || soc_opt.is_none() {
-            info!("Water heater: waiting for MQTT data (ac_ignore={:?}, soc={:?}) — skip", ac_ignore_opt, soc_opt);
+            warn!(
+                "Water heater: MQTT data missing (ac_ignore={:?}, soc={:?}) — skipping evaluation. \
+                 Check that energy-manager subscriptions are received from broker.",
+                ac_ignore_opt, soc_opt
+            );
             continue;
         }
 
         let ac_ignore = ac_ignore_opt.unwrap_or(0);
         let soc       = soc_opt.unwrap_or(0.0);
-        let irradiance_low = irradiance.map(|w| w < cfg.irradiance_min_wm2).unwrap_or(true);
+        let irradiance_low = match irradiance {
+            Some(w) => {
+                let low = w < cfg.irradiance_min_wm2;
+                info!("Water heater: irradiance={:.1} W/m², min={}, irradiance_low={}", w, cfg.irradiance_min_wm2, low);
+                low
+            }
+            None => {
+                warn!(
+                    "Water heater: irradiance_wm2=None (topic 'santuario/irradiance/raw' not received yet) \
+                     — treating as irradiance_low=true → target will be VACATION"
+                );
+                true
+            }
+        };
         let grid_connected = ac_ignore == 0;
+        info!(
+            "Water heater: ac_ignore={}, grid_connected={}, soc={:.1}%, irradiance_low={}",
+            ac_ignore, grid_connected, soc, irradiance_low
+        );
 
         let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
             Ok(e) => e,
@@ -136,7 +167,11 @@ async fn control_task(
         };
 
         let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
-            Ok(m) => m,
+            Ok(m) => {
+                info!("Water heater: rule engine → target_mode={m} (grid_connected={}, soc={:.1}%, irradiance_low={})",
+                    grid_connected, soc, irradiance_low);
+                m
+            }
             Err(e) => {
                 error!("Rule engine error: {e} — fallback VACATION");
                 "VACATION".to_string()
@@ -152,14 +187,22 @@ async fn control_task(
         let actual_mode = lg_snapshot
             .as_ref()
             .map(|s| s.mode)
-            .unwrap_or_else(|| state.try_read().map(|s| s.water_heater_mode).unwrap_or(WaterHeaterMode::Vacation));
+            .unwrap_or_else(|| {
+                warn!("Water heater: LG readback failed, using cached state for comparison");
+                state.try_read().map(|s| s.water_heater_mode).unwrap_or(WaterHeaterMode::Vacation)
+            });
+
+        info!(
+            "Water heater: target={:?}, actual (LG)={:?}, should_send={}",
+            target_mode, actual_mode, actual_mode != target_mode
+        );
 
         let should_send = actual_mode != target_mode;
 
         if !should_send {
             info!(
-                "Water heater: target={:?} matches actual={:?}, no change (soc={:.1}%, grid={}, irr_low={})",
-                target_mode, actual_mode, soc, grid_connected, irradiance_low
+                "Water heater: target={:?} matches actual={:?}, no command needed",
+                target_mode, actual_mode
             );
             consecutive_fails = 0;
             continue;

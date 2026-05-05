@@ -149,6 +149,12 @@ struct RulesStatus {
     water_heater:   WaterHeaterCard,
     charge_current: ChargeCurrent,
     deye:           DeyeCard,
+    /// SmartShunt SOC used by the water heater rule engine (None = not yet received from MQTT)
+    soc_pct:        Option<f64>,
+    /// Irradiance W/m² used by the water heater rule engine (None = not yet received)
+    irradiance_wm2: Option<f64>,
+    /// ac_ignore flag from VEBus (0 = grid connected, 1 = grid ignored/off-grid)
+    ac_ignore:      Option<i64>,
 }
 
 async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
@@ -172,6 +178,9 @@ async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
             on:          s.deye_on,
             last_change: s.deye_last_change,
         },
+        soc_pct:        s.soc_pct,
+        irradiance_wm2: s.irradiance_wm2,
+        ac_ignore:      s.ac_ignore,
     };
     Json(status).into_response()
 }
