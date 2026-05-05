@@ -1,4 +1,4 @@
-//crates/energy-manager/src/logic/irradiance/mod.rs
+// crates/energy-manager/src/logic/irradiance/mod.rs
 //
 mod rules;
 use std::sync::Arc;
@@ -36,20 +36,36 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
                         // ✅ CLÉS SANS ESPACES
                         if let Some(wm2) = json.get("irradiance_wm2").and_then(|v| v.as_f64()) {
                             let connected = json.get("connected").and_then(|v| v.as_bool()).unwrap_or(true);
-                            if !connected { continue; }
+                            
+                            // ✅ LOG explicite pour le debug
+                            debug!("Irradiance HTTP: raw={wm2}, connected={connected}");
+                            
+                            if !connected {
+                                warn!("Irradiance HTTP: sensor disconnected (connected=false), keeping last value");
+                                continue;
+                            }
+                            
+                            // ✅ TOUJOURS mettre à jour le state avec la valeur brute,
+                            // même si le rule engine la considère hors range.
+                            // Le water_heater fait sa propre comparaison avec irradiance_min_wm2.
+                            state.write().await.irradiance_wm2 = Some(wm2);
                             
                             match rule_engine.validate(wm2) {
                                 Ok(true) => {
-                                    state.write().await.irradiance_wm2 = Some(wm2);
                                     bus.emit_live(crate::types::LiveEvent::new(
                                         "irradiance",
                                         serde_json::json!({ "irradiance_wm2": wm2 }),
                                     ));
-                                    debug!("🔍 HTTP Poll Success: {:.0} W/m²", wm2);
+                                    info!("🔍 HTTP Poll Success: {:.0} W/m²", wm2);
                                 }
-                                Ok(false) => debug!("Irradiance HTTP: out of range: {wm2}"),
+                                Ok(false) => {
+                                    // ✅ La valeur est maintenant dans le state, on log juste le rejet
+                                    warn!("Irradiance HTTP: out of range: {wm2} W/m² (rule engine rejected, but state updated)");
+                                }
                                 Err(e) => tracing::error!("Irradiance HTTP: rule engine error: {e}"),
                             }
+                        } else {
+                            warn!("Irradiance HTTP: missing 'irradiance_wm2' field in JSON");
                         }
                     }
                     Err(e) => warn!("Irradiance HTTP: JSON parse error: {e}"),
