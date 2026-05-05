@@ -1,5 +1,5 @@
 //crates/energy-manager/src/logic/irradiance/mod.rs
-
+//
 mod rules;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -9,6 +9,7 @@ use crate::bus::AppBus;
 use crate::types::EnergyState;
 
 pub async fn spawn(bus: AppBus, state: Arc<RwLock<EnergyState>>, bms_server_url: String) {
+    // ✅ bus.clone() passé à http_poll_task
     tokio::spawn(http_poll_task(bms_server_url, state.clone(), bus));
 }
 
@@ -32,6 +33,7 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<serde_json::Value>().await {
                     Ok(json) => {
+                        // ✅ CLÉS SANS ESPACES
                         if let Some(wm2) = json.get("irradiance_wm2").and_then(|v| v.as_f64()) {
                             let connected = json.get("connected").and_then(|v| v.as_bool()).unwrap_or(true);
                             if !connected { continue; }
@@ -58,3 +60,4 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
         }
     }
 }
+// ✅ mqtt_task SUPPRIMÉ comme demandé
