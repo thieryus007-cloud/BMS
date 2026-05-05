@@ -13,7 +13,6 @@ use crate::types::EnergyState;
 const TOPIC: &str = "santuario/irradiance/raw";
 
 pub async fn spawn(bus: AppBus, state: Arc<RwLock<EnergyState>>, bms_server_url: String) {
-    ///tokio::spawn(http_poll_task(bms_server_url, bus.clone(), state.clone()));
     tokio::spawn(http_poll_task(bms_server_url, state.clone(), bus.clone()));
     tokio::spawn(mqtt_task(bus, state));
 }
@@ -21,7 +20,7 @@ pub async fn spawn(bus: AppBus, state: Arc<RwLock<EnergyState>>, bms_server_url:
 /// Polls daly-bms-server GET /api/v1/irradiance/status every 30s.
 /// This is the primary irradiance source — always has the correct value
 /// directly from the PRALRAN RS485 sensor.
-async fn http_poll_task(bms_server_url: String, bus: AppBus, state: Arc<RwLock<EnergyState>>) {
+async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>){
     let url = format!("{}/api/v1/irradiance/status", bms_server_url.trim_end_matches('/'));
     let client = reqwest::Client::new();
     let mut ticker = interval(Duration::from_secs(30));
