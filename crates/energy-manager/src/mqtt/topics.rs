@@ -25,6 +25,7 @@ pub fn all_subscriptions(portal_id: &str, vebus: u32, mppt1: u32, mppt2: u32, pv
         n(pid, &format!("vebus/{vebus}/Dc/0/Power")),
         n(pid, &format!("vebus/{vebus}/Ac/Out/L1/V")),
         n(pid, &format!("vebus/{vebus}/Ac/Out/L1/I")),
+        n(pid, &format!("vebus/{vebus}/Ac/Out/L1/P")),
         n(pid, &format!("vebus/{vebus}/State")),
         n(pid, &format!("vebus/{vebus}/Energy/InverterToAcOut")),
         n(pid, &format!("vebus/{vebus}/Energy/OutToInverter")),
