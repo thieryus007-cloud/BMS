@@ -1,3 +1,5 @@
+//crates/energy-manager/src/logic/irradiance/rules.rs
+
 use anyhow::Context;
 use rust_rule_engine::{Facts, KnowledgeBase, RustRuleEngine, Value};
 
