@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
 
     logic::inverter::spawn(vic.clone(), bus.clone(), state.clone()).await;
     logic::smartshunt::spawn(vic.clone(), bus.clone(), state.clone()).await;
-    logic::irradiance::spawn(bus.clone(), state.clone()).await;
+    logic::irradiance::spawn(bus.clone(), state.clone(), cfg.solar.bms_server_url.clone()).await;
     logic::tasmota::spawn(vic.clone(), bus.clone(), state.clone()).await;
     logic::switch_ats::spawn(bus.clone(), state.clone()).await;
     logic::platform::spawn(cfg.platform.clone(), bus.clone()).await;
