@@ -1,48 +1,40 @@
 use anyhow::Context;
 use rust_rule_engine::{Facts, KnowledgeBase, RustRuleEngine, Value};
 
-const GRL: &str = include_str!("../../../rules/water_heater.grl");
+const GRL: &str = include_str!("../../../rules/irradiance.grl");
 
-pub struct WaterHeaterRuleEngine {
+pub struct IrradianceRuleEngine {
     engine: RustRuleEngine,
 }
 
-impl WaterHeaterRuleEngine {
+impl IrradianceRuleEngine {
     pub fn new() -> anyhow::Result<Self> {
-        let kb = KnowledgeBase::new("water_heater");
+        let kb = KnowledgeBase::new("irradiance");
         kb.add_rules_from_grl(GRL)
-            .context("Failed to load water_heater.grl")?;
+            .context("Failed to load irradiance.grl")?;
         Ok(Self {
             engine: RustRuleEngine::new(kb),
         })
     }
 
-    /// Evaluates conditions and returns "HeatPump" or "Vacation".
-    /// HEAT_PUMP requires: SOC >= 90%, irradiance >= threshold, grid disconnected (ac_ignore=1).
-    pub fn evaluate(
-        &mut self,
-        grid_connected: bool,
-        soc_pct: f64,
-        irradiance_low: bool,
-    ) -> anyhow::Result<String> {
-        let facts = Facts::new();
-        facts.set("WH.want_vacation",  Value::Boolean(false));
-        facts.set("WH.grid_connected", Value::Boolean(grid_connected));
-        facts.set("WH.soc_pct",        Value::Number(soc_pct));
-        facts.set("WH.irradiance_low", Value::Boolean(irradiance_low));
+    /// Returns true when the raw W/m² value is within the valid sensor range.
+    pub fn validate(&mut self, raw: f64) -> anyhow::Result<bool> {
+        let mut facts = Facts::new();
+        
+        // ✅ Espaces supprimés : le moteur exige une correspondance exacte
+        facts.set("IR.raw", Value::Number(raw));
+        facts.set("IR.valid", Value::Boolean(false));
 
         self.engine
             .execute(&facts)
-            .context("Water heater rule engine evaluation failed")?;
+            .context("Irradiance rule engine evaluation failed")?;
 
-        let mode = facts
-            .get("WH.target_mode")
+        Ok(facts
+            .get("IR.valid") // ✅ Espace supprimé ici aussi
             .and_then(|v| match v {
-                Value::String(s) => Some(s),
+                Value::Boolean(b) => Some(b), // ✅ Syntaxe `=>` corrigée
                 _ => None,
             })
-            .unwrap_or_else(|| "Vacation".to_string());
-
-        Ok(mode)
+            .unwrap_or(false))
     }
 }
