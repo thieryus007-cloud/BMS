@@ -1,7 +1,6 @@
 use anyhow::Context;
 use rust_rule_engine::{Facts, KnowledgeBase, RustRuleEngine, Value};
 
-// ⚠️ Adaptez le chemin si votre fichier .grl est ailleurs
 const GRL: &str = include_str!("../../../rules/water_heater.grl");
 
 pub struct WaterHeaterRuleEngine {
