@@ -1,5 +1,5 @@
-//crates/energy-manager/src/logic/irradiance/rules.rs
-
+// crates/energy-manager/src/logic/irradiance/rules.rs
+//
 use anyhow::Context;
 use rust_rule_engine::{Facts, KnowledgeBase, RustRuleEngine, Value};
 
@@ -20,18 +20,19 @@ impl IrradianceRuleEngine {
     }
 
     pub fn validate(&mut self, raw: f64) -> anyhow::Result<bool> {
-        let mut facts = Facts::new();
+        let mut facts = Facts::new(); // ✅ mut obligatoire
+        // ✅ PAS D'ESPACES DANS LES CLÉS
         facts.set("IR.raw", Value::Number(raw));
         facts.set("IR.valid", Value::Boolean(false));
 
         self.engine
-            .execute(&mut facts)
+            .execute(&mut facts) // ✅ &mut obligatoire
             .context("Irradiance rule engine evaluation failed")?;
 
         Ok(facts
             .get("IR.valid")
             .and_then(|v| match v {
-                Value::Boolean(b) => Some(b),
+                Value::Boolean(b) => Some(b), // ✅ => et non = >
                 _ => None,
             })
             .unwrap_or(false))
