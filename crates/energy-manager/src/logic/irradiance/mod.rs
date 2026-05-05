@@ -8,15 +8,14 @@ use tracing::{debug, info, warn};
 use crate::bus::AppBus;
 use crate::types::EnergyState;
 
-const TOPIC: &str = "santuario/irradiance/raw";
-
 pub async fn spawn(bus: AppBus, state: Arc<RwLock<EnergyState>>, bms_server_url: String) {
-    // ✅ On passe bus.clone() à http_poll_task
-    tokio::spawn(http_poll_task(bms_server_url, state.clone(), bus.clone()));
-    //tokio::spawn(mqtt_task(bus, state));
+    // ✅ On passe 'bus' à la tâche HTTP pour qu'elle puisse émettre des LiveEvents
+    tokio::spawn(http_poll_task(bms_server_url, state.clone(), bus));
 }
 
 /// Polls daly-bms-server GET /api/v1/irradiance/status every 30s.
+/// This is the primary irradiance source — always has the correct value
+/// directly from the PRALRAN RS485 sensor.
 async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>, bus: AppBus) {
     let url = format!("{}/api/v1/irradiance/status", bms_server_url.trim_end_matches('/'));
     let client = reqwest::Client::new();
@@ -29,7 +28,6 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
             return;
         }
     };
-    
     info!("Irradiance HTTP poll started → {url}");
 
     loop {
@@ -38,7 +36,7 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<serde_json::Value>().await {
                     Ok(json) => {
-                        // ✅ Clés SANS espace
+                        // ✅ Clés corrigées (sans espaces) pour matcher l'API
                         if let Some(wm2) = json.get("irradiance_wm2").and_then(|v| v.as_f64()) {
                             let connected = json.get("connected").and_then(|v| v.as_bool()).unwrap_or(true);
                             if !connected {
@@ -50,7 +48,7 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
                                     let prev = state.read().await.irradiance_wm2;
                                     state.write().await.irradiance_wm2 = Some(wm2);
                                     
-                                    // ✅ Événement émis avec clés propres
+                                    // ✅ Émission de l'événement (clés corrigées)
                                     bus.emit_live(crate::types::LiveEvent::new(
                                         "irradiance",
                                         serde_json::json!({ "irradiance_wm2": wm2 }),
@@ -65,9 +63,6 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
                                 Ok(false) => debug!("Irradiance HTTP: out of range: {wm2}"),
                                 Err(e) => tracing::error!("Irradiance HTTP: rule engine error: {e}"),
                             }
-                        } else {
-                            // ✅ Log utile si la clé est absente
-                            debug!("Irradiance HTTP: clé 'irradiance_wm2' absente ou invalide dans la réponse");
                         }
                     }
                     Err(e) => warn!("Irradiance HTTP: JSON parse error: {e}"),
@@ -76,48 +71,5 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
             Ok(resp) => warn!("Irradiance HTTP: status {}", resp.status()),
             Err(e) => warn!("Irradiance HTTP: request failed: {e}"),
         }
-    }
-}
-
-/// Listens to santuario/irradiance/raw MQTT topic as supplementary source.
-async fn mqtt_task(bus: AppBus, state: Arc<RwLock<EnergyState>>) {
-    let mut rule_engine = match rules::IrradianceRuleEngine::new() {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::error!("Failed to init irradiance rule engine: {e}");
-            return;
-        }
-    };
-    
-    let mut rx = bus.subscribe_mqtt();
-    loop {
-        let msg = match rx.recv().await {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        if msg.topic != TOPIC {
-            continue;
-        }
-
-        let raw = msg.payload_str().trim().parse::<f64>().unwrap_or(-1.0);
-
-        match rule_engine.validate(raw) {
-            Ok(true) => {}
-            Ok(false) => {
-                debug!("Irradiance MQTT out of range: {raw}");
-                continue;
-            }
-            Err(e) => {
-                tracing::error!("Irradiance rule engine error: {e}");
-                continue;
-            }
-        }
-
-        debug!("Irradiance MQTT: {raw} W/m²");
-        state.write().await.irradiance_wm2 = Some(raw);
-        bus.emit_live(crate::types::LiveEvent::new(
-            "irradiance",
-            serde_json::json!({ "irradiance_wm2": raw }),
-        ));
     }
 }
