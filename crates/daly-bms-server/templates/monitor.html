@@ -553,7 +553,7 @@ async function fetchRulesStatus() {
     const allOk = socOk && irrOk && gridOffOk;
     const dec = document.getElementById('rules-decision');
     if (dec) {
-      dec.textContent = allOk ? '→ HEAT_PUMP' : '→ VACATION (conditions non remplies)';
+      dec.textContent = allOk ? 'Cible calculée : HEAT_PUMP' : 'Cible calculée : VACATION';
       dec.style.color = allOk ? '#4ade80' : '#94a3b8';
     }
   } catch(e) { console.warn('fetchRulesStatus/wh:', e); }
