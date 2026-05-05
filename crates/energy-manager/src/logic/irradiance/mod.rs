@@ -13,7 +13,7 @@ use crate::types::EnergyState;
 const TOPIC: &str = "santuario/irradiance/raw";
 
 pub async fn spawn(bus: AppBus, state: Arc<RwLock<EnergyState>>, bms_server_url: String) {
-    tokio::spawn(http_poll_task(bms_server_url, state.clone(), bus.clone()));
+    tokio::spawn(http_poll_task(bms_server_url, state.clone()));
     tokio::spawn(mqtt_task(bus, state));
 }
 
