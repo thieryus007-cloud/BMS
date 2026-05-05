@@ -1,3 +1,5 @@
+//crates/energy-manager/src/logic/irradiance/mod.rs
+
 mod rules;
 use std::sync::Arc;
 use tokio::sync::RwLock;
