@@ -115,10 +115,8 @@ async fn publish_state(
     let ac_out_power = s.ac_out_power_w;
     drop(s);
 
-    // Prefer direct measurement (Ac/Out/L1/P); fall back to V×I
-    let ac_power = ac_out_power.or_else(|| {
-        ac_voltage.zip(ac_current).map(|(v, i)| v * i)
-    });
+    // Puissance AC OUT L1 fournie directement par Victron (topic Ac/Out/L1/P)
+    let ac_power = ac_out_power;
 
     let payload = json!({
         "Voltage":     dc_voltage,

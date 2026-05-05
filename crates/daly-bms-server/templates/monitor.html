@@ -102,74 +102,87 @@
     </div>
   </div>
 
-  <!-- Card a) Gestion Courant Victron -->
-  <div class="bms-card" id="card-charge" style="background:#0f172a;border:1px solid #1e293b;">
-    <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">⚡ GESTION COURANT VICTRON</span>
-      <span id="charge-ts" style="font-family:monospace;font-size:0.65rem;color:#475569;">—</span>
-    </div>
-    <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.5rem;">
-      <div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
-        <span style="color:#94a3b8;flex:1;">Courant max charge</span>
-        <span id="charge-current-val" style="font-weight:700;color:#22c55e;">— A</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
-        <span style="color:#94a3b8;flex:1;">Power Assist (VEBus)</span>
-        <span id="charge-assist-val" style="font-weight:700;color:#94a3b8;">—</span>
-      </div>
-      <div id="charge-rule-grid" style="display:flex;flex-direction:column;gap:0.4rem;margin-top:0.3rem;padding-top:0.4rem;border-top:1px solid #1e293b;"></div>
-    </div>
-  </div>
-
-  <!-- Card b) Gestion du Chauffe-eau -->
+  <!-- Card unique : 3 règles — Courant Victron / Chauffe-eau / DEYE -->
   <div class="bms-card" id="card-rules" style="background:#0f172a;border:1px solid #1e293b;">
     <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">🚿 GESTION CHAUFFE-EAU</span>
-      <span id="rules-mode-badge" style="font-family:monospace;font-size:0.72rem;padding:2px 8px;border-radius:4px;background:#1e293b;color:#475569;">—</span>
+      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">◈ RÈGLES SYSTÈME</span>
+      <span id="rules-ts" style="font-family:monospace;font-size:0.65rem;color:#475569;">—</span>
     </div>
-    <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.55rem;">
-      <!-- LG ThinQ real values -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;">
-        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
-          <div style="font-family:monospace;font-size:0.6rem;color:#64748b;margin-bottom:2px;">MODE LG</div>
-          <div id="wh-mode-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#7dd3fc;">—</div>
-        </div>
-        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
-          <div style="font-family:monospace;font-size:0.6rem;color:#64748b;margin-bottom:2px;">TEMP. ACTUELLE</div>
-          <div id="wh-temp-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#f97316;">—</div>
-        </div>
-        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
-          <div style="font-family:monospace;font-size:0.6rem;color:#64748b;margin-bottom:2px;">TEMP. CIBLE</div>
-          <div id="wh-target-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#a78bfa;">—</div>
-        </div>
-      </div>
-      <div style="font-family:monospace;font-size:0.62rem;color:#475569;">LG lu le : <span id="wh-read-ts">—</span></div>
-      <!-- Rule conditions -->
-      <div id="rule-grid" style="display:flex;flex-direction:column;gap:0.4rem;padding-top:0.3rem;border-top:1px solid #1e293b;"></div>
-      <div style="display:flex;align-items:center;gap:0.5rem;">
-        <span style="font-family:monospace;font-size:0.68rem;color:#475569;">Décision :</span>
-        <span id="rules-decision" style="font-family:monospace;font-size:0.75rem;font-weight:700;color:#94a3b8;">—</span>
-      </div>
-    </div>
-  </div>
+    <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.85rem;">
 
-  <!-- Card c) Gestion des relais DEYE -->
-  <div class="bms-card" id="card-deye" style="background:#0f172a;border:1px solid #1e293b;">
-    <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">🔌 GESTION RELAIS DEYE</span>
-      <span id="deye-state-badge" style="font-family:monospace;font-size:0.72rem;padding:2px 8px;border-radius:4px;background:#1e293b;color:#475569;">—</span>
-    </div>
-    <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.5rem;">
-      <div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
-        <span id="deye-dot" style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:#475569;"></span>
-        <span style="color:#94a3b8;flex:1;">Relais DEYE</span>
-        <span id="deye-on-val" style="font-weight:700;color:#94a3b8;">—</span>
+      <!-- a) Gestion Courant Victron -->
+      <div>
+        <div style="font-family:monospace;font-size:0.7rem;font-weight:700;color:#38bdf8;margin-bottom:0.4rem;display:flex;justify-content:space-between;">
+          <span>⚡ Gestion Courant Victron</span>
+          <span id="charge-ts" style="font-weight:400;color:#475569;font-size:0.63rem;">—</span>
+        </div>
+        <div style="display:flex;gap:0.4rem;margin-bottom:0.4rem;">
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;">
+            <div style="font-size:0.6rem;color:#64748b;">Courant max charge</div>
+            <div id="charge-current-val" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#22c55e;">—</div>
+          </div>
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;">
+            <div style="font-size:0.6rem;color:#64748b;">Power Assist</div>
+            <div id="charge-assist-val" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#94a3b8;">—</div>
+          </div>
+        </div>
+        <div id="charge-rule-grid" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
       </div>
-      <div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
-        <span style="color:#94a3b8;flex:1;">Dernier changement</span>
-        <span id="deye-change-ts" style="color:#64748b;font-size:0.65rem;">—</span>
+
+      <div style="border-top:1px solid #1e293b;"></div>
+
+      <!-- b) Gestion Chauffe-eau -->
+      <div>
+        <div style="font-family:monospace;font-size:0.7rem;font-weight:700;color:#38bdf8;margin-bottom:0.4rem;display:flex;justify-content:space-between;">
+          <span>🚿 Gestion Chauffe-eau (LG ThinQ)</span>
+          <span id="rules-mode-badge" style="font-size:0.68rem;padding:1px 6px;border-radius:4px;background:#1e293b;color:#475569;">—</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.35rem;margin-bottom:0.4rem;">
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;">
+            <div style="font-size:0.6rem;color:#64748b;">Mode LG</div>
+            <div id="wh-mode-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#7dd3fc;">—</div>
+          </div>
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;">
+            <div style="font-size:0.6rem;color:#64748b;">Temp. actuelle</div>
+            <div id="wh-temp-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#f97316;">—</div>
+          </div>
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;">
+            <div style="font-size:0.6rem;color:#64748b;">Temp. cible</div>
+            <div id="wh-target-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#a78bfa;">—</div>
+          </div>
+        </div>
+        <div style="font-family:monospace;font-size:0.62rem;color:#475569;margin-bottom:0.35rem;">LG lu le : <span id="wh-read-ts">—</span></div>
+        <div id="rule-grid" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;">
+          <span style="font-family:monospace;font-size:0.65rem;color:#475569;">→</span>
+          <span id="rules-decision" style="font-family:monospace;font-size:0.73rem;font-weight:700;color:#94a3b8;">—</span>
+        </div>
       </div>
-      <div id="deye-rule-grid" style="display:flex;flex-direction:column;gap:0.4rem;margin-top:0.3rem;padding-top:0.4rem;border-top:1px solid #1e293b;"></div>
+
+      <div style="border-top:1px solid #1e293b;"></div>
+
+      <!-- c) Gestion Relais DEYE -->
+      <div>
+        <div style="font-family:monospace;font-size:0.7rem;font-weight:700;color:#38bdf8;margin-bottom:0.4rem;display:flex;justify-content:space-between;">
+          <span>🔌 Gestion Relais DEYE</span>
+          <span id="deye-state-badge" style="font-size:0.68rem;padding:1px 6px;border-radius:4px;background:#1e293b;color:#475569;">—</span>
+        </div>
+        <div style="display:flex;gap:0.4rem;margin-bottom:0.4rem;">
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;display:flex;align-items:center;gap:0.5rem;">
+            <span id="deye-dot" style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#475569;"></span>
+            <div>
+              <div style="font-size:0.6rem;color:#64748b;">Relais</div>
+              <div id="deye-on-val" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#94a3b8;">—</div>
+            </div>
+          </div>
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;">
+            <div style="font-size:0.6rem;color:#64748b;">Dernier changement</div>
+            <div id="deye-change-ts" style="font-family:monospace;font-size:0.7rem;color:#64748b;">—</div>
+          </div>
+        </div>
+        <div id="deye-rule-grid" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
+      </div>
+
     </div>
   </div>
 
@@ -501,6 +514,9 @@ async function fetchRulesStatus() {
   const inv       = invR?.inverter ?? null;
   const acIgnore  = inv?.ac_in_ignore ?? null;
   const gridOffOk = acIgnore === true;
+
+  const tsEl2 = document.getElementById('rules-ts');
+  if (tsEl2) tsEl2.textContent = 'Màj ' + new Date().toLocaleTimeString('fr-FR');
 
   // ══════════════════════════════════════════════════════════════════════════
   // Card b) Chauffe-eau

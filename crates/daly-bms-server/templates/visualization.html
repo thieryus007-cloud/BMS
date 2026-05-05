@@ -204,12 +204,13 @@ const atsExecRef = useRef(null);
     setEdges(function (prev) {
       const withFlow = prev.map(function (e) {
         if (e.type !== 'doubleLine' && e.type !== 'customBezier') return e;
-        let fv = 0, rev = false;
+        let fv = 0, rev = false, speedDiv = 500;
         switch (e.id) {
           case 'e-ats-maison':
           case 'e-maison-switchs':  fv = Math.abs(et8?.power_w              ?? 0); break;
           case 'e-ats-micro':       fv = Math.abs(et7?.power_w              ?? 0); break;
-          case 'e-onduleur-ats':    fv = Math.abs(inverter?.ac_output_power_w ?? inverter?.power_w ?? 0); rev = true; break;
+          // Courant AC sortie onduleur (A) — diviseur adapté aux ampères
+          case 'e-onduleur-ats':    fv = Math.abs(inverter?.ac_output_current_a ?? 0); rev = true; speedDiv = 5; break;
           case 'e-ats-reseau':
           case 'e-reseau-onduleur': fv = Math.abs(et9?.power_w              ?? 0); break;
           case 'e-mppt-shu':        fv = mpptTotalPowerW;                          break;
@@ -231,7 +232,7 @@ const atsExecRef = useRef(null);
             ...(e.data || {}),
             flowValue:     fv,
             reverse:       rev,
-            flowSpeed:     Math.min(4, Math.max(0.4, fv / 500)),
+            flowSpeed:     Math.min(4, Math.max(0.4, fv / speedDiv)),
             flowColor:     e.style?.stroke ?? '#2563eb',
             particleCount: 2,
           },
@@ -261,7 +262,8 @@ const atsExecRef = useRef(null);
           });
         }
         if (sw1C) {
-          const e1pwr = Math.abs(inverter?.ac_output_power_w ?? inverter?.power_w ?? 0);
+          // Courant AC sortie onduleur (A) vers ATS-main — diviseur adapté aux ampères
+          const e1a = Math.abs(inverter?.ac_output_current_a ?? 0);
           atsEdges.push({
             id: 'ats-e1', source: 'ats-onduleur', target: 'ats-main',
             sourceHandle: 'onduleur-out', targetHandle: 'ats-in-onduleur',
@@ -269,8 +271,8 @@ const atsExecRef = useRef(null);
             style: { stroke: '#10b981', strokeWidth: 2 },
             data: {
               useBezier: false,
-              flowValue: e1pwr,
-              flowSpeed: Math.min(4, Math.max(0.4, e1pwr / 500)),
+              flowValue: e1a,
+              flowSpeed: Math.min(4, Math.max(0.4, e1a / 5)),
               flowColor: '#10b981',
             }
           });
