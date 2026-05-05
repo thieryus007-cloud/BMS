@@ -621,9 +621,8 @@ async function fetchRulesStatus() {
     const dGrid = document.getElementById('deye-rule-grid');
     if (dGrid) {
       dGrid.innerHTML = [
-        ruleRow('Grid déconnecté',      gridOffOk, acIgnore != null ? (acIgnore ? 'ACTIF' : 'Normal') : '—', null),
-        ruleRow('Irradiance ≥ 300 W/m²', irrOk,   irr != null ? `${irr.toFixed(0)} W/m²` : '—', null),
-        ruleRow('Relais DEYE actif',    !!deyeOn,  deyeOn != null ? (deyeOn ? 'ON' : 'OFF') : '—', null),
+        ruleRow('Grid déconnecté',   gridOffOk, acIgnore != null ? (acIgnore ? 'ACTIF' : 'Normal') : '—', null),
+        ruleRow('Relais DEYE actif', !!deyeOn,  deyeOn != null ? (deyeOn ? 'ON' : 'OFF') : '—', null),
       ].join('');
     }
   } catch(e) { console.warn('fetchRulesStatus/deye:', e); }
