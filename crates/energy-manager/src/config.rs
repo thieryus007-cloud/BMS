@@ -192,12 +192,15 @@ pub struct LgThinqConfig {
     pub client_id: String,
     #[serde(default = "default_lg_poll_secs")]
     pub poll_interval_secs: u64,
+    #[serde(default = "default_lg_vm_url")]
+    pub vm_url: String,
 }
 
 fn default_lg_base_url()  -> String { "https://api-eic.lgthinq.com".into() }
 fn default_lg_country()   -> String { "FR".into() }
 fn default_lg_client_id() -> String { "energy-manager".into() }
 fn default_lg_poll_secs() -> u64 { 600 }
+fn default_lg_vm_url()    -> String { "http://127.0.0.1:8428".into() }
 
 impl Default for LgThinqConfig {
     fn default() -> Self {
@@ -210,6 +213,7 @@ impl Default for LgThinqConfig {
             country: default_lg_country(),
             client_id: default_lg_client_id(),
             poll_interval_secs: default_lg_poll_secs(),
+            vm_url: default_lg_vm_url(),
         }
     }
 }
@@ -321,6 +325,9 @@ pub struct WaterHeaterConfig {
     /// Minimum irradiance to allow HEAT_PUMP mode (W/m²)
     #[serde(default = "default_irradiance_min_wm2")]
     pub irradiance_min_wm2: f64,
+    /// VictoriaMetrics write URL for water heater metrics
+    #[serde(default = "default_wh_vm_url")]
+    pub vm_url: String,
 }
 
 fn default_solar_min_w() -> f64 { 1000.0 }
@@ -331,6 +338,7 @@ fn default_vacation_target_c() -> f64 { 45.0 }
 fn default_temp_set_delay_secs() -> u64 { 15 }
 fn default_keepalive_secs() -> u64 { 25 }
 fn default_irradiance_min_wm2() -> f64 { 300.0 }
+fn default_wh_vm_url() -> String { "http://127.0.0.1:8428".into() }
 
 impl Default for WaterHeaterConfig {
     fn default() -> Self {
@@ -343,6 +351,7 @@ impl Default for WaterHeaterConfig {
             temp_set_delay_secs: default_temp_set_delay_secs(),
             keepalive_secs: default_keepalive_secs(),
             irradiance_min_wm2: default_irradiance_min_wm2(),
+            vm_url: default_wh_vm_url(),
         }
     }
 }

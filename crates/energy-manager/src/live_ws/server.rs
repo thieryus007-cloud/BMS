@@ -24,6 +24,7 @@ use tracing::info;
 
 use crate::http_clients::lg_thinq::LgThinqClient;
 use crate::types::{EnergyState, LiveEvent, WaterHeaterMode};
+use chrono::{DateTime, Utc};
 
 #[derive(Clone)]
 struct ServerState {
@@ -50,6 +51,7 @@ pub async fn serve(
         .route("/health",                   get(health_handler))
         .route("/api/water-heater",         get(wh_status_handler))
         .route("/api/water-heater/mode",    post(wh_set_mode_handler))
+        .route("/api/rules-status",         get(rules_status_handler))
         .with_state(srv)
         .layer(cors);
 
@@ -112,6 +114,66 @@ async fn wh_set_mode_handler(
         s.water_heater_mode = mode;
     }
     (StatusCode::OK, "ok").into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Rules status — aggregated data for monitor.html cards
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct WaterHeaterCard {
+    mode:           String,
+    current_temp_c: Option<f64>,
+    target_temp_c:  Option<f64>,
+    last_read_ts:   Option<DateTime<Utc>>,
+    last_change_ts: Option<DateTime<Utc>>,
+    send_count:     u32,
+    lg_enabled:     bool,
+}
+
+#[derive(Serialize)]
+struct ChargeCurrent {
+    current_a:    Option<f64>,
+    power_assist: Option<i64>,
+    last_ts:      Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize)]
+struct DeyeCard {
+    on:            bool,
+    last_change:   Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize)]
+struct RulesStatus {
+    water_heater:   WaterHeaterCard,
+    charge_current: ChargeCurrent,
+    deye:           DeyeCard,
+}
+
+async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
+    let s = srv.state.read().await;
+    let status = RulesStatus {
+        water_heater: WaterHeaterCard {
+            mode:           s.water_heater_mode.to_lg_str().to_string(),
+            current_temp_c: s.water_heater_temp_c,
+            target_temp_c:  s.water_heater_target_c,
+            last_read_ts:   s.water_heater_last_read,
+            last_change_ts: s.water_heater_last_change,
+            send_count:     s.water_heater_send_count,
+            lg_enabled:     srv.lg.is_some(),
+        },
+        charge_current: ChargeCurrent {
+            current_a:    s.last_charge_current_a,
+            power_assist: s.last_power_assist,
+            last_ts:      s.last_charge_ts,
+        },
+        deye: DeyeCard {
+            on:          s.deye_on,
+            last_change: s.deye_last_change,
+        },
+    };
+    Json(status).into_response()
 }
 
 // ---------------------------------------------------------------------------

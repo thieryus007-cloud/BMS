@@ -102,21 +102,74 @@
     </div>
   </div>
 
-  <!-- Rules Status -->
+  <!-- Card a) Gestion Courant Victron -->
+  <div class="bms-card" id="card-charge" style="background:#0f172a;border:1px solid #1e293b;">
+    <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">⚡ GESTION COURANT VICTRON</span>
+      <span id="charge-ts" style="font-family:monospace;font-size:0.65rem;color:#475569;">—</span>
+    </div>
+    <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.5rem;">
+      <div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
+        <span style="color:#94a3b8;flex:1;">Courant max charge</span>
+        <span id="charge-current-val" style="font-weight:700;color:#22c55e;">— A</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
+        <span style="color:#94a3b8;flex:1;">Power Assist (VEBus)</span>
+        <span id="charge-assist-val" style="font-weight:700;color:#94a3b8;">—</span>
+      </div>
+      <div id="charge-rule-grid" style="display:flex;flex-direction:column;gap:0.4rem;margin-top:0.3rem;padding-top:0.4rem;border-top:1px solid #1e293b;"></div>
+    </div>
+  </div>
+
+  <!-- Card b) Gestion du Chauffe-eau -->
   <div class="bms-card" id="card-rules" style="background:#0f172a;border:1px solid #1e293b;">
     <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">◈ RÈGLES CHAUFFE-EAU</span>
+      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">🚿 GESTION CHAUFFE-EAU</span>
       <span id="rules-mode-badge" style="font-family:monospace;font-size:0.72rem;padding:2px 8px;border-radius:4px;background:#1e293b;color:#475569;">—</span>
     </div>
     <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.55rem;">
-
-      <div id="rule-grid" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
-
-      <div style="margin-top:0.4rem;border-top:1px solid #1e293b;padding-top:0.5rem;display:flex;align-items:center;gap:0.5rem;">
-        <span style="font-family:monospace;font-size:0.68rem;color:#475569;">Résultat :</span>
+      <!-- LG ThinQ real values -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;">
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.6rem;color:#64748b;margin-bottom:2px;">MODE LG</div>
+          <div id="wh-mode-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#7dd3fc;">—</div>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.6rem;color:#64748b;margin-bottom:2px;">TEMP. ACTUELLE</div>
+          <div id="wh-temp-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#f97316;">—</div>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.6rem;color:#64748b;margin-bottom:2px;">TEMP. CIBLE</div>
+          <div id="wh-target-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#a78bfa;">—</div>
+        </div>
+      </div>
+      <div style="font-family:monospace;font-size:0.62rem;color:#475569;">LG lu le : <span id="wh-read-ts">—</span></div>
+      <!-- Rule conditions -->
+      <div id="rule-grid" style="display:flex;flex-direction:column;gap:0.4rem;padding-top:0.3rem;border-top:1px solid #1e293b;"></div>
+      <div style="display:flex;align-items:center;gap:0.5rem;">
+        <span style="font-family:monospace;font-size:0.68rem;color:#475569;">Décision :</span>
         <span id="rules-decision" style="font-family:monospace;font-size:0.75rem;font-weight:700;color:#94a3b8;">—</span>
       </div>
+    </div>
+  </div>
 
+  <!-- Card c) Gestion des relais DEYE -->
+  <div class="bms-card" id="card-deye" style="background:#0f172a;border:1px solid #1e293b;">
+    <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">🔌 GESTION RELAIS DEYE</span>
+      <span id="deye-state-badge" style="font-family:monospace;font-size:0.72rem;padding:2px 8px;border-radius:4px;background:#1e293b;color:#475569;">—</span>
+    </div>
+    <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.5rem;">
+      <div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
+        <span id="deye-dot" style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:#475569;"></span>
+        <span style="color:#94a3b8;flex:1;">Relais DEYE</span>
+        <span id="deye-on-val" style="font-weight:700;color:#94a3b8;">—</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
+        <span style="color:#94a3b8;flex:1;">Dernier changement</span>
+        <span id="deye-change-ts" style="color:#64748b;font-size:0.65rem;">—</span>
+      </div>
+      <div id="deye-rule-grid" style="display:flex;flex-direction:column;gap:0.4rem;margin-top:0.3rem;padding-top:0.4rem;border-top:1px solid #1e293b;"></div>
     </div>
   </div>
 
@@ -399,7 +452,7 @@ async function loadLogFile(){
   } catch(e){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">Erreur: '+e.message+'</div>';}
 }
 
-// ── Rules Status (water heater) ──────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function ruleRow(label, ok, valueStr, detail) {
   const dot = `<span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:${ok?'#22c55e':'#ef4444'};${ok?'box-shadow:0 0 5px #22c55e66':''}"></span>`;
   return `<div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
@@ -410,49 +463,73 @@ function ruleRow(label, ok, valueStr, detail) {
   </div>`;
 }
 
+function fmtTs(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return '—';
+  const age = Math.floor((Date.now() - d) / 1000);
+  const timeStr = d.toLocaleTimeString('fr-FR');
+  if (age < 60) return `${timeStr} (${age}s)`;
+  if (age < 3600) return `${timeStr} (${Math.floor(age/60)}min)`;
+  return `${timeStr} (${Math.floor(age/3600)}h)`;
+}
+
+const EM_BASE = 'http://' + location.hostname + ':8081';
+
 async function fetchRulesStatus() {
+  const safe = p => p.catch(() => null);
+
+  // Fetch local BMS/irradiance/inverter data from daly-bms-server
+  const [bms1r, bms2r, irrR, invR, emR] = await Promise.all([
+    safe(fetch('/api/v1/bms/1/status').then(r => r.ok ? r.json() : null)),
+    safe(fetch('/api/v1/bms/2/status').then(r => r.ok ? r.json() : null)),
+    safe(fetch('/api/v1/irradiance/status').then(r => r.ok ? r.json() : null)),
+    safe(fetch('/api/v1/venus/inverter').then(r => r.ok ? r.json() : null)),
+    safe(fetch(EM_BASE + '/api/rules-status').then(r => r.ok ? r.json() : null)),
+  ]);
+
+  // ── SOC ──────────────────────────────────────────────────────────────────
+  const validBms = [bms1r, bms2r].filter(b => b && b.Soc != null);
+  const avgSoc = validBms.length ? validBms.reduce((s, b) => s + b.Soc, 0) / validBms.length : null;
+  const socOk  = avgSoc != null && avgSoc >= 90;
+
+  // ── Irradiance ──────────────────────────────────────────────────────────
+  const irr   = irrR?.irradiance_wm2 ?? null;
+  const irrOk = irr != null && irr >= 300;
+
+  // ── Grid / AC IN ─────────────────────────────────────────────────────────
+  const inv       = invR?.inverter ?? null;
+  const acIgnore  = inv?.ac_in_ignore ?? null;
+  const gridOffOk = acIgnore === true;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Card b) Chauffe-eau
+  // ══════════════════════════════════════════════════════════════════════════
   try {
-    const safe = p => p.catch(() => null);
-    const [bms1r, bms2r, irrR, invR] = await Promise.all([
-      safe(fetch('/api/v1/bms/1/status').then(r => r.ok ? r.json() : null)),
-      safe(fetch('/api/v1/bms/2/status').then(r => r.ok ? r.json() : null)),
-      safe(fetch('/api/v1/irradiance/status').then(r => r.ok ? r.json() : null)),
-      safe(fetch('/api/v1/venus/inverter').then(r => r.ok ? r.json() : null)),
-    ]);
-
-    // SOC — moyenne des BMS disponibles
-    const validBms = [bms1r, bms2r].filter(b => b && b.Soc != null);
-    const avgSoc = validBms.length ? validBms.reduce((s, b) => s + b.Soc, 0) / validBms.length : null;
-    const socOk  = avgSoc != null && avgSoc >= 90;
-
-    // Irradiance
-    const irr    = irrR?.irradiance_wm2 ?? null;
-    const irrOk  = irr != null && irr >= 300;
-
-    // AC IN Ignored (grid disconnected)
-    const inv       = invR?.inverter ?? null;
-    const acIgnore  = inv?.ac_in_ignore ?? null;
-    const gridOffOk = acIgnore === true;
-
-    // Mode actuel (heatpump mqtt_index=1)
-    const hpR = await safe(fetch('/api/v1/venus/heatpumps').then(r => r.ok ? r.json() : null));
-    const hp1 = (hpR?.heatpumps ?? []).find(h => h.mqtt_index === 1) ?? null;
-    const venusState = hp1?.State ?? null;
-    const modeLabel  = venusState === 1 ? 'HEAT_PUMP' : venusState === 0 ? 'VACATION' : '—';
-    const modeOk     = venusState === 1;
+    const wh = emR?.water_heater ?? null;
+    const whMode = wh?.mode ?? '—';
+    const modeOk = whMode === 'HEAT_PUMP';
 
     const badge = document.getElementById('rules-mode-badge');
     if (badge) {
-      badge.textContent = modeLabel;
+      badge.textContent = whMode;
       badge.style.background = modeOk ? '#14532d' : '#1c1917';
       badge.style.color      = modeOk ? '#4ade80' : '#78716c';
     }
+    const modeEl = document.getElementById('wh-mode-val');
+    if (modeEl) { modeEl.textContent = whMode; modeEl.style.color = modeOk ? '#4ade80' : '#f87171'; }
+    const tempEl = document.getElementById('wh-temp-val');
+    if (tempEl) tempEl.textContent = wh?.current_temp_c != null ? wh.current_temp_c.toFixed(1) + ' °C' : '—';
+    const tgtEl = document.getElementById('wh-target-val');
+    if (tgtEl) tgtEl.textContent = wh?.target_temp_c != null ? wh.target_temp_c.toFixed(1) + ' °C' : '—';
+    const readTs = document.getElementById('wh-read-ts');
+    if (readTs) readTs.textContent = fmtTs(wh?.last_read_ts);
 
     const grid = document.getElementById('rule-grid');
     if (grid) {
       grid.innerHTML = [
-        ruleRow('SOC ≥ 90 %',          socOk,    avgSoc  != null ? `${avgSoc.toFixed(1)} %`   : '—', '(condition remplie si vert)'),
-        ruleRow('Irradiance ≥ 300 W/m²', irrOk,  irr     != null ? `${irr.toFixed(0)} W/m²`  : '—', null),
+        ruleRow('SOC ≥ 90 %',                      socOk,    avgSoc != null ? `${avgSoc.toFixed(1)} %`  : '—', null),
+        ruleRow('Irradiance ≥ 300 W/m²',           irrOk,    irr    != null ? `${irr.toFixed(0)} W/m²` : '—', null),
         ruleRow('Grid déconnecté (AC IN Ignored)', gridOffOk, acIgnore != null ? (acIgnore ? 'ACTIF' : 'Normal') : '—', null),
       ].join('');
     }
@@ -460,10 +537,80 @@ async function fetchRulesStatus() {
     const allOk = socOk && irrOk && gridOffOk;
     const dec = document.getElementById('rules-decision');
     if (dec) {
-      dec.textContent = allOk ? '→ HEAT_PUMP activé' : '→ VACATION (en attente des conditions)';
+      dec.textContent = allOk ? '→ HEAT_PUMP' : '→ VACATION (conditions non remplies)';
       dec.style.color = allOk ? '#4ade80' : '#94a3b8';
     }
-  } catch(e) { console.warn('fetchRulesStatus:', e); }
+  } catch(e) { console.warn('fetchRulesStatus/wh:', e); }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Card a) Courant Victron
+  // ══════════════════════════════════════════════════════════════════════════
+  try {
+    const cc = emR?.charge_current ?? null;
+    const currentA = cc?.current_a ?? null;
+    const assist   = cc?.power_assist ?? null;
+
+    const curEl = document.getElementById('charge-current-val');
+    if (curEl) {
+      curEl.textContent = currentA != null ? `${currentA} A` : '—';
+      curEl.style.color = currentA != null ? '#22c55e' : '#94a3b8';
+    }
+    const assEl = document.getElementById('charge-assist-val');
+    if (assEl) {
+      assEl.textContent = assist != null ? (assist === 1 ? 'ACTIVÉ' : 'Désactivé') : '—';
+      assEl.style.color = assist === 1 ? '#22c55e' : '#94a3b8';
+    }
+    const tsEl = document.getElementById('charge-ts');
+    if (tsEl) tsEl.textContent = fmtTs(cc?.last_ts);
+
+    // Condition rows for charge card
+    const offgrid = acIgnore === true;
+    const cGrid = document.getElementById('charge-rule-grid');
+    if (cGrid) {
+      cGrid.innerHTML = [
+        ruleRow('Mode réseau', !offgrid, offgrid ? 'Off-grid' : 'Grid', null),
+        ruleRow('SOC batteries', avgSoc != null, avgSoc != null ? `${avgSoc.toFixed(1)} %` : '—', null),
+        ruleRow('Courant VEBus appliqué', currentA != null, currentA != null ? `${currentA} A` : '—', null),
+      ].join('');
+    }
+  } catch(e) { console.warn('fetchRulesStatus/charge:', e); }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Card c) Relais DEYE
+  // ══════════════════════════════════════════════════════════════════════════
+  try {
+    const deye = emR?.deye ?? null;
+    const deyeOn = deye?.on ?? null;
+
+    const badge = document.getElementById('deye-state-badge');
+    if (badge) {
+      badge.textContent   = deyeOn === true ? 'ON' : deyeOn === false ? 'OFF' : '—';
+      badge.style.background = deyeOn ? '#14532d' : '#1c1917';
+      badge.style.color      = deyeOn ? '#4ade80' : '#78716c';
+    }
+    const dot = document.getElementById('deye-dot');
+    if (dot) {
+      dot.style.background = deyeOn ? '#22c55e' : '#ef4444';
+      dot.style.boxShadow  = deyeOn ? '0 0 5px #22c55e66' : '';
+    }
+    const onEl = document.getElementById('deye-on-val');
+    if (onEl) {
+      onEl.textContent = deyeOn === true ? 'Actif' : deyeOn === false ? 'Inactif' : '—';
+      onEl.style.color = deyeOn ? '#22c55e' : '#94a3b8';
+    }
+    const chEl = document.getElementById('deye-change-ts');
+    if (chEl) chEl.textContent = fmtTs(deye?.last_change);
+
+    // Conditions for DEYE
+    const dGrid = document.getElementById('deye-rule-grid');
+    if (dGrid) {
+      dGrid.innerHTML = [
+        ruleRow('Grid déconnecté',      gridOffOk, acIgnore != null ? (acIgnore ? 'ACTIF' : 'Normal') : '—', null),
+        ruleRow('Irradiance ≥ 300 W/m²', irrOk,   irr != null ? `${irr.toFixed(0)} W/m²` : '—', null),
+        ruleRow('Relais DEYE actif',    !!deyeOn,  deyeOn != null ? (deyeOn ? 'ON' : 'OFF') : '—', null),
+      ].join('');
+    }
+  } catch(e) { console.warn('fetchRulesStatus/deye:', e); }
 }
 
 fetchMonitor();

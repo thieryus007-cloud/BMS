@@ -3,6 +3,7 @@
 /// Mode selection is handled by rust-rule-engine (rules/charge_current.grl).
 mod rules;
 
+use chrono::Utc;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -122,6 +123,7 @@ async fn compute_and_publish(
         let mut s = state.write().await;
         s.last_charge_current_a = Some(charge_a);
         s.last_power_assist     = Some(power_assist);
+        s.last_charge_ts        = Some(Utc::now());
     }
 
     bus.publish(MqttOutgoing::transient(

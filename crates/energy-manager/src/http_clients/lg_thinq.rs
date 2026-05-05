@@ -214,19 +214,38 @@ pub async fn spawn_poller(
     let bus2   = bus.clone();
     let state2 = state.clone();
     tokio::spawn(async move {
-        let poller = LgThinqClient::new(cfg2);
+        let poller = LgThinqClient::new(cfg2.clone());
+        let vm_url = cfg2.vm_url.clone();
         let mut ticker = interval(Duration::from_secs(poller.cfg.poll_interval_secs));
         loop {
             ticker.tick().await;
+            let now = chrono::Utc::now();
             match poller.get_state().await {
                 Ok(snap) => {
                     {
                         let mut s = state2.write().await;
-                        s.water_heater_mode     = snap.mode;
-                        s.water_heater_temp_c   = snap.current_temp_c;
-                        s.water_heater_target_c = snap.target_temp_c;
+                        s.water_heater_mode      = snap.mode;
+                        s.water_heater_temp_c    = snap.current_temp_c;
+                        s.water_heater_target_c  = snap.target_temp_c;
+                        s.water_heater_last_read = Some(now);
                     }
                     bus2.emit_live(LiveEvent::new("water_heater", &snap));
+
+                    // Write 3 LG ThinQ metrics to VictoriaMetrics
+                    let ts_ms = now.timestamp_millis();
+                    let mut lines = Vec::new();
+                    lines.push(format!("wh_mode{{}} {} {}", snap.mode.to_venus_state(), ts_ms));
+                    if let Some(t) = snap.current_temp_c {
+                        lines.push(format!("wh_current_temp_c{{}} {} {}", t, ts_ms));
+                    }
+                    if let Some(t) = snap.target_temp_c {
+                        lines.push(format!("wh_target_temp_c{{}} {} {}", t, ts_ms));
+                    }
+                    let body = lines.join("\n");
+                    let url  = format!("{}/api/v1/import/prometheus", vm_url);
+                    if let Err(e) = reqwest::Client::new().post(&url).body(body).send().await {
+                        warn!("LG ThinQ VM write error: {e}");
+                    }
                 }
                 Err(e) => error!("LG ThinQ poll error: {e}"),
             }

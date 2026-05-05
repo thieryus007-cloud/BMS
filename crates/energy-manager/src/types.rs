@@ -147,6 +147,8 @@ pub struct EnergyState {
     pub water_heater_temp_c: Option<f64>,
     pub water_heater_target_c: Option<f64>,
     pub water_heater_last_change: Option<DateTime<Utc>>,
+    pub water_heater_last_read: Option<DateTime<Utc>>,
+    pub water_heater_send_count: u32,
 
     // --- DEYE relay (Shelly) ---
     pub deye_on: bool,
@@ -185,6 +187,7 @@ pub struct EnergyState {
     // --- Charge current (last published) ---
     pub last_charge_current_a: Option<f64>,
     pub last_power_assist: Option<i64>,
+    pub last_charge_ts: Option<DateTime<Utc>>,
 
     // --- SmartShunt Ah accumulators (backup: current integration, reset at midnight) ---
     pub ah_charged_today: f64,

@@ -1,7 +1,5 @@
 /// Aggregates VEBus topics into santuario/inverter/venus (retained).
-/// AC power availability is determined by the rule engine (rules/inverter.grl).
-mod rules;
-
+/// AC power falls back to V×I when the direct measurement topic is absent.
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -30,14 +28,6 @@ async fn run(
     let pfx_vebus  = format!("N/{pid}/vebus/{vb}/");
     let pfx_system = format!("N/{pid}/system/0/");
 
-    let mut rule_engine = match rules::InverterRuleEngine::new() {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::error!("Failed to init inverter rule engine: {e}");
-            return;
-        }
-    };
-
     let mut rx = bus.subscribe_mqtt();
     loop {
         let msg = match rx.recv().await {
@@ -46,7 +36,7 @@ async fn run(
         };
 
         if handle(&msg, &pfx_vebus, &pfx_system, &state).await {
-            publish_state(&mut rule_engine, &bus, &state).await;
+            publish_state(&bus, &state).await;
         }
     }
 }
@@ -109,7 +99,6 @@ async fn handle(
 }
 
 async fn publish_state(
-    rule_engine: &mut rules::InverterRuleEngine,
     bus: &AppBus,
     state: &Arc<RwLock<EnergyState>>,
 ) {
@@ -126,19 +115,10 @@ async fn publish_state(
     let ac_out_power = s.ac_out_power_w;
     drop(s);
 
-    // Prefer direct power measurement (Ac/Out/L1/P); fall back to V*I when available
-    let ac_power = if ac_out_power.is_some() {
-        ac_out_power
-    } else {
-        match rule_engine.ac_power_ready(ac_voltage.is_some(), ac_current.is_some()) {
-            Ok(true)  => ac_voltage.zip(ac_current).map(|(v, i)| v * i),
-            Ok(false) => None,
-            Err(e) => {
-                tracing::error!("Inverter rule engine error: {e}");
-                None
-            }
-        }
-    };
+    // Prefer direct measurement (Ac/Out/L1/P); fall back to V×I
+    let ac_power = ac_out_power.or_else(|| {
+        ac_voltage.zip(ac_current).map(|(v, i)| v * i)
+    });
 
     let payload = json!({
         "Voltage":     dc_voltage,
