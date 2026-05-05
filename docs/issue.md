@@ -10,6 +10,8 @@ Pour les deux pages suivantes, ON DOIT UTILISER le SOC donné par le SmartShunt 
 	-1- page visualization card batterie SOC.
 	-2- page Monitoring, id="card-rules": Gestion Chauffe-eau.
 
+malgré cela, actuellement pas d'nvois du mode HEAT_PUMP vers LG ThinQ
+
 ```
 
 
