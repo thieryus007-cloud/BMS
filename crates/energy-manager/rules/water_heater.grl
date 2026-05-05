@@ -1,4 +1,5 @@
-// Water heater automation rules.
+// crates/energy-manager/rules/water_heater.grl
+///Water heater automation rules.
 // Decides between HeatPump and Vacation mode based on energy conditions.
 //
 // Input facts (injected from Rust before evaluate):
