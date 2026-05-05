@@ -187,6 +187,8 @@ const atsExecRef = useRef(null);
       ? (validBms.reduce((s, b) => s + (b.Soc ?? 0), 0) / validBms.length).toFixed(0)
       : null;
     const totalPwr = validBms.reduce((s, b) => s + (b.Dc?.Power ?? 0), 0);
+    // Use SmartShunt SOC (Victron) as primary — falls back to DALY average only if absent
+    const displaySoc = shunt?.soc_percent != null ? shunt.soc_percent : (avgSoc != null ? parseFloat(avgSoc) : null);
 
     const microPwr     = et7?.power_w ?? 0;
     const totalProdPwr = microPwr + mpptTotalPowerW;
@@ -194,9 +196,9 @@ const atsExecRef = useRef(null);
     const mpptYieldSumG = mpptList.reduce((s, m) => s + (m.yield_today_kwh ?? 0), 0);
     const prodSub      = et7 ? `${((et7.energy_export_wh ?? 0) / 1000).toFixed(1)} kWh ET112` : mpptList.length > 0 ? `${mpptYieldSumG.toFixed(2)} kWh MPPT` : 'Micro-onduleurs';
     const prodDot      = (et7?.connected || mpptList.length > 0) ? (totalProdPwr > 50 ? 'live' : '') : '';
-    const batVal       = avgSoc != null ? `SOC ${avgSoc}%` : '—';
+    const batVal       = displaySoc != null ? `SOC ${displaySoc.toFixed(0)}%` : '—';
     const batSub       = totalPwr ? `${totalPwr > 0 ? '+' : ''}${(totalPwr / 1000).toFixed(2)} kW` : '360 Ah + 320 Ah';
-    const batDot       = avgSoc == null ? '' : avgSoc > 50 ? 'live' : avgSoc > 20 ? 'warn' : 'alarm';
+    const batDot       = displaySoc == null ? '' : displaySoc > 50 ? 'live' : displaySoc > 20 ? 'warn' : 'alarm';
     const irrVal       = irr?.irradiance_wm2 != null ? `${irr.irradiance_wm2.toFixed(0)} W/m²` : '—';
     const irrSub       = irr?.total_yield_kwh != null ? `☀ ${irr.total_yield_kwh.toFixed(1)} kWh` : 'Irradiance solaire';
     const irrDot       = irr ? 'live' : '';
@@ -290,7 +292,7 @@ const atsExecRef = useRef(null);
           const mpptYieldSum  = mpptList.reduce((s, m) => s + (m.yield_today_kwh ?? 0), 0);
           const localProdKwh  = ((et7?.energy_export_wh ?? 0) / 1000) + mpptYieldSum;
           const totalYieldKwh = irr?.total_yield_kwh ?? localProdKwh;
-          return { ...n, data: { ...n.data, totalYieldKwh, prodKwh: localProdKwh, soc: avgSoc != null ? parseFloat(avgSoc) : 0, irrWm2: irr?.irradiance_wm2 ?? 0 } };
+          return { ...n, data: { ...n.data, totalYieldKwh, prodKwh: localProdKwh, soc: displaySoc ?? 0, irrWm2: irr?.irradiance_wm2 ?? 0 } };
         }
         case 'sankey': {
           const loadPwr        = tasmotaDevices.reduce((s, d) => s + (d.connected ? (d.power_w ?? 0) : 0), 0);
