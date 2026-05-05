@@ -505,8 +505,8 @@ async function fetchRulesStatus() {
   const emSoc  = emR?.soc_pct ?? null;
   const socOk  = emSoc != null && emSoc >= 90;
 
-  // ── Irradiance — valeur vue par l'energy-manager (santuario/irradiance/raw)
-  const irr   = emR?.irradiance_wm2 ?? irrR?.irradiance_wm2 ?? null;
+  // ── Irradiance — valeur directe du capteur PRALRAN (daly-bms-server)
+  const irr   = irrR?.irradiance_wm2 ?? null;
   const irrOk = irr != null && irr >= 300;
 
   // ── Grid / AC IN — valeur vue par l'energy-manager (VEBus IgnoreAcIn1) ───
