@@ -1,26 +1,25 @@
 /// Receives santuario/irradiance/raw → validates via rule engine → stores in state.
 /// Also polls daly-bms-server HTTP API every 30s as primary reliable source.
 mod rules;
-
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 use tracing::{debug, info, warn};
-
 use crate::bus::AppBus;
 use crate::types::EnergyState;
 
 const TOPIC: &str = "santuario/irradiance/raw";
 
 pub async fn spawn(bus: AppBus, state: Arc<RwLock<EnergyState>>, bms_server_url: String) {
-    tokio::spawn(http_poll_task(bms_server_url, state.clone()));
+    // On passe une copie de `bus` à http_poll_task pour qu'il puisse émettre des événements
+    tokio::spawn(http_poll_task(bms_server_url, state.clone(), bus.clone()));
     tokio::spawn(mqtt_task(bus, state));
 }
 
 /// Polls daly-bms-server GET /api/v1/irradiance/status every 30s.
 /// This is the primary irradiance source — always has the correct value
 /// directly from the PRALRAN RS485 sensor.
-async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>) {
+async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>, bus: AppBus) {
     let url = format!("{}/api/v1/irradiance/status", bms_server_url.trim_end_matches('/'));
     let client = reqwest::Client::new();
     let mut ticker = interval(Duration::from_secs(30));
@@ -31,7 +30,6 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>)
             return;
         }
     };
-
     info!("Irradiance HTTP poll started → {url}");
 
     loop {
@@ -61,7 +59,7 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>)
                                     }
                                 }
                                 Ok(false) => debug!("Irradiance HTTP: out of range: {wm2}"),
-                                Err(e)    => tracing::error!("Irradiance HTTP: rule engine error: {e}"),
+                                Err(e) => tracing::error!("Irradiance HTTP: rule engine error: {e}"),
                             }
                         }
                     }
@@ -69,7 +67,7 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>)
                 }
             }
             Ok(resp) => warn!("Irradiance HTTP: status {}", resp.status()),
-            Err(e)   => warn!("Irradiance HTTP: request failed: {e}"),
+            Err(e) => warn!("Irradiance HTTP: request failed: {e}"),
         }
     }
 }
@@ -83,11 +81,10 @@ async fn mqtt_task(bus: AppBus, state: Arc<RwLock<EnergyState>>) {
             return;
         }
     };
-
     let mut rx = bus.subscribe_mqtt();
     loop {
         let msg = match rx.recv().await {
-            Ok(m)  => m,
+            Ok(m) => m,
             Err(_) => continue,
         };
         if msg.topic != TOPIC {
@@ -97,7 +94,7 @@ async fn mqtt_task(bus: AppBus, state: Arc<RwLock<EnergyState>>) {
         let raw = msg.payload_str().trim().parse::<f64>().unwrap_or(-1.0);
 
         match rule_engine.validate(raw) {
-            Ok(true)  => {}
+            Ok(true) => {}
             Ok(false) => {
                 debug!("Irradiance MQTT out of range: {raw}");
                 continue;
