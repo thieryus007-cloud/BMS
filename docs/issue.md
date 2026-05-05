@@ -2,23 +2,21 @@
 
 # 1/
 ```
-192.168.1.141:8080/api/v1/venus/inverter
-{"connected":true,"inverter":{"ac_in_ignore":true,"ac_out_frequency_hz":50.07692337036133,"ac_output_current_a":-4.809999942779541,"ac_output_power_w":null,"ac_output_voltage_v":230.25999450683594,"current_a":15.5,"mode":"inverter","power_w":903.0,"state":"Inverting","timestamp":"2026-05-04T09:04:58.260337030Z","voltage_v":53.58000183105469}}
-comme "ac_output_power_w":null nous n'avons pas de graphe et pas d'affichage de la valeur w dans le node Onduleur de la page visualization.html.
+Constat:
+la valeur du SOC dans la regle waterheater vient de soc_pct definit dans crates/daly-bms-server/src/state.rs comme venus_shunt_soc_percent.
+La valeur du SOC qui est affichée dans la card rules chauffe-eau est la valeur calcullée des deux SOC BMS DALY.
+Conclusions: 
+Pour les deux pages suivantes, ON DOIT UTILISER le SOC donné par le SmartShunt Victron: venus_shunt_soc_percent.
+	-1- page visualization card batterie SOC.
+	-2- page Monitoring, id="card-rules": Gestion Chauffe-eau.
 
-Dans l'interface victoriametrics, "venus_inverter_power_w" est présent pour la puissance DC, mais ac_output_power_w absent pas pour AC OUT.
-Cela doit etre ajouté a victoriametrics.
-
-Il faut investiguer pour savoir pourquoi /api/v1/venus/inverter renvois cette valeur "null". 
 ```
 
 
 # 2/
 ```
-> On ne voit pas d'animation concernant la circulation du courant sur les edges entre.
->
->> 1- Onduleur et ATS-Onduleur.
->> 2- ATS-Onduleur et ATS-main.
+
+
 ```
 
 # 3/
@@ -39,9 +37,8 @@ Par ailleur, il arrive que la valeur d'irridiance au niveau du Victron VRM soit 
 
 # 4/ 
 ```
-Dans la page monitoring: card regles, TROIS regles suivante OBLIGATOIRE:
-	a)Gestion Courant Victron.
-	b)Gestion du Chauffe-eau.
-	c)Gestion des relais DEYE.
-Pour chaque regles, nous devons avoir les VRAIS valeur retournées aprés interrogations de chaque elment "LG ThinQ/DEYE/Victron" et/ou les valeurs des elements stockés dans victoriametrics, avec le timestamp du dernier update. 
+
+
+
+
 ```
