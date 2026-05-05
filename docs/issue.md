@@ -9,8 +9,19 @@
 
 # 2/
 ```
+Daly-BMS-Rust/crates/energy-manager/src/logic/meteo/mod.rs
+ligne 58
 
-
+ // santuario/meteo/venus — irradiance + solar + wind
+    let meteo_payload = json!({
+        "Irradiance":    s.irradiance_wm2,
+        "TodaysYield":   s.total_yield_today_kwh,
+        "YieldYesterday": s.yield_yesterday_kwh,
+        "WindSpeed":     s.wind_speed_ms,
+        "MpptPower":     s.mppt_273.power_w.unwrap_or(0.0) + s.mppt_289.power_w.unwrap_or(0.0),
+        "SolarTotal":    s.solar_total_w,
+        "Mppts": [
+            {
 ```
 
 # 3/
