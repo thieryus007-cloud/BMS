@@ -17,14 +17,13 @@ impl IrradianceRuleEngine {
         })
     }
 
-    /// Returns true when the raw W/m² value is within the valid sensor range.
     pub fn validate(&mut self, raw: f64) -> anyhow::Result<bool> {
-        let facts = Facts::new();
-        facts.set("IR.raw",   Value::Number(raw));
+        let mut facts = Facts::new();
+        facts.set("IR.raw", Value::Number(raw));
         facts.set("IR.valid", Value::Boolean(false));
 
         self.engine
-            .execute(&facts)
+            .execute(&mut facts)
             .context("Irradiance rule engine evaluation failed")?;
 
         Ok(facts
