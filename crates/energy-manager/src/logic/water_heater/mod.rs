@@ -4,7 +4,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep, Duration};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use crate::bus::AppBus;
 use crate::config::WaterHeaterConfig;
 use crate::http_clients::lg_thinq::LgThinqClient;
@@ -46,6 +46,28 @@ async fn publish_to_venus(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     bus.emit_live(LiveEvent::new("water_heater_venus", &payload));
 }
 
+async fn write_wh_metrics(vm_url: &str, mode: WaterHeaterMode, temp: Option<f64>, target: Option<f64>) {
+    let ts_ms = Utc::now().timestamp_millis();
+    let mut lines = Vec::new();
+    lines.push(format!("wh_mode{{}} {} {}", mode.to_venus_state(), ts_ms));
+    if let Some(t) = temp {
+        lines.push(format!("wh_current_temp_c{{}} {} {}", t, ts_ms));
+    }
+    if let Some(t) = target {
+        lines.push(format!("wh_target_temp_c{{}} {} {}", t, ts_ms));
+    }
+    let body = lines.join("\n");
+    let url = format!("{}/api/v1/import/prometheus", vm_url);
+    if let Err(e) = reqwest::Client::new()
+        .post(&url)
+        .body(body)
+        .send()
+        .await
+    {
+        warn!("Water heater VM write error: {e}");
+    }
+}
+
 async fn control_task(
     cfg: WaterHeaterConfig,
     lg: Arc<LgThinqClient>,
@@ -53,14 +75,56 @@ async fn control_task(
     state: Arc<RwLock<EnergyState>>,
 ) {
     let mut last_change: Option<DateTime<Utc>> = None;
-    let mut last_sent_mode: Option<WaterHeaterMode> = None;
-    let mut ticker = interval(Duration::from_secs(30));
+    // Count consecutive send failures to detect and alert on persistent issues
+    let mut consecutive_fails: u32 = 0;
+    // Tick every 5 minutes as requested
+    let mut ticker = interval(Duration::from_secs(300));
 
-    info!("Water heater control task started");
+    info!("Water heater control task started (5min interval)");
 
     loop {
         ticker.tick().await;
         let now = Utc::now();
+
+        // Read actual state from LG ThinQ before deciding
+        let lg_snapshot = match lg.get_state().await {
+            Ok(snap) => {
+                {
+                    let mut s = state.write().await;
+                    s.water_heater_mode     = snap.mode;
+                    s.water_heater_temp_c   = snap.current_temp_c;
+                    s.water_heater_target_c = snap.target_temp_c;
+                    s.water_heater_last_read = Some(now);
+                }
+                write_wh_metrics(
+                    &cfg.vm_url,
+                    snap.mode,
+                    snap.current_temp_c,
+                    snap.target_temp_c,
+                ).await;
+                Some(snap)
+            }
+            Err(e) => {
+                error!("LG ThinQ get_state error: {e}");
+                None
+            }
+        };
+
+        // Read energy conditions — skip evaluation if MQTT data not yet available
+        let (ac_ignore_opt, soc_opt, irradiance) = {
+            let s = state.read().await;
+            (s.ac_ignore, s.soc_pct, s.irradiance_wm2)
+        };
+
+        if ac_ignore_opt.is_none() || soc_opt.is_none() {
+            info!("Water heater: waiting for MQTT data (ac_ignore={:?}, soc={:?}) — skip", ac_ignore_opt, soc_opt);
+            continue;
+        }
+
+        let ac_ignore = ac_ignore_opt.unwrap_or(0);
+        let soc       = soc_opt.unwrap_or(0.0);
+        let irradiance_low = irradiance.map(|w| w < cfg.irradiance_min_wm2).unwrap_or(true);
+        let grid_connected = ac_ignore == 0;
 
         let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
             Ok(e) => e,
@@ -70,14 +134,6 @@ async fn control_task(
                 continue;
             }
         };
-
-        let (ac_ignore, soc, irradiance) = {
-            let s = state.read().await;
-            (s.ac_ignore.unwrap_or(0), s.soc_pct.unwrap_or(0.0), s.irradiance_wm2)
-        };
-
-        let irradiance_low = irradiance.map(|w| w < cfg.irradiance_min_wm2).unwrap_or(true);
-        let grid_connected = ac_ignore == 0;
 
         let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
             Ok(m) => m,
@@ -92,40 +148,60 @@ async fn control_task(
             _ => WaterHeaterMode::Vacation,
         };
 
+        // Use actual LG state (from readback) as the reference for comparison
+        let actual_mode = lg_snapshot
+            .as_ref()
+            .map(|s| s.mode)
+            .unwrap_or_else(|| state.try_read().map(|s| s.water_heater_mode).unwrap_or(WaterHeaterMode::Vacation));
+
+        let should_send = actual_mode != target_mode;
+
+        if !should_send {
+            info!(
+                "Water heater: target={:?} matches actual={:?}, no change (soc={:.1}%, grid={}, irr_low={})",
+                target_mode, actual_mode, soc, grid_connected, irradiance_low
+            );
+            consecutive_fails = 0;
+            continue;
+        }
+
         let can_change = last_change
             .map(|t| (now - t).num_seconds() as u64 >= cfg.mode_change_min_secs)
             .unwrap_or(true);
 
-        let should_send = match last_sent_mode {
-            Some(last) => last != target_mode,
-            None => true,
-        };
-
-        let force_refresh = last_change
-            .map(|t| (now - t).num_minutes() >= 10)
-            .unwrap_or(true);
-
-        if (!should_send && !force_refresh) || !can_change {
+        if !can_change {
+            let secs_left = cfg.mode_change_min_secs.saturating_sub(
+                last_change.map(|t| (now - t).num_seconds() as u64).unwrap_or(0)
+            );
+            info!("Water heater: cooldown active, {}s remaining — target={:?}", secs_left, target_mode);
             continue;
         }
 
         info!(
-            "Water heater: SEND {:?} (soc={:.1}%, grid={}, irradiance_low={})",
-            target_mode, soc, grid_connected, irradiance_low
+            "Water heater: SEND {:?} (actual={:?}, soc={:.1}%, grid={}, irradiance_low={})",
+            target_mode, actual_mode, soc, grid_connected, irradiance_low
         );
 
         if let Err(e) = lg.set_mode(target_mode).await {
             error!("LG set_mode error: {e}");
+            consecutive_fails += 1;
+            if consecutive_fails >= 3 {
+                warn!(
+                    "Water heater: {} consecutive send failures — LG ThinQ may be unreachable!",
+                    consecutive_fails
+                );
+            }
             continue;
         }
 
-        last_sent_mode = Some(target_mode);
+        consecutive_fails = 0;
         last_change = Some(now);
 
         {
             let mut s = state.write().await;
             s.water_heater_mode = target_mode;
             s.water_heater_last_change = Some(now);
+            s.water_heater_send_count += 1;
         }
         publish_to_venus(&bus, &state).await;
 
