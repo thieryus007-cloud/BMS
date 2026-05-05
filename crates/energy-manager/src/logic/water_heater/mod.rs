@@ -1,3 +1,5 @@
+//crates/energy-manager/src/logic/water_heater/mod.rs
+
 mod rules;
 use chrono::{DateTime, Utc};
 use serde_json::json;
