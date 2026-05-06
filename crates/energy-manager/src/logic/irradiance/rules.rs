@@ -21,7 +21,6 @@ impl IrradianceRuleEngine {
 
     pub fn validate(&mut self, raw: f64) -> anyhow::Result<bool> {
         let mut facts = Facts::new(); // ✅ mut obligatoire
-        // ✅ PAS D'ESPACES DANS LES CLÉS
         facts.set("IR.raw", Value::Number(raw));
         facts.set("IR.valid", Value::Boolean(false));
 
