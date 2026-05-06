@@ -33,7 +33,6 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<serde_json::Value>().await {
                     Ok(json) => {
-                        // ✅ CLÉS SANS ESPACES
                         if let Some(wm2) = json.get("irradiance_wm2").and_then(|v| v.as_f64()) {
                             let connected = json.get("connected").and_then(|v| v.as_bool()).unwrap_or(true);
                             
