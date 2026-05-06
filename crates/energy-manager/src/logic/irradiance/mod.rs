@@ -75,4 +75,3 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
         }
     }
 }
-// ✅ mqtt_task SUPPRIMÉ comme demandé
