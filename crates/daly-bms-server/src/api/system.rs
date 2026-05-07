@@ -155,13 +155,10 @@ pub async fn set_mppt_yield(
     if let Some(kwh) = body.total_yield_kwh.or(body.mppt_yield_kwh) {
         *state.mppt_yield_kwh.write().await = kwh;
     }
-    // dc_pv_power_w est la source canonique ; mppt_power_w est l'alias rétrocompat
-    if let Some(v) = body.dc_pv_power_w {
+    // dc_pv_power_w est prioritaire ; mppt_power_w est l'alias rétrocompat
+    if let Some(v) = body.dc_pv_power_w.or(body.mppt_power_w) {
         *state.dc_pv_power_w.write().await = v;
         *state.mppt_power_w.write().await  = v;
-    } else if let Some(pw) = body.mppt_power_w {
-        *state.mppt_power_w.write().await  = pw;
-        *state.dc_pv_power_w.write().await = pw;
     }
     if let Some(v) = body.pvinv_power_w {
         *state.pvinv_power_w.write().await = v;
