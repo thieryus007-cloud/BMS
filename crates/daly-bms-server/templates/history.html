@@ -251,34 +251,41 @@ function fmtTs(ms, period) {
   return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 }
 
-// ── Base option ────────────────────────────────────────────────────────────
-function baseOpt(c, title, period, xLabels) {
+// ── Base option (horizontal stacked bar — bar-y-category-stack) ────────────
+function baseOpt(c, unit, period, yLabels) {
   return {
     animation: false,
     backgroundColor: 'transparent',
-    grid: { left: 55, right: 20, top: 12, bottom: 40 },
+    grid: { left: 70, right: 35, top: 12, bottom: 40 },
     tooltip: {
       trigger: 'axis',
       backgroundColor: c.tooltip,
       borderColor: c.grid,
       textStyle: { color: c.text, fontSize: 11 },
-      axisPointer: { type: 'cross', lineStyle: { color: c.grid } },
+      axisPointer: { type: 'shadow' },
     },
     xAxis: {
-      type: 'category',
-      data: xLabels,
-      axisLine:   { lineStyle: { color: c.grid } },
-      axisTick:   { lineStyle: { color: c.grid } },
-      axisLabel:  { color: c.text, fontSize: 10, rotate: period === 'day' ? 0 : 30,
-                    interval: Math.max(0, Math.floor(xLabels.length / 8) - 1) },
-      splitLine:  { show: false },
+      type: 'value',
+      axisLine:  { show: false },
+      axisTick:  { show: false },
+      axisLabel: { color: c.text, fontSize: 10 },
+      splitLine: { lineStyle: { color: c.grid, type: 'dashed' } },
+      name: unit,
+      nameLocation: 'end',
+      nameTextStyle: { color: c.text, fontSize: 10 },
     },
     yAxis: {
-      type: 'value',
-      axisLine:   { show: false },
-      axisTick:   { show: false },
-      axisLabel:  { color: c.text, fontSize: 10 },
-      splitLine:  { lineStyle: { color: c.grid, type: 'dashed' } },
+      type: 'category',
+      data: yLabels,
+      inverse: true,
+      axisLine:  { lineStyle: { color: c.grid } },
+      axisTick:  { lineStyle: { color: c.grid } },
+      axisLabel: {
+        color: c.text,
+        fontSize: 9,
+        interval: Math.max(0, Math.floor(yLabels.length / 8) - 1),
+      },
+      splitLine: { show: false },
     },
     legend: {
       bottom: 2,
@@ -314,11 +321,10 @@ function renderCharts(data) {
 
   cKwh.setOption({
     ...baseOpt(c, 'kWh', period, xMain),
-    yAxis: { ...baseOpt(c, '', period, xMain).yAxis, name: 'kWh', nameTextStyle: { color: c.text, fontSize: 10 } },
     series: [
-      { name: '☀️ Solaire',      type: 'line', smooth: true, data: data.solar_kwh_series   || [], lineStyle: { color: c.solar,   width: 2 }, itemStyle: { color: c.solar   }, showSymbol: false, areaStyle: { color: c.solar,   opacity: 0.08 } },
-      { name: '🔌 Importée',     type: 'line', smooth: true, data: data.import_kwh_series  || [], lineStyle: { color: c.import,  width: 2 }, itemStyle: { color: c.import  }, showSymbol: false, areaStyle: { color: c.import,  opacity: 0.08 } },
-      { name: '🏠 Consommation', type: 'line', smooth: true, data: data.consump_kwh_series || [], lineStyle: { color: c.consump, width: 2 }, itemStyle: { color: c.consump }, showSymbol: false, areaStyle: { color: c.consump, opacity: 0.08 } },
+      { name: '☀️ Solaire',      type: 'bar', stack: 'energy', data: data.solar_kwh_series   || [], itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
+      { name: '🔌 Importée',     type: 'bar', stack: 'energy', data: data.import_kwh_series  || [], itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
+      { name: '🏠 Consommation', type: 'bar', stack: 'energy', data: data.consump_kwh_series || [], itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
     ],
   }, true);
 
@@ -338,11 +344,10 @@ function renderCharts(data) {
 
   cW.setOption({
     ...baseOpt(c, 'W', period, xMain),
-    yAxis: { ...baseOpt(c, '', period, xMain).yAxis, name: 'W', nameTextStyle: { color: c.text, fontSize: 10 } },
     series: [
-      { name: '☀️ Solaire',      type: 'line', smooth: true, data: data.solar_w  || [], lineStyle: { color: c.solar,   width: 2 }, itemStyle: { color: c.solar   }, showSymbol: false },
-      { name: '🔌 Importée',     type: 'line', smooth: true, data: data.import_w || [], lineStyle: { color: c.import,  width: 2 }, itemStyle: { color: c.import  }, showSymbol: false },
-      { name: '🏠 Consommation', type: 'line', smooth: true, data: data.consump_w|| [], lineStyle: { color: c.consump, width: 2 }, itemStyle: { color: c.consump }, showSymbol: false },
+      { name: '☀️ Solaire',      type: 'bar', stack: 'power', data: data.solar_w  || [], itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
+      { name: '🔌 Importée',     type: 'bar', stack: 'power', data: data.import_w || [], itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
+      { name: '🏠 Consommation', type: 'bar', stack: 'power', data: data.consump_w|| [], itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
     ],
   }, true);
 
@@ -362,11 +367,10 @@ function renderCharts(data) {
 
   cAh.setOption({
     ...baseOpt(c, 'Ah', period, xMain),
-    yAxis: { ...baseOpt(c, '', period, xMain).yAxis, name: 'Ah', nameTextStyle: { color: c.text, fontSize: 10 } },
     series: [
-      { name: '☀️ Solaire',      type: 'line', smooth: true, data: solarAhSeries,  lineStyle: { color: c.solar,   width: 2 }, itemStyle: { color: c.solar   }, showSymbol: false, areaStyle: { color: c.solar,   opacity: 0.08 } },
-      { name: '🔌 Importée',     type: 'line', smooth: true, data: importAhSeries, lineStyle: { color: c.import,  width: 2 }, itemStyle: { color: c.import  }, showSymbol: false, areaStyle: { color: c.import,  opacity: 0.08 } },
-      { name: '🏠 Consommation', type: 'line', smooth: true, data: consumpAhSeries,lineStyle: { color: c.consump, width: 2 }, itemStyle: { color: c.consump }, showSymbol: false, areaStyle: { color: c.consump, opacity: 0.08 } },
+      { name: '☀️ Solaire',      type: 'bar', stack: 'ah', data: solarAhSeries,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
+      { name: '🔌 Importée',     type: 'bar', stack: 'ah', data: importAhSeries,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
+      { name: '🏠 Consommation', type: 'bar', stack: 'ah', data: consumpAhSeries, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
     ],
   }, true);
 
@@ -382,10 +386,9 @@ function renderCharts(data) {
 
   cShunt.setOption({
     ...baseOpt(c, 'Ah', period, xCharge.length ? xCharge : xMain),
-    yAxis: { ...baseOpt(c, '', period, xMain).yAxis, name: 'Ah', nameTextStyle: { color: c.text, fontSize: 10 } },
     series: [
-      { name: '⬆ Charge Ah',   type: 'line', smooth: true, data: data.charge_ah_series   || [], lineStyle: { color: c.charge,  width: 2 }, itemStyle: { color: c.charge  }, showSymbol: false, areaStyle: { color: c.charge,  opacity: 0.1 } },
-      { name: '⬇ Décharge Ah', type: 'line', smooth: true, data: data.discharge_ah_series|| [], lineStyle: { color: c.dischrg, width: 2 }, itemStyle: { color: c.dischrg }, showSymbol: false, areaStyle: { color: c.dischrg, opacity: 0.1 } },
+      { name: '⬆ Charge Ah',   type: 'bar', stack: 'shunt', data: data.charge_ah_series   || [], itemStyle: { color: c.charge  }, emphasis: { focus: 'series' } },
+      { name: '⬇ Décharge Ah', type: 'bar', stack: 'shunt', data: data.discharge_ah_series|| [], itemStyle: { color: c.dischrg }, emphasis: { focus: 'series' } },
     ],
   }, true);
 }
