@@ -39,57 +39,66 @@ pub async fn get_energy_history(
     };
 
     let now_ms = Utc::now().timestamp_millis();
-    let (start_ms, step_ms): (i64, i64) = match period {
-        "week"  => (now_ms - 7 * 86_400_000,   3_600_000),
-        "month" => (now_ms - 30 * 86_400_000,  21_600_000),
-        "year"  => (now_ms - 365 * 86_400_000, 86_400_000),
-        _       => (now_ms - 86_400_000,        900_000),
+
+    // step = résolution d'un bucket ; window = fenêtre PromQL pour agréger
+    let (start_ms, step_ms, window): (i64, i64, &str) = match period {
+        "week"  => (now_ms -   7 * 86_400_000,  86_400_000,    "1d"),
+        "month" => (now_ms -  30 * 86_400_000,  86_400_000,    "1d"),
+        "year"  => (now_ms - 365 * 86_400_000,  2_592_000_000, "30d"),
+        _       => (now_ms -       86_400_000,  3_600_000,     "1h"),  // day
     };
 
-    // ── Requêtes PromQL en parallèle ────────────────────────────────────────────
+    // ── Requêtes PromQL avec fenêtres d'agrégation ──────────────────────────────
+    let q_solar_w        = format!("avg_over_time(solar_total_w[{}])", window);
+    let q_import_w       = format!("avg_over_time(et112_power_w{{address=\"0x09\"}}[{}])", window);
+    let q_consump_w      = format!("avg_over_time(et112_power_w{{address=\"0x08\"}}[{}])", window);
+    let q_solar_energy   = format!("increase(et112_energy_import_wh{{address=\"0x07\"}}[{}])", window);
+    let q_import_energy  = format!("increase(et112_energy_import_wh{{address=\"0x09\"}}[{}])", window);
+    let q_export_energy  = format!("increase(et112_energy_export_wh{{address=\"0x09\"}}[{}])", window);
+    let q_consump_energy = format!("increase(et112_energy_import_wh{{address=\"0x08\"}}[{}])", window);
+    let q_charge_ah      = format!("max_over_time(venus_shunt_ah_charged_today[{}])", window);
+    let q_discharge_ah   = format!("max_over_time(venus_shunt_ah_discharged_today[{}])", window);
+
     let (solar_w_r, import_w_r, consumption_w_r,
          solar_energy_r, import_energy_r, export_energy_r, consumption_energy_r,
          charge_ah_r, discharge_ah_r) = tokio::join!(
-        vm.query_range_json("solar_total_w",                               start_ms, now_ms, step_ms),
-        vm.query_range_json("et112_power_w{address=\"0x09\"}",             start_ms, now_ms, step_ms),
-        vm.query_range_json("et112_power_w{address=\"0x08\"}",             start_ms, now_ms, step_ms),
-        vm.query_range_json("et112_energy_import_wh{address=\"0x07\"}",    start_ms, now_ms, step_ms),
-        vm.query_range_json("et112_energy_import_wh{address=\"0x09\"}",    start_ms, now_ms, step_ms),
-        vm.query_range_json("et112_energy_export_wh{address=\"0x09\"}",    start_ms, now_ms, step_ms),
-        vm.query_range_json("et112_energy_import_wh{address=\"0x08\"}",    start_ms, now_ms, step_ms),
-        vm.query_range_json("venus_shunt_ah_charged_today",                start_ms, now_ms, step_ms),
-        vm.query_range_json("venus_shunt_ah_discharged_today",             start_ms, now_ms, step_ms),
+        vm.query_range_json(&q_solar_w,        start_ms, now_ms, step_ms),
+        vm.query_range_json(&q_import_w,       start_ms, now_ms, step_ms),
+        vm.query_range_json(&q_consump_w,      start_ms, now_ms, step_ms),
+        vm.query_range_json(&q_solar_energy,   start_ms, now_ms, step_ms),
+        vm.query_range_json(&q_import_energy,  start_ms, now_ms, step_ms),
+        vm.query_range_json(&q_export_energy,  start_ms, now_ms, step_ms),
+        vm.query_range_json(&q_consump_energy, start_ms, now_ms, step_ms),
+        vm.query_range_json(&q_charge_ah,      start_ms, now_ms, step_ms),
+        vm.query_range_json(&q_discharge_ah,   start_ms, now_ms, step_ms),
     );
 
-    // ── Extraction des séries ────────────────────────────────────────────────────
-    let (ts_solar,   solar_w)    = extract_ts_values(solar_w_r.ok());
-    let (ts_import,  import_w)   = extract_ts_values(import_w_r.ok());
-    let (ts_consump, consump_w)  = extract_ts_values(consumption_w_r.ok());
+    // ── Extraction ──────────────────────────────────────────────────────────────
+    let (ts_solar,   solar_w)   = extract_ts_values(solar_w_r.ok());
+    let (ts_import,  import_w)  = extract_ts_values(import_w_r.ok());
+    let (ts_consump, consump_w) = extract_ts_values(consumption_w_r.ok());
 
-    let solar_energy_pts   = extract_cumul(solar_energy_r.ok());
-    let import_energy_pts  = extract_cumul(import_energy_r.ok());
-    let export_energy_pts  = extract_cumul(export_energy_r.ok());
-    let consump_energy_pts = extract_cumul(consumption_energy_r.ok());
+    // increase() retourne le delta Wh par fenêtre — conversion directe en kWh/bucket
+    let (_, solar_energy_wh)    = extract_ts_values(solar_energy_r.ok());
+    let (_, import_energy_wh)   = extract_ts_values(import_energy_r.ok());
+    let (_, export_energy_wh)   = extract_ts_values(export_energy_r.ok());
+    let (_, consump_energy_wh)  = extract_ts_values(consumption_energy_r.ok());
 
+    let solar_kwh_series:   Vec<f64> = solar_energy_wh.iter().map(|&v| round2(v.max(0.0) / 1000.0)).collect();
+    let import_kwh_series:  Vec<f64> = import_energy_wh.iter().map(|&v| round2(v.max(0.0) / 1000.0)).collect();
+    let consump_kwh_series: Vec<f64> = consump_energy_wh.iter().map(|&v| round2(v.max(0.0) / 1000.0)).collect();
+
+    let solar_kwh  = round2(solar_energy_wh.iter().map(|&v| v.max(0.0)).sum::<f64>() / 1000.0);
+    let import_kwh = round2(import_energy_wh.iter().map(|&v| v.max(0.0)).sum::<f64>() / 1000.0);
+    let export_kwh = round2(export_energy_wh.iter().map(|&v| v.max(0.0)).sum::<f64>() / 1000.0);
+    let consump_kwh= round2(consump_energy_wh.iter().map(|&v| v.max(0.0)).sum::<f64>() / 1000.0);
+
+    // max_over_time donne le total journalier (compteur SmartShunt remis à 0 à minuit)
     let (ts_charge,    charge_ah_pts)    = extract_ts_values(charge_ah_r.ok());
     let (ts_discharge, discharge_ah_pts) = extract_ts_values(discharge_ah_r.ok());
 
-    let solar_kwh   = delta_wh_to_kwh(&solar_energy_pts);
-    let import_kwh  = delta_wh_to_kwh(&import_energy_pts);
-    let export_kwh  = delta_wh_to_kwh(&export_energy_pts);
-    let consump_kwh = delta_wh_to_kwh(&consump_energy_pts);
-
-    let solar_kwh_series   = cumul_delta_kwh(&solar_energy_pts);
-    let import_kwh_series  = cumul_delta_kwh(&import_energy_pts);
-    let consump_kwh_series = cumul_delta_kwh(&consump_energy_pts);
-
-    let v_nom = 51.2_f64;
-    let solar_ah   = solar_kwh   * 1000.0 / v_nom;
-    let import_ah  = import_kwh  * 1000.0 / v_nom;
-    let consump_ah = consump_kwh * 1000.0 / v_nom;
-
-    let charge_ah_now    = charge_ah_pts.last().copied().unwrap_or(0.0);
-    let discharge_ah_now = discharge_ah_pts.last().copied().unwrap_or(0.0);
+    let charge_ah_total    = round2(charge_ah_pts.iter().map(|&v| v.max(0.0)).sum::<f64>());
+    let discharge_ah_total = round2(discharge_ah_pts.iter().map(|&v| v.max(0.0)).sum::<f64>());
 
     Json(json!({
         "ok":     true,
@@ -109,22 +118,18 @@ pub async fn get_energy_history(
         "import_kwh_series":  import_kwh_series,
         "consump_kwh_series": consump_kwh_series,
 
-        "solar_ah":   round2(solar_ah),
-        "import_ah":  round2(import_ah),
-        "consump_ah": round2(consump_ah),
-
         "charge_ah_series":    charge_ah_pts,
         "discharge_ah_series": discharge_ah_pts,
-        "charge_ah_now":    round2(charge_ah_now),
-        "discharge_ah_now": round2(discharge_ah_now),
+        "charge_ah_now":    charge_ah_total,
+        "discharge_ah_now": discharge_ah_total,
 
         "totals": {
-            "solar_kwh":   round2(solar_kwh),
-            "import_kwh":  round2(import_kwh),
-            "export_kwh":  round2(export_kwh),
-            "consump_kwh": round2(consump_kwh),
-            "charge_ah":   round2(charge_ah_now),
-            "discharge_ah":round2(discharge_ah_now),
+            "solar_kwh":   solar_kwh,
+            "import_kwh":  import_kwh,
+            "export_kwh":  export_kwh,
+            "consump_kwh": consump_kwh,
+            "charge_ah":   charge_ah_total,
+            "discharge_ah":discharge_ah_total,
         }
     }))
 }
@@ -149,38 +154,6 @@ fn extract_ts_values(result: Option<Value>) -> (Vec<i64>, Vec<f64>) {
     }).unzip()
 }
 
-/// Extrait les valeurs brutes d'un compteur cumulatif (en Wh).
-fn extract_cumul(result: Option<Value>) -> Vec<f64> {
-    let result = match result { Some(v) => v, None => return Vec::new() };
-    let empty = vec![];
-    let series_list = result["data"]["result"].as_array().unwrap_or(&empty);
-    match series_list.first() {
-        Some(first) => match first["values"].as_array() {
-            Some(values) => values.iter()
-                .map(|entry| entry[1].as_str().unwrap_or("0").parse::<f64>().unwrap_or(0.0))
-                .collect(),
-            None => Vec::new(),
-        },
-        None => Vec::new(),
-    }
-}
-
-/// Delta total (dernier - premier) en kWh depuis des valeurs Wh.
-fn delta_wh_to_kwh(pts: &[f64]) -> f64 {
-    if pts.len() < 2 { return 0.0; }
-    let first = pts.first().copied().unwrap_or(0.0);
-    let last  = pts.last().copied().unwrap_or(0.0);
-    if last >= first { (last - first) / 1000.0 } else { 0.0 }
-}
-
-/// Série de kWh cumulatifs depuis le début de période (delta par rapport au premier point).
-fn cumul_delta_kwh(pts: &[f64]) -> Vec<f64> {
-    if pts.is_empty() { return Vec::new(); }
-    let base = pts[0];
-    pts.iter()
-        .map(|&v| round2(if v >= base { (v - base) / 1000.0 } else { 0.0 }))
-        .collect()
-}
 
 #[inline]
 fn round2(v: f64) -> f64 { (v * 100.0).round() / 100.0 }
