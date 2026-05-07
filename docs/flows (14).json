@@ -1,0 +1,222 @@
+[
+    {
+        "id": "f1e8cd3d2bfb3b52",
+        "type": "tab",
+        "label": "PV Simple Fix",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "de37660382152742",
+        "type": "mqtt in",
+        "z": "f1e8cd3d2bfb3b52",
+        "name": "Micro-onduleurs >> N/c0619ab9929a/pvinverter/32/Ac/Power",
+        "topic": "N/c0619ab9929a/pvinverter/32/Ac/Power",
+        "qos": "2",
+        "datatype": "json",
+        "broker": "169b50c2d9fc12dc",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 260,
+        "y": 60,
+        "wires": [
+            [
+                "196875d7335efac6"
+            ]
+        ]
+    },
+    {
+        "id": "196875d7335efac6",
+        "type": "change",
+        "z": "f1e8cd3d2bfb3b52",
+        "name": "Extract AC",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.value",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "ac_value",
+                "pt": "msg",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 470,
+        "y": 220,
+        "wires": [
+            [
+                "1deeaf3e3ce09332",
+                "a4ee00081dcaa881"
+            ]
+        ]
+    },
+    {
+        "id": "1deeaf3e3ce09332",
+        "type": "debug",
+        "z": "f1e8cd3d2bfb3b52",
+        "name": "AC Clean",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 640,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "72b7f3576fd4485c",
+        "type": "mqtt in",
+        "z": "f1e8cd3d2bfb3b52",
+        "name": "Total MPPT >>  N/c0619ab9929a/system/0/Dc/Pv/Power",
+        "topic": "N/c0619ab9929a/system/0/Dc/Pv/Power",
+        "qos": "2",
+        "datatype": "json",
+        "broker": "169b50c2d9fc12dc",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 240,
+        "y": 440,
+        "wires": [
+            [
+                "8b84ac3b9355fafc"
+            ]
+        ]
+    },
+    {
+        "id": "8b84ac3b9355fafc",
+        "type": "change",
+        "z": "f1e8cd3d2bfb3b52",
+        "name": "Extract DC",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload.value",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "dc_value",
+                "pt": "msg",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 470,
+        "y": 300,
+        "wires": [
+            [
+                "95163d50c2bce45a",
+                "a4ee00081dcaa881"
+            ]
+        ]
+    },
+    {
+        "id": "95163d50c2bce45a",
+        "type": "debug",
+        "z": "f1e8cd3d2bfb3b52",
+        "name": "DC Clean",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 620,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "a4ee00081dcaa881",
+        "type": "function",
+        "z": "f1e8cd3d2bfb3b52",
+        "name": "Calculate Sum",
+        "func": "// Récupère les dernières valeurs stockées\nlet ac = context.get('ac') || null;\nlet dc = context.get('dc') || null;\n\n// Mise à jour selon le topic\nif (msg.topic.includes('Ac/Power')) {\n    ac = msg.payload;\n    context.set('ac', ac);\n    node.log('AC updated: ' + ac);\n} else if (msg.topic.includes('Dc/Pv/Power')) {\n    dc = msg.payload;\n    context.set('dc', dc);\n    node.log('DC updated: ' + dc);\n}\n\n// Affiche le statut\nconst acOk = ac !== null && typeof ac === 'number' && !isNaN(ac);\nconst dcOk = dc !== null && typeof dc === 'number' && !isNaN(dc);\n\nnode.status({\n    fill: (acOk && dcOk) ? 'green' : 'yellow',\n    shape: 'dot',\n    text: `AC:${acOk ? ac.toFixed(1) : '---'} | DC:${dcOk ? dc.toFixed(1) : '---'}`\n});\n\n// Si les deux sont valides, calcule\nif (acOk && dcOk) {\n    const sum = ac + dc;\n    node.log('SUM: ' + ac + ' + ' + dc + ' = ' + sum);\n    \n    return {\n        payload: sum,\n        topic: 'PV/TotalPower',\n        ac: ac,\n        dc: dc,\n        timestamp: new Date().toISOString()\n    };\n}\n\nnode.log('Waiting... AC:' + acOk + ' DC:' + dcOk);\nreturn null;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 820,
+        "y": 260,
+        "wires": [
+            [
+                "0822369e1c3d0240"
+            ]
+        ]
+    },
+    {
+        "id": "0822369e1c3d0240",
+        "type": "debug",
+        "z": "f1e8cd3d2bfb3b52",
+        "name": "TOTAL",
+        "active": false,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 1080,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "169b50c2d9fc12dc",
+        "type": "mqtt-broker",
+        "name": "",
+        "broker": "192.168.1.120",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    }
+]
