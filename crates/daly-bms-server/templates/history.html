@@ -239,16 +239,13 @@ function themeColors() {
   };
 }
 
-// ── Format timestamp → label ────────────────────────────────────────────────
+// ── Format timestamp → label (adapté au step de chaque période) ─────────────
 function fmtTs(ms, period) {
   const d = new Date(ms);
-  if (period === 'day') {
-    return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  } else if (period === 'week' || period === 'month') {
-    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) + ' ' +
-           d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  }
-  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+  if (period === 'day')   return d.toLocaleTimeString('fr-FR', { hour: '2-digit' }) + 'h';
+  if (period === 'week')  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  if (period === 'month') return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+  return d.toLocaleDateString('fr-FR', { month: 'short' }); // year → Jan, Fév…
 }
 
 // ── Base option (horizontal stacked bar — bar-y-category-stack) ────────────
@@ -296,69 +293,64 @@ function baseOpt(c, unit, period, yLabels) {
 }
 
 // ── Render charts ──────────────────────────────────────────────────────────
+// L'API retourne déjà des valeurs agrégées par bucket via PromQL :
+//   increase([window])     → kWh par bucket
+//   avg_over_time([window])→ W moyen par bucket
+//   max_over_time([window])→ Ah SmartShunt par bucket (remise à 0 à minuit)
 function renderCharts(data) {
   const period = data.period || 'day';
   const c = themeColors();
 
-  // X-axis labels for each series
-  const xSolar   = (data.ts_solar_ms   || []).map(ms => fmtTs(ms, period));
-  const xImport  = (data.ts_import_ms  || []).map(ms => fmtTs(ms, period));
-  const xConsump = (data.ts_consump_ms || []).map(ms => fmtTs(ms, period));
-  const xCharge  = (data.ts_charge_ms  || []).map(ms => fmtTs(ms, period));
+  // Labels depuis les timestamps (un par bucket)
+  const tsSolar  = data.ts_solar_ms    || [];
+  const tsCharge = data.ts_charge_ms   || [];
+  const tsDischg = data.ts_discharge_ms|| [];
+  const xMain  = tsSolar.map(ms => fmtTs(ms, period));
+  const xShunt = (tsCharge.length ? tsCharge : tsDischg).map(ms => fmtTs(ms, period));
 
-  // All series share the longest x-axis (for kWh / Ah charts use solar x)
-  const xMain = xSolar.length >= xImport.length ? xSolar : xImport;
-
-  // ── 1. kWh cumulatif ─────────────────────────────────────────────────────
-  const hasSolarKwh  = (data.solar_kwh_series  || []).length > 0;
-  const hasImportKwh = (data.import_kwh_series || []).length > 0;
-  const hasConsumpKwh= (data.consump_kwh_series|| []).length > 0;
-  const hasKwh = hasSolarKwh || hasImportKwh || hasConsumpKwh;
+  // ── 1. kWh par bucket ─────────────────────────────────────────────────────
+  const solarKwh   = data.solar_kwh_series   || [];
+  const importKwh  = data.import_kwh_series  || [];
+  const consumpKwh = data.consump_kwh_series || [];
+  const hasKwh = solarKwh.length > 0 || importKwh.length > 0 || consumpKwh.length > 0;
 
   document.getElementById('nd-kwh').classList.toggle('hidden', hasKwh);
-  document.getElementById('meta-kwh').textContent =
-    hasKwh ? `☀ ${(data.totals?.solar_kwh||0).toFixed(2)} · 🔌 ${(data.totals?.import_kwh||0).toFixed(2)} · 🏠 ${(data.totals?.consump_kwh||0).toFixed(2)} kWh` : '—';
+  document.getElementById('meta-kwh').textContent = hasKwh
+    ? `☀ ${(data.totals?.solar_kwh||0).toFixed(2)} · 🔌 ${(data.totals?.import_kwh||0).toFixed(2)} · 🏠 ${(data.totals?.consump_kwh||0).toFixed(2)} kWh` : '—';
 
   cKwh.setOption({
     ...baseOpt(c, 'kWh', period, xMain),
     series: [
-      { name: '☀️ Solaire',      type: 'bar', stack: 'energy', data: data.solar_kwh_series   || [], itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
-      { name: '🔌 Importée',     type: 'bar', stack: 'energy', data: data.import_kwh_series  || [], itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
-      { name: '🏠 Consommation', type: 'bar', stack: 'energy', data: data.consump_kwh_series || [], itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
+      { name: '☀️ Solaire',      type: 'bar', stack: 'energy', data: solarKwh,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
+      { name: '🔌 Importée',     type: 'bar', stack: 'energy', data: importKwh,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
+      { name: '🏠 Consommation', type: 'bar', stack: 'energy', data: consumpKwh, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
     ],
   }, true);
 
-  // ── 2. Puissance W ───────────────────────────────────────────────────────
-  const hasSolarW  = (data.solar_w  || []).length > 0;
-  const hasImportW = (data.import_w || []).length > 0;
-  const hasConsumpW= (data.consump_w|| []).length > 0;
-  const hasW = hasSolarW || hasImportW || hasConsumpW;
+  // ── 2. Puissance W (moyenne par bucket via avg_over_time) ─────────────────
+  const solarW   = data.solar_w  || [];
+  const importW  = data.import_w || [];
+  const consumpW = data.consump_w|| [];
+  const hasW = solarW.length > 0 || importW.length > 0 || consumpW.length > 0;
 
   document.getElementById('nd-w').classList.toggle('hidden', hasW);
-  const maxW = Math.max(
-    ...(data.solar_w  || [0]),
-    ...(data.import_w || [0]),
-    ...(data.consump_w|| [0])
-  );
+  const maxW = Math.max(...(solarW.length ? solarW : [0]), ...(importW.length ? importW : [0]), ...(consumpW.length ? consumpW : [0]));
   document.getElementById('meta-w').textContent = hasW ? `Max ${maxW.toFixed(0)} W` : '—';
 
   cW.setOption({
     ...baseOpt(c, 'W', period, xMain),
     series: [
-      { name: '☀️ Solaire',      type: 'bar', stack: 'power', data: data.solar_w  || [], itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
-      { name: '🔌 Importée',     type: 'bar', stack: 'power', data: data.import_w || [], itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
-      { name: '🏠 Consommation', type: 'bar', stack: 'power', data: data.consump_w|| [], itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
+      { name: '☀️ Solaire',      type: 'bar', stack: 'power', data: solarW,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
+      { name: '🔌 Importée',     type: 'bar', stack: 'power', data: importW,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
+      { name: '🏠 Consommation', type: 'bar', stack: 'power', data: consumpW, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
     ],
   }, true);
 
-  // ── 3. Ah dérivés (kWh / V_nom) ─────────────────────────────────────────
-  function kwhToAh(arr) {
-    return (arr || []).map(v => Math.round(v * 1000 / V_NOM * 100) / 100);
-  }
-  const solarAhSeries  = kwhToAh(data.solar_kwh_series);
-  const importAhSeries = kwhToAh(data.import_kwh_series);
-  const consumpAhSeries= kwhToAh(data.consump_kwh_series);
-  const hasAh = solarAhSeries.length > 0 || importAhSeries.length > 0 || consumpAhSeries.length > 0;
+  // ── 3. Ah (kWh × 1000 / V_nom) par bucket ────────────────────────────────
+  const solarAh   = solarKwh.map(v => Math.round(v * 1000 / V_NOM * 100) / 100);
+  const importAh  = importKwh.map(v => Math.round(v * 1000 / V_NOM * 100) / 100);
+  const consumpAh = consumpKwh.map(v => Math.round(v * 1000 / V_NOM * 100) / 100);
+  const hasAh = solarAh.length > 0 || importAh.length > 0 || consumpAh.length > 0;
 
   document.getElementById('nd-ah').classList.toggle('hidden', hasAh);
   document.getElementById('meta-ah').textContent = hasAh
@@ -368,16 +360,16 @@ function renderCharts(data) {
   cAh.setOption({
     ...baseOpt(c, 'Ah', period, xMain),
     series: [
-      { name: '☀️ Solaire',      type: 'bar', stack: 'ah', data: solarAhSeries,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
-      { name: '🔌 Importée',     type: 'bar', stack: 'ah', data: importAhSeries,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
-      { name: '🏠 Consommation', type: 'bar', stack: 'ah', data: consumpAhSeries, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
+      { name: '☀️ Solaire',      type: 'bar', stack: 'ah', data: solarAh,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
+      { name: '🔌 Importée',     type: 'bar', stack: 'ah', data: importAh,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
+      { name: '🏠 Consommation', type: 'bar', stack: 'ah', data: consumpAh, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
     ],
   }, true);
 
-  // ── 4. Charge / Décharge Ah SmartShunt ──────────────────────────────────
-  const hasCharge  = (data.charge_ah_series   || []).length > 0;
-  const hasDischrg = (data.discharge_ah_series|| []).length > 0;
-  const hasShunt   = hasCharge || hasDischrg;
+  // ── 4. Charge / Décharge Ah SmartShunt (max_over_time par bucket) ─────────
+  const chargeAh  = data.charge_ah_series    || [];
+  const dischrgAh = data.discharge_ah_series || [];
+  const hasShunt  = chargeAh.length > 0 || dischrgAh.length > 0;
 
   document.getElementById('nd-shunt').classList.toggle('hidden', hasShunt);
   document.getElementById('meta-shunt').textContent = hasShunt
@@ -385,10 +377,10 @@ function renderCharts(data) {
     : '—';
 
   cShunt.setOption({
-    ...baseOpt(c, 'Ah', period, xCharge.length ? xCharge : xMain),
+    ...baseOpt(c, 'Ah', period, xShunt),
     series: [
-      { name: '⬆ Charge Ah',   type: 'bar', stack: 'shunt', data: data.charge_ah_series   || [], itemStyle: { color: c.charge  }, emphasis: { focus: 'series' } },
-      { name: '⬇ Décharge Ah', type: 'bar', stack: 'shunt', data: data.discharge_ah_series|| [], itemStyle: { color: c.dischrg }, emphasis: { focus: 'series' } },
+      { name: '⬆ Charge Ah',   type: 'bar', stack: 'shunt', data: chargeAh,  itemStyle: { color: c.charge  }, emphasis: { focus: 'series' } },
+      { name: '⬇ Décharge Ah', type: 'bar', stack: 'shunt', data: dischrgAh, itemStyle: { color: c.dischrg }, emphasis: { focus: 'series' } },
     ],
   }, true);
 }
