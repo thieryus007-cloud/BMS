@@ -198,9 +198,11 @@ async fn writer_task(
         bus.emit_live(LiveEvent::new("solar", json!({
             "solar_total_w": solar_total,
             "dc_pv_power_w": dc_pv_w,
+            "mppt_power_w":  dc_pv_w,   // alias rétrocompat dashboard
             "mppt_273_w":    m273_w,
             "mppt_289_w":    m289_w,
             "pvinv_power_w": pvinv_w,
+            "pvinv_w":       pvinv_w,   // alias rétrocompat dashboard
             "house_power_w": house_power,
         })));
     }
