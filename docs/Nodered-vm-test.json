@@ -1,0 +1,603 @@
+[
+    {
+        "id": "inject_button",
+        "type": "inject",
+        "z": "victoriametrics_flow",
+        "name": "🟢 Bouton Poussoir",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 150,
+        "y": 80,
+        "wires": [
+            ["generate_random"]
+        ]
+    },
+    {
+        "id": "generate_random",
+        "type": "function",
+        "z": "victoriametrics_flow",
+        "name": "🎲 Générer valeur aléatoire",
+        "func": "// Génère une valeur aléatoire entre 0 et 100\nvar randomValue = Math.floor(Math.random() * 101);\n\n// Création du timestamp Unix en millisecondes\nvar timestamp = Date.now();\n\n// Format InfluxDB Line Protocol pour VictoriaMetrics\n// Format: metric_name{tag1=\"value1\"} value timestamp\nvar lineProtocol = 'nodered_test{source=\"nodered\",host=\"windows_pc\"} ' + randomValue + ' ' + timestamp;\n\nmsg.payload = lineProtocol;\nmsg.metricValue = randomValue;\nmsg.timestamp = timestamp;\nmsg.url = 'http://192.168.1.141:8428/api/v1/import/prometheus';\n\nnode.status({fill:\"green\",shape:\"dot\",text:\"Valeur: \" + randomValue});\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 80,
+        "wires": [
+            ["debug_before_send", "http_request_vm"]
+        ]
+    },
+    {
+        "id": "debug_before_send",
+        "type": "debug",
+        "z": "victoriametrics_flow",
+        "name": "📤 DEBUG - Avant envoi",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 620,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "http_request_vm",
+        "type": "http request",
+        "z": "victoriametrics_flow",
+        "name": "📡 POST VictoriaMetrics",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [
+            {
+                "keyType": "Content-Type",
+                "keyValue": "",
+                "valueType": "text/plain",
+                "valueValue": ""
+            }
+        ],
+        "x": 640,
+        "y": 80,
+        "wires": [
+            ["debug_response", "check_response_status"]
+        ]
+    },
+    {
+        "id": "debug_response",
+        "type": "debug",
+        "z": "victoriametrics_flow",
+        "name": "📥 DEBUG - Réponse brute",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 860,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "check_response_status",
+        "type": "switch",
+        "z": "victoriametrics_flow",
+        "name": "🔍 Vérifier Status HTTP",
+        "property": "statusCode",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "204",
+                "vt": "num"
+            },
+            {
+                "t": "eq",
+                "v": "200",
+                "vt": "num"
+            },
+            {
+                "t": "else"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 3,
+        "x": 880,
+        "y": 80,
+        "wires": [
+            ["success_handler"],
+            ["success_handler"],
+            ["error_handler"]
+        ]
+    },
+    {
+        "id": "success_handler",
+        "type": "function",
+        "z": "victoriametrics_flow",
+        "name": "✅ Succès - Compteur",
+        "func": "// Récupère le compteur global ou initialise à 0\nvar successCount = global.get('vm_success_count') || 0;\nsuccessCount++;\nglobal.set('vm_success_count', successCount);\n\nmsg.payload = {\n    status: \"SUCCESS\",\n    statusCode: msg.statusCode,\n    metricValue: msg.metricValue,\n    timestamp: msg.timestamp,\n    totalSuccess: successCount,\n    responseBody: msg.payload,\n    url: msg.url\n};\n\nnode.status({fill:\"green\",shape:\"dot\",text:\"OK #\" + successCount});\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1120,
+        "y": 60,
+        "wires": [
+            ["debug_success", "update_dashboard"]
+        ]
+    },
+    {
+        "id": "error_handler",
+        "type": "function",
+        "z": "victoriametrics_flow",
+        "name": "❌ Erreur - Détail",
+        "func": "// Récupère le compteur d'erreurs\nvar errorCount = global.get('vm_error_count') || 0;\nerrorCount++;\nglobal.set('vm_error_count', errorCount);\n\nvar errorDetails = {\n    status: \"ERROR\",\n    statusCode: msg.statusCode || \"No Response\",\n    errorMessage: msg.payload || \"Unknown error\",\n    metricValue: msg.metricValue,\n    timestamp: msg.timestamp,\n    totalErrors: errorCount,\n    url: msg.url,\n    headers: msg.headers || \"N/A\"\n};\n\n// Détection spécifique des erreurs\nif (msg.statusCode === 400) {\n    errorDetails.errorType = \"BAD REQUEST - Format de données invalide\";\n} else if (msg.statusCode === 404) {\n    errorDetails.errorType = \"NOT FOUND - Endpoint incorrect\";\n} else if (msg.statusCode === 500) {\n    errorDetails.errorType = \"SERVER ERROR - Problème côté VictoriaMetrics\";\n} else if (!msg.statusCode) {\n    errorDetails.errorType = \"CONNECTION ERROR - Serveur injoignable\";\n} else {\n    errorDetails.errorType = \"UNKNOWN ERROR - Code: \" + msg.statusCode;\n}\n\nmsg.payload = errorDetails;\n\nnode.status({fill:\"red\",shape:\"ring\",text:\"Erreur #\" + errorCount});\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1120,
+        "y": 100,
+        "wires": [
+            ["debug_error", "update_dashboard"]
+        ]
+    },
+    {
+        "id": "debug_success",
+        "type": "debug",
+        "z": "victoriametrics_flow",
+        "name": "✅ DEBUG - Succès",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1340,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "debug_error",
+        "type": "debug",
+        "z": "victoriametrics_flow",
+        "name": "❌ DEBUG - Erreur",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1340,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "update_dashboard",
+        "type": "function",
+        "z": "victoriametrics_flow",
+        "name": "📊 Mise à jour Dashboard",
+        "func": "var successCount = global.get('vm_success_count') || 0;\nvar errorCount = global.get('vm_error_count') || 0;\nvar totalAttempts = successCount + errorCount;\n\nmsg.payload = {\n    totalEnvoyes: totalAttempts,\n    succes: successCount,\n    erreurs: errorCount,\n    tauxReussite: totalAttempts > 0 ? ((successCount / totalAttempts) * 100).toFixed(2) + '%' : 'N/A',\n    derniereValeur: msg.metricValue || 'N/A',\n    dernierStatut: msg.payload.status || 'N/A'\n};\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1380,
+        "y": 140,
+        "wires": [
+            ["debug_dashboard"]
+        ]
+    },
+    {
+        "id": "debug_dashboard",
+        "type": "debug",
+        "z": "victoriametrics_flow",
+        "name": "📊 DEBUG - Dashboard Stats",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1600,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "inject_query",
+        "type": "inject",
+        "z": "victoriametrics_flow",
+        "name": "🔵 Query Manuel (PromQL)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 170,
+        "y": 240,
+        "wires": [
+            ["prepare_query"]
+        ]
+    },
+    {
+        "id": "auto_query",
+        "type": "inject",
+        "z": "victoriametrics_flow",
+        "name": "🔄 Auto Query toutes les 30s",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "30",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "5",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 190,
+        "y": 280,
+        "wires": [
+            ["prepare_query"]
+        ]
+    },
+    {
+        "id": "prepare_query",
+        "type": "function",
+        "z": "victoriametrics_flow",
+        "name": "🔍 Préparer requête PromQL",
+        "func": "// Requête pour vérifier si le metric existe et compter les données\nvar query = 'count(nodered_test)';\n\nmsg.method = \"GET\";\nmsg.url = 'http://192.168.1.141:8428/api/v1/query?query=' + encodeURIComponent(query);\nmsg.queryType = \"count\";\n\nnode.status({fill:\"blue\",shape:\"dot\",text:\"Query...\"});\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 260,
+        "wires": [
+            ["debug_query_sent", "http_query_vm"]
+        ]
+    },
+    {
+        "id": "debug_query_sent",
+        "type": "debug",
+        "z": "victoriametrics_flow",
+        "name": "📤 DEBUG - Query envoyée",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 640,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "http_query_vm",
+        "type": "http request",
+        "z": "victoriametrics_flow",
+        "name": "📡 GET VictoriaMetrics PromQL",
+        "method": "GET",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 660,
+        "y": 260,
+        "wires": [
+            ["parse_query_response"]
+        ]
+    },
+    {
+        "id": "parse_query_response",
+        "type": "function",
+        "z": "victoriametrics_flow",
+        "name": "📊 Parser réponse PromQL",
+        "func": "var response = msg.payload;\nvar result = {\n    queryTime: new Date().toISOString(),\n    rawResponse: response,\n    status: response.status || \"unknown\"\n};\n\nif (response.status === \"success\" && response.data && response.data.result) {\n    var results = response.data.result;\n    \n    if (results.length > 0) {\n        var metricData = results[0];\n        result.metricFound = true;\n        result.metricName = \"nodered_test\";\n        result.totalDataPoints = metricData.value ? metricData.value[1] : \"N/A\";\n        result.timestamp = metricData.value ? new Date(parseInt(metricData.value[0]) * 1000).toISOString() : \"N/A\";\n        result.labels = metricData.metric || {};\n        \n        // Comparer avec le nombre envoyé\n        var sentCount = global.get('vm_success_count') || 0;\n        result.sentByNodeRED = sentCount;\n        result.receivedByVM = parseInt(result.totalDataPoints) || 0;\n        result.difference = sentCount - result.receivedByVM;\n        result.syncStatus = result.difference === 0 ? \"✅ PARFAIT\" : (result.difference > 0 ? \"⚠️ PERTES DETECTEES\" : \"📝 VM A PLUS DE DONNEES\");\n        \n        node.status({fill:\"green\",shape:\"dot\",text:\"Data: \" + result.totalDataPoints});\n    } else {\n        result.metricFound = false;\n        result.message = \"❌ METRIC NON TROUVE - nodered_test n'existe pas encore dans VictoriaMetrics\";\n        node.status({fill:\"red\",shape:\"ring\",text:\"Non trouvé\"});\n    }\n} else {\n    result.metricFound = false;\n    result.error = response.error || \"Réponse invalide\";\n    result.message = \"❌ ERREUR API: \" + result.error;\n    node.status({fill:\"red\",shape:\"ring\",text:\"Erreur API\"});\n}\n\nmsg.payload = result;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 900,
+        "y": 260,
+        "wires": [
+            ["debug_query_result", "check_sync"]
+        ]
+    },
+    {
+        "id": "debug_query_result",
+        "type": "debug",
+        "z": "victoriametrics_flow",
+        "name": "📥 DEBUG - Résultat Query",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1140,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "check_sync",
+        "type": "function",
+        "z": "victoriametrics_flow",
+        "name": "🔄 Vérifier Synchronisation",
+        "func": "var result = msg.payload;\n\nif (result.metricFound) {\n    var syncInfo = {\n        status: \"SYNC_CHECK\",\n        metricName: \"nodered_test\",\n        sentByNodeRED: result.sentByNodeRED,\n        storedInVM: result.receivedByVM,\n        difference: result.difference,\n        conclusion: result.syncStatus,\n        recommendation: result.difference > 0 ? \"Attendez quelques secondes et relancez la query (délai d'ingestion VM)\" : \"Tout est synchronisé\"\n    };\n    \n    msg.payload = syncInfo;\n    return msg;\n}\n\nreturn null;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1150,
+        "y": 280,
+        "wires": [
+            ["debug_sync"]
+        ]
+    },
+    {
+        "id": "debug_sync",
+        "type": "debug",
+        "z": "victoriametrics_flow",
+        "name": "🔄 DEBUG - Sync Status",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1380,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "inject_list_metrics",
+        "type": "inject",
+        "z": "victoriametrics_flow",
+        "name": "📋 Lister tous les metrics",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 180,
+        "y": 380,
+        "wires": [
+            ["prepare_list_query"]
+        ]
+    },
+    {
+        "id": "prepare_list_query",
+        "type": "function",
+        "z": "victoriametrics_flow",
+        "name": "🔍 Query: liste metrics",
+        "func": "msg.method = \"GET\";\nmsg.url = 'http://192.168.1.141:8428/api/v1/label/__name__/values';\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 380,
+        "wires": [
+            ["http_list_metrics"]
+        ]
+    },
+    {
+        "id": "http_list_metrics",
+        "type": "http request",
+        "z": "victoriametrics_flow",
+        "name": "📡 GET Liste Metrics",
+        "method": "GET",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 630,
+        "y": 380,
+        "wires": [
+            ["filter_nodered_metrics"]
+        ]
+    },
+    {
+        "id": "filter_nodered_metrics",
+        "type": "function",
+        "z": "victoriametrics_flow",
+        "name": "🔎 Filtrer nodered_test",
+        "func": "var response = msg.payload;\nvar result = {\n    totalMetrics: 0,\n    noderedMetrics: [],\n    noderedTestFound: false\n};\n\nif (response.status === \"success\" && response.data) {\n    result.totalMetrics = response.data.length;\n    \n    response.data.forEach(function(metric) {\n        if (metric.includes('nodered')) {\n            result.noderedMetrics.push(metric);\n        }\n        if (metric === 'nodered_test') {\n            result.noderedTestFound = true;\n        }\n    });\n}\n\nresult.message = result.noderedTestFound ? \n    \"✅ nodered_test TROUVE dans la liste des metrics!\" : \n    \"❌ nodered_test NON TROUVE dans la liste\";\n\nmsg.payload = result;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 870,
+        "y": 380,
+        "wires": [
+            ["debug_list_metrics"]
+        ]
+    },
+    {
+        "id": "debug_list_metrics",
+        "type": "debug",
+        "z": "victoriametrics_flow",
+        "name": "📋 DEBUG - Liste Metrics",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1110,
+        "y": 380,
+        "wires": []
+    },
+    {
+        "id": "inject_reset",
+        "type": "inject",
+        "z": "victoriametrics_flow",
+        "name": "🔄 Reset Compteurs",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+n        "payload": "",
+        "payloadType": "date",
+        "x": 160,
+        "y": 480,
+        "wires": [
+            ["reset_counters"]
+        ]
+    },
+    {
+        "id": "reset_counters",
+        "type": "function",
+        "z": "victoriametrics_flow",
+        "name": "🗑️ Reset Stats",
+        "func": "global.set('vm_success_count', 0);\nglobal.set('vm_error_count', 0);\n\nmsg.payload = {\n    status: \"RESET\",\n    message: \"Compteurs remis à zéro\",\n    successCount: 0,\n    errorCount: 0\n};\n\nnode.status({fill:\"grey\",shape:\"ring\",text:\"Reset\"});\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 480,
+        "wires": [
+            ["debug_reset"]
+        ]
+    },
+    {
+        "id": "debug_reset",
+        "type": "debug",
+        "z": "victoriametrics_flow",
+        "name": "🗑️ DEBUG - Reset",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 580,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "comment1",
+        "type": "comment",
+        "z": "victoriametrics_flow",
+        "name": "🚀 ENVOI DE DONNEES",
+        "info": "",
+        "x": 140,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "comment2",
+        "type": "comment",
+        "z": "victoriametrics_flow",
+        "name": "🔍 VERIFICATION PROMQL",
+        "info": "",
+        "x": 160,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "comment3",
+        "type": "comment",
+        "z": "victoriametrics_flow",
+        "name": "📋 OUTILS DEBUG",
+        "info": "",
+        "x": 140,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "comment4",
+        "type": "comment",
+        "z": "victoriametrics_flow",
+        "name": "⚙️ UTILITAIRES",
+        "info": "",
+        "x": 140,
+        "y": 440,
+        "wires": []
+    }
+]
