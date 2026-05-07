@@ -1,222 +1,846 @@
 [
-    {
-        "id": "f1e8cd3d2bfb3b52",
-        "type": "tab",
-        "label": "PV Simple Fix",
-        "disabled": false,
-        "info": ""
-    },
-    {
-        "id": "de37660382152742",
-        "type": "mqtt in",
-        "z": "f1e8cd3d2bfb3b52",
-        "name": "Micro-onduleurs >> N/c0619ab9929a/pvinverter/32/Ac/Power",
-        "topic": "N/c0619ab9929a/pvinverter/32/Ac/Power",
-        "qos": "2",
-        "datatype": "json",
-        "broker": "169b50c2d9fc12dc",
-        "nl": false,
-        "rap": true,
-        "rh": 0,
-        "inputs": 0,
-        "x": 260,
-        "y": 60,
-        "wires": [
-            [
-                "196875d7335efac6"
-            ]
-        ]
-    },
-    {
-        "id": "196875d7335efac6",
-        "type": "change",
-        "z": "f1e8cd3d2bfb3b52",
-        "name": "Extract AC",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "payload.value",
-                "tot": "msg"
-            },
-            {
-                "t": "set",
-                "p": "ac_value",
-                "pt": "msg",
-                "to": "payload",
-                "tot": "msg"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 470,
-        "y": 220,
-        "wires": [
-            [
-                "1deeaf3e3ce09332",
-                "a4ee00081dcaa881"
-            ]
-        ]
-    },
-    {
-        "id": "1deeaf3e3ce09332",
-        "type": "debug",
-        "z": "f1e8cd3d2bfb3b52",
-        "name": "AC Clean",
-        "active": false,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": true,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "payload",
-        "statusType": "auto",
-        "x": 640,
-        "y": 60,
-        "wires": []
-    },
-    {
-        "id": "72b7f3576fd4485c",
-        "type": "mqtt in",
-        "z": "f1e8cd3d2bfb3b52",
-        "name": "Total MPPT >>  N/c0619ab9929a/system/0/Dc/Pv/Power",
-        "topic": "N/c0619ab9929a/system/0/Dc/Pv/Power",
-        "qos": "2",
-        "datatype": "json",
-        "broker": "169b50c2d9fc12dc",
-        "nl": false,
-        "rap": true,
-        "rh": 0,
-        "inputs": 0,
-        "x": 240,
-        "y": 440,
-        "wires": [
-            [
-                "8b84ac3b9355fafc"
-            ]
-        ]
-    },
-    {
-        "id": "8b84ac3b9355fafc",
-        "type": "change",
-        "z": "f1e8cd3d2bfb3b52",
-        "name": "Extract DC",
-        "rules": [
-            {
-                "t": "set",
-                "p": "payload",
-                "pt": "msg",
-                "to": "payload.value",
-                "tot": "msg"
-            },
-            {
-                "t": "set",
-                "p": "dc_value",
-                "pt": "msg",
-                "to": "payload",
-                "tot": "msg"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 470,
-        "y": 300,
-        "wires": [
-            [
-                "95163d50c2bce45a",
-                "a4ee00081dcaa881"
-            ]
-        ]
-    },
-    {
-        "id": "95163d50c2bce45a",
-        "type": "debug",
-        "z": "f1e8cd3d2bfb3b52",
-        "name": "DC Clean",
-        "active": false,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": true,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "payload",
-        "statusType": "auto",
-        "x": 620,
-        "y": 440,
-        "wires": []
-    },
-    {
-        "id": "a4ee00081dcaa881",
-        "type": "function",
-        "z": "f1e8cd3d2bfb3b52",
-        "name": "Calculate Sum",
-        "func": "// Récupère les dernières valeurs stockées\nlet ac = context.get('ac') || null;\nlet dc = context.get('dc') || null;\n\n// Mise à jour selon le topic\nif (msg.topic.includes('Ac/Power')) {\n    ac = msg.payload;\n    context.set('ac', ac);\n    node.log('AC updated: ' + ac);\n} else if (msg.topic.includes('Dc/Pv/Power')) {\n    dc = msg.payload;\n    context.set('dc', dc);\n    node.log('DC updated: ' + dc);\n}\n\n// Affiche le statut\nconst acOk = ac !== null && typeof ac === 'number' && !isNaN(ac);\nconst dcOk = dc !== null && typeof dc === 'number' && !isNaN(dc);\n\nnode.status({\n    fill: (acOk && dcOk) ? 'green' : 'yellow',\n    shape: 'dot',\n    text: `AC:${acOk ? ac.toFixed(1) : '---'} | DC:${dcOk ? dc.toFixed(1) : '---'}`\n});\n\n// Si les deux sont valides, calcule\nif (acOk && dcOk) {\n    const sum = ac + dc;\n    node.log('SUM: ' + ac + ' + ' + dc + ' = ' + sum);\n    \n    return {\n        payload: sum,\n        topic: 'PV/TotalPower',\n        ac: ac,\n        dc: dc,\n        timestamp: new Date().toISOString()\n    };\n}\n\nnode.log('Waiting... AC:' + acOk + ' DC:' + dcOk);\nreturn null;",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 820,
-        "y": 260,
-        "wires": [
-            [
-                "0822369e1c3d0240"
-            ]
-        ]
-    },
-    {
-        "id": "0822369e1c3d0240",
-        "type": "debug",
-        "z": "f1e8cd3d2bfb3b52",
-        "name": "TOTAL",
-        "active": false,
-        "tosidebar": true,
-        "console": true,
-        "tostatus": true,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "payload",
-        "statusType": "auto",
-        "x": 1080,
-        "y": 260,
-        "wires": []
-    },
-    {
-        "id": "169b50c2d9fc12dc",
-        "type": "mqtt-broker",
-        "name": "",
-        "broker": "192.168.1.120",
-        "port": 1883,
-        "clientid": "",
-        "autoConnect": true,
-        "usetls": false,
-        "protocolVersion": 4,
-        "keepalive": 60,
-        "cleansession": true,
-        "autoUnsubscribe": true,
-        "birthTopic": "",
-        "birthQos": "0",
-        "birthRetain": "false",
-        "birthPayload": "",
-        "birthMsg": {},
-        "closeTopic": "",
-        "closeQos": "0",
-        "closeRetain": "false",
-        "closePayload": "",
-        "closeMsg": {},
-        "willTopic": "",
-        "willQos": "0",
-        "willRetain": "false",
-        "willPayload": "",
-        "willMsg": {},
-        "userProps": "",
-        "sessionExpiry": ""
-    }
+  {
+    "id": "f1e8cd3d2bfb3b52",
+    "type": "tab",
+    "label": "PV + VictoriaMetrics",
+    "disabled": false,
+    "info": ""
+  },
+  {
+    "id": "de37660382152742",
+    "type": "mqtt in",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Micro-onduleurs >> N/c0619ab9929a/pvinverter/32/Ac/Power",
+    "topic": "N/c0619ab9929a/pvinverter/32/Ac/Power",
+    "qos": "2",
+    "datatype": "json",
+    "broker": "169b50c2d9fc12dc",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 260,
+    "y": 60,
+    "wires": [
+      [
+        "196875d7335efac6"
+      ]
+    ]
+  },
+  {
+    "id": "196875d7335efac6",
+    "type": "change",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Extract AC",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "payload.value",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "ac_value",
+        "pt": "msg",
+        "to": "payload",
+        "tot": "msg"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 470,
+    "y": 60,
+    "wires": [
+      [
+        "1deeaf3e3ce09332",
+        "a4ee00081dcaa881"
+      ]
+    ]
+  },
+  {
+    "id": "1deeaf3e3ce09332",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "AC Clean",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 640,
+    "y": 20,
+    "wires": []
+  },
+  {
+    "id": "72b7f3576fd4485c",
+    "type": "mqtt in",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Total MPPT >>  N/c0619ab9929a/system/0/Dc/Pv/Power",
+    "topic": "N/c0619ab9929a/system/0/Dc/Pv/Power",
+    "qos": "2",
+    "datatype": "json",
+    "broker": "169b50c2d9fc12dc",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 240,
+    "y": 140,
+    "wires": [
+      [
+        "8b84ac3b9355fafc"
+      ]
+    ]
+  },
+  {
+    "id": "8b84ac3b9355fafc",
+    "type": "change",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Extract DC",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "payload.value",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "dc_value",
+        "pt": "msg",
+        "to": "payload",
+        "tot": "msg"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 470,
+    "y": 140,
+    "wires": [
+      [
+        "95163d50c2bce45a",
+        "a4ee00081dcaa881"
+      ]
+    ]
+  },
+  {
+    "id": "95163d50c2bce45a",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DC Clean",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 620,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "a4ee00081dcaa881",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Calculate Sum",
+    "func": "// Recupere les dernieres valeurs stockees\nlet ac = context.get('ac') || null;\nlet dc = context.get('dc') || null;\n\n// Mise a jour selon le topic\nif (msg.topic.includes('Ac/Power')) {\n    ac = msg.payload;\n    context.set('ac', ac);\n    node.log('AC updated: ' + ac);\n} else if (msg.topic.includes('Dc/Pv/Power')) {\n    dc = msg.payload;\n    context.set('dc', dc);\n    node.log('DC updated: ' + dc);\n}\n\n// Affiche le statut\nconst acOk = ac !== null && typeof ac === 'number' && !isNaN(ac);\nconst dcOk = dc !== null && typeof dc === 'number' && !isNaN(dc);\n\nnode.status({\n    fill: (acOk && dcOk) ? 'green' : 'yellow',\n    shape: 'dot',\n    text: 'AC:' + (acOk ? ac.toFixed(1) : '---') + ' | DC:' + (dcOk ? dc.toFixed(1) : '---')\n});\n\n// Si les deux sont valides, calcule\nif (acOk && dcOk) {\n    const sum = ac + dc;\n    node.log('SUM: ' + ac + ' + ' + dc + ' = ' + sum);\n    \n    return {\n        payload: sum,\n        topic: 'PV/TotalPower',\n        ac: ac,\n        dc: dc,\n        timestamp: new Date().toISOString()\n    };\n}\n\nnode.log('Waiting... AC:' + acOk + ' DC:' + dcOk);\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 720,
+    "y": 100,
+    "wires": [
+      [
+        "0822369e1c3d0240",
+        "prepare_vm_payload"
+      ]
+    ]
+  },
+  {
+    "id": "0822369e1c3d0240",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "TOTAL",
+    "active": false,
+    "tosidebar": true,
+    "console": true,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 940,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "prepare_vm_payload",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Preparer Line Protocol",
+    "func": "var sumValue = msg.payload;\nvar timestamp = Date.now();\n\n// Format InfluxDB Line Protocol pour VictoriaMetrics\n// msg.payload DOIT contenir le line protocol (c'est le body envoye par http request)\nvar lineProtocol = 'total_solar_power{source=\"nodered\",type=\"pv_total\"} ' + sumValue + ' ' + timestamp;\n\n// Sauvegarde les infos pour debug dans d'autres proprietes\nmsg.metricValue = sumValue;\nmsg.vmTimestamp = timestamp;\nmsg.acValue = msg.ac;\nmsg.dcValue = msg.dc;\n\n// msg.payload = le body HTTP (le line protocol)\n// msg.url = l'URL de destination\n// msg.method = la methode HTTP\nmsg.payload = lineProtocol;\nmsg.url = 'http://192.168.1.141:8428/api/v1/import/prometheus';\nmsg.method = 'POST';\n\nnode.status({fill:\"blue\",shape:\"dot\",text:\"Val: \" + sumValue.toFixed(1) + \"W\"});\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 980,
+    "y": 100,
+    "wires": [
+      [
+        "debug_before_send",
+        "http_request_vm"
+      ]
+    ]
+  },
+  {
+    "id": "debug_before_send",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DEBUG - Avant envoi VM",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1220,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "http_request_vm",
+    "type": "http request",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "POST VictoriaMetrics",
+    "method": "use",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [
+      {
+        "keyType": "Content-Type",
+        "keyValue": "",
+        "valueType": "text/plain",
+        "valueValue": ""
+      }
+    ],
+    "x": 1240,
+    "y": 100,
+    "wires": [
+      [
+        "debug_response",
+        "check_response_status"
+      ]
+    ]
+  },
+  {
+    "id": "debug_response",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DEBUG - Reponse VM",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1460,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "check_response_status",
+    "type": "switch",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Verifier Status HTTP",
+    "property": "statusCode",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "eq",
+        "v": "204",
+        "vt": "num"
+      },
+      {
+        "t": "eq",
+        "v": "200",
+        "vt": "num"
+      },
+      {
+        "t": "else"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 3,
+    "x": 1480,
+    "y": 100,
+    "wires": [
+      [
+        "success_handler"
+      ],
+      [
+        "success_handler"
+      ],
+      [
+        "error_handler"
+      ]
+    ]
+  },
+  {
+    "id": "success_handler",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Succes - Compteur",
+    "func": "var successCount = global.get('vm_solar_success') || 0;\nsuccessCount++;\nglobal.set('vm_solar_success', successCount);\n\nmsg.payload = {\n    status: \"SUCCESS\",\n    statusCode: msg.statusCode,\n    metricName: \"total_solar_power\",\n    metricValue: msg.metricValue,\n    acValue: msg.acValue,\n    dcValue: msg.dcValue,\n    timestamp: msg.vmTimestamp,\n    totalSuccess: successCount,\n    lineProtocolSent: msg.payload\n};\n\nnode.status({fill:\"green\",shape:\"dot\",text:\"OK #\" + successCount});\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1720,
+    "y": 80,
+    "wires": [
+      [
+        "debug_success",
+        "update_dashboard"
+      ]
+    ]
+  },
+  {
+    "id": "error_handler",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Erreur - Detail",
+    "func": "var errorCount = global.get('vm_solar_error') || 0;\nerrorCount++;\nglobal.set('vm_solar_error', errorCount);\n\nvar errorDetails = {\n    status: \"ERROR\",\n    statusCode: msg.statusCode || \"No Response\",\n    errorMessage: msg.payload || \"Unknown error\",\n    metricName: \"total_solar_power\",\n    metricValue: msg.metricValue,\n    timestamp: msg.vmTimestamp,\n    totalErrors: errorCount,\n    url: 'http://192.168.1.141:8428/api/v1/import/prometheus'\n};\n\nif (msg.statusCode === 400) {\n    errorDetails.errorType = \"BAD REQUEST - Format de donnees invalide\";\n} else if (msg.statusCode === 404) {\n    errorDetails.errorType = \"NOT FOUND - Endpoint incorrect\";\n} else if (msg.statusCode === 500) {\n    errorDetails.errorType = \"SERVER ERROR - Probleme cote VictoriaMetrics\";\n} else if (!msg.statusCode) {\n    errorDetails.errorType = \"CONNECTION ERROR - Serveur injoignable\";\n} else {\n    errorDetails.errorType = \"UNKNOWN ERROR - Code: \" + msg.statusCode;\n}\n\nmsg.payload = errorDetails;\n\nnode.status({fill:\"red\",shape:\"ring\",text:\"Erreur #\" + errorCount});\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1720,
+    "y": 120,
+    "wires": [
+      [
+        "debug_error",
+        "update_dashboard"
+      ]
+    ]
+  },
+  {
+    "id": "debug_success",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DEBUG - Succes VM",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1940,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "debug_error",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DEBUG - Erreur VM",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1940,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "update_dashboard",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Stats Dashboard",
+    "func": "var successCount = global.get('vm_solar_success') || 0;\nvar errorCount = global.get('vm_solar_error') || 0;\nvar totalAttempts = successCount + errorCount;\n\nmsg.payload = {\n    metricName: \"total_solar_power\",\n    totalEnvoyes: totalAttempts,\n    succes: successCount,\n    erreurs: errorCount,\n    tauxReussite: totalAttempts > 0 ? ((successCount / totalAttempts) * 100).toFixed(2) + '%' : 'N/A',\n    derniereValeur: msg.metricValue || 'N/A',\n    derniereSomme: msg.metricValue ? msg.metricValue.toFixed(2) + ' W' : 'N/A',\n    dernierStatut: msg.payload.status || 'N/A'\n};\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1960,
+    "y": 160,
+    "wires": [
+      [
+        "debug_dashboard"
+      ]
+    ]
+  },
+  {
+    "id": "debug_dashboard",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DEBUG - Dashboard Stats",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 2180,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "inject_query",
+    "type": "inject",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Query Manuel PromQL",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 280,
+    "wires": [
+      [
+        "prepare_query"
+      ]
+    ]
+  },
+  {
+    "id": "auto_query",
+    "type": "inject",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Auto Query toutes les 30s",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "30",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 200,
+    "y": 320,
+    "wires": [
+      [
+        "prepare_query"
+      ]
+    ]
+  },
+  {
+    "id": "prepare_query",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Preparer requete PromQL",
+    "func": "var query = 'count(total_solar_power)';\n\nmsg.url = 'http://192.168.1.141:8428/api/v1/query?query=' + encodeURIComponent(query);\nmsg.method = 'GET';\n\nnode.status({fill:\"blue\",shape:\"dot\",text:\"Query...\"});\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 300,
+    "wires": [
+      [
+        "debug_query_sent",
+        "http_query_vm"
+      ]
+    ]
+  },
+  {
+    "id": "debug_query_sent",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DEBUG - Query envoyee",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 660,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "http_query_vm",
+    "type": "http request",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "GET VictoriaMetrics PromQL",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 680,
+    "y": 300,
+    "wires": [
+      [
+        "parse_query_response"
+      ]
+    ]
+  },
+  {
+    "id": "parse_query_response",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Parser reponse PromQL",
+    "func": "var response = msg.payload;\nvar result = {\n    queryTime: new Date().toISOString(),\n    metricName: \"total_solar_power\",\n    rawResponse: response,\n    status: response.status || \"unknown\"\n};\n\nif (response.status === \"success\" && response.data && response.data.result) {\n    var results = response.data.result;\n    \n    if (results.length > 0) {\n        var metricData = results[0];\n        result.metricFound = true;\n        result.totalDataPoints = metricData.value ? metricData.value[1] : \"N/A\";\n        result.timestamp = metricData.value ? new Date(parseInt(metricData.value[0]) * 1000).toISOString() : \"N/A\";\n        result.labels = metricData.metric || {};\n        \n        var sentCount = global.get('vm_solar_success') || 0;\n        result.sentByNodeRED = sentCount;\n        result.receivedByVM = parseInt(result.totalDataPoints) || 0;\n        result.difference = sentCount - result.receivedByVM;\n        result.syncStatus = result.difference === 0 ? \"PARFAIT\" : (result.difference > 0 ? \"PERTES DETECTEES\" : \"VM A PLUS DE DONNEES\");\n        \n        node.status({fill:\"green\",shape:\"dot\",text:\"Data: \" + result.totalDataPoints});\n    } else {\n        result.metricFound = false;\n        result.message = \"METRIC NON TROUVE - total_solar_power n'existe pas encore dans VictoriaMetrics\";\n        node.status({fill:\"red\",shape:\"ring\",text:\"Non trouve\"});\n    }\n} else {\n    result.metricFound = false;\n    result.error = response.error || \"Reponse invalide\";\n    result.message = \"ERREUR API: \" + result.error;\n    node.status({fill:\"red\",shape:\"ring\",text:\"Erreur API\"});\n}\n\nmsg.payload = result;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 920,
+    "y": 300,
+    "wires": [
+      [
+        "debug_query_result",
+        "check_sync"
+      ]
+    ]
+  },
+  {
+    "id": "debug_query_result",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DEBUG - Resultat Query",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1160,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "check_sync",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Verifier Synchronisation",
+    "func": "var result = msg.payload;\n\nif (result.metricFound) {\n    var syncInfo = {\n        status: \"SYNC_CHECK\",\n        metricName: \"total_solar_power\",\n        sentByNodeRED: result.sentByNodeRED,\n        storedInVM: result.receivedByVM,\n        difference: result.difference,\n        conclusion: result.syncStatus,\n        recommendation: result.difference > 0 ? \"Attendez quelques secondes et relancez la query (delai d'ingestion VM)\" : \"Tout est synchronise\"\n    };\n    \n    msg.payload = syncInfo;\n    return msg;\n}\n\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1170,
+    "y": 320,
+    "wires": [
+      [
+        "debug_sync"
+      ]
+    ]
+  },
+  {
+    "id": "debug_sync",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DEBUG - Sync Status",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1400,
+    "y": 320,
+    "wires": []
+  },
+  {
+    "id": "inject_list_metrics",
+    "type": "inject",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Lister tous les metrics",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 200,
+    "y": 420,
+    "wires": [
+      [
+        "prepare_list_query"
+      ]
+    ]
+  },
+  {
+    "id": "prepare_list_query",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Query: liste metrics",
+    "func": "msg.url = 'http://192.168.1.141:8428/api/v1/label/__name__/values';\nmsg.method = 'GET';\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 420,
+    "wires": [
+      [
+        "http_list_metrics"
+      ]
+    ]
+  },
+  {
+    "id": "http_list_metrics",
+    "type": "http request",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "GET Liste Metrics",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 650,
+    "y": 420,
+    "wires": [
+      [
+        "filter_solar_metrics"
+      ]
+    ]
+  },
+  {
+    "id": "filter_solar_metrics",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Filtrer total_solar_power",
+    "func": "var response = msg.payload;\nvar result = {\n    totalMetrics: 0,\n    solarMetrics: [],\n    totalSolarPowerFound: false\n};\n\nif (response.status === \"success\" && response.data) {\n    result.totalMetrics = response.data.length;\n    \n    response.data.forEach(function(metric) {\n        if (metric.includes('solar') || metric.includes('pv') || metric.includes('power')) {\n            result.solarMetrics.push(metric);\n        }\n        if (metric === 'total_solar_power') {\n            result.totalSolarPowerFound = true;\n        }\n    });\n}\n\nresult.message = result.totalSolarPowerFound ? \n    \"total_solar_power TROUVE dans la liste des metrics!\" : \n    \"total_solar_power NON TROUVE dans la liste\";\n\nmsg.payload = result;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 890,
+    "y": 420,
+    "wires": [
+      [
+        "debug_list_metrics"
+      ]
+    ]
+  },
+  {
+    "id": "debug_list_metrics",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DEBUG - Liste Metrics",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1130,
+    "y": 420,
+    "wires": []
+  },
+  {
+    "id": "inject_reset",
+    "type": "inject",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Reset Compteurs",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 520,
+    "wires": [
+      [
+        "reset_counters"
+      ]
+    ]
+  },
+  {
+    "id": "reset_counters",
+    "type": "function",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "Reset Stats",
+    "func": "global.set('vm_solar_success', 0);\nglobal.set('vm_solar_error', 0);\n\nmsg.payload = {\n    status: \"RESET\",\n    message: \"Compteurs remis a zero\",\n    successCount: 0,\n    errorCount: 0\n};\n\nnode.status({fill:\"grey\",shape:\"ring\",text:\"Reset\"});\n\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 520,
+    "wires": [
+      [
+        "debug_reset"
+      ]
+    ]
+  },
+  {
+    "id": "debug_reset",
+    "type": "debug",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "DEBUG - Reset",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 600,
+    "y": 520,
+    "wires": []
+  },
+  {
+    "id": "comment_pv",
+    "type": "comment",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "PARTIE PV - MQTT Victron",
+    "info": "",
+    "x": 160,
+    "y": 20,
+    "wires": []
+  },
+  {
+    "id": "comment_vm_send",
+    "type": "comment",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "ENVOI VERS VICTORIAMETRICS",
+    "info": "",
+    "x": 980,
+    "y": 20,
+    "wires": []
+  },
+  {
+    "id": "comment_vm_query",
+    "type": "comment",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "VERIFICATION PROMQL",
+    "info": "",
+    "x": 180,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "comment_tools",
+    "type": "comment",
+    "z": "f1e8cd3d2bfb3b52",
+    "name": "OUTILS DEBUG & UTILITAIRES",
+    "info": "",
+    "x": 220,
+    "y": 380,
+    "wires": []
+  },
+  {
+    "id": "169b50c2d9fc12dc",
+    "type": "mqtt-broker",
+    "name": "",
+    "broker": "192.168.1.120",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  }
 ]
