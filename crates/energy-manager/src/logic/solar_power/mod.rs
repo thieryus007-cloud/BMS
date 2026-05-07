@@ -41,7 +41,8 @@ async fn mqtt_task(
 
     let t_m1_power  = format!("N/{pid}/solarcharger/{m1}/Yield/Power");
     let t_m2_power  = format!("N/{pid}/solarcharger/{m2}/Yield/Power");
-    let t_pv_power  = format!("N/{pid}/pvinverter/{pv}/Ac/L1/Power");
+    let t_dc_pv     = format!("N/{pid}/system/0/Dc/Pv/Power");
+    let t_pv_power  = format!("N/{pid}/pvinverter/{pv}/Ac/Power");
     let t_pv_energy = format!("N/{pid}/pvinverter/{pv}/Ac/Energy/Forward");
     let t_m1_yield  = format!("N/{pid}/solarcharger/{m1}/History/Daily/0/Yield");
     let t_m2_yield  = format!("N/{pid}/solarcharger/{m2}/History/Daily/0/Yield");
@@ -80,7 +81,11 @@ async fn mqtt_task(
             } else if *t == t_m2_power {
                 s.mppt_289.power_w = msg.victron_value::<f64>();
                 s.mppt_power_289_w = s.mppt_289.power_w;
+            } else if *t == t_dc_pv {
+                // Source de vérité pour la somme MPPT : N/.../system/0/Dc/Pv/Power
+                s.dc_pv_power_w = msg.victron_value::<f64>();
             } else if *t == t_pv_power {
+                // N/.../pvinverter/32/Ac/Power (ET112 micro-onduleurs, total AC)
                 s.pvinverter_power_w = msg.victron_value::<f64>();
             } else if *t == t_pv_energy {
                 if let Some(kwh) = msg.victron_value::<f64>() {
@@ -126,7 +131,8 @@ async fn mqtt_task(
                 continue;
             }
 
-            let mppt_total  = s.mppt_273.power_w.unwrap_or(0.0) + s.mppt_289.power_w.unwrap_or(0.0);
+            // MPPT sum = system aggregate (N/.../system/0/Dc/Pv/Power)
+            let mppt_total  = s.dc_pv_power_w.unwrap_or(0.0);
             let pvinv_total = s.pvinverter_power_w.unwrap_or(0.0);
             s.solar_total_w = mppt_total + pvinv_total;
 
@@ -158,11 +164,12 @@ async fn writer_task(
     loop {
         ticker.tick().await;
 
-        let (solar_total, house_power, m273_w, m289_w, pvinv_w, total_yield) = {
+        let (solar_total, house_power, dc_pv_w, m273_w, m289_w, pvinv_w, total_yield) = {
             let s = state.read().await;
             (
                 s.solar_total_w,
                 s.house_power_w.unwrap_or(0.0),
+                s.dc_pv_power_w.unwrap_or(0.0),
                 s.mppt_273.power_w.unwrap_or(0.0),
                 s.mppt_289.power_w.unwrap_or(0.0),
                 s.pvinverter_power_w.unwrap_or(0.0),
@@ -170,11 +177,11 @@ async fn writer_task(
             )
         };
 
-        let mppt_power = m273_w + m289_w;
-
         let body = json!({
             "solar_total_w":   solar_total,
-            "mppt_power_w":    mppt_power,
+            "dc_pv_power_w":   dc_pv_w,   // N/.../system/0/Dc/Pv/Power
+            "pvinv_power_w":   pvinv_w,   // N/.../pvinverter/32/Ac/Power
+            "mppt_power_w":    dc_pv_w,   // alias = dc_pv pour compatibilité API
             "total_yield_kwh": total_yield,
             "house_power_w":   house_power,
         });
@@ -190,10 +197,10 @@ async fn writer_task(
 
         bus.emit_live(LiveEvent::new("solar", json!({
             "solar_total_w": solar_total,
+            "dc_pv_power_w": dc_pv_w,
             "mppt_273_w":    m273_w,
             "mppt_289_w":    m289_w,
-            "mppt_power_w":  mppt_power,
-            "pvinv_w":       pvinv_w,
+            "pvinv_power_w": pvinv_w,
             "house_power_w": house_power,
         })));
     }

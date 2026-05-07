@@ -251,11 +251,19 @@ impl VmClient {
         rows
     }
 
-    pub fn solar_rows(solar_total_w: f32, mppt_power_w: f32, total_yield_kwh: f32) -> Vec<VmRow> {
+    /// Métriques solaires écrites dans VictoriaMetrics depuis energy-manager.
+    /// - `solar_total_w`  : total = dc_pv_power_w + pvinv_power_w
+    /// - `dc_pv_power_w`  : N/.../system/0/Dc/Pv/Power  (somme MPPT système)
+    /// - `pvinv_power_w`  : N/.../pvinverter/32/Ac/Power (ET112 micro-onduleurs)
+    /// - `mppt_power_w`   : alias de dc_pv_power_w pour rétrocompatibilité des graphes
+    /// - `solar_yield_kwh`: production journalière totale
+    pub fn solar_rows(solar_total_w: f32, dc_pv_power_w: f32, pvinv_power_w: f32, total_yield_kwh: f32) -> Vec<VmRow> {
         let ts = chrono::Utc::now().timestamp_millis();
         vec![
-            VmRow::new("solar_total_w",   solar_total_w as f64,   ts),
-            VmRow::new("mppt_power_w",    mppt_power_w as f64,    ts),
+            VmRow::new("solar_total_w",   solar_total_w  as f64, ts),
+            VmRow::new("dc_pv_power_w",   dc_pv_power_w  as f64, ts),
+            VmRow::new("pvinv_power_w",   pvinv_power_w  as f64, ts),
+            VmRow::new("mppt_power_w",    dc_pv_power_w  as f64, ts),
             VmRow::new("solar_yield_kwh", total_yield_kwh as f64, ts),
         ]
     }

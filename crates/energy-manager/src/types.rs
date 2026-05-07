@@ -112,7 +112,8 @@ pub struct EnergyState {
     // --- Solar / PV ---
     pub mppt_power_273_w: Option<f64>,
     pub mppt_power_289_w: Option<f64>,
-    pub pvinverter_power_w: Option<f64>,
+    pub dc_pv_power_w: Option<f64>,     // N/.../system/0/Dc/Pv/Power (aggregate MPPT)
+    pub pvinverter_power_w: Option<f64>, // N/.../pvinverter/32/Ac/Power
     pub solar_total_w: f64,
     pub house_power_w: Option<f64>,
 
