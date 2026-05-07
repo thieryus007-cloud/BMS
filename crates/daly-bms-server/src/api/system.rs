@@ -87,9 +87,10 @@ pub async fn get_logs(
 ///
 /// Retourne la dernière mesure du capteur d'irradiance PRALRAN.
 pub async fn get_irradiance_status(State(state): State<AppState>) -> impl IntoResponse {
-    let kwh  = *state.mppt_yield_kwh.read().await;
-    let mpw  = *state.mppt_power_w.read().await;
-    let solw = *state.solar_total_w.read().await;
+    let kwh    = *state.mppt_yield_kwh.read().await;
+    let dc_pv  = *state.dc_pv_power_w.read().await;
+    let pvinv  = *state.pvinv_power_w.read().await;
+    let solw   = *state.solar_total_w.read().await;
     let housew = *state.house_power_w.read().await;
     match state.latest_irradiance().await {
         Some(snap) => (
@@ -101,7 +102,9 @@ pub async fn get_irradiance_status(State(state): State<AppState>) -> impl IntoRe
                 "irradiance_wm2": snap.irradiance_wm2,
                 "timestamp": snap.timestamp.to_rfc3339(),
                 "total_yield_kwh": kwh,
-                "mppt_power_w":    mpw,
+                "dc_pv_power_w":   dc_pv,
+                "pvinv_power_w":   pvinv,
+                "mppt_power_w":    dc_pv,
                 "solar_total_w":   solw,
                 "house_power_w":   housew,
             })),
@@ -112,7 +115,9 @@ pub async fn get_irradiance_status(State(state): State<AppState>) -> impl IntoRe
                 "connected": false,
                 "irradiance_wm2": 0.0,
                 "total_yield_kwh": kwh,
-                "mppt_power_w":    mpw,
+                "dc_pv_power_w":   dc_pv,
+                "pvinv_power_w":   pvinv,
+                "mppt_power_w":    dc_pv,
                 "solar_total_w":   solw,
                 "house_power_w":   housew,
             })),
@@ -127,10 +132,13 @@ pub struct MpptYieldBody {
     pub total_yield_kwh: Option<f32>,
     /// Rétrocompat ancien nom de champ.
     pub mppt_yield_kwh:  Option<f32>,
-    /// Puissance MPPT seule en W (273+289, sans ET112).
+    /// Puissance MPPT agrégée en W = N/.../system/0/Dc/Pv/Power (alias de dc_pv_power_w).
     pub mppt_power_w:    Option<f32>,
-    /// Puissance solaire totale en W = MPPT + ET112 PVInverter (source VRM Node-RED).
-    /// Champ canonique depuis Solar_power.json — source de vérité pour le dashboard.
+    /// Puissance MPPT agrégée en W = N/.../system/0/Dc/Pv/Power (source de vérité).
+    pub dc_pv_power_w:   Option<f32>,
+    /// Puissance ET112 micro-onduleurs en W = N/.../pvinverter/32/Ac/Power.
+    pub pvinv_power_w:   Option<f32>,
+    /// Puissance solaire totale en W = dc_pv_power_w + pvinv_power_w.
     pub solar_total_w:   Option<f32>,
     /// Puissance maison en W = N/c0619ab9929a/system/0/Ac/ConsumptionOnOutput/L1/Power.
     pub house_power_w:   Option<f32>,
@@ -139,8 +147,7 @@ pub struct MpptYieldBody {
 /// POST /api/v1/solar/mppt-yield
 ///
 /// Mise à jour partielle : seuls les champs présents dans le body sont écrits.
-/// Solar_power.json envoie solar_total_w + mppt_power_w.
-/// meteo.json envoie total_yield_kwh + mppt_power_w (keepalive kWh).
+/// energy-manager envoie solar_total_w + dc_pv_power_w + pvinv_power_w + mppt_power_w.
 pub async fn set_mppt_yield(
     State(state): State<AppState>,
     Json(body): Json<MpptYieldBody>,
@@ -148,8 +155,16 @@ pub async fn set_mppt_yield(
     if let Some(kwh) = body.total_yield_kwh.or(body.mppt_yield_kwh) {
         *state.mppt_yield_kwh.write().await = kwh;
     }
-    if let Some(pw) = body.mppt_power_w {
-        *state.mppt_power_w.write().await = pw;
+    // dc_pv_power_w est la source canonique ; mppt_power_w est l'alias rétrocompat
+    if let Some(v) = body.dc_pv_power_w {
+        *state.dc_pv_power_w.write().await = v;
+        *state.mppt_power_w.write().await  = v;
+    } else if let Some(pw) = body.mppt_power_w {
+        *state.mppt_power_w.write().await  = pw;
+        *state.dc_pv_power_w.write().await = pw;
+    }
+    if let Some(v) = body.pvinv_power_w {
+        *state.pvinv_power_w.write().await = v;
     }
     if let Some(tw) = body.solar_total_w {
         *state.solar_total_w.write().await = tw;
@@ -159,25 +174,28 @@ pub async fn set_mppt_yield(
     }
 
     // Write solar metrics to VictoriaMetrics — throttlé à 1 écriture / 5s
-    // (energy-manager appelle cet endpoint toutes les secondes)
     if let Some(vm) = &state.vm {
         if state.vm_solar_rate_ok() {
-            let kwh_val = *state.mppt_yield_kwh.read().await;
-            let pw_val  = *state.mppt_power_w.read().await;
-            let total_w = *state.solar_total_w.read().await;
-            let rows = crate::vm_client::VmClient::solar_rows(total_w, pw_val, kwh_val);
+            let kwh_val    = *state.mppt_yield_kwh.read().await;
+            let dc_pv_val  = *state.dc_pv_power_w.read().await;
+            let pvinv_val  = *state.pvinv_power_w.read().await;
+            let total_w    = *state.solar_total_w.read().await;
+            let rows = crate::vm_client::VmClient::solar_rows(total_w, dc_pv_val, pvinv_val, kwh_val);
             let _ = vm.write_rows(rows).await;
         }
     }
 
-    let kwh  = *state.mppt_yield_kwh.read().await;
-    let pw   = *state.mppt_power_w.read().await;
-    let tw   = *state.solar_total_w.read().await;
+    let kwh    = *state.mppt_yield_kwh.read().await;
+    let dc_pv  = *state.dc_pv_power_w.read().await;
+    let pvinv  = *state.pvinv_power_w.read().await;
+    let tw     = *state.solar_total_w.read().await;
     let housew = *state.house_power_w.read().await;
     (StatusCode::OK, Json(json!({
         "ok": true,
         "total_yield_kwh": kwh,
-        "mppt_power_w":    pw,
+        "dc_pv_power_w":   dc_pv,
+        "pvinv_power_w":   pvinv,
+        "mppt_power_w":    dc_pv,
         "solar_total_w":   tw,
         "house_power_w":   housew,
     })))
@@ -336,16 +354,8 @@ pub struct SystemTotals {
 }
 
 pub async fn get_system_totals(State(state): State<AppState>) -> impl IntoResponse {
-    // Production : MPPT + PV Inverter (ET112 0x07)
-    let mppt_power = state.venus_mppt_total_power().await;
-    let pv_inverter_power = state
-        .et112_latest_all()
-        .await
-        .iter()
-        .find(|e| e.address == 0x07)
-        .map(|e| e.power_w)
-        .unwrap_or(0.0);
-    let production_w = mppt_power + pv_inverter_power;
+    // Production : source de vérité = solar_total_w (dc_pv_power_w + pvinv_power_w)
+    let production_w = *state.solar_total_w.read().await;
 
     // Consommation : maison
     let consumption_w = *state.house_power_w.read().await;

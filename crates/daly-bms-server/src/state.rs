@@ -381,11 +381,17 @@ pub struct AppState {
     /// Publiée par energy-manager via POST /api/v1/solar/mppt-yield.
     pub mppt_yield_kwh: Arc<RwLock<f32>>,
 
-    /// Puissance MPPT instantanée totale en W (somme de tous les chargeurs solaires).
+    /// Puissance MPPT agrégée en W = N/.../system/0/Dc/Pv/Power (alias de dc_pv_power_w).
     /// Publiée par energy-manager via POST /api/v1/solar/mppt-yield.
     pub mppt_power_w: Arc<RwLock<f32>>,
 
-    /// Puissance solaire totale en W = MPPT 273+289 + PV Inverter ET112 (VRM).
+    /// Puissance MPPT agrégée en W = N/.../system/0/Dc/Pv/Power (source de vérité).
+    pub dc_pv_power_w: Arc<RwLock<f32>>,
+
+    /// Puissance ET112 micro-onduleurs en W = N/.../pvinverter/32/Ac/Power.
+    pub pvinv_power_w: Arc<RwLock<f32>>,
+
+    /// Puissance solaire totale en W = dc_pv_power_w + pvinv_power_w.
     /// Publiée par energy-manager via POST /api/v1/solar/mppt-yield.
     pub solar_total_w: Arc<RwLock<f32>>,
 
@@ -497,6 +503,8 @@ impl AppState {
             tasmota_buffers: Arc::new(RwLock::new(tasmota_buffers)),
             mppt_yield_kwh: Arc::new(RwLock::new(0.0)),
             mppt_power_w:   Arc::new(RwLock::new(0.0)),
+            dc_pv_power_w:  Arc::new(RwLock::new(0.0)),
+            pvinv_power_w:  Arc::new(RwLock::new(0.0)),
             solar_total_w:  Arc::new(RwLock::new(0.0)),
             house_power_w:  Arc::new(RwLock::new(0.0)),
             venus_mppts: Arc::new(RwLock::new(BTreeMap::new())),

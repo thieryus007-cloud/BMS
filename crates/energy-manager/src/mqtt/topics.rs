@@ -66,7 +66,7 @@ pub fn all_subscriptions(portal_id: &str, vebus: u32, mppt1: u32, mppt2: u32, pv
         n(pid, &format!("solarcharger/{mppt2}/Dc/0/Current")),
 
         // --- PVInverter (ET112) ---
-        n(pid, &format!("pvinverter/{pvinv}/Ac/L1/Power")),
+        n(pid, &format!("pvinverter/{pvinv}/Ac/Power")),
         n(pid, &format!("pvinverter/{pvinv}/Ac/Energy/Forward")),
 
         // --- Irradiance ---
