@@ -107,17 +107,27 @@ crates/daly-bms-server/src/             ← serveur principal RS485/API
 crates/energy-manager/src/              ← gestionnaire énergie (remplace Node-RED)
   config.rs                             ← chargement [energy_manager] depuis Config.toml
   types.rs                              ← types partagés (EnergyState, MqttIncoming, ...)
-  bus.rs                                ← AppBus (broadcast MQTT )
+  bus.rs                                ← AppBus (broadcast MQTT)
   main.rs                               ← démarrage séquentiel de tous les modules
-  logic/                                ← modules logiques métier
+  monitoring.rs                         ← métriques système + tokio → VictoriaMetrics
+  logic/                                ← modules logiques métier (charge_current,
+                                          deye_command, inverter, irradiance, meteo,
+                                          platform, smartshunt, solar_power,
+                                          switch_ats, tasmota, victron_keepalive,
+                                          water_heater)
   mqtt/                                 ← client MQTT rumqttc + topics
-  VictoriaMetrics/                               ← client VictoriaMetrics writer
   http_clients/                         ← Open-Meteo + LG ThinQ
   live_ws/                              ← WebSocket live events
   persist/                              ← restauration baselines au démarrage
+crates/energy-manager/rules/            ← règles `.grl` (rust-rule-engine) :
+                                          charge_current, deye_command, inverter,
+                                          irradiance, smartshunt, solar_power,
+                                          water_heater
 crates/dbus-mqtt-venus/src/             ← bridge MQTT→D-Bus NanoPi
 contrib/irradiance-rs485/               ← service Python irradiance
+contrib/daly-bms.service                ← unité systemd daly-bms-server
 contrib/energy-manager.service          ← unité systemd energy-manager
+contrib/node-exporter.service           ← unité systemd Prometheus node_exporter
 ```
 
 **IMPORTANT** : Le service lit `/etc/daly-bms/config.toml`, PAS `~/Daly-BMS-Rust/Config.toml`.
@@ -181,18 +191,81 @@ ssh root@192.168.1.120 "dbus -y | grep victronenergy"
 
 ---
 
-## 7. API ENDPOINTS
+## 7. API ENDPOINTS (extraits — voir `crates/daly-bms-server/src/api/mod.rs`)
 
 ```
-GET  /api/v1/system/status
-GET  /api/v1/bms/{id}/snapshot    GET  /api/v1/bms/{id}/history
-WS   /api/v1/bms/{id}/stream
-GET  /api/v1/et112/{addr}/status  GET  /api/v1/et112/{addr}/history
-POST /api/v1/bms/{id}/charge-mos  POST /api/v1/bms/{id}/discharge-mos
-POST /api/v1/bms/{id}/soc         POST /api/v1/bms/{id}/reset
+# Système
+GET  /api/v1/system/status            GET  /api/v1/system/totals
+GET  /api/v1/system/logs              GET  /api/v1/config
+GET  /api/v1/discover                 GET  /api/v1/irradiance/status
+POST /api/v1/solar/mppt-yield
+
+# Venus (lecture cache D-Bus / MQTT)
+GET  /api/v1/venus/mppt               GET  /api/v1/venus/smartshunt
+GET  /api/v1/venus/inverter           GET  /api/v1/venus/temperatures
+GET  /api/v1/venus/heatpumps
+
+# Monitor (RS485 health, logs)
+GET  /api/v1/monitor/status           GET  /api/v1/monitor/rs485-health
+GET  /api/v1/monitor/logs             GET  /api/v1/monitor/logs/content
+
+# BMS — lecture
+GET  /api/v1/bms/:id/status           GET  /api/v1/bms/:id/cells
+GET  /api/v1/bms/:id/temperatures     GET  /api/v1/bms/:id/alarms
+GET  /api/v1/bms/:id/mos              GET  /api/v1/bms/:id/history
+GET  /api/v1/bms/:id/history/summary  GET  /api/v1/bms/:id/export/csv
+GET  /api/v1/bms/compare              GET  /api/v1/bms/:id/settings
+
+# BMS — écriture (api_key requis si configurée)
+POST /api/v1/bms/:id/mos              POST /api/v1/bms/:id/soc
+POST /api/v1/bms/:id/soc/full         POST /api/v1/bms/:id/soc/empty
+POST /api/v1/bms/:id/reset
+POST /api/v1/bms/:id/settings/cell-voltage-alarms
+POST /api/v1/bms/:id/settings/pack-voltage-alarms
+POST /api/v1/bms/:id/settings/current-alarms
+POST /api/v1/bms/:id/settings/delta-alarms
+POST /api/v1/bms/:id/settings/balancing
+
+# ATS CHINT
+GET  /api/v1/ats/status
+POST /api/v1/ats/remote_on            POST /api/v1/ats/remote_off
+POST /api/v1/ats/force_source1        POST /api/v1/ats/force_source2
+POST /api/v1/ats/force_double         POST /api/v1/ats/send_raw
+GET  /api/v1/ats/debug_on             GET  /api/v1/ats/debug_off
+
+# ET112
+GET  /api/v1/et112                    GET  /api/v1/et112/:addr/status
+GET  /api/v1/et112/:addr/history
+
+# Charts / History
+GET  /api/v1/chart/history            GET  /api/v1/chart/edge-history
+GET  /api/v1/history/energy
+
+# Tasmota / Shelly
+GET  /api/v1/tasmota                  GET  /api/v1/tasmota/:id/status
+GET  /api/v1/tasmota/:id/history      POST /api/v1/tasmota/:id/control
+GET  /api/v1/shelly                   GET  /api/v1/shelly/:id/status
+POST /api/v1/shelly/:id/channel/:ch/control
+
+# PromQL (compat Grafana)
+GET  /api/v1/query                    GET  /api/v1/query_range
+GET  /api/v1/labels
+
+# Alertes
+GET  /api/v1/alerts/list              GET  /api/v1/alerts/stats
+POST /api/v1/alerts/:id/acknowledge
+
+# Health + WebSocket
+GET  /health
+WS   /ws/bms/stream                   WS   /ws/bms/:id/stream
+WS   /ws/venus/stream                 WS   /ws/console
 ```
 
-Dashboard SSR : `/dashboard/et112/{addr}`
+Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
+`/dashboard/et112`, `/dashboard/et112/:addr`, `/dashboard/tasmota`,
+`/dashboard/tasmota/:id`, `/dashboard/ats`, `/dashboard/monitor`,
+`/dashboard/console`, `/dashboard/visualization`, `/dashboard/history`,
+`/dashboard/alerts`, `/dashboard/logs`, `/dashboard/settings`.
 
 ---
 
