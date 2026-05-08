@@ -249,7 +249,7 @@ check:
 # Installation (systemd)
 # =============================================================================
 
-.PHONY: install uninstall install-z8run
+.PHONY: install uninstall install-z8run install-node-exporter
 
 install: build
 	sudo bash contrib/install-systemd.sh
@@ -259,6 +259,23 @@ uninstall:
 
 install-z8run:
 	sudo bash contrib/install-z8run.sh
+
+# Installe node_exporter (ARM64) sur le Pi5 pour métriques système → VictoriaMetrics
+# Usage : make install-node-exporter  (à exécuter depuis le Pi5)
+NODE_EXPORTER_VERSION ?= 1.8.2
+NODE_EXPORTER_ARCH    ?= arm64
+install-node-exporter:
+	@echo "Téléchargement node_exporter $(NODE_EXPORTER_VERSION) ($(NODE_EXPORTER_ARCH))..."
+	curl -fsSL "https://github.com/prometheus/node_exporter/releases/download/v$(NODE_EXPORTER_VERSION)/node_exporter-$(NODE_EXPORTER_VERSION).linux-$(NODE_EXPORTER_ARCH).tar.gz" \
+		| tar -xz --strip-components=1 -C /tmp node_exporter-$(NODE_EXPORTER_VERSION).linux-$(NODE_EXPORTER_ARCH)/node_exporter
+	sudo install -m 755 /tmp/node_exporter /usr/local/bin/node_exporter
+	sudo cp contrib/node-exporter.service /etc/systemd/system/node-exporter.service
+	sudo systemctl daemon-reload
+	sudo systemctl enable --now node-exporter
+	sudo systemctl status node-exporter --no-pager -l
+	@echo "✓ node_exporter installé — métriques sur http://localhost:9100/metrics"
+	@echo "  → Configurer VictoriaMetrics pour scraper ce endpoint."
+	@echo "  → Copier contrib/victoriametrics-scrape.yml dans /etc/victoriametrics/scrape.yml"
 
 # =============================================================================
 # Cross-compile + déploiement SSH vers le Pi

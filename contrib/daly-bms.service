@@ -5,7 +5,9 @@ After=network.target
 Wants=network.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+WatchdogSec=60
 User=dalybms
 Group=dalybms
 

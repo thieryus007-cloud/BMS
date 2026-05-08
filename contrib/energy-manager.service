@@ -6,7 +6,9 @@ Wants=network-online.target
 PartOf=daly-bms.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+WatchdogSec=60
 User=pi5compute
 Group=pi5compute
 

@@ -10,6 +10,7 @@
 //! - Température CPU
 
 use crate::state::{AppState, MonitorSnapshot, ProcessInfo, ServiceStatus};
+use crate::vm_client::VmRow;
 use chrono::Utc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
@@ -41,6 +42,9 @@ pub async fn run_monitor_agent(state: AppState) {
     loop {
         ticker.tick().await;
 
+        // Heartbeat watchdog systemd — doit arriver avant WatchdogSec=60
+        let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]);
+
         let curr_net    = read_net_bytes().await;
         let elapsed_s   = prev_net_ts.elapsed().as_secs_f64().max(1.0);
         let net_rx_bps  = ((curr_net.0.saturating_sub(prev_net.0)) as f64 / elapsed_s) as u64;
@@ -49,6 +53,16 @@ pub async fn run_monitor_agent(state: AppState) {
         prev_net_ts     = Instant::now();
 
         let snap = collect_snapshot(&state, net_rx_bps, net_tx_bps).await;
+
+        // Écriture métriques système dans VictoriaMetrics
+        if let Some(vm) = &state.vm {
+            let ts_ms = snap.timestamp.timestamp_millis();
+            let rows  = build_monitor_vm_rows(&snap, ts_ms);
+            if let Err(e) = vm.write_rows(rows).await {
+                warn!("VM write monitor métriques: {}", e);
+            }
+        }
+
         state.on_monitor_snapshot(snap).await;
     }
 }
@@ -411,6 +425,109 @@ pub async fn run_watchdog_agent(_state: AppState) {
             }
         }
     }
+}
+
+// =============================================================================
+// Métriques système → VictoriaMetrics
+// =============================================================================
+
+fn build_monitor_vm_rows(snap: &MonitorSnapshot, ts_ms: i64) -> Vec<VmRow> {
+    let mut rows = vec![
+        VmRow::new("pi5_cpu_percent",    snap.cpu_percent    as f64, ts_ms),
+        VmRow::new("pi5_memory_percent", snap.memory_percent as f64, ts_ms),
+        VmRow::new("pi5_disk_percent",   snap.disk_percent   as f64, ts_ms),
+        VmRow::new("pi5_uptime_secs",    snap.uptime_secs    as f64, ts_ms),
+        VmRow::new("pi5_mem_used_mb",    snap.mem_used_mb    as f64, ts_ms),
+        VmRow::new("pi5_swap_used_mb",   snap.swap_used_mb   as f64, ts_ms),
+        VmRow::new("pi5_net_rx_bps",     snap.net_rx_bps     as f64, ts_ms),
+        VmRow::new("pi5_net_tx_bps",     snap.net_tx_bps     as f64, ts_ms),
+        VmRow::with_labels("pi5_load_avg", vec![("window", "1m")],  snap.load_avg[0] as f64, ts_ms),
+        VmRow::with_labels("pi5_load_avg", vec![("window", "5m")],  snap.load_avg[1] as f64, ts_ms),
+        VmRow::with_labels("pi5_load_avg", vec![("window", "15m")], snap.load_avg[2] as f64, ts_ms),
+    ];
+    if let Some(temp) = snap.cpu_temp_c {
+        rows.push(VmRow::new("pi5_cpu_temp_c", temp as f64, ts_ms));
+    }
+    // Top processus (CPU > 0.1%) — utile pour identifier le coupable lors d'un freeze
+    for proc in &snap.processes {
+        if proc.cpu_percent > 0.1 {
+            let pid = proc.pid.to_string();
+            rows.push(VmRow::with_labels(
+                "pi5_process_cpu_percent",
+                vec![("process", proc.name.as_str()), ("pid", pid.as_str())],
+                proc.cpu_percent as f64,
+                ts_ms,
+            ));
+            rows.push(VmRow::with_labels(
+                "pi5_process_mem_mb",
+                vec![("process", proc.name.as_str()), ("pid", pid.as_str())],
+                proc.mem_rss_mb as f64,
+                ts_ms,
+            ));
+        }
+    }
+    rows
+}
+
+// =============================================================================
+// Point d'entrée unique — remplace les deux tokio::spawn dans main.rs
+// =============================================================================
+
+/// Démarre monitor_agent, watchdog_agent et l'exporteur tokio-metrics.
+/// Appeler depuis main.rs à la place des deux tokio::spawn séparés.
+pub fn spawn_all(state: AppState) {
+    use tokio_metrics::TaskMonitor;
+
+    let monitor_tm  = TaskMonitor::new();
+    let watchdog_tm = TaskMonitor::new();
+
+    // Agents instrumentés avec TaskMonitor (mesure durée de polling tokio)
+    tokio::spawn(monitor_tm.instrument(run_monitor_agent(state.clone())));
+    tokio::spawn(watchdog_tm.instrument(run_watchdog_agent(state.clone())));
+
+    // Exporteur métriques tokio → VictoriaMetrics (toutes les 60s)
+    let vm = state.vm.clone();
+    tokio::spawn(async move {
+        let mut mon_ivals = monitor_tm.intervals();
+        let mut wdg_ivals = watchdog_tm.intervals();
+        let mut ticker    = interval(Duration::from_secs(60));
+        loop {
+            ticker.tick().await;
+            let ts_ms = Utc::now().timestamp_millis();
+            let mut rows: Vec<VmRow> = Vec::new();
+
+            for (name, m) in [
+                ("daly_bms_monitor",  mon_ivals.next()),
+                ("daly_bms_watchdog", wdg_ivals.next()),
+            ] {
+                let Some(m) = m else { continue };
+                rows.push(VmRow::with_labels(
+                    "tokio_task_polls_total",
+                    vec![("task", name)],
+                    m.total_poll_count as f64,
+                    ts_ms,
+                ));
+                rows.push(VmRow::with_labels(
+                    "tokio_task_mean_poll_us",
+                    vec![("task", name)],
+                    m.mean_poll_duration().as_micros() as f64,
+                    ts_ms,
+                ));
+                rows.push(VmRow::with_labels(
+                    "tokio_task_mean_scheduled_us",
+                    vec![("task", name)],
+                    m.mean_scheduled_duration().as_micros() as f64,
+                    ts_ms,
+                ));
+            }
+
+            if let Some(vm) = &vm {
+                if let Err(e) = vm.write_rows(rows).await {
+                    warn!("VM write tokio métriques: {}", e);
+                }
+            }
+        }
+    });
 }
 
 async fn restart_systemd_service(name: &str) -> bool {
