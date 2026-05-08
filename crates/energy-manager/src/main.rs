@@ -8,6 +8,7 @@ mod config;
 mod http_clients;
 mod live_ws;
 mod logic;
+mod monitoring;
 mod mqtt;
 mod persist;
 mod types;
@@ -93,7 +94,22 @@ async fn main() -> anyhow::Result<()> {
         live_ws::server::serve(&bind, live_tx, srv_state, srv_lg).await;
     });
 
+    // --- Module monitoring Pi5 (métriques système + tokio → VictoriaMetrics) ---
+    monitoring::spawn(cfg.water_heater.vm_url.clone());
+
     info!("energy-manager fully started");
+
+    // Notifie systemd que le service est prêt (Type=notify)
+    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
+
+    // Heartbeat watchdog systemd (doit arriver avant WatchdogSec=60)
+    tokio::spawn(async {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            ticker.tick().await;
+            let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]);
+        }
+    });
 
     // Wait forever (all work happens in spawned tasks)
     std::future::pending::<()>().await;

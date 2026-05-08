@@ -1,0 +1,25 @@
+[Unit]
+Description=Prometheus Node Exporter — métriques système Pi5
+Documentation=https://prometheus.io/docs/guides/node-exporter/
+After=network.target
+
+[Service]
+Type=simple
+User=pi5compute
+Group=pi5compute
+
+ExecStart=/usr/local/bin/node_exporter \
+    --web.listen-address=0.0.0.0:9100 \
+    --collector.systemd \
+    --collector.processes
+
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=node-exporter
+
+[Install]
+WantedBy=multi-user.target

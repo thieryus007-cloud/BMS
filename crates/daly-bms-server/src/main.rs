@@ -651,9 +651,8 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // ── Agent de monitoring Pi5 ────────────────────────────────────────────────
-    tokio::spawn(monitor::run_monitor_agent(state.clone()));
-    tokio::spawn(monitor::run_watchdog_agent(state.clone()));
+    // ── Agent de monitoring Pi5 (+ watchdog sd_notify + métriques tokio→VM) ──
+    monitor::spawn_all(state.clone());
 
     // ── Serveur HTTP Axum ──────────────────────────────────────────────────────
     let router = api::build_router(state);
@@ -664,6 +663,9 @@ async fn main() -> anyhow::Result<()> {
     if args.simulate {
         info!("Docs → http://{}/api/v1/system/status", addr);
     }
+
+    // Notifie systemd que le service est prêt (Type=notify)
+    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, router).await?;

@@ -35,3 +35,7 @@ rust-rule-engine = { workspace = true }
 
 # ── Crate-specific ─────────────────────────────────────────────────────────────
 dotenvy = "0.15"
+
+# ── Monitoring ────────────────────────────────────────────────────────────────
+sd-notify     = { workspace = true }
+tokio-metrics = { workspace = true }

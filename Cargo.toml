@@ -88,6 +88,10 @@ tokio-modbus  = { version = "0.14", features = ["rtu"] }
 # ── Rule engine (energy-manager decision logic) ───────────────────────────────
 rust-rule-engine = "1.20"
 
+# ── Monitoring ─────────────────────────────────────────────────────────────────
+sd-notify     = "0.4"
+tokio-metrics = "0.3"
+
 # =============================================================================
 # Release profile — optimisé taille + vitesse pour le Pi
 # =============================================================================

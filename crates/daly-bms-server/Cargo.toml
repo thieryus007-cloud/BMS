@@ -38,3 +38,7 @@ futures        = { workspace = true }
 bytes          = { workspace = true }
 askama         = "0.12"
 # tokio-modbus supprimé — remplacé par rs485_bus::modbus_rtu (pur Rust)
+
+# ── Monitoring ────────────────────────────────────────────────────────────────
+sd-notify     = { workspace = true }
+tokio-metrics = { workspace = true }
