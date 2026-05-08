@@ -1,7 +1,8 @@
-# 🚀 SOLUTION PROFESSIONNELLE COMPLÈTE — DÉPLOIEMENT ESS
+# 🚀 DÉPLOIEMENT ESS (Energy Storage System)
 
-**Version:** 1.0 (2026-04-05)  
-**Branche:** `claude/realtime-metrics-dashboard-lUKF3`  
+**Version:** 1.1 (mise à jour mai 2026)
+**Branche:** `main` (la feature `claude/realtime-metrics-dashboard-lUKF3` a été
+mergée — voir l'historique git pour le détail)
 **Statut:** ✅ PRODUCTION READY
 
 ---
