@@ -155,6 +155,8 @@ pub struct EnergyState {
     pub deye_on: bool,
     pub deye_last_change: Option<DateTime<Utc>>,
     pub deye_lockout_until: Option<DateTime<Utc>>,
+    /// Persisted DEYE state from retained MQTT (set by persist watcher at startup)
+    pub deye_persisted_state: Option<String>,
 
     // --- Irradiance ---
     pub irradiance_wm2: Option<f64>,

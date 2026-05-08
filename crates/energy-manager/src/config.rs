@@ -33,6 +33,21 @@ pub struct EnergyManagerConfig {
     pub solar: SolarConfig,
     #[serde(default)]
     pub platform: PlatformConfig,
+    #[serde(default)]
+    pub rules: RulesConfig,
+}
+
+// ---------------------------------------------------------------------------
+// Rules hot-reload
+// ---------------------------------------------------------------------------
+
+/// Optional directory containing .grl rule files to load at startup instead of
+/// the embedded versions. Hot-reload is triggered via POST /api/v1/em/rules/reload.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct RulesConfig {
+    /// Path to directory containing .grl files (e.g. "/etc/daly-bms/rules").
+    /// If absent or files not found, embedded rules are used as fallback.
+    pub dir: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +340,9 @@ pub struct WaterHeaterConfig {
     /// Minimum irradiance to allow HEAT_PUMP mode (W/m²)
     #[serde(default = "default_irradiance_min_wm2")]
     pub irradiance_min_wm2: f64,
+    /// Minimum battery SOC to allow HEAT_PUMP mode (%)
+    #[serde(default = "default_soc_min_pct")]
+    pub soc_min_pct: f64,
     /// VictoriaMetrics write URL for water heater metrics
     #[serde(default = "default_wh_vm_url")]
     pub vm_url: String,
@@ -338,6 +356,7 @@ fn default_vacation_target_c() -> f64 { 45.0 }
 fn default_temp_set_delay_secs() -> u64 { 15 }
 fn default_keepalive_secs() -> u64 { 25 }
 fn default_irradiance_min_wm2() -> f64 { 300.0 }
+fn default_soc_min_pct() -> f64 { 90.0 }
 fn default_wh_vm_url() -> String { "http://127.0.0.1:8428".into() }
 
 impl Default for WaterHeaterConfig {
@@ -351,6 +370,7 @@ impl Default for WaterHeaterConfig {
             temp_set_delay_secs: default_temp_set_delay_secs(),
             keepalive_secs: default_keepalive_secs(),
             irradiance_min_wm2: default_irradiance_min_wm2(),
+            soc_min_pct: default_soc_min_pct(),
             vm_url: default_wh_vm_url(),
         }
     }

@@ -19,13 +19,14 @@ use tracing::{debug, info};
 use crate::bus::AppBus;
 use crate::config::VictronConfig;
 use crate::mqtt::topics::publish;
+use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, LiveEvent, MqttIncoming, MqttOutgoing};
 
-pub async fn spawn(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>) {
-    tokio::spawn(run(vic, bus, state));
+pub async fn spawn(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>, loader: Arc<RulesLoader>) {
+    tokio::spawn(run(vic, bus, state, loader));
 }
 
-async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>) {
+async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>, loader: Arc<RulesLoader>) {
     let pid   = &vic.portal_id;
     let shunt = vic.smartshunt_instance;
 
@@ -36,7 +37,7 @@ async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState
     let t_ttg     = format!("N/{pid}/battery/{shunt}/TimeToGo");
     let t_state   = format!("N/{pid}/battery/{shunt}/State");
 
-    let mut rule_engine = match rules::SmartShuntRuleEngine::new() {
+    let mut rule_engine = match rules::SmartShuntRuleEngine::with_source(&loader.load("smartshunt")) {
         Ok(e) => e,
         Err(e) => {
             tracing::error!("Failed to init SmartShunt rule engine: {e}");
@@ -44,20 +45,31 @@ async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState
         }
     };
 
-    let mut rx = bus.subscribe_mqtt();
-    loop {
-        let msg = match rx.recv().await {
-            Ok(m)  => m,
-            Err(_) => continue,
-        };
+    let mut rx        = bus.subscribe_mqtt();
+    let mut reload_rx = bus.subscribe_rule_reload();
 
-        if let Some(dirty) = handle(
-            &msg, &state, &mut rule_engine,
-            &t_voltage, &t_current, &t_power,
-            &t_soc, &t_ttg, &t_state,
-        ).await {
-            if dirty {
-                publish_state(&bus, &state).await;
+    loop {
+        tokio::select! {
+            Ok(msg) = rx.recv() => {
+                if let Some(dirty) = handle(
+                    &msg, &state, &mut rule_engine,
+                    &t_voltage, &t_current, &t_power,
+                    &t_soc, &t_ttg, &t_state,
+                ).await {
+                    if dirty {
+                        publish_state(&bus, &state).await;
+                    }
+                }
+            }
+
+            Ok(name) = reload_rx.recv() => {
+                if name == "smartshunt" || name == "*" {
+                    let src = loader.load("smartshunt");
+                    match rules::SmartShuntRuleEngine::with_source(&src) {
+                        Ok(e) => { rule_engine = e; tracing::info!("smartshunt rule engine reloaded"); }
+                        Err(e) => tracing::warn!("smartshunt reload failed (keeping old engine): {e}"),
+                    }
+                }
             }
         }
     }

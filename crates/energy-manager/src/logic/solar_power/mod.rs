@@ -13,6 +13,7 @@ use tracing::debug;
 use crate::bus::AppBus;
 use crate::config::{SolarConfig, VictronConfig};
 use crate::mqtt::topics::publish;
+use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, LiveEvent, MqttOutgoing};
 
 pub async fn spawn(
@@ -20,12 +21,13 @@ pub async fn spawn(
     cfg: SolarConfig,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
+    loader: Arc<RulesLoader>,
 ) {
     let bus2   = bus.clone();
     let state2 = state.clone();
     let vic2   = vic.clone();
 
-    tokio::spawn(mqtt_task(vic2, bus2, state2));
+    tokio::spawn(mqtt_task(vic2, bus2, state2, loader));
     tokio::spawn(writer_task(cfg, bus, state));
 }
 
@@ -33,6 +35,7 @@ async fn mqtt_task(
     vic: Arc<VictronConfig>,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
+    loader: Arc<RulesLoader>,
 ) {
     let pid = &vic.portal_id;
     let m1  = vic.mppt1_instance;
@@ -54,7 +57,7 @@ async fn mqtt_task(
     let t_m2_dc_i   = format!("N/{pid}/solarcharger/{m2}/Dc/0/Current");
     let t_consump   = format!("N/{pid}/system/0/Ac/ConsumptionOnOutput/L1/Power");
 
-    let mut rule_engine = match rules::SolarRuleEngine::new() {
+    let mut rule_engine = match rules::SolarRuleEngine::with_source(&loader.load("solar_power")) {
         Ok(e) => e,
         Err(e) => {
             tracing::error!("Failed to init solar rule engine: {e}");
@@ -62,12 +65,12 @@ async fn mqtt_task(
         }
     };
 
-    let mut rx = bus.subscribe_mqtt();
+    let mut rx        = bus.subscribe_mqtt();
+    let mut reload_rx = bus.subscribe_rule_reload();
+
     loop {
-        let msg = match rx.recv().await {
-            Ok(m)  => m,
-            Err(_) => continue,
-        };
+        tokio::select! {
+            Ok(msg) = rx.recv() => {
         let t = &msg.topic;
 
         let mut publish_baseline: Option<(i32, f64)> = None;
@@ -149,7 +152,19 @@ async fn mqtt_task(
             )).await;
             debug!("pvinv_baseline published as retained: day={day} kwh={kwh:.3}");
         }
-    }
+            }   // close Ok(msg) arm
+
+            Ok(name) = reload_rx.recv() => {
+                if name == "solar_power" || name == "*" {
+                    let src = loader.load("solar_power");
+                    match rules::SolarRuleEngine::with_source(&src) {
+                        Ok(e) => { rule_engine = e; tracing::info!("solar_power rule engine reloaded"); }
+                        Err(e) => tracing::warn!("solar_power reload failed (keeping old engine): {e}"),
+                    }
+                }
+            }
+        }   // close select!
+    }       // close loop
 }
 
 async fn writer_task(

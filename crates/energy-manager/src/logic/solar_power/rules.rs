@@ -1,7 +1,8 @@
 use anyhow::Context;
 use rust_rule_engine::{Facts, KnowledgeBase, RustRuleEngine, Value};
 
-const GRL: &str = include_str!("../../../rules/solar_power.grl");
+#[cfg(test)]
+const GRL_EMBEDDED: &str = include_str!("../../../rules/solar_power.grl");
 
 pub struct SolarRuleEngine {
     engine: RustRuleEngine,
@@ -16,10 +17,15 @@ pub struct BaselineDecision {
 }
 
 impl SolarRuleEngine {
+    #[cfg(test)]
     pub fn new() -> anyhow::Result<Self> {
+        Self::with_source(GRL_EMBEDDED)
+    }
+
+    pub fn with_source(grl: &str) -> anyhow::Result<Self> {
         let kb = KnowledgeBase::new("solar_power");
-        kb.add_rules_from_grl(GRL)
-            .context("Failed to load solar_power.grl")?;
+        kb.add_rules_from_grl(grl)
+            .context("Failed to load solar_power rules")?;
         Ok(Self {
             engine: RustRuleEngine::new(kb),
         })
@@ -53,5 +59,40 @@ impl SolarRuleEngine {
             .unwrap_or(false);
 
         Ok(BaselineDecision { reset, capture })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn e() -> SolarRuleEngine { SolarRuleEngine::new().unwrap() }
+
+    #[test]
+    fn new_day_resets_and_captures() {
+        let d = e().baseline_decision(true, false).unwrap();
+        assert!(d.reset);
+        assert!(d.capture);
+    }
+
+    #[test]
+    fn absent_baseline_captures_no_reset() {
+        let d = e().baseline_decision(false, true).unwrap();
+        assert!(!d.reset);
+        assert!(d.capture);
+    }
+
+    #[test]
+    fn neither_flag_no_action() {
+        let d = e().baseline_decision(false, false).unwrap();
+        assert!(!d.reset);
+        assert!(!d.capture);
+    }
+
+    #[test]
+    fn new_day_and_absent_both_trigger() {
+        let d = e().baseline_decision(true, true).unwrap();
+        assert!(d.reset);
+        assert!(d.capture);
     }
 }
