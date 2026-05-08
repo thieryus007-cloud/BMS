@@ -14,6 +14,11 @@
 //   DY.next_state             (string, absent if no transition)
 //   DY.relay_on               (bool)
 //   DY.relay_off              (bool)
+//
+// IMPORTANT: normal rules (salience 100) include `DY.grid_connected == false`
+// to prevent them from overwriting grid-reconnect rules (salience 200).
+// The rule engine fires all matching rules; higher-salience fires first but
+// lower-salience can still overwrite the same fact without this guard.
 
 // ── Normal state machine transitions (salience 100) ─────────────────────────
 
@@ -42,26 +47,26 @@ rule "DY_PendingCut_Elapsed" salience 100 no-loop {
         DY.relay_off = true;
 }
 
-// Lockout → Off once lockout expires
+// Lockout → Off once lockout expires (guard: grid not connected, else reconnect rule takes priority)
 rule "DY_Lockout_Expired" salience 100 no-loop {
     when
-        DY.state == "Lockout" && DY.lockout_expired == true
+        DY.state == "Lockout" && DY.lockout_expired == true && DY.grid_connected == false
     then
         DY.next_state = "Off";
 }
 
-// Off → PendingRestore when frequency drops to low threshold
+// Off → PendingRestore when frequency drops to low threshold (guard: grid not connected)
 rule "DY_Off_LowFreq" salience 100 no-loop {
     when
-        DY.state == "Off" && DY.freq_low_reached == true
+        DY.state == "Off" && DY.freq_low_reached == true && DY.grid_connected == false
     then
         DY.next_state = "PendingRestore";
 }
 
-// PendingRestore: cancel if frequency climbs back (mutually exclusive with _Elapsed)
+// PendingRestore: cancel if frequency climbs back (guard: grid not connected)
 rule "DY_PendingRestore_FreqClimb" salience 100 no-loop {
     when
-        DY.state == "PendingRestore" && DY.freq_low_reached == false
+        DY.state == "PendingRestore" && DY.freq_low_reached == false && DY.grid_connected == false
     then
         DY.next_state = "Off";
 }

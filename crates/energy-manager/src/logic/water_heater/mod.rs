@@ -11,6 +11,7 @@ use crate::bus::AppBus;
 use crate::config::WaterHeaterConfig;
 use crate::http_clients::lg_thinq::LgThinqClient;
 use crate::mqtt::topics::publish;
+use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, LiveEvent, MqttOutgoing, WaterHeaterMode};
 
 pub async fn spawn(
@@ -18,10 +19,11 @@ pub async fn spawn(
     lg: Option<Arc<LgThinqClient>>,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
+    loader: Arc<RulesLoader>,
 ) {
     tokio::spawn(keepalive_task(cfg.keepalive_secs, bus.clone(), state.clone()));
     if let Some(lg_client) = lg {
-        tokio::spawn(control_task(cfg, lg_client, bus, state));
+        tokio::spawn(control_task(cfg, lg_client, bus, state, loader));
     } else {
         info!("Water heater auto-control disabled (no LG ThinQ client)");
     }
@@ -75,17 +77,26 @@ async fn control_task(
     lg: Arc<LgThinqClient>,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
+    loader: Arc<RulesLoader>,
 ) {
     let mut last_change: Option<DateTime<Utc>> = None;
-    // Count consecutive send failures to detect and alert on persistent issues
     let mut consecutive_fails: u32 = 0;
-    // Tick every 5 minutes as requested
-    let mut ticker = interval(Duration::from_secs(300));
+    let mut ticker    = interval(Duration::from_secs(300));
+    let mut reload_rx = bus.subscribe_rule_reload();
+
+    let mut rule_engine = match rules::WaterHeaterRuleEngine::with_source(&loader.load("water_heater")) {
+        Ok(e) => e,
+        Err(e) => {
+            error!("Failed to init water heater rule engine: {e}");
+            return;
+        }
+    };
 
     info!("Water heater control task started (5min interval)");
 
     loop {
-        ticker.tick().await;
+        tokio::select! {
+        _ = ticker.tick() => {
         let now = Utc::now();
 
         // Read actual state from LG ThinQ before deciding
@@ -154,21 +165,13 @@ async fn control_task(
             }
         };
         let grid_connected = ac_ignore == 0;
+        let soc_low = soc < cfg.soc_min_pct;
         info!(
-            "Water heater: ac_ignore={}, grid_connected={}, soc={:.1}%, irradiance_low={}",
-            ac_ignore, grid_connected, soc, irradiance_low
+            "Water heater: ac_ignore={}, grid_connected={}, soc={:.1}% (min={}%, soc_low={}), irradiance_low={}",
+            ac_ignore, grid_connected, soc, cfg.soc_min_pct, soc_low, irradiance_low
         );
 
-        let mut rule_engine = match rules::WaterHeaterRuleEngine::new() {
-            Ok(e) => e,
-            Err(e) => {
-                error!("Failed to init water heater rule engine: {e}");
-                sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        };
-
-        let target_mode_str = match rule_engine.evaluate(grid_connected, soc, irradiance_low) {
+        let target_mode_str = match rule_engine.evaluate(grid_connected, soc_low, irradiance_low) {
             Ok(m) => {
                 info!("Water heater: rule engine → target_mode={m} (grid_connected={}, soc={:.1}%, irradiance_low={})",
                     grid_connected, soc, irradiance_low);
@@ -271,5 +274,17 @@ async fn control_task(
             }
             publish_to_venus(&bus2, &state2).await;
         });
-    }
+        }   // close _ = ticker.tick() arm
+
+        Ok(name) = reload_rx.recv() => {
+            if name == "water_heater" || name == "*" {
+                let src = loader.load("water_heater");
+                match rules::WaterHeaterRuleEngine::with_source(&src) {
+                    Ok(e) => { rule_engine = e; info!("water_heater rule engine reloaded"); }
+                    Err(e) => tracing::warn!("water_heater reload failed (keeping old engine): {e}"),
+                }
+            }
+        }
+        }   // close select!
+    }       // close loop
 }

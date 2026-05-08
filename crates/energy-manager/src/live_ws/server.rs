@@ -1,10 +1,13 @@
 /// HTTP + WebSocket server for energy-manager.
 ///
 /// Routes:
-///   GET  /live               — WebSocket live event stream
-///   GET  /health             — health check
-///   GET  /api/water-heater   — current water heater state (JSON)
-///   POST /api/water-heater/mode   — set mode ("HEAT_PUMP" | "VACATION" | "TURBO")
+///   GET  /live                       — WebSocket live event stream
+///   GET  /health                     — health check
+///   GET  /api/water-heater           — current water heater state (JSON)
+///   POST /api/water-heater/mode      — set mode ("HEAT_PUMP" | "VACATION" | "TURBO")
+///   GET  /api/rules-status           — aggregated rules status for monitor.html
+///   GET  /api/v1/em/rules            — list loaded rules (name, origin, loaded_at)
+///   POST /api/v1/em/rules/reload     — hot-reload rules from disk (body: {"name":"*"})
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -23,14 +26,17 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
 use crate::http_clients::lg_thinq::LgThinqClient;
+use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, LiveEvent, WaterHeaterMode};
 use chrono::{DateTime, Utc};
 
 #[derive(Clone)]
 struct ServerState {
-    tx:       broadcast::Sender<LiveEvent>,
-    state:    Arc<RwLock<EnergyState>>,
-    lg:       Option<Arc<LgThinqClient>>,
+    tx:          broadcast::Sender<LiveEvent>,
+    state:       Arc<RwLock<EnergyState>>,
+    lg:          Option<Arc<LgThinqClient>>,
+    loader:      Arc<RulesLoader>,
+    rule_reload: broadcast::Sender<String>,
 }
 
 pub async fn serve(
@@ -38,8 +44,10 @@ pub async fn serve(
     live_tx: broadcast::Sender<LiveEvent>,
     state: Arc<RwLock<EnergyState>>,
     lg: Option<Arc<LgThinqClient>>,
+    loader: Arc<RulesLoader>,
+    rule_reload: broadcast::Sender<String>,
 ) {
-    let srv = ServerState { tx: live_tx, state, lg };
+    let srv = ServerState { tx: live_tx, state, lg, loader, rule_reload };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -47,11 +55,13 @@ pub async fn serve(
         .allow_headers(Any);
 
     let app = Router::new()
-        .route("/live",                     get(ws_handler))
-        .route("/health",                   get(health_handler))
-        .route("/api/water-heater",         get(wh_status_handler))
-        .route("/api/water-heater/mode",    post(wh_set_mode_handler))
-        .route("/api/rules-status",         get(rules_status_handler))
+        .route("/live",                         get(ws_handler))
+        .route("/health",                       get(health_handler))
+        .route("/api/water-heater",             get(wh_status_handler))
+        .route("/api/water-heater/mode",        post(wh_set_mode_handler))
+        .route("/api/rules-status",             get(rules_status_handler))
+        .route("/api/v1/em/rules",              get(rules_list_handler))
+        .route("/api/v1/em/rules/reload",       post(rules_reload_handler))
         .with_state(srv)
         .layer(cors);
 
@@ -183,6 +193,31 @@ async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
         ac_ignore:      s.ac_ignore,
     };
     Json(status).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Rules hot-reload endpoints
+// ---------------------------------------------------------------------------
+
+async fn rules_list_handler(State(srv): State<ServerState>) -> Response {
+    Json(srv.loader.info()).into_response()
+}
+
+#[derive(Deserialize)]
+struct ReloadRequest {
+    #[serde(default = "default_reload_name")]
+    name: String,
+}
+fn default_reload_name() -> String { "*".to_string() }
+
+async fn rules_reload_handler(
+    State(srv): State<ServerState>,
+    body: Option<Json<ReloadRequest>>,
+) -> Response {
+    let name = body.map(|b| b.name.clone()).unwrap_or_else(|| "*".to_string());
+    srv.rule_reload.send(name.clone()).ok();
+    info!("Rules hot-reload triggered: {name}");
+    (StatusCode::OK, format!("reload triggered: {name}")).into_response()
 }
 
 // ---------------------------------------------------------------------------

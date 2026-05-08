@@ -1,7 +1,8 @@
 use anyhow::Context;
 use rust_rule_engine::{Facts, KnowledgeBase, RustRuleEngine, Value};
 
-const GRL: &str = include_str!("../../../rules/deye_command.grl");
+#[cfg(test)]
+const GRL_EMBEDDED: &str = include_str!("../../../rules/deye_command.grl");
 
 pub struct DeyeRuleEngine {
     engine: RustRuleEngine,
@@ -18,10 +19,15 @@ pub struct DeyeDecision {
 }
 
 impl DeyeRuleEngine {
+    #[cfg(test)]
     pub fn new() -> anyhow::Result<Self> {
+        Self::with_source(GRL_EMBEDDED)
+    }
+
+    pub fn with_source(grl: &str) -> anyhow::Result<Self> {
         let kb = KnowledgeBase::new("deye_command");
-        kb.add_rules_from_grl(GRL)
-            .context("Failed to load deye_command.grl")?;
+        kb.add_rules_from_grl(grl)
+            .context("Failed to load deye_command rules")?;
         Ok(Self {
             engine: RustRuleEngine::new(kb),
         })
@@ -70,5 +76,84 @@ impl DeyeRuleEngine {
         }).unwrap_or(false);
 
         Ok(DeyeDecision { next_state, relay_on, relay_off })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn e() -> DeyeRuleEngine { DeyeRuleEngine::new().unwrap() }
+
+    // Shorthand: evaluate with default config thresholds (52 Hz / 50.3 Hz / 15s / 45s)
+    fn eval(engine: &mut DeyeRuleEngine, state: &str, freq: f64, time_s: u64, grid: bool, lockout_exp: bool) -> DeyeDecision {
+        engine.evaluate(state, freq, time_s, grid, 52.0, 50.3, 15, 45, lockout_exp).unwrap()
+    }
+
+    #[test]
+    fn on_normal_freq_no_transition() {
+        let d = eval(&mut e(), "On", 50.0, 0, false, false);
+        assert!(d.next_state.is_none());
+        assert!(!d.relay_on);
+        assert!(!d.relay_off);
+    }
+
+    #[test]
+    fn on_high_freq_transitions_pending_cut() {
+        let d = eval(&mut e(), "On", 52.5, 0, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("PendingCut"));
+    }
+
+    #[test]
+    fn pending_cut_freq_drops_cancels() {
+        let d = eval(&mut e(), "PendingCut", 50.0, 5, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("On"));
+    }
+
+    #[test]
+    fn pending_cut_delay_elapsed_high_freq_locks() {
+        let d = eval(&mut e(), "PendingCut", 52.5, 20, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("Lockout"));
+        assert!(d.relay_off);
+    }
+
+    #[test]
+    fn lockout_expires_transitions_off() {
+        let d = eval(&mut e(), "Lockout", 50.0, 0, false, true);
+        assert_eq!(d.next_state.as_deref(), Some("Off"));
+    }
+
+    #[test]
+    fn off_low_freq_transitions_pending_restore() {
+        let d = eval(&mut e(), "Off", 50.1, 0, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("PendingRestore"));
+    }
+
+    #[test]
+    fn pending_restore_elapsed_low_freq_restores() {
+        let d = eval(&mut e(), "PendingRestore", 50.0, 50, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("On"));
+        assert!(d.relay_on);
+    }
+
+    #[test]
+    fn grid_reconnect_from_off_restores_immediately() {
+        let d = eval(&mut e(), "Off", 50.0, 0, true, false);
+        assert_eq!(d.next_state.as_deref(), Some("On"));
+        assert!(d.relay_on);
+    }
+
+    #[test]
+    fn grid_reconnect_from_lockout_restores_immediately() {
+        let d = eval(&mut e(), "Lockout", 50.0, 0, true, false);
+        assert_eq!(d.next_state.as_deref(), Some("On"));
+        assert!(d.relay_on);
+    }
+
+    #[test]
+    fn grid_reconnect_from_pending_cut_restores_immediately() {
+        let d = eval(&mut e(), "PendingCut", 52.5, 5, true, false);
+        assert_eq!(d.next_state.as_deref(), Some("On"));
+        assert!(d.relay_on);
     }
 }

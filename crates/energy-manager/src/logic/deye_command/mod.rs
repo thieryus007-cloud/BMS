@@ -1,28 +1,29 @@
 /// DEYE relay control via Shelly Pro 2PM (MQTT RPC).
 /// State machine: On → PendingCut (15s) → Lockout (120s) → Off → PendingRestore (45s) → On
 /// State transitions are decided by rust-rule-engine (rules/deye_command.grl).
-/// Timestamp tracking and relay I/O remain in Rust.
+/// State is persisted to santuario/persist/deye_state (retained MQTT) to survive restarts.
 mod rules;
 
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, sleep, Duration};
 use tracing::info;
 
 use crate::bus::AppBus;
 use crate::config::{DeyeConfig, VictronConfig};
 use crate::mqtt::topics::publish;
+use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, MqttOutgoing};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum DeyeState {
     On,
-    PendingCut(DateTime<Utc>),     // high freq first seen at
+    PendingCut(DateTime<Utc>),
     Off,
-    PendingRestore(DateTime<Utc>), // low freq first seen at
-    Lockout(DateTime<Utc>),        // locked out until this timestamp
+    PendingRestore(DateTime<Utc>),
+    Lockout(DateTime<Utc>),
 }
 
 fn state_name(s: &DeyeState) -> &'static str {
@@ -57,8 +58,9 @@ pub async fn spawn(
     cfg: DeyeConfig,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
+    loader: Arc<RulesLoader>,
 ) {
-    tokio::spawn(run(vic, cfg, bus, state));
+    tokio::spawn(run(vic, cfg, bus, state, loader));
 }
 
 async fn run(
@@ -66,6 +68,7 @@ async fn run(
     cfg: DeyeConfig,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
+    loader: Arc<RulesLoader>,
 ) {
     let pid = &vic.portal_id;
     let vb  = vic.vebus_instance;
@@ -81,7 +84,8 @@ async fn run(
         return;
     }
 
-    let mut rule_engine = match rules::DeyeRuleEngine::new() {
+    let src = loader.load("deye_command");
+    let mut rule_engine = match rules::DeyeRuleEngine::with_source(&src) {
         Ok(e) => e,
         Err(e) => {
             tracing::error!("Failed to init DEYE rule engine: {e}");
@@ -89,10 +93,32 @@ async fn run(
         }
     };
 
-    let mut deye_sm   = DeyeState::On;
+    // Restore persisted state — wait up to 3s for retained MQTT message.
+    // This prevents spurious relay-on when restarting while DEYE is cut.
+    let initial_state = {
+        sleep(Duration::from_secs(3)).await;
+        let s = state.read().await;
+        match s.deye_persisted_state.as_deref() {
+            Some("Off") | Some("Lockout") | Some("PendingRestore") => {
+                info!("DEYE: restoring state=Off from retained MQTT");
+                DeyeState::Off
+            }
+            Some(other) => {
+                info!("DEYE: starting with state=On (persisted={other})");
+                DeyeState::On
+            }
+            None => {
+                info!("DEYE: no persisted state — starting with On");
+                DeyeState::On
+            }
+        }
+    };
+
+    let mut deye_sm   = initial_state;
     let mut last_freq: f64 = 50.0;
-    let mut rx = bus.subscribe_mqtt();
-    let mut ticker = interval(Duration::from_secs(1));
+    let mut rx        = bus.subscribe_mqtt();
+    let mut reload_rx = bus.subscribe_rule_reload();
+    let mut ticker    = interval(Duration::from_secs(1));
 
     loop {
         tokio::select! {
@@ -106,11 +132,10 @@ async fn run(
                         let connected = {
                             state.read().await.ac_ignore.map(|v| v == 0).unwrap_or(true)
                         };
-                        // Frequency-based logic applies only in off-grid mode
                         if connected { continue; }
 
                         let now = Utc::now();
-                        deye_sm = apply_decision(
+                        let new_state = apply_decision(
                             rule_engine.evaluate(
                                 state_name(&deye_sm),
                                 last_freq,
@@ -129,18 +154,23 @@ async fn run(
                             shelly_id,
                             channel,
                         ).await;
+                        if new_state != deye_sm {
+                            deye_sm = new_state;
+                            persist_deye_state(&bus, &deye_sm).await;
+                            update_deye_state(&state, &deye_sm).await;
+                        }
                     }
 
                 } else if *t == t_connected {
                     if let Some(v) = msg.victron_value::<i64>() {
                         if v == 1 {
                             let now = Utc::now();
-                            deye_sm = apply_decision(
+                            let new_state = apply_decision(
                                 rule_engine.evaluate(
                                     state_name(&deye_sm),
                                     last_freq,
                                     0,
-                                    true, // grid reconnected → rule engine restores On
+                                    true,
                                     cfg.freq_high_hz,
                                     cfg.freq_low_hz,
                                     cfg.cut_delay_secs,
@@ -154,6 +184,11 @@ async fn run(
                                 shelly_id,
                                 channel,
                             ).await;
+                            if new_state != deye_sm {
+                                deye_sm = new_state;
+                                persist_deye_state(&bus, &deye_sm).await;
+                                update_deye_state(&state, &deye_sm).await;
+                            }
                         }
                     }
                 }
@@ -161,7 +196,7 @@ async fn run(
 
             _ = ticker.tick() => {
                 let now = Utc::now();
-                deye_sm = apply_decision(
+                let new_state = apply_decision(
                     rule_engine.evaluate(
                         state_name(&deye_sm),
                         last_freq,
@@ -180,12 +215,45 @@ async fn run(
                     shelly_id,
                     channel,
                 ).await;
+                if new_state != deye_sm {
+                    deye_sm = new_state;
+                    persist_deye_state(&bus, &deye_sm).await;
+                    update_deye_state(&state, &deye_sm).await;
+                }
+            }
+
+            Ok(name) = reload_rx.recv() => {
+                if name == "deye_command" || name == "*" {
+                    let src = loader.load("deye_command");
+                    match rules::DeyeRuleEngine::with_source(&src) {
+                        Ok(e) => { rule_engine = e; info!("deye_command rule engine reloaded"); }
+                        Err(e) => tracing::warn!("deye_command reload failed (keeping old engine): {e}"),
+                    }
+                }
             }
         }
     }
 }
 
-/// Applies a rule engine decision: send relay commands and return updated DeyeState.
+/// Publishes DEYE state as retained MQTT for persistence across restarts.
+/// Only stable states are persisted: "On" and "Off".
+async fn persist_deye_state(bus: &AppBus, state: &DeyeState) {
+    let persisted = match state {
+        DeyeState::On | DeyeState::PendingCut(_) => "On",
+        DeyeState::Off | DeyeState::Lockout(_) | DeyeState::PendingRestore(_) => "Off",
+    };
+    bus.publish(MqttOutgoing::raw(
+        publish::DEYE_STATE, persisted, true,
+    )).await;
+}
+
+/// Updates EnergyState with DEYE relay info for the REST /api/rules-status endpoint.
+async fn update_deye_state(state: &Arc<RwLock<EnergyState>>, deye: &DeyeState) {
+    let mut s = state.write().await;
+    s.deye_on          = matches!(deye, DeyeState::On | DeyeState::PendingCut(_));
+    s.deye_last_change = Some(Utc::now());
+}
+
 async fn apply_decision(
     decision: anyhow::Result<rules::DeyeDecision>,
     current: DeyeState,

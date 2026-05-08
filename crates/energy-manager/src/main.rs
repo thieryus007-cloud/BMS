@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -11,9 +12,13 @@ mod logic;
 mod monitoring;
 mod mqtt;
 mod persist;
+#[allow(dead_code)]
+mod rule_metrics;
+mod rules_loader;
 mod types;
 
 use bus::AppBus;
+use rules_loader::RulesLoader;
 use types::EnergyState;
 
 #[tokio::main]
@@ -31,6 +36,11 @@ async fn main() -> anyhow::Result<()> {
     let cfg = config::load()?;
     info!("Config loaded — portal_id={}, mqtt={}:{}",
         cfg.victron.portal_id, cfg.mqtt.host, cfg.mqtt.port);
+
+    // --- Rules loader (disk-first with embedded fallback) ---
+    let rules_dir = cfg.rules.dir.as_deref().map(Path::new);
+    let loader    = Arc::new(RulesLoader::new(rules_dir));
+    info!("Rules loader initialized (dir={:?})", cfg.rules.dir);
 
     // --- Shared state ---
     let state: Arc<RwLock<EnergyState>> = Arc::new(RwLock::new(EnergyState::default()));
@@ -73,25 +83,27 @@ async fn main() -> anyhow::Result<()> {
     let vic = Arc::new(cfg.victron.clone());
 
     logic::inverter::spawn(vic.clone(), bus.clone(), state.clone()).await;
-    logic::smartshunt::spawn(vic.clone(), bus.clone(), state.clone()).await;
-    logic::irradiance::spawn(bus.clone(), state.clone(), cfg.solar.bms_server_url.clone()).await;
+    logic::smartshunt::spawn(vic.clone(), bus.clone(), state.clone(), loader.clone()).await;
+    logic::irradiance::spawn(bus.clone(), state.clone(), cfg.solar.bms_server_url.clone(), loader.clone()).await;
     logic::tasmota::spawn(vic.clone(), bus.clone(), state.clone()).await;
     logic::switch_ats::spawn(bus.clone(), state.clone()).await;
     logic::platform::spawn(cfg.platform.clone(), bus.clone()).await;
-    logic::charge_current::spawn(vic.clone(), cfg.charge_current.clone(), bus.clone(), state.clone()).await;
-    logic::solar_power::spawn(vic.clone(), cfg.solar.clone(), bus.clone(), state.clone()).await;
-    logic::deye_command::spawn(vic.clone(), cfg.deye.clone(), bus.clone(), state.clone()).await;
-    logic::water_heater::spawn(cfg.water_heater.clone(), lg_arc.clone(), bus.clone(), state.clone()).await;
+    logic::charge_current::spawn(vic.clone(), cfg.charge_current.clone(), bus.clone(), state.clone(), loader.clone()).await;
+    logic::solar_power::spawn(vic.clone(), cfg.solar.clone(), bus.clone(), state.clone(), loader.clone()).await;
+    logic::deye_command::spawn(vic.clone(), cfg.deye.clone(), bus.clone(), state.clone(), loader.clone()).await;
+    logic::water_heater::spawn(cfg.water_heater.clone(), lg_arc.clone(), bus.clone(), state.clone(), loader.clone()).await;
     logic::meteo::spawn(cfg.solar.clone(), bus.clone(), state.clone()).await;
     logic::victron_keepalive::spawn(cfg.victron.portal_id.clone(), bus.clone()).await;
 
     // --- Live WebSocket + REST server ---
-    let bind     = cfg.api.bind.clone();
-    let live_tx  = bus.live.clone();
-    let srv_state = state.clone();
-    let srv_lg    = lg_arc.clone();
+    let bind         = cfg.api.bind.clone();
+    let live_tx      = bus.live.clone();
+    let srv_state    = state.clone();
+    let srv_lg       = lg_arc.clone();
+    let srv_loader   = loader.clone();
+    let srv_reload   = bus.rule_reload.clone();
     tokio::spawn(async move {
-        live_ws::server::serve(&bind, live_tx, srv_state, srv_lg).await;
+        live_ws::server::serve(&bind, live_tx, srv_state, srv_lg, srv_loader, srv_reload).await;
     });
 
     // --- Module monitoring Pi5 (métriques système + tokio → VictoriaMetrics) ---
@@ -134,6 +146,9 @@ fn spawn_persist_watcher(bus: AppBus, state: Arc<RwLock<EnergyState>>) {
                 }
                 "santuario/persist/yield_yesterday" => {
                     persist::baseline::on_retained_yield_yesterday(msg.payload_str(), &state).await;
+                }
+                "santuario/persist/deye_state" => {
+                    persist::deye_state::on_retained_deye_state(msg.payload_str(), &state).await;
                 }
                 _ => {}
             }

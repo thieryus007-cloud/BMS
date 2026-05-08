@@ -41,8 +41,8 @@ MQTT (Mosquitto :1883)
 |-------|------|-------|
 | `mqtt_in` | `broadcast::Sender<MqttIncoming>` | Tous les messages MQTT entrants → tous les modules |
 | `mqtt_out` | `mpsc::Sender<MqttOutgoing>` | Publish MQTT depuis n'importe quel module |
-| 
 | `live` | `broadcast::Sender<LiveEvent>` | Événements WebSocket live |
+| `rule_reload` | `broadcast::Sender<String>` | Signal hot-reload → tous les modules de règles |
 
 Cloner `AppBus` est gratuit (tous les champs sont `Arc`-backed).
 
@@ -100,6 +100,12 @@ debounce_secs       = 300      # Délai de stabilisation (5 min)
 mode_change_min_secs = 900     # Intervalle min entre changements (15 min)
 heat_pump_target_c  = 60.0
 vacation_target_c   = 45.0
+soc_min_pct         = 90.0     # SOC minimum pour activer HEAT_PUMP (défaut 90%)
+
+[energy_manager.rules]
+# Optionnel — si défini, les règles .grl sont lues depuis ce répertoire
+# (hot-reload sans recompilation). Fallback sur les règles embarquées.
+# dir = "/etc/daly-bms/rules"
 
 [energy_manager.charge_current]
 offgrid_max_a        = 70.0
@@ -343,6 +349,43 @@ sudo cp Config.toml /etc/daly-bms/config.toml
 sudo systemctl restart energy-manager
 ```
 
+### Hot-reload des règles (sans recompilation)
+
+Les règles `.grl` peuvent être modifiées **en production** sans recompiler ni redémarrer.
+
+**Prérequis** : configurer un répertoire dans `Config.toml` :
+
+```toml
+[energy_manager.rules]
+dir = "/etc/daly-bms/rules"
+```
+
+Copier les règles initiales :
+```bash
+sudo mkdir -p /etc/daly-bms/rules
+sudo cp crates/energy-manager/rules/*.grl /etc/daly-bms/rules/
+```
+
+**Recharger après modification d'un fichier** :
+```bash
+# Recharger UNE règle (ex: water_heater)
+curl -s -X POST http://192.168.1.141:8081/api/v1/em/rules/reload \
+     -H "Content-Type: application/json" \
+     -d '{"name":"water_heater"}'
+
+# Recharger TOUTES les règles
+curl -s -X POST http://192.168.1.141:8081/api/v1/em/rules/reload \
+     -H "Content-Type: application/json" \
+     -d '{"name":"*"}'
+```
+
+**Lister les règles chargées** (origine: disk ou embedded, timestamp) :
+```bash
+curl -s http://192.168.1.141:8081/api/v1/em/rules | python3 -m json.tool
+```
+
+Si `rules.dir` n'est pas configuré ou si le fichier n'existe pas sur disque, le système utilise automatiquement la règle embarquée dans le binaire.
+
 ### Changer la logique métier (recompilation requise)
 
 Exemples de modifications courantes :
@@ -358,7 +401,53 @@ Exemples de modifications courantes :
 
 ---
 
-## 8. Supprimer un module
+## 8. Tests unitaires des règles
+
+Chaque module de règles `.grl` a une suite de tests unitaires dans son fichier `rules.rs`.
+
+```bash
+# Lancer tous les tests (34 tests, ~0.3s)
+cargo test -p energy-manager
+
+# Lancer les tests d'une règle spécifique
+cargo test -p energy-manager deye_command
+cargo test -p energy-manager water_heater
+```
+
+Les tests couvrent :
+- `charge_current` — 4 tests (offgrid, grid+PV, grid sans PV, etc.)
+- `deye_command` — 9 tests (toutes transitions, grille reconnectée, lockout)
+- `irradiance` — 5 tests (valides/invalides, plage 0–2000 W/m²)
+- `smartshunt` — 6 tests (capture baseline chargée/déchargée)
+- `solar_power` — 4 tests (nouveau jour, baseline absente)
+- `water_heater` — 5 tests (grid connecté, SOC bas, irradiance faible)
+
+**Ajouter un test** : dans le module `rules.rs` concerné, ajouter dans `#[cfg(test)] mod tests`:
+
+```rust
+#[test]
+fn mon_nouveau_cas() {
+    let mut e = MonRuleEngine::new().unwrap();
+    let result = e.evaluate(/* params */);
+    assert_eq!(result.unwrap(), "EXPECTED");
+}
+```
+
+---
+
+## 9. Persistance d'état DEYE
+
+L'état du relais DEYE (On/Off) est persisté en MQTT retained sur `santuario/persist/deye_state`.  
+Au redémarrage, le service attend 3 secondes avant d'activer la logique DEYE pour laisser
+le temps au broker MQTT de livrer le message retained.
+
+États persistés :
+- `"On"` — DEYE actif (états `On` ou `PendingCut`)
+- `"Off"` — DEYE coupé (états `Off`, `Lockout`, `PendingRestore`)
+
+---
+
+## 10. Supprimer un module
 
 1. Supprimer le fichier `logic/mon_module.rs`
 2. Retirer `pub mod mon_module;` dans `logic/mod.rs`
@@ -370,7 +459,7 @@ Exemples de modifications courantes :
 
 ---
 
-## 9. Ajouter un nouveau publish MQTT
+## 11. Ajouter un nouveau publish MQTT
 
 **1. Déclarer le topic** dans `mqtt/topics.rs` :
 
@@ -406,7 +495,7 @@ bus.publish(MqttOutgoing::raw(publish::MON_TOPIC, "valeur", false)).await;
 
 ---
 
-## 11. Débogage
+## 12. Débogage
 
 ```bash
 # Logs en continu
@@ -429,7 +518,7 @@ websocat ws://192.168.1.141:8081/live
 
 ---
 
-## 12. Installation initiale du service (première fois)
+## 13. Installation initiale du service (première fois)
 
 ```bash
 # Depuis le repo sur Pi5 :

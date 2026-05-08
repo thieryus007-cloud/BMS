@@ -1,7 +1,8 @@
 use anyhow::Context;
 use rust_rule_engine::{Facts, KnowledgeBase, RustRuleEngine, Value};
 
-const GRL: &str = include_str!("../../../rules/smartshunt.grl");
+#[cfg(test)]
+const GRL_EMBEDDED: &str = include_str!("../../../rules/smartshunt.grl");
 
 pub struct SmartShuntRuleEngine {
     engine: RustRuleEngine,
@@ -14,10 +15,15 @@ pub struct BaselineDecision {
 }
 
 impl SmartShuntRuleEngine {
+    #[cfg(test)]
     pub fn new() -> anyhow::Result<Self> {
+        Self::with_source(GRL_EMBEDDED)
+    }
+
+    pub fn with_source(grl: &str) -> anyhow::Result<Self> {
         let kb = KnowledgeBase::new("smartshunt");
-        kb.add_rules_from_grl(GRL)
-            .context("Failed to load smartshunt.grl")?;
+        kb.add_rules_from_grl(grl)
+            .context("Failed to load smartshunt rules")?;
         Ok(Self {
             engine: RustRuleEngine::new(kb),
         })
@@ -54,5 +60,54 @@ impl SmartShuntRuleEngine {
             .unwrap_or(false);
 
         Ok(BaselineDecision { capture_charged, capture_discharged })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn e() -> SmartShuntRuleEngine { SmartShuntRuleEngine::new().unwrap() }
+
+    #[test]
+    fn new_day_captures_charged() {
+        let d = e().baseline_decision(true, false, false, false).unwrap();
+        assert!(d.capture_charged);
+        assert!(!d.capture_discharged);
+    }
+
+    #[test]
+    fn missing_baseline_captures_charged() {
+        let d = e().baseline_decision(false, true, false, false).unwrap();
+        assert!(d.capture_charged);
+        assert!(!d.capture_discharged);
+    }
+
+    #[test]
+    fn new_day_captures_discharged() {
+        let d = e().baseline_decision(false, false, true, false).unwrap();
+        assert!(!d.capture_charged);
+        assert!(d.capture_discharged);
+    }
+
+    #[test]
+    fn missing_baseline_captures_discharged() {
+        let d = e().baseline_decision(false, false, false, true).unwrap();
+        assert!(!d.capture_charged);
+        assert!(d.capture_discharged);
+    }
+
+    #[test]
+    fn all_false_captures_nothing() {
+        let d = e().baseline_decision(false, false, false, false).unwrap();
+        assert!(!d.capture_charged);
+        assert!(!d.capture_discharged);
+    }
+
+    #[test]
+    fn all_true_captures_both() {
+        let d = e().baseline_decision(true, true, true, true).unwrap();
+        assert!(d.capture_charged);
+        assert!(d.capture_discharged);
     }
 }

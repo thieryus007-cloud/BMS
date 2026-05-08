@@ -79,9 +79,10 @@ pub fn all_subscriptions(portal_id: &str, vebus: u32, mppt1: u32, mppt2: u32, pv
         "stat/tongou_3BC764/POWER".to_string(),
         "tele/tongou_3BC764/SENSOR".to_string(),
 
-        // --- Persist (retained baselines) ---
+        // --- Persist (retained baselines + DEYE state) ---
         "santuario/persist/pvinv_baseline".to_string(),
         "santuario/persist/yield_yesterday".to_string(),
+        "santuario/persist/deye_state".to_string(),
     ]
 }
 
@@ -120,6 +121,7 @@ pub mod publish {
     pub const METEO_VENUS:    &str = "santuario/meteo/venus";
     pub const INVERTER_VENUS: &str = "santuario/inverter/venus";
     pub const SYSTEM_VENUS:   &str = "santuario/system/venus";
-    pub const PVINV_BASELINE: &str = "santuario/persist/pvinv_baseline";
+    pub const PVINV_BASELINE:  &str = "santuario/persist/pvinv_baseline";
     pub const YIELD_YESTERDAY: &str = "santuario/persist/yield_yesterday";
+    pub const DEYE_STATE:      &str = "santuario/persist/deye_state";
 }

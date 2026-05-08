@@ -12,6 +12,7 @@ use tracing::info;
 use crate::bus::AppBus;
 use crate::config::{ChargeCurrent as ChargeCfg, VictronConfig};
 use crate::mqtt::topics::publish;
+use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, MqttOutgoing};
 
 pub async fn spawn(
@@ -19,8 +20,9 @@ pub async fn spawn(
     cfg: ChargeCfg,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
+    loader: Arc<RulesLoader>,
 ) {
-    tokio::spawn(run(vic, cfg, bus, state));
+    tokio::spawn(run(vic, cfg, bus, state, loader));
 }
 
 async fn run(
@@ -28,6 +30,7 @@ async fn run(
     cfg: ChargeCfg,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
+    loader: Arc<RulesLoader>,
 ) {
     let vb  = vic.vebus_instance;
     let pid = vic.portal_id.clone();
@@ -36,7 +39,8 @@ async fn run(
     let topic_pv_power = format!("N/{pid}/system/0/Ac/PvOnOutput/L1/Power");
     let topic_consump  = format!("N/{pid}/system/0/Ac/ConsumptionOnOutput/L1/Power");
 
-    let mut rule_engine = match rules::ChargeRuleEngine::new() {
+    let src = loader.load("charge_current");
+    let mut rule_engine = match rules::ChargeRuleEngine::with_source(&src) {
         Ok(e) => e,
         Err(e) => {
             tracing::error!("Failed to init charge current rule engine: {e}");
@@ -44,37 +48,47 @@ async fn run(
         }
     };
 
-    let mut rx = bus.subscribe_mqtt();
+    let mut rx          = bus.subscribe_mqtt();
+    let mut reload_rx   = bus.subscribe_rule_reload();
+
     loop {
-        let msg = match rx.recv().await {
-            Ok(m)  => m,
-            Err(_) => continue,
-        };
-
-        let t = &msg.topic;
-        if t != &topic_ignore && t != &topic_pv_power && t != &topic_consump {
-            continue;
-        }
-
-        // Update state from MQTT
-        {
-            let mut s = state.write().await;
-            if t == &topic_ignore {
-                if let Some(v) = msg.victron_value::<i64>() {
-                    s.ac_ignore = Some(v);
+        tokio::select! {
+            Ok(msg) = rx.recv() => {
+                let t = &msg.topic;
+                if t != &topic_ignore && t != &topic_pv_power && t != &topic_consump {
+                    continue;
                 }
-            } else if t == &topic_pv_power {
-                if let Some(v) = msg.victron_value::<f64>() {
-                    s.mppt_power_273_w = Some(v);
+
+                {
+                    let mut s = state.write().await;
+                    if t == &topic_ignore {
+                        if let Some(v) = msg.victron_value::<i64>() {
+                            s.ac_ignore = Some(v);
+                        }
+                    } else if t == &topic_pv_power {
+                        if let Some(v) = msg.victron_value::<f64>() {
+                            s.mppt_power_273_w = Some(v);
+                        }
+                    } else if t == &topic_consump {
+                        if let Some(v) = msg.victron_value::<f64>() {
+                            s.house_power_w = Some(v);
+                        }
+                    }
                 }
-            } else if t == &topic_consump {
-                if let Some(v) = msg.victron_value::<f64>() {
-                    s.house_power_w = Some(v);
+
+                compute_and_publish(&mut rule_engine, &bus, &state, &cfg, &pid, vb).await;
+            }
+
+            Ok(name) = reload_rx.recv() => {
+                if name == "charge_current" || name == "*" {
+                    let src = loader.load("charge_current");
+                    match rules::ChargeRuleEngine::with_source(&src) {
+                        Ok(e) => { rule_engine = e; info!("charge_current rule engine reloaded"); }
+                        Err(e) => tracing::warn!("charge_current reload failed (keeping old engine): {e}"),
+                    }
                 }
             }
         }
-
-        compute_and_publish(&mut rule_engine, &bus, &state, &cfg, &pid, vb).await;
     }
 }
 
@@ -93,7 +107,6 @@ async fn compute_and_publish(
     let cons_w    = s.house_power_w.unwrap_or(0.0);
     let pv_excess = (pv_w - cons_w) > cfg.pv_excess_threshold_w;
 
-    // Rule engine decides the charging mode
     let mode = match rule_engine.evaluate(offgrid, pv_excess) {
         Ok(m)  => m,
         Err(e) => {
@@ -103,12 +116,11 @@ async fn compute_and_publish(
     };
 
     let (charge_a, power_assist, feed_in) = match mode.as_str() {
-        "offgrid"        => (cfg.offgrid_max_a,      1i64, None),
-        "grid_pv_excess" => (cfg.grid_pv_excess_a,   0i64, Some(0i64)),
-        _                => (cfg.grid_no_excess_a,   0i64, Some(0i64)),
+        "offgrid"        => (cfg.offgrid_max_a,    1i64, None),
+        "grid_pv_excess" => (cfg.grid_pv_excess_a, 0i64, Some(0i64)),
+        _                => (cfg.grid_no_excess_a, 0i64, Some(0i64)),
     };
 
-    // Only publish if changed
     let changed = s.last_charge_current_a != Some(charge_a)
         || s.last_power_assist != Some(power_assist);
     drop(s);

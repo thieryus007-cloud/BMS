@@ -1,17 +1,17 @@
 // crates/energy-manager/rules/water_heater.grl
-///Water heater automation rules.
+// Water heater automation rules.
 // Decides between HeatPump and Vacation mode based on energy conditions.
 //
 // Input facts (injected from Rust before evaluate):
 //   WH.want_vacation   (bool, initialised to false — set true by any condition rule)
 //   WH.grid_connected  (bool, true = ac_ignore == 0, grid ON → Vacation)
-//   WH.soc_pct         (number, battery SOC %)
-//   WH.irradiance_low  (bool, true when irradiance < irradiance_min_wm2)
+//   WH.soc_low         (bool, pre-computed: soc_pct < soc_min_pct from WaterHeaterConfig)
+//   WH.irradiance_low  (bool, true when irradiance < irradiance_min_wm2 from WaterHeaterConfig)
 //
 // Output facts (read from Rust after execute):
-//   WH.target_mode     (string: "HeatPump" | "Vacation")
+//   WH.target_mode     (string: "HEAT_PUMP" | "VACATION")
 //
-// HEAT_PUMP requires ALL: SOC >= 90%, irradiance >= 300 W/m², grid disconnected (ac_ignore = 1)
+// HEAT_PUMP requires ALL: soc_low=false, irradiance_low=false, grid_connected=false
 
 // ── Condition rules (salience 100) ──────────────────────────────────────────
 
@@ -24,7 +24,7 @@ rule "WH_Cond_Grid" salience 100 {
 
 rule "WH_Cond_SOC_Low" salience 100 {
     when
-        WH.soc_pct < 90
+        WH.soc_low == true
     then
         WH.want_vacation = true;
 }
@@ -45,7 +45,7 @@ rule "WH_Decide_Vacation" salience 200 {
         WH.target_mode = "VACATION";
 }
 
-rule "WH_Decide_HeatPump" salience 200  {
+rule "WH_Decide_HeatPump" salience 200 {
     when
         WH.want_vacation == false
     then
