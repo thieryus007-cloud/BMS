@@ -172,6 +172,11 @@ ATS CHINT RS485                   ──► daly-bms-server::ats (lecture + comm
 | `energy-manager` | Pi5 | ✅ Production | Binaire Pi5 (port 8081) — automatisation énergie via `rust-rule-engine` (charge_current, deye_command, inverter, irradiance, smartshunt, solar_power, water_heater, switch_ats, victron_keepalive) + clients HTTP Open-Meteo et LG ThinQ |
 | `dbus-mqtt-venus` | NanoPi (armv7) | ✅ Production | Binaire NanoPi : MQTT → D-Bus Venus OS (zbus pur Rust) — services `battery`, `pvinverter`, `heatpump`, `temperature`, `switch`, `meteo`, `platform` |
 
+> **Différence `rs485-bus` ↔ `daly-bms-core`** : `rs485-bus` est la couche
+> physique (mutex sur le port série + helpers Modbus génériques) partagée par
+> tous les drivers ; `daly-bms-core` ajoute le protocole spécifique Daly UART
+> par-dessus. Détails et schéma → [`docs/architecture-rs485-bus.md`](docs/architecture-rs485-bus.md).
+
 ---
 
 ## Structure du dépôt
