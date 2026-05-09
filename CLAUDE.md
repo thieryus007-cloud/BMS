@@ -315,3 +315,4 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Debug MQTT | `MQTT_DEBUGGING_GUIDE.md` |
 | Debug onduleur / SmartShunt | `DEBUG_ONDULEUR_SMARTSHUNT.md` |
 | Guide energy-manager — modifier/ajouter/retirer une fonctionnalité | `docs/energy-manager-guide.md` |
+| Architecture bus RS485 unifié (`rs485-bus` vs `daly-bms-core`) | `docs/architecture-rs485-bus.md` |
