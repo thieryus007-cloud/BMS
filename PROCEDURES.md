@@ -254,22 +254,7 @@ git push -u origin <branche>
 
 ---
 
-## I. INSTALLATION IRRADIANCE RS485 (après réinstall OS)
-
-```bash
-cd ~/Daly-BMS-Rust
-git pull origin <branche>
-bash contrib/irradiance-rs485/install.sh
-# L'irradiance est lue directement par daly-bms-server via RS485 (0x05)
-```
-
-Identifier le port : `ls -la /dev/serial/by-id/`
-- BMS (Bus 002) → `/dev/ttyUSB0`
-- Irradiance (Bus 004) → `/dev/ttyUSB1` ← si capteur séparé
-
----
-
-## J. NOTES TECHNIQUES
+## I. NOTES TECHNIQUES
 
 **Architecture température** : température extérieure via `temperature.mqtt_1` (type 4=Outdoor) uniquement.
 `/ExternalTemperature` absent de `meteo` — ne pas réajouter dans `MeteoValues` ni `meteo_service.rs`.

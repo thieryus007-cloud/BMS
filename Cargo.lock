@@ -642,21 +642,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "daly-bms-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "daly-bms-core",
- "hex",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "daly-bms-core"
 version = "0.1.0"
 dependencies = [
@@ -672,17 +657,6 @@ dependencies = [
  "tokio-serial",
  "tokio-util",
  "tracing",
-]
-
-[[package]]
-name = "daly-bms-probe"
-version = "0.1.0"
-dependencies = [
- "clap",
- "daly-bms-core",
- "tokio",
- "tokio-serial",
- "tokio-util",
 ]
 
 [[package]]

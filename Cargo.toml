@@ -7,8 +7,6 @@ members = [
     "crates/rs485-bus",
     "crates/daly-bms-core",
     "crates/daly-bms-server",
-    "crates/daly-bms-cli",
-    "crates/daly-bms-probe",
     "crates/dbus-mqtt-venus",
     "crates/energy-manager",
 ]

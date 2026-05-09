@@ -361,7 +361,7 @@ pub struct AppState {
     /// Indicateur polling actif.
     pub polling_active: Arc<std::sync::atomic::AtomicBool>,
 
-    /// Port série partagé — None en mode simulateur.
+    /// Port série partagé.
     /// Partagé avec le poll_loop via le Mutex interne de DalyPort.
     pub port: Arc<RwLock<Option<Arc<DalyPort>>>>,
 

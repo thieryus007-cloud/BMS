@@ -222,7 +222,7 @@ async fn require_port(state: &AppState) -> Result<std::sync::Arc<daly_bms_core::
         Some(p) => Ok(p.clone()),
         None => Err((
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": "Port série non disponible (mode simulateur ou port non ouvert)"})),
+            Json(json!({"error": "Port série non disponible"})),
         ).into_response()),
     }
 }

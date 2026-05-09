@@ -377,13 +377,6 @@ journalctl -u daly-bms | grep -i "venus\|dbus"
 journalctl -u daly-bms | grep -i "api.*error"
 ```
 
-### **Grafana Dashboard** (optionnel)
-```
-http://192.168.1.141:3001
-- Admin / supersecretchangeit
-- Import dashboard ID 12345 (Daly-BMS)
-```
-
 ---
 
 ## 🔐 SÉCURITÉ

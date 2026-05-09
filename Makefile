@@ -14,7 +14,6 @@
 CARGO := cargo
 BINARY := daly-bms-server
 ENERGY_BIN := energy-manager
-CLI := daly-bms-cli
 TARGET_ARM := aarch64-unknown-linux-gnu
 TARGET_ARMV7 := armv7-unknown-linux-gnueabihf
 TARGET_MUSL := aarch64-unknown-linux-musl
@@ -105,7 +104,7 @@ check-musl-deps:
 # Compilation — Version optimisée
 # =============================================================================
 
-.PHONY: build build-arm build-arm-debug build-arm-musl build-arm-v7 build-cli build-venus build-venus-arm build-venus-armv7 build-venus-v7 build-energy build-energy-arm install-energy run-energy
+.PHONY: build build-arm build-arm-debug build-arm-musl build-arm-v7 build-venus build-venus-arm build-venus-armv7 build-venus-v7 build-energy build-energy-arm install-energy run-energy
 
 VENUS_BIN := dbus-mqtt-venus
 
@@ -137,9 +136,6 @@ build-arm-musl: check-musl-deps
 	$(CARGO) build --release --target $(TARGET_MUSL) --bin $(BINARY)
 	@echo "✓ Binaire ARM statique (musl) : $(MUSL_RELEASE_DIR)/$(BINARY)"
 	@ls -lh $(MUSL_RELEASE_DIR)/$(BINARY) 2>/dev/null || true
-
-build-cli:
-	$(CARGO) build --release --bin $(CLI)
 
 # Phase 3 — Venus OS D-Bus bridge
 build-venus:
@@ -209,9 +205,6 @@ run:
 
 run-debug:
 	RUST_LOG=debug $(CARGO) run --bin $(BINARY)
-
-cli:
-	$(CARGO) run --bin $(CLI) -- $(ARGS)
 
 # =============================================================================
 # Tests
@@ -390,7 +383,6 @@ help:
 	@echo " Développement :"
 	@echo "  make run             Lancer le serveur (release)"
 	@echo "  make run-debug       Lancer en mode debug (RUST_LOG=debug)"
-	@echo "  make cli ARGS='--help' Lancer le CLI"
 	@echo ""
 	@echo " Tests & Qualité :"
 	@echo "  make test            Tests unitaires"
