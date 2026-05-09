@@ -3,7 +3,7 @@
 **Version Rust complète** — mise à jour mai 2026
 Remplacement total de la stack Python/FastAPI **et** des flows Node-RED par **Rust**
 (workspace multi-crates : `rs485-bus` + `daly-bms-core` + `daly-bms-server` +
-`energy-manager` + `daly-bms-cli` + `daly-bms-probe` + `dbus-mqtt-venus`).
+`energy-manager` + `dbus-mqtt-venus`).
 
 > Dashboard intégré **SSR Rust** (Askama + ECharts) — aucun npm.
 > Infrastructure Docker **inchangée** (Mosquitto, VictoriaMetrics ).
@@ -40,9 +40,8 @@ Remplacement total de la stack Python/FastAPI **et** des flows Node-RED par **Ru
 │                                  │                                  │
 │                          Mosquitto :1883                            │
 │                                  │                                  │
-│         ┌────────────────────────┴────────────────────────┐         │
-│         ▼                                                 ▼         │
-│  VictoriaMetrics :8428                              Grafana :3001   │
+│                                │                                    │
+│                       VictoriaMetrics :8428                         │
 └────────────────────────────────┬────────────────────────────────────┘
                                  │ MQTT (santuario/*/venus)
                                  ▼
@@ -111,7 +110,6 @@ Remplacement total de la stack Python/FastAPI **et** des flows Node-RED par **Ru
 
 ```
 BMS UART  ──► daly_bms_core::poll_loop()   ← mode hardware (RS485/USB)
-Simulateur ──► run_simulator()              ← mode --simulate (sans matériel)
                     │
                     ▼  on_snapshot(snap)
              AppState::on_snapshot()
@@ -173,8 +171,6 @@ ATS CHINT RS485                   ──► daly-bms-server::ats (lecture + comm
 | `daly-bms-server` | Pi5 | ✅ Production | Binaire Pi5 : API Axum (REST + WebSocket) + Dashboard SSR + bridges (MQTT, VictoriaMetrics, AlertEngine SQLite) — gère BMS, ET112, ATS, irradiance, Tasmota, Shelly |
 | `energy-manager` | Pi5 | ✅ Production | Binaire Pi5 (port 8081) — automatisation énergie via `rust-rule-engine` (charge_current, deye_command, inverter, irradiance, smartshunt, solar_power, water_heater, switch_ats, victron_keepalive) + clients HTTP Open-Meteo et LG ThinQ |
 | `dbus-mqtt-venus` | NanoPi (armv7) | ✅ Production | Binaire NanoPi : MQTT → D-Bus Venus OS (zbus pur Rust) — services `battery`, `pvinverter`, `heatpump`, `temperature`, `switch`, `meteo`, `platform` |
-| `daly-bms-cli` | Pi5 | ✅ Stable | Outil CLI de diagnostic et contrôle RS485 |
-| `daly-bms-probe` | Pi5 | ✅ Stable | Outil diagnostic bas niveau — trames brutes, test 3 variantes d'adressage |
 
 ---
 
@@ -185,13 +181,9 @@ Daly-BMS-Rust/
 ├── Cargo.toml                 ← Workspace Rust (résolver v2, Rust 1.88+)
 ├── Cargo.lock
 ├── Config.toml                ← Configuration principale (TOML)
-├── Config.docker.toml         ← Configuration Docker (hostnames internes)
-├── Makefile                   ← Commandes build/test/deploy/docker
-├── Dockerfile                 ← Image Docker multi-stage (builder + runtime)
-├── docker-compose.yml         ← Stack complète (serveur + infra)
-├── docker-compose.infra.yml   ← Infra seule (Mosquitto, VictoriaMetrics, energy-manager)
+├── Makefile                   ← Commandes build/test/deploy
+├── docker-compose.infra.yml   ← Infra Mosquitto (broker MQTT)
 ├── .env.docker                ← Template variables d'environnement (à copier en .env)
-├── .env                       ← Variables secrètes Docker (gitignored)
 ├── .gitignore
 │
 ├── crates/
@@ -205,7 +197,7 @@ Daly-BMS-Rust/
 │   ├── daly-bms-server/          ← Serveur principal Pi5 (REST/WS + Dashboard SSR)
 │   │   ├── src/
 │   │   │   ├── main.rs, config.rs, state.rs, autodetect.rs,
-│   │   │   ├── simulator.rs, monitor.rs, console.rs, vm_client.rs
+│   │   │   ├── monitor.rs, console.rs, vm_client.rs
 │   │   │   ├── api/              ← Router Axum : bms, system, ats, et112,
 │   │   │   │                       chart, history, alerts, tasmota, shelly,
 │   │   │   │                       promql, console, health
@@ -243,16 +235,12 @@ Daly-BMS-Rust/
 │   │       ├── platform_service.rs / platform_manager.rs
 │   │       └── sensor_manager.rs
 │   │
-│   ├── daly-bms-cli/             ← Outil CLI (clap)
-│   └── daly-bms-probe/           ← Outil diagnostic bas niveau (trames brutes)
 │
 ├── contrib/
 │   ├── daly-bms.service          ← Unité systemd daly-bms-server
 │   ├── energy-manager.service    ← Unité systemd energy-manager
 │   ├── node-exporter.service     ← Unité systemd Prometheus node_exporter
 │   ├── victoriametrics-scrape.yml← Config scrape Prometheus pour VM
-│   ├── nginx.conf                ← Reverse proxy nginx
-│   ├── irradiance-rs485/         ← Service Python irradiance (legacy)
 │   ├── install-systemd.sh        ← Script d'installation systemd
 │   └── uninstall-systemd.sh      ← Script de désinstallation
 ├── docker/
@@ -319,27 +307,11 @@ Daly-BMS-Rust/
 
 ## Démarrage rapide
 
-### Mode simulateur (sans matériel BMS — Windows ou Linux)
-
-```bash
-# Compiler
-cargo build --release
-
-# Lancer avec 2 BMS simulés
-cargo run --bin daly-bms-server -- --simulate --sim-bms 0x01,0x02
-
-# Ou avec Make (lance le binaire en release)
-make run
-
-# Accéder au dashboard
-# http://localhost:8080/dashboard
-```
-
-### Infrastructure Docker (5 min)
+### Infrastructure Docker (broker MQTT)
 
 ```bash
 cp .env.docker .env            # adapter les tokens et mots de passe
-make up                        # Mosquitto:1883 VictoriaMetrics:8428 energy-manager
+make up                        # Mosquitto:1883
 make ps                        # vérifier l'état des containers
 ```
 
@@ -369,14 +341,10 @@ make install        # copie le binaire + installe daly-bms.service
 journalctl -u daly-bms -f
 ```
 
-### Stack Docker complète (serveur + infra)
+### Infrastructure broker MQTT
 
 ```bash
-# Démarrer toute la stack (y compris daly-bms-server en container)
-docker compose up -d
-
-# Ou uniquement l'infra (pour développement local Rust)
-make up   # utilise docker-compose.infra.yml
+make up   # démarre Mosquitto via docker-compose.infra.yml
 ```
 
 ---
@@ -444,30 +412,6 @@ Le dashboard est **embarqué dans le binaire** (SSR Askama + ECharts). Aucun npm
 
 ---
 
-## CLI
-
-```bash
-# Status complet
-daly-bms-cli --port /dev/ttyUSB0 --addr 0x01 status
-
-# Tensions cellules (16 cellules)
-daly-bms-cli --port /dev/ttyUSB0 --addr 0x01 cells --count 16
-
-# Scanner le bus
-daly-bms-cli --port /dev/ttyUSB0 discover --start 1 --end 10
-
-# Polling continu
-daly-bms-cli --port /dev/ttyUSB0 --addr 0x01 poll --interval 2
-
-# Activer MOS charge
-daly-bms-cli --port /dev/ttyUSB0 --addr 0x01 set-charge-mos --enable
-
-# Calibrer SOC à 80%
-daly-bms-cli --port /dev/ttyUSB0 --addr 0x01 set-soc --value 80.0
-```
-
----
-
 ## Commandes Make
 
 ```bash
@@ -483,7 +427,6 @@ make build-arm          # Cross-compiler daly-bms-server pour aarch64 (Pi5)
 make build-arm-debug    # Build aarch64 avec symboles (profile release-debug)
 make build-arm-musl     # Build aarch64 statique (musl)
 make build-arm-v7       # Cross-compiler pour armv7 (NanoPi)
-make build-cli          # Compiler daly-bms-cli
 make build-venus        # Compiler dbus-mqtt-venus (host)
 make build-venus-arm    # dbus-mqtt-venus aarch64
 make build-venus-v7     # dbus-mqtt-venus armv7 (NanoPi)
@@ -496,7 +439,6 @@ make run-energy         # Lancer energy-manager localement
 make build-all          # Tous les binaires
 make run                # Lancer daly-bms-server (release)
 make run-debug          # daly-bms-server avec RUST_LOG=debug
-make cli ARGS="..."     # Lancer daly-bms-cli
 make test               # Tests unitaires (workspace)
 make test-core          # Tests daly-bms-core uniquement
 make test-verbose       # Tests avec --nocapture
@@ -593,31 +535,6 @@ docker system prune -a --volumes
 
 ---
 
-## Simulateur BMS
-
-Le mode simulateur génère des données **LiFePO4 réalistes** sans matériel :
-
-```bash
-# 1 BMS simulé (adresse 0x01 par défaut)
-cargo run --bin daly-bms-server -- --simulate
-
-# 2 BMS simulés (adresses 0x01 et 0x02 comme en production)
-cargo run --bin daly-bms-server -- --simulate --sim-bms 0x01,0x02
-```
-
-**Physique simulée :**
-- SOC : courbe de décharge, recharge automatique à 10%, cycle à 95%
-- Tension : courbe OCV LiFePO4 (44V vide → 58,4V plein pour 16 cellules)
-- Courant : variation sinusoïdale autour de -8,5 A (décharge)
-- Température : corrélée au courant + dérive ambiante
-- Tensions cellules : déséquilibre réaliste (-15 à +15 mV par cellule)
-- Équilibrage : activé automatiquement quand delta > 10 mV
-- Alarmes : déclenchées sur seuils SOC/delta
-
-Le simulateur alimente les mêmes bridges que le hardware réel : **MQTT, VictoriaMetrics, AlertEngine, WebSocket, Dashboard**.
-
----
-
 ## Protocole Daly implémenté
 
 ### Format trame (13 octets)
@@ -695,16 +612,12 @@ wscat -c ws://localhost:8080/ws/bms/stream
 # Niveau de logs augmenté
 RUST_LOG=debug daly-bms-server
 
-# Diagnostic bas niveau (trame brute RS485)
-cargo run --bin daly-bms-probe -- --port /dev/ttyUSB0
-
 # Vérifier état containers
 make ps
 docker compose -f docker-compose.infra.yml ps
 
-# Redémarrer un container spécifique
-docker compose -f docker-compose.infra.yml restart grafana
-docker compose -f docker-compose.infra.yml restart dalybms-VictoriaMetrics
+# Redémarrer Mosquitto
+docker compose -f docker-compose.infra.yml restart mosquitto
 ```
 
 ---
@@ -739,30 +652,24 @@ Il affiche pour chaque BMS :
 ### Phase 0 — Fondations Rust ✅
 
 - [x] Structure workspace Rust (Cargo.toml, 5 crates)
-- [x] Types de données (BmsSnapshot ↔ JSONData.json)
+- [x] Types de données (BmsSnapshot)
 - [x] Protocole UART + checksum + tests unitaires
 - [x] API Axum (toutes les routes définies)
 - [x] AppState + ring buffer + broadcast WebSocket
 - [x] Bridges (MQTT, VictoriaMetrics, AlertEngine)
-- [x] CLI (clap, toutes les commandes)
-- [x] Outil probe (diagnostic bas niveau)
 
 ### Phase 1 — Infrastructure & Intégration ✅
 
-- [x] Infrastructure Docker (Mosquitto, VictoriaMetrics, energy-manager)
-- [x] Docker complet (Dockerfile + docker-compose.yml stack complète)
-- [x] Simulateur BMS avec physique LiFePO4 (validé Windows + Linux)
+- [x] Infrastructure Mosquitto (Docker)
 - [x] Auto-détection port série et adresses BMS
 - [x] Dashboard SSR intégré (Askama + ECharts, sans npm)
 - [x] MQTT publish_interval_sec réduit à 1s (temps réel)
 - [x] Architecture Venus OS confirmée (MQTT → D-Bus)
 - [x] Service dbus-canbattery.can0 stoppé sur NanoPi (CAN remplacé par MQTT)
-- [x] Compatibilité Windows 10/11 validée
 
 ### Phase 2 — Production RPi5 ✅
 
 - [x] RPi5 CM opérationnel — données BMS 0x01 et 0x02 confirmées dans VictoriaMetrics
-- [x] Dashboard Grafana fonctionnel en production (17 mars 2026)
 - [x] Correction adresses BMS (0x28/0x29 → 0x01/0x02)
 - [x] Rotation logs Docker configurée + rétention VictoriaMetrics 30j
 - [ ] Validation commandes d'écriture (MOS, SOC, reset) sur hardware réel

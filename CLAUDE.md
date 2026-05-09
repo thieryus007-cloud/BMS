@@ -124,7 +124,6 @@ crates/energy-manager/rules/            ← règles `.grl` (rust-rule-engine) :
                                           irradiance, smartshunt, solar_power,
                                           water_heater
 crates/dbus-mqtt-venus/src/             ← bridge MQTT→D-Bus NanoPi
-contrib/irradiance-rs485/               ← service Python irradiance
 contrib/daly-bms.service                ← unité systemd daly-bms-server
 contrib/energy-manager.service          ← unité systemd energy-manager
 contrib/node-exporter.service           ← unité systemd Prometheus node_exporter

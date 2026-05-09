@@ -1,16 +1,11 @@
 //! # daly-bms-server
 //!
-//! Serveur principal : charge la configuration, ouvre le port série (ou simule),
+//! Serveur principal : charge la configuration, ouvre le port série,
 //! démarre le polling et expose l'API Axum (REST + WebSocket).
 //!
 //! ## Démarrage
 //! ```bash
-//! # Avec hardware réel :
 //! DALY_CONFIG=/etc/daly-bms/config.toml daly-bms-server
-//!
-//! # Mode simulation (sans Pi ni BMS) :
-//! cargo run --bin daly-bms-server -- --simulate
-//! cargo run --bin daly-bms-server -- --simulate --sim-bms 0x01,0x02
 //! ```
 
 mod autodetect;
@@ -25,7 +20,6 @@ mod state;
 mod vm_client;
 mod api;
 mod bridges;
-mod simulator;
 mod dashboard;
 mod monitor;
 
@@ -89,8 +83,6 @@ impl<S: Subscriber> Layer<S> for WebLogLayer {
 
 #[derive(Debug)]
 struct ServerArgs {
-    simulate:  bool,
-    sim_addrs: Vec<u8>,
     /// Port série explicite (ex: COM3, /dev/ttyUSB0)
     port:      Option<String>,
     /// Adresses BMS pour le mode hardware (ex: 0x01,0x02)
@@ -100,12 +92,6 @@ struct ServerArgs {
 impl ServerArgs {
     fn parse() -> Self {
         let args: Vec<String> = std::env::args().collect();
-        let simulate = args.iter().any(|a| a == "--simulate" || a == "-s");
-
-        let sim_addrs = args.windows(2)
-            .find(|w| w[0] == "--sim-bms")
-            .map(|w| Self::parse_addresses(&w[1]))
-            .unwrap_or_default();
 
         let port = args.windows(2)
             .find(|w| w[0] == "--port" || w[0] == "-p")
@@ -116,7 +102,7 @@ impl ServerArgs {
             .map(|w| Self::parse_addresses(&w[1]))
             .unwrap_or_default();
 
-        Self { simulate, sim_addrs, port, bms_addrs }
+        Self { port, bms_addrs }
     }
 
     fn parse_addresses(s: &str) -> Vec<u8> {
@@ -207,8 +193,8 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Flags d'auto-détection ────────────────────────────────────────────────
     // Actifs uniquement si aucun fichier config ET aucun argument CLI fourni.
-    let auto_detect_port    = !args.simulate && args.port.is_none()      && (!config_from_file || config.serial.port.is_empty());
-    let auto_discover_addrs = !args.simulate && args.bms_addrs.is_empty() && !config_from_file;
+    let auto_detect_port    = args.port.is_none()      && (!config_from_file || config.serial.port.is_empty());
+    let auto_discover_addrs = args.bms_addrs.is_empty() && !config_from_file;
 
     // ── Logging ────────────────────────────────────────────────────────────────
     let log_level  = config.logging.level.clone();
@@ -265,10 +251,8 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let mode = if args.simulate { "SIMULATION" } else { "HARDWARE" };
     info!(
         version = env!("CARGO_PKG_VERSION"),
-        mode,
         api = %config.api.bind,
         "DalyBMS Server démarrage"
     );
@@ -395,31 +379,8 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ── Mode SIMULATION ou HARDWARE ────────────────────────────────────────────
-    if args.simulate {
-        // Adresses depuis --sim-bms, ou depuis config.toml, ou défaut 0x01,0x02
-        let addresses = if !args.sim_addrs.is_empty() {
-            args.sim_addrs.clone()
-        } else {
-            let cfg_addrs = config.bms_addresses();
-            if !cfg_addrs.is_empty() { cfg_addrs } else { vec![0x01, 0x02] }
-        };
-
-        info!(
-            "Mode simulation : {} BMS {:?}",
-            addresses.len(),
-            addresses.iter().map(|a| format!("{:#04x}", a)).collect::<Vec<_>>()
-        );
-
-        state.polling_active.store(true, Ordering::Relaxed);
-        let state_sim = state.clone();
-        let config_sim = config.clone();
-        tokio::spawn(async move {
-            simulator::run_simulator(state_sim, config_sim, addresses).await;
-        });
-    } else {
-        // Mode hardware réel
-
+    // ── Mode HARDWARE ──────────────────────────────────────────────────────────
+    {
         // ── 1. Résoudre le port (auto-détection ou config) ───────────────────
         // find_daly_port() retourne le port déjà ouvert pour éviter la double
         // ouverture Windows ("Accès refusé" si on ouvre, ferme, puis rouvre).
@@ -645,7 +606,6 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => {
                     error!("Impossible d'ouvrir {} : {:?}", resolved_port, e);
                     warn!("Démarrage en mode API-seule (pas de données BMS).");
-                    warn!("Astuce : relancez avec --simulate pour tester sans matériel.");
                 }
             }
         }
@@ -660,9 +620,6 @@ async fn main() -> anyhow::Result<()> {
 
     info!("API  → http://{}", addr);
     info!("WS   → ws://{}/ws/bms/stream", addr);
-    if args.simulate {
-        info!("Docs → http://{}/api/v1/system/status", addr);
-    }
 
     // Notifie systemd que le service est prêt (Type=notify)
     let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
