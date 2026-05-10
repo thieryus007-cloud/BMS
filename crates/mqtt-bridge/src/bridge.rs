@@ -23,8 +23,10 @@ fn nanopi_to_local_subscriptions(portal: &str) -> Vec<(String, QoS)> {
         (format!("N/{portal}/#"), QoS::AtMostOnce),
         // Données BMS publiées par dbus-mqtt-venus sur NanoPi
         ("santuario/#".to_string(), QoS::AtMostOnce),
-        // Shelly bidirectionnel
+        // Shelly Pro 2PM : status et événements publiés par le device sur NanoPi
         ("shellypro2pm-ec62608840a4/#".to_string(), QoS::AtMostOnce),
+        // Réponses RPC Shelly (topic de réponse daly-bms-shelly/rpc sur NanoPi)
+        ("daly-bms-shelly/rpc".to_string(), QoS::AtMostOnce),
         // Tasmota / Tongou : mesures énergie et état relais publiés sur NanoPi
         ("tele/#".to_string(), QoS::AtMostOnce),
         ("stat/#".to_string(), QoS::AtMostOnce),
@@ -51,8 +53,8 @@ fn local_to_nanopi_subscriptions(portal: &str) -> Vec<(String, QoS)> {
         ("santuario/inverter/#".to_string(),  QoS::AtMostOnce),
         ("santuario/system/#".to_string(),    QoS::AtMostOnce),
         ("santuario/pvinverter/#".to_string(), QoS::AtMostOnce),
-        // Shelly bidirectionnel
-        ("shellypro2pm-ec62608840a4/#".to_string(), QoS::AtMostOnce),
+        // Shelly : commandes RPC seulement (status sont bridgés nanopi→local, pas l'inverse)
+        ("shellypro2pm-ec62608840a4/rpc".to_string(), QoS::AtMostOnce),
     ]
 }
 
