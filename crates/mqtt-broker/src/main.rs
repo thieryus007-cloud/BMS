@@ -27,7 +27,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{info, warn};
+use tracing::info;
 
 // =============================================================================
 // CLI
@@ -87,7 +87,7 @@ async fn main() -> Result<()> {
         .with_context(|| format!("Parse config TOML : {}", cli.config.display()))?;
 
     info!("Broker MQTT démarré — TCP :1883, WS :9001");
-    info!("Persistence : {}", config.router.dir.display());
+    info!("Persistence : /var/lib/mqtt-broker");
 
     // ── Métriques partagées ───────────────────────────────────────────────────
     let metrics = Arc::new(BrokerMetrics::default());
