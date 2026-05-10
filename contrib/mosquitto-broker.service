@@ -1,0 +1,39 @@
+[Unit]
+Description=Mosquitto MQTT Broker (natif, remplace Docker)
+Documentation=https://mosquitto.org/documentation/
+After=network-online.target
+Wants=network-online.target
+Before=daly-bms.service energy-manager.service
+
+[Service]
+Type=notify
+ExecStart=/usr/sbin/mosquitto -c /etc/mosquitto/mosquitto.conf
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Redémarrage automatique en cas d'échec
+Restart=on-failure
+RestartSec=5s
+
+# Utilisateur mosquitto (créé par le package Debian)
+User=mosquitto
+Group=mosquitto
+
+# Ressources (Mosquitto est très léger)
+MemoryMax=50M
+LimitNOFILE=65536
+
+# Sécurité — assez permissif pour un broker réseau
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# Chemins en lecture/écriture nécessaires
+ReadWritePaths=/var/lib/mosquitto /var/log/mosquitto
+
+# Journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mosquitto-broker
+
+[Install]
+WantedBy=multi-user.target
