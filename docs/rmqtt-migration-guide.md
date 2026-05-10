@@ -2,6 +2,13 @@
 
 > **Capitalisé sur la migration rumqttd (mai 2026) — lire l'historique des erreurs avant de commencer.**
 > Version rmqtt documentée : **0.20.0** (v2025.04)
+>
+> **Mise à jour mai 2026 — corrections vs. l'état réel du dépôt :**
+> - L'état initial n'a **pas** de crates `mqtt-bridge` ni `mqtt-broker` à supprimer (le bridge actuel est dans la conf Mosquitto Docker).
+> - Le broker actuel est **Mosquitto en Docker** (`dalybms-mosquitto`), avec un bridge configuré dans `docker/mosquitto/config/mosquitto.conf` vers NanoPi.
+> - `Config.toml` actuel : `[mqtt].host = "192.168.1.120"` (NanoPi) et `[energy_manager.mqtt].host = "192.168.1.141"` (Pi5). Les deux doivent passer à `127.0.0.1`.
+> - Il n'existe **pas** de section `[mqtt_bridge]` dans `Config.toml` — `portal_id` est dans `[energy_manager]` (ligne 542).
+> - L'arrêt de Docker Mosquitto désactive automatiquement son bridge `nanopi-venus-bridge` — il n'y a donc rien à reconfigurer côté NanoPi.
 
 ---
 
@@ -350,6 +357,21 @@ addr = "0.0.0.0:9001"
   allow_anonymous = true
 ```
 
+### 7.1 Plugin HTTP API — `/etc/rmqtt/plugins/rmqtt-http-api.toml`
+
+> **Sans ce fichier**, le plugin `rmqtt-http-api` se charge mais ne bind aucun port :
+> les vérifications `curl http://localhost:8083/...` du §13.6 échoueront. À créer
+> obligatoirement, sinon retirer `rmqtt-http-api` de `plugins_default_startups`.
+
+```toml
+# Plugin REST de management — utile pour debug ("clients", "subscriptions",
+# "metrics", "stats"). Bind localhost uniquement (pas d'auth → ne pas exposer).
+http_laddr = "127.0.0.1:8083"
+workers = 1
+max_row_limit = 10_000
+message_type = 1
+```
+
 ---
 
 ## 8. Configuration bridge ingress (NanoPi → Pi5)
@@ -606,20 +628,27 @@ mqtt_ver = "v4"
 ```
 
 > **Important** : Remplacer `c0619ab9929a` par le `portal_id` réel du Cerbo GX.
-> Le vérifier dans `Config.toml` section `[mqtt_bridge]` ou avec :
-> `ssh root@192.168.1.120 "dbus -y | grep N/" | head -3`
+> Vérifier dans `Config.toml` section `[energy_manager]` (clé `portal_id`) :
+> ```bash
+> grep '^portal_id' Config.toml
+> # ou côté NanoPi :
+> ssh root@192.168.1.120 "mosquitto_sub -h localhost -t 'N/+/system/0/Serial' -C 1 -W 5"
+> ```
 
 ---
 
-## 10. Service systemd mqtt-broker
+## 10. Services systemd
 
-Créer `/etc/systemd/system/rmqtt-broker.service` :
+### 10.1 Nouveau service `rmqtt-broker.service`
+
+Créer `contrib/rmqtt-broker.service` (versionné dans le dépôt) :
 
 ```ini
 [Unit]
 Description=RMQTT Broker — remplace Mosquitto/Docker sur Pi5
 Documentation=https://github.com/rmqtt/rmqtt
-After=network.target
+After=network-online.target
+Wants=network-online.target
 Before=daly-bms.service energy-manager.service
 StartLimitIntervalSec=0
 
@@ -628,188 +657,364 @@ Type=simple
 User=rmqtt
 Group=rmqtt
 
-ExecStart=/usr/local/bin/rmqttd -c /etc/rmqtt/rmqtt.toml
+ExecStart=/usr/local/bin/rmqttd -f /etc/rmqtt/rmqtt.toml
 
 WorkingDirectory=/var/lib/rmqtt
 
-Environment=RUST_LOG=rmqtt=info
+Environment=RUST_LOG=rmqtt=info,rmqtt_bridge_ingress_mqtt=info,rmqtt_bridge_egress_mqtt=info
 
 Restart=on-failure
 RestartSec=5s
 
 LimitNOFILE=65536
+# 200 Mo : marge confortable pour bridge + retainer + WS (mesuré ~80 Mo en charge)
 MemoryMax=200M
+
+# Sécurité — assez permissif pour pouvoir écrire /var/log/rmqtt et /var/lib/rmqtt
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/rmqtt /var/log/rmqtt
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rmqtt-broker
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Ajouter la dépendance dans `daly-bms.service` :
+> **Pièges connus** :
+> - L'option CLI est `-f` (file) sur rmqttd ≥ 0.20, **pas** `-c`. Vérifier avec `rmqttd --help`.
+> - Ne **pas** ajouter `ProtectSystem=strict` ni `AmbientCapabilities=` (échecs silencieux constatés en migration rumqttd, voir §2.3).
+> - `StartLimitIntervalSec=0` est correct dans `[Unit]` (pas dans `[Service]`).
+
+### 10.2 Patch `contrib/daly-bms.service`
+
+Le fichier actuel (`contrib/daly-bms.service`) n'a aucune dépendance MQTT. Modifier l'en-tête :
 
 ```ini
 [Unit]
-...
+Description=DalyBMS Server — Rust RS485 BMS monitor
+Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
 After=network.target rmqtt-broker.service
+Wants=network.target
 Requires=rmqtt-broker.service
+```
+
+(Le reste du fichier — `[Service]`, `[Install]` — est inchangé.)
+
+### 10.3 Patch `contrib/energy-manager.service`
+
+Le fichier actuel référence `mosquitto.service` (qui n'a jamais existé en tant que service systemd hôte sur le Pi5 — Mosquitto tournait en Docker). Remplacer la ligne `After=` :
+
+```ini
+[Unit]
+Description=Energy Manager — Gestionnaire d'énergie Rust (remplace Node-RED)
+Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
+After=network-online.target rmqtt-broker.service daly-bms.service
+Wants=network-online.target
+Requires=rmqtt-broker.service
+PartOf=daly-bms.service
+```
+
+### 10.4 Déploiement des unités
+
+```bash
+sudo cp contrib/rmqtt-broker.service /etc/systemd/system/
+sudo cp contrib/daly-bms.service     /etc/systemd/system/
+sudo cp contrib/energy-manager.service /etc/systemd/system/
+sudo systemctl daemon-reload
 ```
 
 ---
 
-## 11. Suppression du bridge custom (mqtt-bridge)
+## 11. Retrait de Mosquitto Docker (le vrai « ancien bridge »)
 
-Avec RMQTT, le crate `mqtt-bridge` n'est plus nécessaire. La suppression est propre :
+> ⚠ **Correction vs. version initiale du guide** : il n'existe **pas** de crates
+> `mqtt-bridge` ni `mqtt-broker` dans le workspace, donc rien à retirer dans
+> `Cargo.toml`. Le « bridge custom » à supprimer est en réalité **la
+> configuration bridge dans Mosquitto Docker** (`docker/mosquitto/config/mosquitto.conf`,
+> bloc `connection nanopi-venus-bridge`).
+
+### 11.1 Stopper et supprimer le conteneur
 
 ```bash
-# Sur Pi5 — désactiver et supprimer le service
-sudo systemctl stop mqtt-bridge
-sudo systemctl disable mqtt-bridge
-sudo rm /etc/systemd/system/mqtt-bridge.service
-sudo rm /usr/local/bin/mqtt-bridge
-sudo systemctl daemon-reload
+cd ~/Daly-BMS-Rust
+docker compose -f docker-compose.infra.yml down
+# (ne supprime PAS les volumes — utile pour rollback). Pour purge complète :
+# docker compose -f docker-compose.infra.yml down -v
+docker ps -a | grep mosquitto   # doit être vide
 ```
 
-Dans le `Cargo.toml` du workspace, retirer :
-```toml
-# Supprimer ces lignes :
-"crates/mqtt-bridge",
+### 11.2 Retirer (ou archiver) les fichiers Docker
+
+Une fois la migration validée 24h en production :
+
+```bash
+# Garder une trace dans git plutôt que rm immédiat
+git mv docker-compose.infra.yml docker-compose.infra.yml.bak
+git mv docker/mosquitto         docker/mosquitto.bak
 ```
 
-Et dans `Makefile`, retirer les targets `build-mqtt-arm` liés à `mqtt-bridge`.
+### 11.3 Mettre à jour le Makefile
 
-> Le crate `mqtt-broker` est également supprimé — RMQTT est maintenant le broker.
+Les targets `make up` / `make down` / `make logs` / `make reset` / `make restart` / `make ps` (lignes 47-64 de `Makefile`) deviennent obsolètes. Deux options :
+
+- **Option A (recommandée)** : remplacer par des wrappers `systemctl` :
+  ```makefile
+  up:
+  	sudo systemctl start rmqtt-broker
+  down:
+  	sudo systemctl stop rmqtt-broker
+  logs:
+  	journalctl -u rmqtt-broker -f
+  restart:
+  	sudo systemctl restart rmqtt-broker
+  ps:
+  	systemctl status rmqtt-broker --no-pager
+  ```
+- **Option B** : supprimer les targets et les remplacer par la commande directe dans `CLAUDE.md`.
+
+> Penser aussi à mettre à jour la ligne 5 (`# make up → démarrer l'infra Docker`) et le bloc d'aide ligne 370.
+
+### 11.4 Mettre à jour `CLAUDE.md`
+
+Sections à modifier :
+- Section 1 (Architecture) : remplacer `Docker: mosquitto:1883` par `systemd: rmqtt-broker.service (1883/9001/8083)`.
+- Section 0 (Commandes rapides) : retirer/remplacer la ligne `Docker start/stop/logs : make up / make down / make logs`.
+- Section 8 (Problèmes courants) : ajouter une entrée pour `rmqtt-broker` (`journalctl -u rmqtt-broker -n 50`).
 
 ---
 
 ## 12. Mise à jour Config.toml Pi5
 
-Les sections MQTT dans `Config.toml` doivent pointer vers le broker local (`127.0.0.1:1883`) :
+Les deux sections MQTT actuelles pointent vers des hôtes différents et doivent toutes deux passer à `127.0.0.1` (broker local RMQTT) :
 
+### 12.1 Section `[mqtt]` (daly-bms-server) — ligne ~74
+
+**Avant :**
 ```toml
-# Section principale MQTT (daly-bms-server)
 [mqtt]
-host     = "127.0.0.1"
-port     = 1883
-# Pas de username/password — RMQTT en mode anonymous sur localhost
-
-# Section energy-manager
-[energy_manager]
-  [energy_manager.mqtt]
-  host = "127.0.0.1"
-  port = 1883
-
-# Section mqtt_bridge — SUPPRIMER cette section entière
-# (le bridge est maintenant géré par RMQTT nativement)
-# [mqtt_bridge]    ← à supprimer
+enabled = true
+host = "192.168.1.120"          # ← NanoPi
+port = 1883
+topic_prefix = "santuario/bms"
+publish_interval_sec = 1
+format = "json"
 ```
 
-Après modification :
+**Après :**
+```toml
+[mqtt]
+enabled = true
+host = "127.0.0.1"              # ← RMQTT local (était 192.168.1.120)
+port = 1883
+topic_prefix = "santuario/bms"  # NE PAS CHANGER (utilisé par dbus-mqtt-venus côté NanoPi)
+publish_interval_sec = 1
+format = "json"
+```
+
+### 12.2 Section `[energy_manager.mqtt]` — ligne ~528
+
+**Avant :**
+```toml
+[energy_manager.mqtt]
+host = "192.168.1.141"          # ← Pi5 (loop via interface réseau)
+port = 1883
+keep_alive_secs = 60
+reconnect_delay_secs = 10
+```
+
+**Après :**
+```toml
+[energy_manager.mqtt]
+host = "127.0.0.1"              # ← localhost (était 192.168.1.141)
+port = 1883
+keep_alive_secs = 60
+reconnect_delay_secs = 10
+```
+
+### 12.3 `portal_id` — à laisser tel quel
+
+```toml
+[energy_manager]
+portal_id = "c0619ab9929a"      # Ne pas modifier — utilisé par les bridges RMQTT (§8/§9)
+```
+
+> **Note** : le guide initial mentionnait une section `[mqtt_bridge]` à supprimer.
+> Cette section **n'existe pas** dans le `Config.toml` actuel — rien à faire.
+
+### 12.4 Déployer
+
 ```bash
+# Commit + push depuis machine de dev
+git add Config.toml
+git commit -m "chore(config): broker MQTT local 127.0.0.1 (migration RMQTT)"
+git push -u origin claude/complete-migration-guide-k1iQS
+
+# Sur le Pi5
+make sync
 sudo cp Config.toml /etc/daly-bms/config.toml
+# (les services sont redémarrés à l'étape 8 du déploiement, §13)
 ```
 
 ---
 
 ## 13. Déploiement pas à pas
 
-### Étape 1 — Préparer l'environnement
+> **Convention** : les fichiers de configuration RMQTT sont versionnés dans le dépôt
+> sous `contrib/rmqtt/` (à créer). Ce répertoire ne contient **pas de code Rust** —
+> ce ne doit donc **pas** être un crate du workspace. Structure attendue :
+> ```
+> contrib/
+>   rmqtt-broker.service
+>   rmqtt/
+>     rmqtt.toml
+>     plugins/
+>       rmqtt-http-api.toml
+>       rmqtt-bridge-ingress-mqtt.toml
+>       rmqtt-bridge-egress-mqtt.toml
+> ```
+
+### Étape 0 — Pré-flight (machine de dev)
 
 ```bash
 cd ~/Daly-BMS-Rust
+git checkout claude/complete-migration-guide-k1iQS
+git tag -a v-pre-rmqtt -m "État stable avant migration RMQTT" 2>/dev/null || true
+
+# Vérifier le portal_id (doit valoir c0619ab9929a)
+grep '^portal_id' Config.toml
+
+# Vérifier le binaire rmqttd disponible (sinon §6)
+which rmqttd && rmqttd --version
+```
+
+### Étape 1 — Préparer le Pi5
+
+```bash
+# Sur Pi5
+cd ~/Daly-BMS-Rust
 make sync
 
-# Vérifier que Docker Mosquitto tourne encore
-docker ps | grep mosquitto
+# État actuel
+docker ps | grep mosquitto         # doit afficher dalybms-mosquitto running
+systemctl is-active daly-bms       # active
+systemctl is-active energy-manager # active
 ```
 
-### Étape 2 — Installer RMQTT
+### Étape 2 — Installer le binaire RMQTT (Pi5)
 
+Voir §6. Vérifier :
 ```bash
-# Voir section 6 pour les options d'installation
-# Vérifier :
-rmqttd --version
-# Attendu : rmqttd 0.20.0
+rmqttd --version    # → rmqttd 0.20.0
+rmqttd --help | grep -E '^\s*-[fc]'   # confirmer si l'option config est -f ou -c
 ```
 
-### Étape 3 — Déployer les configurations
+### Étape 3 — Créer utilisateur, répertoires, fichiers de config
 
 ```bash
-sudo mkdir -p /etc/rmqtt/plugins /var/log/rmqtt
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin rmqtt 2>/dev/null || true
+sudo mkdir -p /etc/rmqtt/plugins /var/log/rmqtt /var/lib/rmqtt
 
-# Config principale
-sudo cp crates/rmqtt-broker/rmqtt.toml /etc/rmqtt/rmqtt.toml
-
-# Bridge ingress (NanoPi→Pi5)
-sudo cp crates/rmqtt-broker/plugins/rmqtt-bridge-ingress-mqtt.toml \
-    /etc/rmqtt/plugins/
-
-# Bridge egress (Pi5→NanoPi)
-sudo cp crates/rmqtt-broker/plugins/rmqtt-bridge-egress-mqtt.toml \
-    /etc/rmqtt/plugins/
+# Configs (chemins versionnés dans le dépôt, voir encadré ci-dessus)
+sudo cp contrib/rmqtt/rmqtt.toml                                /etc/rmqtt/rmqtt.toml
+sudo cp contrib/rmqtt/plugins/rmqtt-http-api.toml               /etc/rmqtt/plugins/
+sudo cp contrib/rmqtt/plugins/rmqtt-bridge-ingress-mqtt.toml    /etc/rmqtt/plugins/
+sudo cp contrib/rmqtt/plugins/rmqtt-bridge-egress-mqtt.toml     /etc/rmqtt/plugins/
 
 sudo chown -R rmqtt:rmqtt /etc/rmqtt /var/log/rmqtt /var/lib/rmqtt
+sudo chmod 750 /var/lib/rmqtt /var/log/rmqtt
 ```
 
-### Étape 4 — Arrêter Docker Mosquitto
+### Étape 4 — Déployer les unités systemd
 
 ```bash
-# ⚠ Ne pas le faire avant que RMQTT soit prêt à démarrer
-docker stop dalybms-mosquitto
-docker rm dalybms-mosquitto
-# Vérifier que le port est libéré
-ss -tlnp | grep 1883
-# Doit être vide
-```
-
-### Étape 5 — Démarrer RMQTT
-
-```bash
+sudo cp contrib/rmqtt-broker.service   /etc/systemd/system/
+sudo cp contrib/daly-bms.service       /etc/systemd/system/
+sudo cp contrib/energy-manager.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable rmqtt-broker
-sudo systemctl start rmqtt-broker
-sleep 5
-
-# Vérifier
-systemctl status rmqtt-broker --no-pager
-journalctl -u rmqtt-broker -n 30 --no-pager
 ```
 
-### Étape 6 — Vérifier le broker
+### Étape 5 — Mettre à jour `Config.toml` (cf. §12)
 
 ```bash
-# TCP :1883 actif ?
-ss -tlnp | grep 1883
+sudo cp Config.toml /etc/daly-bms/config.toml
+```
+Ne **pas** redémarrer les services maintenant : Docker Mosquitto occupe encore :1883.
 
-# API HTTP actif ?
-curl -s http://localhost:8083/api/v1/status | jq .
+### Étape 6 — Arrêter Docker Mosquitto **et** démarrer RMQTT (fenêtre courte)
 
-# Test connexion MQTT locale
-mosquitto_sub -h localhost -p 1883 -t "test/#" -v &
-mosquitto_pub -h localhost -p 1883 -t "test/ping" -m "hello"
+```bash
+# Stopper proprement les clients (ils vont se reconnecter automatiquement)
+sudo systemctl stop daly-bms energy-manager
+
+# Stopper Docker Mosquitto (libère :1883 et :9001)
+docker compose -f docker-compose.infra.yml down
+ss -tlnp | grep -E ':(1883|9001)\b'   # ← doit être vide
+
+# Démarrer RMQTT
+sudo systemctl start rmqtt-broker
+sleep 3
+
+# Vérification
+systemctl status rmqtt-broker --no-pager
+journalctl -u rmqtt-broker -n 50 --no-pager
+ss -tlnp | grep -E ':(1883|9001|8083)\b'   # 3 lignes attendues
+```
+
+### Étape 7 — Vérifier le broker
+
+```bash
+# API HTTP (si rmqtt-http-api.toml a bien été déployé, cf. §7.1)
+curl -s http://127.0.0.1:8083/api/v1/stats | head
+
+# Test pub/sub local
+mosquitto_sub -h 127.0.0.1 -p 1883 -t "test/#" -v -C 1 &
+sleep 1
+mosquitto_pub -h 127.0.0.1 -p 1883 -t "test/ping" -m "hello"
+wait
 # Attendu : test/ping hello
 ```
 
-### Étape 7 — Vérifier les bridges
+### Étape 8 — Vérifier les bridges
 
 ```bash
-# Bridge ingress (NanoPi→Pi5) actif ?
-# Sur Pi5, souscrire à N/{portal}/#
-mosquitto_sub -h localhost -p 1883 -t "N/#" -v
-# Doit voir les données Venus OS arriver
+# Bridge INGRESS (NanoPi → Pi5) — Venus OS doit arriver localement
+timeout 10 mosquitto_sub -h 127.0.0.1 -p 1883 -t "N/c0619ab9929a/#" -v | head
 
-# Bridge egress (Pi5→NanoPi) actif ?
-# Sur NanoPi, souscrire à santuario/bms/#
-ssh root@192.168.1.120 "mosquitto_sub -h localhost -t 'santuario/bms/#' -v -C 3"
-# Doit voir les données BMS arriver depuis Pi5
+# Bridge EGRESS (Pi5 → NanoPi) — publication test depuis Pi5
+mosquitto_pub -h 127.0.0.1 -p 1883 -t "santuario/bms/test" -m '{"probe":1}' -q 1
+ssh root@192.168.1.120 \
+  "timeout 5 mosquitto_sub -h localhost -t 'santuario/bms/test' -v -C 1"
+# Attendu : santuario/bms/test {"probe":1}
 ```
 
-### Étape 8 — Déployer daly-bms-server et energy-manager
+### Étape 9 — Redémarrer les services métier
+
+```bash
+sudo systemctl start daly-bms
+sleep 5
+journalctl -u daly-bms -n 30 --no-pager | grep -iE 'mqtt|connect'
+
+sudo systemctl start energy-manager
+sleep 5
+journalctl -u energy-manager -n 30 --no-pager | grep -iE 'mqtt|connect'
+```
+
+### Étape 10 — (Optionnel) Recompiler si binaire absent
+
+Les binaires existants restent compatibles (ils lisent simplement `host = "127.0.0.1"`).
+Recompiler n'est nécessaire **que** si une modification de code accompagne la migration :
 
 ```bash
 make build-arm
 sudo systemctl stop daly-bms
 sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/
 sudo systemctl start daly-bms
-sleep 5
 
 make build-energy-arm
 sudo systemctl stop energy-manager
@@ -905,7 +1110,7 @@ systemctl status daly-bms energy-manager
 □ Créer un tag git : git tag -a v-pre-rmqtt -m "avant migration RMQTT"
 □ Noter l'heure : si problème > 30min → rollback immédiat
 □ Vérifier que NanoPi est accessible : ping 192.168.1.120
-□ Vérifier le portal_id dans Config.toml [mqtt_bridge]
+□ Vérifier le portal_id dans Config.toml section [energy_manager] (clé portal_id)
 □ Préparer le binaire rmqttd en avance (ne pas compiler pendant la migration)
 ```
 

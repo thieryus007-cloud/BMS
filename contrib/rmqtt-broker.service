@@ -1,0 +1,37 @@
+[Unit]
+Description=RMQTT Broker — remplace Mosquitto/Docker sur Pi5
+Documentation=https://github.com/rmqtt/rmqtt
+After=network-online.target
+Wants=network-online.target
+Before=daly-bms.service energy-manager.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=rmqtt
+Group=rmqtt
+
+ExecStart=/usr/local/bin/rmqttd -f /etc/rmqtt/rmqtt.toml
+
+WorkingDirectory=/var/lib/rmqtt
+
+Environment=RUST_LOG=rmqtt=info,rmqtt_bridge_ingress_mqtt=info,rmqtt_bridge_egress_mqtt=info
+
+Restart=on-failure
+RestartSec=5s
+
+LimitNOFILE=65536
+MemoryMax=200M
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/rmqtt /var/log/rmqtt
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rmqtt-broker
+
+[Install]
+WantedBy=multi-user.target

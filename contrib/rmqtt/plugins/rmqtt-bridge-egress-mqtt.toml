@@ -1,0 +1,162 @@
+# =============================================================================
+# Bridge EGRESS : Pi5 local → NanoPi (192.168.1.120)
+# Voir docs/rmqtt-migration-guide.md §9 — RÈGLE ANTI-BOUCLE
+#
+# Tous les topics santuario/* viennent de Pi5, JAMAIS de NanoPi.
+# =============================================================================
+
+[[bridges]]
+enable = true
+name = "pi5-to-nanopi"
+client_id_prefix = "dalybms-bridge-out"
+server = "192.168.1.120:1883"
+
+connect_timeout = "20s"
+keepalive = "60s"
+reconnect_interval = "5s"
+message_channel_capacity = 1000
+mqtt_ver = "v4"
+
+  [bridges.options]
+  clean_session = true
+  concurrent_client_limit = 1
+
+  # BMS → battery.mqtt_1 / battery.mqtt_2 (QoS 1 + retain pour reconnexion Venus)
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "santuario/bms/#"
+  qos = 1
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 1
+  retain = true
+
+  # ET112 Micro-Onduleurs → pvinverter.mqtt_7
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "santuario/pvinverter/#"
+  qos = 0
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 0
+  retain = true
+
+  # ET112 Maison + Réseau → heatpump.mqtt_8/9
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "santuario/heatpump/#"
+  qos = 0
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 0
+  retain = true
+
+  # Température extérieure → temperature.mqtt_1
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "santuario/heat/#"
+  qos = 0
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 0
+  retain = true
+
+  # ATS CHINT + Tongou → switch.mqtt_1..6
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "santuario/switch/#"
+  qos = 0
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 0
+  retain = true
+
+  # Compteurs réseau → grid.mqtt_n
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "santuario/grid/#"
+  qos = 0
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 0
+  retain = true
+
+  # Irradiance PRALRAN → meteo
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "santuario/meteo/#"
+  qos = 0
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 0
+  retain = true
+
+  # Platform Pi5
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "santuario/platform/#"
+  qos = 0
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 0
+  retain = false
+
+  # Inverter agrégé
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "santuario/inverter/#"
+  qos = 0
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 0
+  retain = false
+
+  # System
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "santuario/system/#"
+  qos = 0
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 0
+  retain = false
+
+  # Venus OS commandes (écriture D-Bus) — QoS 1
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "W/c0619ab9929a/#"
+  qos = 1
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 1
+  retain = false
+
+  # Venus OS keepalive (lecture D-Bus) — QoS 1
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "R/c0619ab9929a/#"
+  qos = 1
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 1
+  retain = false
+
+  # Commandes ON/OFF Tongou depuis Pi5 web
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "cmnd/#"
+  qos = 1
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 1
+  retain = false
+
+  # Commandes RPC Shelly (Pi5 → Shelly via NanoPi)
+  [[bridges.entries]]
+  [bridges.entries.local]
+  topic = "shellypro2pm-ec62608840a4/rpc"
+  qos = 0
+  [bridges.entries.remote]
+  topic = "${local.topic}"
+  qos = 0
+  retain = false
