@@ -17,7 +17,7 @@ ExecStart=/usr/local/bin/mqtt-broker \
 
 WorkingDirectory=/var/lib/mqtt-broker
 
-Environment=RUST_LOG=info
+Environment=RUST_LOG=info,rumqttd=warn
 
 Restart=on-failure
 RestartSec=5s
@@ -27,19 +27,9 @@ StartLimitIntervalSec=0
 StateDirectory=mqtt-broker
 StateDirectoryMode=0750
 
-# Ports MQTT accessibles depuis le réseau local
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-
-# Sécurité
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/lib/mqtt-broker
-PrivateTmp=true
-
 # Limits
 LimitNOFILE=65536
-MemoryMax=100M
+MemoryMax=200M
 
 [Install]
 WantedBy=multi-user.target

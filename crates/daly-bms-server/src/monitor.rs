@@ -83,7 +83,7 @@ pub async fn run_monitor_agent(state: AppState) {
 async fn collect_snapshot(_state: &AppState, net_rx_bps: u64, net_tx_bps: u64) -> MonitorSnapshot {
     let mut services         = Vec::new();
     let mut network_services = Vec::new();
-    let mut auto_actions     = Vec::new();
+    let auto_actions: Vec<String> = Vec::new();
 
     // ── Services systemd ──────────────────────────────────────────────────────
     let daly_status = check_systemd_service("daly-bms").await;

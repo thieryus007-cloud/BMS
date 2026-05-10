@@ -72,11 +72,13 @@ if [ "$SKIP_MQTT" = false ]; then
   sudo chown mqtt-broker:mqtt-broker /var/lib/mqtt-broker
   sudo chmod 750 /var/lib/mqtt-broker
 
-  # Déployer la config broker si absente
-  if [ ! -f /etc/daly-bms/mqtt-broker.toml ]; then
-    sudo cp crates/mqtt-broker/mqtt-broker.toml /etc/daly-bms/mqtt-broker.toml
-    info "mqtt-broker.toml déployé dans /etc/daly-bms/"
-  fi
+  # S'assurer que mqtt-broker peut lire /etc/daly-bms/
+  sudo chmod o+rx /etc/daly-bms/ 2>/dev/null || true
+
+  # Déployer/mettre à jour la config broker (toujours, pas seulement si absente)
+  sudo cp crates/mqtt-broker/mqtt-broker.toml /etc/daly-bms/mqtt-broker.toml
+  sudo chmod 644 /etc/daly-bms/mqtt-broker.toml
+  info "mqtt-broker.toml déployé dans /etc/daly-bms/"
 
   # Déployer le binaire
   sudo systemctl stop mqtt-bridge 2>/dev/null || true
@@ -84,13 +86,11 @@ if [ "$SKIP_MQTT" = false ]; then
   sudo cp "${ARM_DIR}/mqtt-broker" /usr/local/bin/mqtt-broker
   sudo chmod 755 /usr/local/bin/mqtt-broker
 
-  # Installer l'unité systemd si absente
-  if [ ! -f /etc/systemd/system/mqtt-broker.service ]; then
-    sudo cp contrib/mqtt-broker.service /etc/systemd/system/
-    sudo systemctl daemon-reload
-    sudo systemctl enable mqtt-broker
-    info "Service mqtt-broker enregistré"
-  fi
+  # Installer/mettre à jour l'unité systemd
+  sudo cp contrib/mqtt-broker.service /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable mqtt-broker 2>/dev/null || true
+  info "Service mqtt-broker enregistré"
 
   sudo systemctl start mqtt-broker
   sleep 3
@@ -98,7 +98,9 @@ if [ "$SKIP_MQTT" = false ]; then
   if systemctl is-active --quiet mqtt-broker; then
     info "mqtt-broker actif (TCP :1883, WS :9001, metrics :8082)"
   else
-    error "mqtt-broker n'a pas démarré — vérifier : journalctl -u mqtt-broker -n 30"
+    warn "mqtt-broker n'a pas démarré — logs :"
+    journalctl -u mqtt-broker -n 20 --no-pager || true
+    error "Arrêt — corriger mqtt-broker avant de continuer"
   fi
 
   # ── 6. Déploiement mqtt-bridge ─────────────────────────────────────────────

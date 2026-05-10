@@ -3,36 +3,33 @@
 # Déployer sur Pi5 : sudo cp mqtt-broker.toml /etc/daly-bms/mqtt-broker.toml
 # =============================================================================
 
-# Stockage persistence (retained messages + segments QoS 1/2)
-# Créer : sudo mkdir -p /var/lib/mqtt-broker && sudo chown mqtt-broker:mqtt-broker /var/lib/mqtt-broker
 [router]
-id                     = 0
-dir                    = "/var/lib/mqtt-broker"
-max_connections        = 1000
+id                        = 0
+max_connections           = 1000
 max_outgoing_packet_count = 200
-max_segment_size       = 104857600   # 100 MB
-max_segment_count      = 10
+max_segment_size          = 104857600
+max_segment_count         = 10
 
 # ── Listener MQTT standard TCP :1883 ─────────────────────────────────────────
-[v4.1]
-name                   = "v4-1"
-listen                 = "0.0.0.0:1883"
+[v4.tcp]
+name                     = "tcp"
+listen                   = "0.0.0.0:1883"
 next_connection_delay_ms = 1
 
-  [v4.1.connections]
-  connection_timeout_ms  = 5000
-  max_payload_size       = 1048576   # 1 MB — snapshots JSON BMS
-  max_inflight_count     = 200
-  dynamic_filters        = true
+  [v4.tcp.connections]
+  connection_timeout_ms = 5000
+  max_payload_size      = 1048576
+  max_inflight_count    = 200
+  dynamic_filters       = true
 
 # ── Listener WebSocket MQTT :9001 ─────────────────────────────────────────────
-[ws.1]
-name                   = "ws-1"
-listen                 = "0.0.0.0:9001"
+[ws.websocket]
+name                     = "websocket"
+listen                   = "0.0.0.0:9001"
 next_connection_delay_ms = 1
 
-  [ws.1.connections]
-  connection_timeout_ms  = 5000
-  max_payload_size       = 1048576
-  max_inflight_count     = 200
-  dynamic_filters        = true
+  [ws.websocket.connections]
+  connection_timeout_ms = 5000
+  max_payload_size      = 1048576
+  max_inflight_count    = 200
+  dynamic_filters       = true
