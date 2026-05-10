@@ -1,0 +1,41 @@
+[package]
+name        = "energy-manager"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+rust-version.workspace = true
+description = "Energy management automation — replaces Node-RED flows"
+
+[[bin]]
+name = "energy-manager"
+path = "src/main.rs"
+
+[dependencies]
+# ── Workspace ─────────────────────────────────────────────────────────────────
+tokio             = { workspace = true }
+serde             = { workspace = true }
+serde_json        = { workspace = true }
+toml              = { workspace = true }
+anyhow            = { workspace = true }
+thiserror         = { workspace = true }
+tracing           = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum              = { workspace = true }
+tower-http        = { workspace = true }
+rumqttc           = { workspace = true }
+reqwest           = { workspace = true }
+chrono            = { workspace = true }
+futures           = { workspace = true }
+uuid              = { workspace = true }
+bytes             = { workspace = true }
+
+# ── Rule engine ────────────────────────────────────────────────────────────────
+rust-rule-engine = { workspace = true }
+
+# ── Crate-specific ─────────────────────────────────────────────────────────────
+dotenvy = "0.15"
+
+# ── Monitoring ────────────────────────────────────────────────────────────────
+sd-notify     = { workspace = true }
+tokio-metrics = { workspace = true }

@@ -1,0 +1,653 @@
+{% extends "base.html" %}
+
+{% block title %}Paramètres — ESS Monitor{% endblock %}
+{% block page_title %}Paramètres{% endblock %}
+{% block nav_settings %}active{% endblock %}
+
+{% block content %}
+<style>
+  .settings-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .settings-header h1 { font-size: 1.3rem; font-weight: 700; }
+
+  /* ── Panneau BMS ──────────────────────────────────────────────────── */
+  .bms-settings-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+  }
+  .bms-settings-hdr {
+    background: #1a5f8a;
+    padding: 0.6rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .bms-settings-hdr-title {
+    font-weight: 700;
+    color: #fff;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .bms-settings-hdr-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.8);
+  }
+  .fw-badge {
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.25);
+    padding: 0.1rem 0.5rem;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.68rem;
+  }
+
+  /* ── Loading / Error ──────────────────────────────────────────────── */
+  .settings-loading {
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .settings-error {
+    padding: 1rem 1.5rem;
+    color: var(--red);
+    font-size: 0.82rem;
+    background: rgba(207,34,46,0.05);
+    border-top: 1px solid rgba(207,34,46,0.2);
+  }
+
+  /* ── Sections de paramètres ───────────────────────────────────────── */
+  .settings-section {
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--border);
+  }
+  .settings-section:first-of-type { border-top: none; }
+  .section-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--surface2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .edit-btn {
+    font-size: 0.68rem;
+    color: var(--accent);
+    background: none;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.15rem 0.55rem;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.15s;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .edit-btn:hover { background: rgba(88,166,255,0.1); }
+
+  /* ── Grille de valeurs ──────────────────────────────────────────────── */
+  .params-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.5rem 1rem;
+  }
+  .param-item { display: flex; flex-direction: column; gap: 0.1rem; }
+  .param-label { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; }
+  .param-value { font-size: 0.88rem; font-weight: 600; font-family: monospace; color: var(--text); }
+
+  /* ── Formulaire d'édition inline ────────────────────────────────────── */
+  .edit-form {
+    display: none;
+    margin-top: 0.75rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+  }
+  .edit-form.visible { display: block; }
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.5rem 1rem;
+    margin-bottom: 0.75rem;
+  }
+  .form-field { display: flex; flex-direction: column; gap: 0.2rem; }
+  .form-field label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; }
+  .form-field input {
+    font-size: 0.82rem;
+    font-family: monospace;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    width: 100%;
+  }
+  .form-field input:focus { outline: none; border-color: var(--accent); }
+  .pwd-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .pwd-row input {
+    font-size: 0.82rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--text);
+    width: 140px;
+  }
+  .save-btn {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: none;
+    border-radius: 4px;
+    padding: 0.35rem 0.9rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .save-btn:hover { background: #0757ba; }
+  .cancel-btn {
+    font-size: 0.78rem;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.35rem 0.75rem;
+    cursor: pointer;
+  }
+  .form-result {
+    margin-top: 0.5rem;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 4px;
+    display: none;
+  }
+  .form-result.ok   { background: rgba(26,127,55,0.1); color: var(--green); display: block; }
+  .form-result.err  { background: rgba(207,34,46,0.1); color: var(--red);   display: block; }
+
+  .info-note {
+    margin: 0.5rem 0 0;
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  /* ── Bouton Reset ─────────────────────────────────────────────────── */
+  .btn-reset {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--red);
+    background: none;
+    border: 1px solid var(--red);
+    border-radius: 4px;
+    padding: 0.35rem 0.9rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-reset:hover { background: rgba(207,34,46,0.08); }
+
+  /* ── Modal Reset ──────────────────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .modal-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+    width: 100%; max-width: 420px;
+    padding: 1.25rem 1.5rem 1rem;
+  }
+  .modal-title { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+  .modal-label { font-size: 0.72rem; color: var(--muted); display: block; margin-bottom: 0.25rem; }
+  .modal-input {
+    width: 100%; font-size: 0.85rem; font-family: monospace;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: var(--surface2); color: var(--text);
+  }
+  .modal-input:focus { outline: none; border-color: var(--accent); }
+  .modal-footer { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1rem; }
+  .btn-modal-cancel {
+    font-size: 0.78rem; color: var(--muted); background: none;
+    border: 1px solid var(--border); border-radius: 4px; padding: 0.35rem 0.75rem; cursor: pointer;
+  }
+  .btn-modal-confirm {
+    font-size: 0.78rem; font-weight: 600; color: #fff;
+    border: none; border-radius: 4px; padding: 0.35rem 0.9rem; cursor: pointer;
+  }
+</style>
+
+<div class="settings-header">
+  <h1>⚙️ Paramètres BMS</h1>
+  <span style="font-size:0.8rem;color:var(--muted)">Lecture et modification des seuils de protection</span>
+</div>
+
+{% if bms_list.is_empty() %}
+<div class="card" style="text-align:center;padding:3rem;color:var(--muted)">
+  <div style="font-size:2rem;margin-bottom:0.75rem">🔌</div>
+  <div>Aucun BMS détecté — démarrez le polling ou le simulateur.</div>
+</div>
+{% else %}
+
+{% for bms in bms_list %}
+<div class="bms-settings-panel">
+  {# ── En-tête ─────────────────────────────────────────────── #}
+  <div class="bms-settings-hdr">
+    <div class="bms-settings-hdr-title">🔋 {{ bms.name }}</div>
+    <div class="bms-settings-hdr-right">
+      {% if !bms.firmware_sw.is_empty() %}
+        <span class="fw-badge">SW: {{ bms.firmware_sw }}</span>
+      {% endif %}
+      {% if !bms.firmware_hw.is_empty() %}
+        <span class="fw-badge">HW: {{ bms.firmware_hw }}</span>
+      {% endif %}
+      <span style="color:rgba(255,255,255,0.5)">{{ bms.address_hex }}</span>
+    </div>
+  </div>
+
+  {# ── Corps : chargement JS ──────────────────────────────── #}
+  <div id="settings-body-{{ bms.address }}" class="settings-loading">
+    Chargement des paramètres…
+  </div>
+</div>
+{% endfor %}
+
+<p class="info-note">
+  💡 Mot de passe requis pour les modifications : <code>12345678</code> (mot de passe Daly par défaut).
+  Certains BMS n'envoient pas de confirmation — vérifiez la valeur après modification.
+</p>
+{% endif %}
+
+{# ─── Modal Reset BMS (partagé entre tous les BMS) ─────────────────────────── #}
+<div id="modal-reset-settings" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeResetModal()">
+  <div class="modal-box">
+    <div class="modal-title" style="color:var(--red)">⚠ Reset BMS</div>
+    <div>
+      <p style="color:var(--red);font-size:0.8rem;background:rgba(207,34,46,0.07);border:1px solid rgba(207,34,46,0.25);border-radius:4px;padding:0.6rem 0.75rem;margin-bottom:0.75rem">
+        Cette opération réinitialise le BMS. Les paramètres sont conservés mais la communication sera interrompue quelques secondes.
+      </p>
+      <label class="modal-label">Mot de passe Daly</label>
+      <input type="password" id="rst-password" value="12345678" class="modal-input" autocomplete="off">
+      <label class="modal-label" style="margin-top:0.75rem;display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+        <input type="checkbox" id="rst-confirm" style="width:auto">
+        Je confirme le reset de ce BMS
+      </label>
+      <div id="rst-result" style="margin-top:0.6rem;min-height:1.2em;font-size:0.75rem"></div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeResetModal()" class="btn-modal-cancel">Annuler</button>
+      <button onclick="submitReset()" class="btn-modal-confirm" style="background:var(--red)">Reset</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ─── Chargement et affichage des paramètres ──────────────────────────────────
+const BMS_LIST = [
+{% for bms in bms_list %}
+  { addr: {{ bms.address }}, hex: "{{ bms.address_hex }}", name: "{{ bms.name }}" },
+{% endfor %}
+];
+
+function fmt(v, unit, decimals) {
+  if (v === undefined || v === null) return '—';
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return isNaN(n) ? '—' : n.toFixed(decimals || 0) + ' ' + (unit || '');
+}
+
+function renderSettings(addr, s) {
+  const body = document.getElementById('settings-body-' + addr);
+  if (!body) return;
+
+  const cap_ah = s.rated_capacity_mah ? (s.rated_capacity_mah / 1000).toFixed(1) + ' Ah' : '—';
+  const nom_mv = s.nominal_cell_mv ? s.nominal_cell_mv + ' mV' : '—';
+
+  body.innerHTML = `
+    <!-- ── Capacité nominale ── -->
+    <div class="settings-section">
+      <div class="section-title">
+        <span>Capacité nominale (0x50 — lecture seule)</span>
+      </div>
+      <div class="params-grid">
+        <div class="param-item"><span class="param-label">Capacité pack</span><span class="param-value">${cap_ah}</span></div>
+        <div class="param-item"><span class="param-label">Tension nominale cellule</span><span class="param-value">${nom_mv}</span></div>
+      </div>
+    </div>
+
+    <!-- ── Balancing ── -->
+    <div class="settings-section">
+      <div class="section-title">
+        <span>Seuils de balancing (0x5F)</span>
+        <button class="edit-btn" onclick="toggleForm('bal', ${addr})">Modifier</button>
+      </div>
+      <div class="params-grid">
+        <div class="param-item"><span class="param-label">Tension d'activation</span><span class="param-value" id="bal-act-${addr}">${fmt(s.balancing_activation_mv, 'mV')}</span></div>
+        <div class="param-item"><span class="param-label">Delta acceptable</span><span class="param-value" id="bal-dlt-${addr}">${fmt(s.balancing_delta_mv, 'mV')}</span></div>
+      </div>
+      <div class="edit-form" id="form-bal-${addr}">
+        <div class="form-grid">
+          <div class="form-field"><label>Activation (mV)</label><input type="number" id="inp-bal-act-${addr}" value="${s.balancing_activation_mv || 0}"></div>
+          <div class="form-field"><label>Delta (mV)</label><input type="number" id="inp-bal-dlt-${addr}" value="${s.balancing_delta_mv || 0}"></div>
+        </div>
+        <div class="pwd-row">
+          <input type="password" placeholder="Mot de passe" id="pwd-bal-${addr}">
+          <button class="save-btn" onclick="saveBalancing(${addr})">Enregistrer</button>
+          <button class="cancel-btn" onclick="toggleForm('bal', ${addr})">Annuler</button>
+        </div>
+        <div class="form-result" id="res-bal-${addr}"></div>
+      </div>
+    </div>
+
+    <!-- ── Alarmes tension cellule ── -->
+    <div class="settings-section">
+      <div class="section-title">
+        <span>Seuils alarme tension cellule (0x59)</span>
+        <button class="edit-btn" onclick="toggleForm('cv', ${addr})">Modifier</button>
+      </div>
+      <div class="params-grid">
+        <div class="param-item"><span class="param-label">Sur-tension L1</span><span class="param-value" id="cv-h1-${addr}">${fmt(s.cell_high_v_l1_mv, 'mV')}</span></div>
+        <div class="param-item"><span class="param-label">Sur-tension L2</span><span class="param-value" id="cv-h2-${addr}">${fmt(s.cell_high_v_l2_mv, 'mV')}</span></div>
+        <div class="param-item"><span class="param-label">Sous-tension L1</span><span class="param-value" id="cv-l1-${addr}">${fmt(s.cell_low_v_l1_mv, 'mV')}</span></div>
+        <div class="param-item"><span class="param-label">Sous-tension L2</span><span class="param-value" id="cv-l2-${addr}">${fmt(s.cell_low_v_l2_mv, 'mV')}</span></div>
+      </div>
+      <div class="edit-form" id="form-cv-${addr}">
+        <div class="form-grid">
+          <div class="form-field"><label>Sur-tension L1 (mV)</label><input type="number" id="inp-cv-h1-${addr}" value="${s.cell_high_v_l1_mv || 0}"></div>
+          <div class="form-field"><label>Sur-tension L2 (mV)</label><input type="number" id="inp-cv-h2-${addr}" value="${s.cell_high_v_l2_mv || 0}"></div>
+          <div class="form-field"><label>Sous-tension L1 (mV)</label><input type="number" id="inp-cv-l1-${addr}" value="${s.cell_low_v_l1_mv || 0}"></div>
+          <div class="form-field"><label>Sous-tension L2 (mV)</label><input type="number" id="inp-cv-l2-${addr}" value="${s.cell_low_v_l2_mv || 0}"></div>
+        </div>
+        <div class="pwd-row">
+          <input type="password" placeholder="Mot de passe" id="pwd-cv-${addr}">
+          <button class="save-btn" onclick="saveCellVoltAlarms(${addr})">Enregistrer</button>
+          <button class="cancel-btn" onclick="toggleForm('cv', ${addr})">Annuler</button>
+        </div>
+        <div class="form-result" id="res-cv-${addr}"></div>
+      </div>
+    </div>
+
+    <!-- ── Alarmes tension pack ── -->
+    <div class="settings-section">
+      <div class="section-title">
+        <span>Seuils alarme tension pack (0x5A)</span>
+        <button class="edit-btn" onclick="toggleForm('pv', ${addr})">Modifier</button>
+      </div>
+      <div class="params-grid">
+        <div class="param-item"><span class="param-label">Sur-tension L1</span><span class="param-value" id="pv-h1-${addr}">${fmt(s.pack_high_v_l1_dv, '', 0)} × 0.1V = ${s.pack_high_v_l1_dv ? (s.pack_high_v_l1_dv/10).toFixed(1)+'V' : '—'}</span></div>
+        <div class="param-item"><span class="param-label">Sur-tension L2</span><span class="param-value" id="pv-h2-${addr}">${s.pack_high_v_l2_dv ? (s.pack_high_v_l2_dv/10).toFixed(1)+'V' : '—'}</span></div>
+        <div class="param-item"><span class="param-label">Sous-tension L1</span><span class="param-value" id="pv-l1-${addr}">${s.pack_low_v_l1_dv ? (s.pack_low_v_l1_dv/10).toFixed(1)+'V' : '—'}</span></div>
+        <div class="param-item"><span class="param-label">Sous-tension L2</span><span class="param-value" id="pv-l2-${addr}">${s.pack_low_v_l2_dv ? (s.pack_low_v_l2_dv/10).toFixed(1)+'V' : '—'}</span></div>
+      </div>
+      <div class="edit-form" id="form-pv-${addr}">
+        <div class="form-grid">
+          <div class="form-field"><label>Sur-tension L1 (0.1V)</label><input type="number" id="inp-pv-h1-${addr}" value="${s.pack_high_v_l1_dv || 0}"></div>
+          <div class="form-field"><label>Sur-tension L2 (0.1V)</label><input type="number" id="inp-pv-h2-${addr}" value="${s.pack_high_v_l2_dv || 0}"></div>
+          <div class="form-field"><label>Sous-tension L1 (0.1V)</label><input type="number" id="inp-pv-l1-${addr}" value="${s.pack_low_v_l1_dv || 0}"></div>
+          <div class="form-field"><label>Sous-tension L2 (0.1V)</label><input type="number" id="inp-pv-l2-${addr}" value="${s.pack_low_v_l2_dv || 0}"></div>
+        </div>
+        <div class="pwd-row">
+          <input type="password" placeholder="Mot de passe" id="pwd-pv-${addr}">
+          <button class="save-btn" onclick="savePackVoltAlarms(${addr})">Enregistrer</button>
+          <button class="cancel-btn" onclick="toggleForm('pv', ${addr})">Annuler</button>
+        </div>
+        <div class="form-result" id="res-pv-${addr}"></div>
+      </div>
+    </div>
+
+    <!-- ── Alarmes courant ── -->
+    <div class="settings-section">
+      <div class="section-title">
+        <span>Seuils alarme courant (0x5B)</span>
+        <button class="edit-btn" onclick="toggleForm('ci', ${addr})">Modifier</button>
+      </div>
+      <div class="params-grid">
+        <div class="param-item"><span class="param-label">Sur-courant CHG L1</span><span class="param-value" id="ci-c1-${addr}">${fmt(s.chg_high_a_l1, 'A', 1)}</span></div>
+        <div class="param-item"><span class="param-label">Sur-courant CHG L2</span><span class="param-value" id="ci-c2-${addr}">${fmt(s.chg_high_a_l2, 'A', 1)}</span></div>
+        <div class="param-item"><span class="param-label">Sur-courant DCH L1</span><span class="param-value" id="ci-d1-${addr}">${fmt(s.dch_high_a_l1, 'A', 1)}</span></div>
+        <div class="param-item"><span class="param-label">Sur-courant DCH L2</span><span class="param-value" id="ci-d2-${addr}">${fmt(s.dch_high_a_l2, 'A', 1)}</span></div>
+      </div>
+      <div class="edit-form" id="form-ci-${addr}">
+        <div class="form-grid">
+          <div class="form-field"><label>CHG max L1 (A)</label><input type="number" step="0.1" id="inp-ci-c1-${addr}" value="${s.chg_high_a_l1 || 0}"></div>
+          <div class="form-field"><label>CHG max L2 (A)</label><input type="number" step="0.1" id="inp-ci-c2-${addr}" value="${s.chg_high_a_l2 || 0}"></div>
+          <div class="form-field"><label>DCH max L1 (A)</label><input type="number" step="0.1" id="inp-ci-d1-${addr}" value="${s.dch_high_a_l1 || 0}"></div>
+          <div class="form-field"><label>DCH max L2 (A)</label><input type="number" step="0.1" id="inp-ci-d2-${addr}" value="${s.dch_high_a_l2 || 0}"></div>
+        </div>
+        <div class="pwd-row">
+          <input type="password" placeholder="Mot de passe" id="pwd-ci-${addr}">
+          <button class="save-btn" onclick="saveCurrentAlarms(${addr})">Enregistrer</button>
+          <button class="cancel-btn" onclick="toggleForm('ci', ${addr})">Annuler</button>
+        </div>
+        <div class="form-result" id="res-ci-${addr}"></div>
+      </div>
+    </div>
+
+    <!-- ── Alarmes delta ── -->
+    <div class="settings-section">
+      <div class="section-title">
+        <span>Seuils alarme déséquilibre (0x5E)</span>
+        <button class="edit-btn" onclick="toggleForm('da', ${addr})">Modifier</button>
+      </div>
+      <div class="params-grid">
+        <div class="param-item"><span class="param-label">Delta tension L1</span><span class="param-value" id="da-v1-${addr}">${fmt(s.cell_delta_v_l1_mv, 'mV')}</span></div>
+        <div class="param-item"><span class="param-label">Delta tension L2</span><span class="param-value" id="da-v2-${addr}">${fmt(s.cell_delta_v_l2_mv, 'mV')}</span></div>
+        <div class="param-item"><span class="param-label">Delta temp L1</span><span class="param-value" id="da-t1-${addr}">${fmt(s.temp_delta_l1, '°C')}</span></div>
+        <div class="param-item"><span class="param-label">Delta temp L2</span><span class="param-value" id="da-t2-${addr}">${fmt(s.temp_delta_l2, '°C')}</span></div>
+      </div>
+      <div class="edit-form" id="form-da-${addr}">
+        <div class="form-grid">
+          <div class="form-field"><label>Delta tension L1 (mV)</label><input type="number" id="inp-da-v1-${addr}" value="${s.cell_delta_v_l1_mv || 0}"></div>
+          <div class="form-field"><label>Delta tension L2 (mV)</label><input type="number" id="inp-da-v2-${addr}" value="${s.cell_delta_v_l2_mv || 0}"></div>
+          <div class="form-field"><label>Delta temp L1 (°C)</label><input type="number" id="inp-da-t1-${addr}" value="${s.temp_delta_l1 || 0}"></div>
+          <div class="form-field"><label>Delta temp L2 (°C)</label><input type="number" id="inp-da-t2-${addr}" value="${s.temp_delta_l2 || 0}"></div>
+        </div>
+        <div class="pwd-row">
+          <input type="password" placeholder="Mot de passe" id="pwd-da-${addr}">
+          <button class="save-btn" onclick="saveDeltaAlarms(${addr})">Enregistrer</button>
+          <button class="cancel-btn" onclick="toggleForm('da', ${addr})">Annuler</button>
+        </div>
+        <div class="form-result" id="res-da-${addr}"></div>
+      </div>
+    </div>
+
+    <!-- ── Actions BMS ── -->
+    <div class="settings-section">
+      <div class="section-title"><span>Actions BMS</span></div>
+      <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap">
+        <button class="btn-reset" onclick="openResetModalFor(${addr})">⚠ Reset BMS</button>
+        <span style="font-size:0.7rem;color:var(--muted)">Inopérant en mode simulateur</span>
+      </div>
+    </div>
+  `;
+}
+
+function showError(addr, msg) {
+  const body = document.getElementById('settings-body-' + addr);
+  if (body) body.innerHTML = `<div class="settings-error">⚠️ ${msg}</div>`;
+}
+
+// Charger les paramètres de chaque BMS séquentiellement.
+// Sur bus RS485 partagé, les requêtes parallèles provoquent de la contention
+// entre BMS et des timeouts sur le second BMS.
+(function loadNext(idx) {
+  if (idx >= BMS_LIST.length) return;
+  var bms = BMS_LIST[idx];
+  fetch('/api/v1/bms/' + bms.addr + '/settings')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { showError(bms.addr, data.error); }
+      else { renderSettings(bms.addr, data.settings); }
+      loadNext(idx + 1);
+    })
+    .catch(function(e) {
+      showError(bms.addr, 'Erreur réseau : ' + e.message);
+      loadNext(idx + 1);
+    });
+}(0));
+
+// ─── Toggle formulaire d'édition ─────────────────────────────────────────────
+function toggleForm(type, addr) {
+  const form = document.getElementById('form-' + type + '-' + addr);
+  if (!form) return;
+  form.classList.toggle('visible');
+}
+
+// ─── Afficher résultat ────────────────────────────────────────────────────────
+function showResult(id, ok, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = ok ? '✓ ' + msg : '✗ ' + msg;
+  el.className = 'form-result ' + (ok ? 'ok' : 'err');
+  if (ok) setTimeout(function() { el.className = 'form-result'; }, 4000);
+}
+
+// ─── Fonctions de sauvegarde ─────────────────────────────────────────────────
+function postSettings(addr, endpoint, body, resId) {
+  fetch('/api/v1/bms/' + addr + '/settings/' + endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.ok) {
+      showResult(resId, true, data.warning || 'Paramètre enregistré');
+    } else {
+      showResult(resId, false, data.error || 'Erreur inconnue');
+    }
+  })
+  .catch(function(e) { showResult(resId, false, 'Erreur réseau : ' + e.message); });
+}
+
+function saveBalancing(addr) {
+  const pwd = document.getElementById('pwd-bal-' + addr).value;
+  postSettings(addr, 'balancing', {
+    activation_mv: parseInt(document.getElementById('inp-bal-act-' + addr).value),
+    delta_mv:      parseInt(document.getElementById('inp-bal-dlt-' + addr).value),
+    password: pwd,
+  }, 'res-bal-' + addr);
+}
+
+function saveCellVoltAlarms(addr) {
+  const pwd = document.getElementById('pwd-cv-' + addr).value;
+  postSettings(addr, 'cell-voltage-alarms', {
+    high_l1_mv: parseInt(document.getElementById('inp-cv-h1-' + addr).value),
+    high_l2_mv: parseInt(document.getElementById('inp-cv-h2-' + addr).value),
+    low_l1_mv:  parseInt(document.getElementById('inp-cv-l1-' + addr).value),
+    low_l2_mv:  parseInt(document.getElementById('inp-cv-l2-' + addr).value),
+    password: pwd,
+  }, 'res-cv-' + addr);
+}
+
+function savePackVoltAlarms(addr) {
+  const pwd = document.getElementById('pwd-pv-' + addr).value;
+  postSettings(addr, 'pack-voltage-alarms', {
+    high_l1_dv: parseInt(document.getElementById('inp-pv-h1-' + addr).value),
+    high_l2_dv: parseInt(document.getElementById('inp-pv-h2-' + addr).value),
+    low_l1_dv:  parseInt(document.getElementById('inp-pv-l1-' + addr).value),
+    low_l2_dv:  parseInt(document.getElementById('inp-pv-l2-' + addr).value),
+    password: pwd,
+  }, 'res-pv-' + addr);
+}
+
+function saveCurrentAlarms(addr) {
+  const pwd = document.getElementById('pwd-ci-' + addr).value;
+  postSettings(addr, 'current-alarms', {
+    chg_l1_a: parseFloat(document.getElementById('inp-ci-c1-' + addr).value),
+    chg_l2_a: parseFloat(document.getElementById('inp-ci-c2-' + addr).value),
+    dch_l1_a: parseFloat(document.getElementById('inp-ci-d1-' + addr).value),
+    dch_l2_a: parseFloat(document.getElementById('inp-ci-d2-' + addr).value),
+    password: pwd,
+  }, 'res-ci-' + addr);
+}
+
+function saveDeltaAlarms(addr) {
+  const pwd = document.getElementById('pwd-da-' + addr).value;
+  postSettings(addr, 'delta-alarms', {
+    cell_delta_l1_mv: parseInt(document.getElementById('inp-da-v1-' + addr).value),
+    cell_delta_l2_mv: parseInt(document.getElementById('inp-da-v2-' + addr).value),
+    temp_delta_l1:    parseInt(document.getElementById('inp-da-t1-' + addr).value),
+    temp_delta_l2:    parseInt(document.getElementById('inp-da-t2-' + addr).value),
+    password: pwd,
+  }, 'res-da-' + addr);
+}
+
+// ─── Reset BMS ───────────────────────────────────────────────────────────────
+var _resetAddr = null;
+
+function openResetModalFor(addr) {
+  _resetAddr = addr;
+  document.getElementById('rst-confirm').checked = false;
+  document.getElementById('rst-result').textContent = '';
+  document.getElementById('modal-reset-settings').style.display = 'flex';
+}
+function closeResetModal() {
+  document.getElementById('modal-reset-settings').style.display = 'none';
+}
+function submitReset() {
+  if (!_resetAddr) return;
+  var pwd     = document.getElementById('rst-password').value;
+  var confirm = document.getElementById('rst-confirm').checked;
+  var resEl   = document.getElementById('rst-result');
+  if (!confirm) {
+    resEl.style.color = 'var(--red)';
+    resEl.textContent = 'Cocher la case de confirmation';
+    return;
+  }
+  resEl.style.color = 'var(--muted)';
+  resEl.textContent = 'Envoi du reset…';
+  fetch('/api/v1/bms/' + _resetAddr + '/reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm: true, password: pwd })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.ok) {
+      var msg = '✓ Reset envoyé — BMS redémarre (quelques secondes d\'interruption)';
+      if (data.warning) msg += '  (' + data.warning + ')';
+      resEl.style.color = 'var(--green)';
+      resEl.textContent = msg;
+      setTimeout(closeResetModal, 3000);
+    } else {
+      resEl.style.color = 'var(--red)';
+      resEl.textContent = '✗ ' + (data.error || 'Erreur inconnue');
+    }
+  })
+  .catch(function(e) {
+    resEl.style.color = 'var(--red)';
+    resEl.textContent = '✗ Erreur réseau : ' + e;
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,445 @@
+{% extends "base.html" %}
+{% block title %}Historique Énergie{% endblock %}
+{% block page_title %}📊 Historique Énergie{% endblock %}
+{% block nav_grafana %}active{% endblock %}
+
+{% block head %}
+<style>
+.period-bar {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 1.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.period-btn {
+  padding: 0.38rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.period-btn:hover { background: var(--surface2); color: var(--text); }
+.period-btn.active {
+  background: var(--accent2);
+  color: #fff;
+  border-color: transparent;
+}
+.period-label {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.hist-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+@media (max-width: 900px) {
+  .hist-grid { grid-template-columns: 1fr; }
+}
+
+.kpi-summary {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0;
+  margin-bottom: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+@media (max-width: 900px) {
+  .kpi-summary { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 480px) {
+  .kpi-summary { grid-template-columns: repeat(2, 1fr); }
+}
+.kpi-summary-cell {
+  padding: 0.75rem 1rem;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.kpi-summary-cell:nth-child(6n) { border-right: none; }
+.kpi-sum-lbl {
+  font-size: 0.56rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+.kpi-sum-val {
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text);
+}
+.kpi-sum-val.solar   { color: var(--yellow); }
+.kpi-sum-val.import  { color: var(--accent); }
+.kpi-sum-val.consump { color: var(--purple); }
+.kpi-sum-val.charge  { color: var(--green); }
+.kpi-sum-val.dischrg { color: var(--orange); }
+.kpi-sum-val.export  { color: var(--cyan); }
+
+.chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 260px;
+}
+.chart-wrap canvas,
+.chart-wrap div[_echarts_instance_] {
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.no-data-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+.no-data-overlay.hidden { display: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Period selector -->
+<div class="period-bar">
+  <button class="period-btn active" data-period="day"   onclick="selectPeriod(this)">Aujourd'hui</button>
+  <button class="period-btn"        data-period="week"  onclick="selectPeriod(this)">7 jours</button>
+  <button class="period-btn"        data-period="month" onclick="selectPeriod(this)">30 jours</button>
+  <button class="period-btn"        data-period="year"  onclick="selectPeriod(this)">1 an</button>
+  <span class="period-label" id="period-label">Chargement…</span>
+</div>
+
+<!-- KPI totaux -->
+<div class="kpi-summary" id="kpi-summary">
+  <div class="kpi-summary-cell">
+    <div class="kpi-sum-lbl">☀️ Solaire kWh</div>
+    <div class="kpi-sum-val solar" id="kpi-solar-kwh">—</div>
+  </div>
+  <div class="kpi-summary-cell">
+    <div class="kpi-sum-lbl">🔌 Importée kWh</div>
+    <div class="kpi-sum-val import" id="kpi-import-kwh">—</div>
+  </div>
+  <div class="kpi-summary-cell">
+    <div class="kpi-sum-lbl">🏠 Consommation kWh</div>
+    <div class="kpi-sum-val consump" id="kpi-consump-kwh">—</div>
+  </div>
+  <div class="kpi-summary-cell">
+    <div class="kpi-sum-lbl">📤 Exportée kWh</div>
+    <div class="kpi-sum-val export" id="kpi-export-kwh">—</div>
+  </div>
+  <div class="kpi-summary-cell">
+    <div class="kpi-sum-lbl">⬆ Charge Ah</div>
+    <div class="kpi-sum-val charge" id="kpi-charge-ah">—</div>
+  </div>
+  <div class="kpi-summary-cell" style="border-right:none">
+    <div class="kpi-sum-lbl">⬇ Décharge Ah</div>
+    <div class="kpi-sum-val dischrg" id="kpi-dischrg-ah">—</div>
+  </div>
+</div>
+
+<!-- 4 graphiques -->
+<div class="hist-grid">
+  <!-- 1. kWh cumulatif -->
+  <div class="chart-card">
+    <div class="chart-hdr">
+      <span class="chart-hdr-title">Énergie kWh (cumulatif)</span>
+      <span class="chart-hdr-meta" id="meta-kwh">—</span>
+    </div>
+    <div class="chart-wrap">
+      <div id="chart-kwh" style="width:100%;height:100%"></div>
+      <div class="no-data-overlay" id="nd-kwh"><span>📊</span><span>Aucune donnée VictoriaMetrics</span></div>
+    </div>
+  </div>
+
+  <!-- 2. Puissance W -->
+  <div class="chart-card">
+    <div class="chart-hdr">
+      <span class="chart-hdr-title">Puissance instantanée (W)</span>
+      <span class="chart-hdr-meta" id="meta-w">—</span>
+    </div>
+    <div class="chart-wrap">
+      <div id="chart-w" style="width:100%;height:100%"></div>
+      <div class="no-data-overlay" id="nd-w"><span>📊</span><span>Aucune donnée VictoriaMetrics</span></div>
+    </div>
+  </div>
+
+  <!-- 3. Ah dérivés -->
+  <div class="chart-card">
+    <div class="chart-hdr">
+      <span class="chart-hdr-title">Énergie Ah (cumulatif, approx 48 V)</span>
+      <span class="chart-hdr-meta" id="meta-ah">—</span>
+    </div>
+    <div class="chart-wrap">
+      <div id="chart-ah" style="width:100%;height:100%"></div>
+      <div class="no-data-overlay" id="nd-ah"><span>📊</span><span>Aucune donnée VictoriaMetrics</span></div>
+    </div>
+  </div>
+
+  <!-- 4. Charge / Décharge Ah SmartShunt -->
+  <div class="chart-card">
+    <div class="chart-hdr">
+      <span class="chart-hdr-title">Charge vs Décharge Ah (SmartShunt)</span>
+      <span class="chart-hdr-meta" id="meta-shunt">—</span>
+    </div>
+    <div class="chart-wrap">
+      <div id="chart-shunt" style="width:100%;height:100%"></div>
+      <div class="no-data-overlay" id="nd-shunt"><span>📊</span><span>Aucune donnée SmartShunt</span></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+'use strict';
+
+const V_NOM = 51.2;
+
+// ── ECharts instances ───────────────────────────────────────────────────────
+const cKwh   = echarts.init(document.getElementById('chart-kwh'),   null, { renderer: 'canvas' });
+const cW     = echarts.init(document.getElementById('chart-w'),     null, { renderer: 'canvas' });
+const cAh    = echarts.init(document.getElementById('chart-ah'),    null, { renderer: 'canvas' });
+const cShunt = echarts.init(document.getElementById('chart-shunt'), null, { renderer: 'canvas' });
+
+// Resize on window change
+window.addEventListener('resize', function() {
+  cKwh.resize(); cW.resize(); cAh.resize(); cShunt.resize();
+});
+
+// ── Thème colors (lit CSS vars) ──────────────────────────────────────────────
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function themeColors() {
+  return {
+    solar:   cssVar('--yellow')  || '#ca8a04',
+    import:  cssVar('--accent')  || '#2563eb',
+    consump: cssVar('--purple')  || '#7c3aed',
+    charge:  cssVar('--green')   || '#16a34a',
+    dischrg: cssVar('--orange')  || '#ea580c',
+    text:    cssVar('--muted')   || '#4b5563',
+    grid:    cssVar('--border')  || '#d6dce5',
+    tooltip: cssVar('--surface') || '#ffffff',
+  };
+}
+
+// ── Format timestamp → label (adapté au step de chaque période) ─────────────
+function fmtTs(ms, period) {
+  const d = new Date(ms);
+  if (period === 'day')   return d.toLocaleTimeString('fr-FR', { hour: '2-digit' }) + 'h';
+  if (period === 'week')  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  if (period === 'month') return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+  return d.toLocaleDateString('fr-FR', { month: 'short' }); // year → Jan, Fév…
+}
+
+// ── Base option (horizontal stacked bar — bar-y-category-stack) ────────────
+function baseOpt(c, unit, period, yLabels) {
+  return {
+    animation: false,
+    backgroundColor: 'transparent',
+    grid: { left: 70, right: 35, top: 12, bottom: 40 },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: c.tooltip,
+      borderColor: c.grid,
+      textStyle: { color: c.text, fontSize: 11 },
+      axisPointer: { type: 'shadow' },
+    },
+    xAxis: {
+      type: 'value',
+      axisLine:  { show: false },
+      axisTick:  { show: false },
+      axisLabel: { color: c.text, fontSize: 10 },
+      splitLine: { lineStyle: { color: c.grid, type: 'dashed' } },
+      name: unit,
+      nameLocation: 'end',
+      nameTextStyle: { color: c.text, fontSize: 10 },
+    },
+    yAxis: {
+      type: 'category',
+      data: yLabels,
+      inverse: true,
+      axisLine:  { lineStyle: { color: c.grid } },
+      axisTick:  { lineStyle: { color: c.grid } },
+      axisLabel: {
+        color: c.text,
+        fontSize: 9,
+        interval: Math.max(0, Math.floor(yLabels.length / 8) - 1),
+      },
+      splitLine: { show: false },
+    },
+    legend: {
+      bottom: 2,
+      textStyle: { color: c.text, fontSize: 11 },
+      itemWidth: 14, itemHeight: 8,
+    },
+  };
+}
+
+// ── Render charts ──────────────────────────────────────────────────────────
+// L'API retourne déjà des valeurs agrégées par bucket via PromQL :
+//   increase([window])     → kWh par bucket
+//   avg_over_time([window])→ W moyen par bucket
+//   max_over_time([window])→ Ah SmartShunt par bucket (remise à 0 à minuit)
+function renderCharts(data) {
+  const period = data.period || 'day';
+  const c = themeColors();
+
+  // Labels depuis les timestamps (un par bucket)
+  const tsSolar  = data.ts_solar_ms    || [];
+  const tsCharge = data.ts_charge_ms   || [];
+  const tsDischg = data.ts_discharge_ms|| [];
+  const xMain  = tsSolar.map(ms => fmtTs(ms, period));
+  const xShunt = (tsCharge.length ? tsCharge : tsDischg).map(ms => fmtTs(ms, period));
+
+  // ── 1. kWh par bucket ─────────────────────────────────────────────────────
+  const solarKwh   = data.solar_kwh_series   || [];
+  const importKwh  = data.import_kwh_series  || [];
+  const consumpKwh = data.consump_kwh_series || [];
+  const hasKwh = solarKwh.length > 0 || importKwh.length > 0 || consumpKwh.length > 0;
+
+  document.getElementById('nd-kwh').classList.toggle('hidden', hasKwh);
+  document.getElementById('meta-kwh').textContent = hasKwh
+    ? `☀ ${(data.totals?.solar_kwh||0).toFixed(2)} · 🔌 ${(data.totals?.import_kwh||0).toFixed(2)} · 🏠 ${(data.totals?.consump_kwh||0).toFixed(2)} kWh` : '—';
+
+  cKwh.setOption({
+    ...baseOpt(c, 'kWh', period, xMain),
+    series: [
+      { name: '☀️ Solaire',      type: 'bar', stack: 'energy', data: solarKwh,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
+      { name: '🔌 Importée',     type: 'bar', stack: 'energy', data: importKwh,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
+      { name: '🏠 Consommation', type: 'bar', stack: 'energy', data: consumpKwh, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
+    ],
+  }, true);
+
+  // ── 2. Puissance W (moyenne par bucket via avg_over_time) ─────────────────
+  const solarW   = data.solar_w  || [];
+  const importW  = data.import_w || [];
+  const consumpW = data.consump_w|| [];
+  const hasW = solarW.length > 0 || importW.length > 0 || consumpW.length > 0;
+
+  document.getElementById('nd-w').classList.toggle('hidden', hasW);
+  const maxW = Math.max(...(solarW.length ? solarW : [0]), ...(importW.length ? importW : [0]), ...(consumpW.length ? consumpW : [0]));
+  document.getElementById('meta-w').textContent = hasW ? `Max ${maxW.toFixed(0)} W` : '—';
+
+  cW.setOption({
+    ...baseOpt(c, 'W', period, xMain),
+    series: [
+      { name: '☀️ Solaire',      type: 'bar', stack: 'power', data: solarW,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
+      { name: '🔌 Importée',     type: 'bar', stack: 'power', data: importW,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
+      { name: '🏠 Consommation', type: 'bar', stack: 'power', data: consumpW, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
+    ],
+  }, true);
+
+  // ── 3. Ah (kWh × 1000 / V_nom) par bucket ────────────────────────────────
+  const solarAh   = solarKwh.map(v => Math.round(v * 1000 / V_NOM * 100) / 100);
+  const importAh  = importKwh.map(v => Math.round(v * 1000 / V_NOM * 100) / 100);
+  const consumpAh = consumpKwh.map(v => Math.round(v * 1000 / V_NOM * 100) / 100);
+  const hasAh = solarAh.length > 0 || importAh.length > 0 || consumpAh.length > 0;
+
+  document.getElementById('nd-ah').classList.toggle('hidden', hasAh);
+  document.getElementById('meta-ah').textContent = hasAh
+    ? `☀ ${(data.totals?.solar_kwh||0) * 1000 / V_NOM|0} · 🔌 ${(data.totals?.import_kwh||0) * 1000 / V_NOM|0} · 🏠 ${(data.totals?.consump_kwh||0) * 1000 / V_NOM|0} Ah`
+    : '—';
+
+  cAh.setOption({
+    ...baseOpt(c, 'Ah', period, xMain),
+    series: [
+      { name: '☀️ Solaire',      type: 'bar', stack: 'ah', data: solarAh,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
+      { name: '🔌 Importée',     type: 'bar', stack: 'ah', data: importAh,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
+      { name: '🏠 Consommation', type: 'bar', stack: 'ah', data: consumpAh, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
+    ],
+  }, true);
+
+  // ── 4. Charge / Décharge Ah SmartShunt (max_over_time par bucket) ─────────
+  const chargeAh  = data.charge_ah_series    || [];
+  const dischrgAh = data.discharge_ah_series || [];
+  const hasShunt  = chargeAh.length > 0 || dischrgAh.length > 0;
+
+  document.getElementById('nd-shunt').classList.toggle('hidden', hasShunt);
+  document.getElementById('meta-shunt').textContent = hasShunt
+    ? `⬆ ${(data.charge_ah_now||0).toFixed(1)} Ah · ⬇ ${(data.discharge_ah_now||0).toFixed(1)} Ah`
+    : '—';
+
+  cShunt.setOption({
+    ...baseOpt(c, 'Ah', period, xShunt),
+    series: [
+      { name: '⬆ Charge Ah',   type: 'bar', stack: 'shunt', data: chargeAh,  itemStyle: { color: c.charge  }, emphasis: { focus: 'series' } },
+      { name: '⬇ Décharge Ah', type: 'bar', stack: 'shunt', data: dischrgAh, itemStyle: { color: c.dischrg }, emphasis: { focus: 'series' } },
+    ],
+  }, true);
+}
+
+// ── KPI totals ──────────────────────────────────────────────────────────────
+function updateKpis(data) {
+  const t = data.totals || {};
+  document.getElementById('kpi-solar-kwh').textContent  = t.solar_kwh   != null ? t.solar_kwh.toFixed(2)  + ' kWh' : '—';
+  document.getElementById('kpi-import-kwh').textContent = t.import_kwh  != null ? t.import_kwh.toFixed(2) + ' kWh' : '—';
+  document.getElementById('kpi-consump-kwh').textContent= t.consump_kwh != null ? t.consump_kwh.toFixed(2)+ ' kWh' : '—';
+  document.getElementById('kpi-export-kwh').textContent = t.export_kwh  != null ? t.export_kwh.toFixed(2) + ' kWh' : '—';
+  document.getElementById('kpi-charge-ah').textContent  = t.charge_ah   != null ? t.charge_ah.toFixed(1)  + ' Ah'  : '—';
+  document.getElementById('kpi-dischrg-ah').textContent = t.discharge_ah!= null ? t.discharge_ah.toFixed(1)+ ' Ah' : '—';
+}
+
+// ── Load data ───────────────────────────────────────────────────────────────
+let currentPeriod = 'day';
+
+function periodLabel(p) {
+  const now = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  return { day: '24 h', week: '7 jours', month: '30 jours', year: '1 an' }[p] + ' — màj ' + now;
+}
+
+async function loadHistory(period) {
+  document.getElementById('period-label').textContent = 'Chargement…';
+  try {
+    const resp = await fetch('/api/v1/history/energy?period=' + period);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    if (!data.ok) {
+      document.getElementById('period-label').textContent = 'VictoriaMetrics désactivé';
+      return;
+    }
+    renderCharts(data);
+    updateKpis(data);
+    document.getElementById('period-label').textContent = periodLabel(period);
+  } catch (e) {
+    document.getElementById('period-label').textContent = 'Erreur : ' + e.message;
+  }
+}
+
+function selectPeriod(btn) {
+  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentPeriod = btn.dataset.period;
+  loadHistory(currentPeriod);
+}
+
+// ── Init ────────────────────────────────────────────────────────────────────
+loadHistory('day');
+
+// Auto-refresh every 60s (history data changes slowly)
+setInterval(function() { loadHistory(currentPeriod); }, 60000);
+
+// Re-render charts on theme toggle (CSS vars change)
+const _origToggle = window.toggleTheme;
+window.toggleTheme = function() {
+  _origToggle();
+  setTimeout(function() { loadHistory(currentPeriod); }, 300);
+};
+</script>
+{% endblock %}

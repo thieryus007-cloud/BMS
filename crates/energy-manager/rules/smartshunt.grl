@@ -1,0 +1,44 @@
+// SmartShunt daily baseline capture rules.
+// Decides when to (re-)capture the start-of-day cumulative energy counter.
+//
+// Input facts:
+//   SHUNT.charged_new_day           (bool)
+//   SHUNT.charged_baseline_absent   (bool)
+//   SHUNT.discharged_new_day        (bool)
+//   SHUNT.discharged_baseline_absent (bool)
+//
+// Output facts:
+//   SHUNT.capture_charged    (bool, default false)
+//   SHUNT.capture_discharged (bool, default false)
+
+// Capture charged baseline on new calendar day
+rule "SHUNT_Charged_Baseline_NewDay" salience 100 no-loop {
+    when
+        SHUNT.charged_new_day == true
+    then
+        SHUNT.capture_charged = true;
+}
+
+// Capture charged baseline when missing (first message after start/reset)
+rule "SHUNT_Charged_Baseline_Missing" salience 100 no-loop {
+    when
+        SHUNT.charged_baseline_absent == true
+    then
+        SHUNT.capture_charged = true;
+}
+
+// Capture discharged baseline on new calendar day
+rule "SHUNT_Discharged_Baseline_NewDay" salience 100 no-loop {
+    when
+        SHUNT.discharged_new_day == true
+    then
+        SHUNT.capture_discharged = true;
+}
+
+// Capture discharged baseline when missing
+rule "SHUNT_Discharged_Baseline_Missing" salience 100 no-loop {
+    when
+        SHUNT.discharged_baseline_absent == true
+    then
+        SHUNT.capture_discharged = true;
+}

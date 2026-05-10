@@ -1,0 +1,523 @@
+{% extends "base.html" %}
+{% block title %}ATS CHINT — ESS Monitor{% endblock %}
+{% block page_title %}🔀 ATS CHINT{% endblock %}
+{% block nav_ats %}active{% endblock %}
+
+{% block head %}
+<style>
+.ats-header { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.25rem; margin-bottom: 1.25rem; box-shadow: var(--shadow); }
+.ats-header-top { display: flex; justify-content: space-between; align-items: stretch; gap: 1rem; flex-wrap: wrap; }
+.ats-section { background: var(--surface2); border-radius: var(--radius-sm); padding: 0.85rem 1rem; border: 1px solid var(--border); flex: 1; min-width: 240px; }
+.ats-header h1 { font-size: 1.1rem; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #d97706); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.75rem; }
+.info-bar { background: var(--surface); border-radius: var(--radius-sm); padding: 0.75rem 1rem; margin: 0.75rem 0; display: flex; flex-wrap: wrap; gap: 1.5rem; border: 1px solid var(--border); align-items: center; }
+.info-group { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+.info-item { display: flex; align-items: baseline; gap: 6px; font-size: 0.8rem; background: var(--surface2); padding: 4px 12px; border-radius: 30px; border: 1px solid var(--border); }
+.info-label { color: var(--muted2); font-size: 0.7rem; }
+.info-value { font-weight: 700; font-family: 'JetBrains Mono', monospace; font-size: 0.88rem; color: #d97706; }
+.status-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.led { width: 12px; height: 12px; border-radius: 50%; background: var(--red); transition: all 0.3s; flex-shrink: 0; }
+.led.connected { background: var(--green); box-shadow: 0 0 7px var(--green); }
+.refresh-counter { background: var(--surface2); padding: 4px 12px; border-radius: 30px; font-family: monospace; font-size: 0.75rem; color: var(--text); border: 1px solid var(--border); }
+.model-badge { background: #fbbf24; color: #0f172a; padding: 3px 10px; border-radius: 16px; font-size: 0.7rem; font-weight: 700; }
+.compact-log { background: var(--surface2); border-radius: var(--radius-sm); padding: 6px 12px; min-width: 240px; border-left: 3px solid #fbbf24; height: 100%; }
+.log-lines { font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; }
+.log-line { padding: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-line.success { color: var(--green); }
+.log-line.error { color: var(--red); }
+.modbus-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.modbus-item { background: var(--surface); padding: 4px 10px; border-radius: 16px; font-size: 0.7rem; border: 1px solid var(--border); }
+.modbus-label { color: var(--muted2); font-size: 0.65rem; }
+.modbus-value { font-weight: 700; color: #d97706; font-family: monospace; }
+.status-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ats-grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+.ats-card { background: var(--surface); border-radius: var(--radius); padding: 1.25rem; border: 1px solid var(--border); box-shadow: var(--shadow); transition: transform 0.2s; }
+.ats-card:hover { transform: translateY(-1px); }
+.ats-card-title { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.source-status { display: flex; align-items: center; gap: 10px; }
+.source-dot { width: 14px; height: 14px; border-radius: 50%; transition: all 0.3s; }
+.source-dot.active   { background: var(--green); box-shadow: 0 0 7px var(--green); }
+.source-dot.inactive { background: var(--red);   box-shadow: 0 0 4px var(--red); }
+.source-name { font-size: 1rem; font-weight: 700; }
+.source-connection { font-size: 0.7rem; color: var(--muted); margin-left: 6px; }
+.data-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--surface2); align-items: center; }
+.data-label { color: var(--muted); font-size: 0.78rem; }
+.data-value { font-weight: 600; font-family: monospace; font-size: 0.82rem; color: var(--text); }
+.setting-value { color: #d97706; font-weight: 700; }
+.badge-normal  { background: rgba(22,163,74,.15);  color: var(--green);  padding: 2px 8px; border-radius: 10px; font-size: 0.68rem; display: inline-block; }
+.badge-warning { background: rgba(202,138,4,.15);  color: var(--yellow); padding: 2px 8px; border-radius: 10px; font-size: 0.68rem; display: inline-block; }
+.badge-danger  { background: rgba(220,38,38,.15);  color: var(--red);    padding: 2px 8px; border-radius: 10px; font-size: 0.68rem; display: inline-block; }
+.action-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.action-btn { background: rgba(37,99,235,.12); border: 1px solid rgba(37,99,235,.35); color: #1e40af; padding: 7px 14px; border-radius: 30px; font-size: 0.72rem; cursor: pointer; transition: 0.2s; font-family: inherit; }
+.action-btn:hover { background: var(--accent2); color: white; }
+.action-btn-primary { background: #f59e0b; border-color: #f59e0b; color: white; }
+.action-btn-primary:hover { background: #d97706; }
+.action-btn-loading { position: relative; pointer-events: none; opacity: 0.7; }
+.action-btn-loading::after { content: ""; position: absolute; width: 12px; height: 12px; top: 50%; left: 50%; margin: -6px; border: 2px solid white; border-top-color: transparent; border-radius: 50%; animation: ats-spin 0.6s linear infinite; }
+@keyframes ats-spin { to { transform: rotate(360deg); } }
+.remote-indicator { font-size: 0.68rem; background: var(--surface2); padding: 3px 10px; border-radius: 16px; margin-left: auto; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); }
+.remote-indicator.active { background: var(--green); color: white; border-color: transparent; }
+.console-card { background: var(--surface); border-radius: var(--radius); padding: 1.25rem; margin-top: 1rem; border: 1px solid rgba(37,99,235,.35); box-shadow: var(--shadow); }
+.console-title { font-size: 1rem; font-weight: 700; color: #1e40af; margin-bottom: 1rem; display: flex; align-items: center; gap: 8px; }
+.console-input-group { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
+.console-input { flex: 2; min-width: 260px; background: var(--surface2); border: 1px solid rgba(37,99,235,.35); color: var(--text); padding: 10px 14px; border-radius: var(--radius-sm); font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; }
+.console-input:focus { outline: none; border-color: #fbbf24; }
+.console-checkbox { display: flex; align-items: center; gap: 7px; background: var(--surface2); padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: 0.75rem; }
+.console-checkbox input { width: 16px; height: 16px; cursor: pointer; }
+.console-send-btn { background: var(--accent2); border: none; color: white; padding: 10px 18px; border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; transition: 0.2s; font-size: 0.8rem; }
+.console-send-btn:hover { opacity: 0.88; }
+.console-crc-btn { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 16px; border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; font-family: monospace; font-size: 0.78rem; }
+.console-response { background: var(--surface2); border-radius: var(--radius-sm); padding: 1rem; margin-top: 1rem; border: 1px solid var(--border); }
+.console-response-title { color: var(--muted); font-size: 0.7rem; margin-bottom: 6px; }
+.console-response-content { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: var(--green); word-break: break-all; }
+.console-error { color: var(--red); }
+.console-history { margin-top: 1rem; max-height: 140px; overflow-y: auto; background: var(--surface2); border-radius: var(--radius-sm); padding: 10px; font-family: monospace; font-size: 0.68rem; }
+.history-entry { padding: 3px 0; border-bottom: 1px solid var(--border); }
+.history-send { color: #1e40af; }
+.history-recv { color: var(--green); }
+.remote-banner { background: linear-gradient(135deg, #fbbf24, #f59e0b); border-radius: var(--radius-sm); padding: 10px 18px; margin-top: 1rem; text-align: center; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 10px; color: #0f172a; font-size: 0.85rem; }
+.remote-banner.hidden { display: none; }
+.warning-text { color: #d97706; font-size: 0.68rem; margin-top: 6px; }
+.phase-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; padding: 5px 0; }
+.info-badge { background: var(--surface2); border-radius: 10px; padding: 3px 8px; font-size: 0.68rem; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); }
+.separator { border-top: 1px solid var(--border); margin: 10px 0; }
+.toggle-switch { position: relative; width: 52px; height: 26px; background: var(--border); border-radius: 26px; cursor: pointer; transition: 0.3s; flex-shrink: 0; }
+.toggle-switch.active { background: var(--green); }
+.toggle-switch::after { content: ""; position: absolute; width: 22px; height: 22px; background: white; border-radius: 50%; top: 2px; left: 2px; transition: 0.3s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+.toggle-switch.active::after { left: 28px; }
+.toggle-container { display: flex; align-items: center; gap: 10px; }
+.toggle-label { font-size: 0.75rem; color: var(--muted); }
+@keyframes blink-red { 0%, 100% { box-shadow: 0 0 0 2px rgba(220,38,38,.4), var(--shadow); } 50% { box-shadow: 0 0 0 3px rgba(220,38,38,.7), var(--shadow-lg); } }
+.card-active-blink { animation: blink-red 1.2s infinite; border: 2px solid var(--red) !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ats-header">
+  <div class="ats-header-top">
+    <div class="ats-section">
+      <h1>⚡ ATS CHINT — Onduleur / Réseau</h1>
+      <div class="status-bar">
+        <div style="display:flex;align-items:center;gap:8px;"><div class="led" id="led"></div><div id="statusText">Connexion...</div></div>
+        <div class="refresh-counter" id="refreshCounter">Actus: 0</div>
+        <div class="refresh-counter" id="lastRefresh">--:--:--</div>
+        <div class="model-badge" id="modelBadge">BN</div>
+        <button class="action-btn action-btn-primary" onclick="refreshNow()">🔄 Actualiser</button>
+        <button class="action-btn" id="debugBtn" onclick="toggleDebug()">🐛 Debug OFF</button>
+      </div>
+    </div>
+    <div class="ats-section">
+      <div class="modbus-row">
+        <div class="modbus-item"><span class="modbus-label">Adresse ModBus</span> <span class="modbus-value" id="modbus_addr">6</span></div>
+        <div class="modbus-item"><span class="modbus-label">Baud rate</span>      <span class="modbus-value" id="modbus_baud">9600</span></div>
+        <div class="modbus-item"><span class="modbus-label">Parité</span>          <span class="modbus-value" id="modbus_parity">None</span></div>
+      </div>
+      <div class="status-row">
+        <div class="info-item"><span class="info-label">⏱️ Runtime</span><span class="info-value" id="runtime">—</span></div>
+        <div class="info-item"><span class="info-label">📦 Version</span><span class="info-value" id="swVer">—</span></div>
+      </div>
+    </div>
+    <div class="ats-section">
+      <div class="compact-log">
+        <div class="log-lines" id="compactLog">
+          <div class="log-line success">[--:--:--] ✅ En attente...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="info-bar">
+    <div class="info-group">
+      <div class="info-item"><span class="info-label">🔀 SOURCE ACTIVE</span><span class="info-value" id="activeSource">—</span></div>
+      <div class="info-item"><span class="info-label">Mode opératoire</span><span class="data-value" id="operation_mode">—</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="ats-grid-3">
+  <div class="ats-card" id="cardOnduleur">
+    <div class="ats-card-title">
+      <div class="source-status">
+        <div class="source-dot" id="onduleurDot"></div>
+        <span class="source-name">🔋 Onduleur</span>
+        <span class="source-connection" id="onduleurStatus">Connecté</span>
+      </div>
+      <div class="remote-indicator" id="remoteIndicatorOnduleur">🔒</div>
+    </div>
+    <div class="phase-row"><span class="data-label">Phase A</span><span class="data-value"><span id="v1a">— V</span> <span id="s1a_badge" class="badge-normal" style="margin-left:6px">—</span></span></div>
+    <div class="data-row"><span class="data-label">Max enregistré Phase A</span><span class="data-value" id="max1">— V</span></div>
+    <div class="data-row"><span class="data-label">Commutations Onduleur → Réseau</span><span class="data-value" id="cnt1_display">—</span></div>
+    <div class="data-row"><span class="data-label">T1 (transfert)</span><span class="data-value setting-value" id="t1">— s</span></div>
+    <div class="separator"></div>
+    <div class="action-buttons" style="flex-direction:column;gap:8px;">
+      <div style="display:flex;gap:8px;">
+        <button class="action-btn action-btn-primary" id="forceOnduleurAutoBtn" onclick="forceSource1WithRemote()" style="flex:1;">🔋 Forcer Onduleur (auto)</button>
+        <button class="action-btn" onclick="sendCmd('force_source1')">⚡ Direct</button>
+      </div>
+      <div class="warning-text">💡 Auto = active/désactive la télécommande automatiquement</div>
+    </div>
+  </div>
+
+  <div class="ats-card" id="cardReg50">
+    <div class="ats-card-title">
+      <span>🔄</span> État Commutation
+      <div class="info-badge" style="margin-left:auto" id="remoteBadgeReg">🔒 Télécom: OFF</div>
+    </div>
+    <div class="data-row"><span class="data-label">Mode opératoire</span><span class="data-value" id="swModeReg">—</span></div>
+    <div class="data-row"><span class="data-label">SW1 - Interrupteur Onduleur</span><span class="data-value" id="sw1">—</span></div>
+    <div class="data-row"><span class="data-label">SW2 - Interrupteur Réseau</span><span class="data-value" id="sw2">—</span></div>
+    <div class="data-row"><span class="data-label">Position centrale (middleOFF)</span><span class="data-value" id="middleOFF">—</span></div>
+    <div class="data-row"><span class="data-label">Télécommande</span><span class="data-value" id="swRemoteReg">—</span></div>
+    <div class="data-row"><span class="data-label">Défaut</span><span class="data-value" id="swFaultReg">—</span></div>
+    <div class="separator"></div>
+    <div class="action-buttons" style="align-items:center;">
+      <div class="toggle-container">
+        <span class="toggle-label">Télécommande:</span>
+        <div class="toggle-switch" id="telecomToggle" onclick="toggleTelecom()"></div>
+      </div>
+      <button class="action-btn" onclick="sendCmd('force_double')" style="background:var(--red);color:white;border-color:var(--red);">⏹️ Forcer OFF</button>
+    </div>
+    <div class="warning-text" style="margin-top:8px;">⚠️ "Forcer OFF" et "Direct" nécessitent la télécommande active</div>
+  </div>
+
+  <div class="ats-card" id="cardReseau">
+    <div class="ats-card-title">
+      <div class="source-status">
+        <div class="source-dot" id="reseauDot"></div>
+        <span class="source-name">⚡ Réseau</span>
+        <span class="source-connection" id="reseauStatus">Connecté</span>
+      </div>
+      <div class="remote-indicator" id="remoteIndicatorReseau">🔒</div>
+    </div>
+    <div class="phase-row"><span class="data-label">Phase A</span><span class="data-value"><span id="v2a">— V</span> <span id="s2a_badge" class="badge-normal" style="margin-left:6px">—</span></span></div>
+    <div class="data-row"><span class="data-label">Max enregistré Phase A</span><span class="data-value" id="max2">— V</span></div>
+    <div class="data-row"><span class="data-label">Commutations Réseau → Onduleur</span><span class="data-value" id="cnt2_display">—</span></div>
+    <div class="data-row"><span class="data-label">T2 (retour)</span><span class="data-value setting-value" id="t2">— s</span></div>
+    <div class="separator"></div>
+    <div class="action-buttons" style="flex-direction:column;gap:8px;">
+      <div style="display:flex;gap:8px;">
+        <button class="action-btn action-btn-primary" id="forceReseauAutoBtn" onclick="forceSource2WithRemote()" style="flex:1;">⚡ Forcer Réseau (auto)</button>
+        <button class="action-btn" onclick="sendCmd('force_source2')">🎮 Direct</button>
+      </div>
+      <div class="warning-text">💡 Auto = active/désactive la télécommande</div>
+    </div>
+  </div>
+</div>
+
+<div class="console-card">
+  <div class="console-title"><span>🔧</span> Console Modbus — Envoi de trame hexadécimale</div>
+  <div class="console-input-group">
+    <input type="text" id="hexFrameInput" class="console-input" placeholder="Ex: 06 03 00 4F 00 01" value="06 03 00 4F 00 01">
+    <div class="console-checkbox">
+      <input type="checkbox" id="autoCrcCheckbox" checked>
+      <label>Ajouter CRC auto</label>
+    </div>
+    <button class="console-crc-btn" onclick="calculateAndShowCrc()">🔢 CRC</button>
+    <button class="console-send-btn" onclick="sendHexFrame()">📨 ENVOYER</button>
+    <button class="console-send-btn" onclick="clearHexHistory()" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);">🗑️ Effacer</button>
+  </div>
+  <div class="console-response">
+    <div class="console-response-title">📥 Réponse reçue :</div>
+    <div class="console-response-content" id="consoleResponse">-- Aucune requête envoyée --</div>
+  </div>
+  <div class="console-history" id="hexHistory">
+    <div class="history-entry" style="color:var(--muted2)">📋 Historique des trames</div>
+  </div>
+  <div class="warning-text" style="margin-top:10px;">💡 Saisissez la trame sans CRC. Le CRC sera ajouté automatiquement si la case est cochée.</div>
+</div>
+
+<div id="remoteBanner" class="remote-banner hidden">
+  <span>📡</span>
+  <span>MODE TÉLÉCOMMANDE ACTIF — Les commandes sont disponibles</span>
+  <span>🔓</span>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let refreshCount = 0;
+let autoInterval = null;
+let debugEnabled = false;
+let logLines = ["✨ Prêt", "---", "---", "---"];
+let isExecutingCommand = false;
+
+function calculateCRC(data) {
+    let crc = 0xFFFF;
+    for (let i = 0; i < data.length; i++) {
+        crc ^= data[i];
+        for (let bit = 0; bit < 8; bit++) {
+            if (crc & 0x0001) crc = (crc >> 1) ^ 0xA001;
+            else crc = crc >> 1;
+        }
+    }
+    return crc;
+}
+
+function addCRCToFrame(hexString) {
+    const bytes = [];
+    const parts = hexString.trim().split(/\s+/);
+    for (const part of parts) if (part.length) bytes.push(parseInt(part, 16));
+    if (!bytes.length) return null;
+    const crc = calculateCRC(bytes);
+    bytes.push(crc & 0xFF, (crc >> 8) & 0xFF);
+    return bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+}
+
+function calculateAndShowCrc() {
+    const input = document.getElementById('hexFrameInput').value.trim();
+    if (!input) return alert('Veuillez saisir une trame');
+    const withCrc = addCRCToFrame(input);
+    if (withCrc) alert(`CRC calculé :\nSans CRC : ${input}\nAvec CRC : ${withCrc}`);
+}
+
+async function forceSource1WithRemote() {
+    if (isExecutingCommand) { updateCompactLog('⏳ Commande en cours...', 'warning'); return; }
+    const btn = document.getElementById('forceOnduleurAutoBtn');
+    isExecutingCommand = true; btn.classList.add('action-btn-loading'); btn.disabled = true;
+    try {
+        updateCompactLog('🔧 Activation télécommande...', 'send');
+        let resp = await fetch('/api/v1/ats/remote_on', { method: 'POST' });
+        let data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Échec');
+        await new Promise(r => setTimeout(r, 300));
+        updateCompactLog('🔋 Forçage source Onduleur...', 'send');
+        resp = await fetch('/api/v1/ats/force_source1', { method: 'POST' });
+        data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Échec');
+        await new Promise(r => setTimeout(r, 300));
+        updateCompactLog('🔒 Désactivation télécommande...', 'send');
+        await fetch('/api/v1/ats/remote_off', { method: 'POST' });
+        updateCompactLog('✅ Forçage Onduleur réussi !', 'success');
+        setTimeout(refreshNow, 500);
+    } catch(e) {
+        updateCompactLog(`❌ Erreur: ${e.message}`, 'error');
+        try { await fetch('/api/v1/ats/remote_off', { method: 'POST' }); } catch(_) {}
+    } finally {
+        isExecutingCommand = false; btn.classList.remove('action-btn-loading'); btn.disabled = false;
+        setTimeout(refreshNow, 300);
+    }
+}
+
+async function forceSource2WithRemote() {
+    if (isExecutingCommand) { updateCompactLog('⏳ Commande en cours...', 'warning'); return; }
+    const btn = document.getElementById('forceReseauAutoBtn');
+    isExecutingCommand = true; btn.classList.add('action-btn-loading'); btn.disabled = true;
+    try {
+        updateCompactLog('🔧 Activation télécommande...', 'send');
+        let resp = await fetch('/api/v1/ats/remote_on', { method: 'POST' });
+        let data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Échec');
+        await new Promise(r => setTimeout(r, 300));
+        updateCompactLog('⚡ Forçage source Réseau...', 'send');
+        resp = await fetch('/api/v1/ats/force_source2', { method: 'POST' });
+        data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'Échec');
+        await new Promise(r => setTimeout(r, 300));
+        updateCompactLog('🔒 Désactivation télécommande...', 'send');
+        await fetch('/api/v1/ats/remote_off', { method: 'POST' });
+        updateCompactLog('✅ Forçage Réseau réussi !', 'success');
+        setTimeout(refreshNow, 500);
+    } catch(e) {
+        updateCompactLog(`❌ Erreur: ${e.message}`, 'error');
+        try { await fetch('/api/v1/ats/remote_off', { method: 'POST' }); } catch(_) {}
+    } finally {
+        isExecutingCommand = false; btn.classList.remove('action-btn-loading'); btn.disabled = false;
+        setTimeout(refreshNow, 300);
+    }
+}
+
+function updateCompactLog(msg, type = 'info') {
+    const now = new Date();
+    const time = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    let icon = 'ℹ️';
+    if (type === 'error') icon = '❌';
+    else if (type === 'success') icon = '✅';
+    else if (type === 'send') icon = '📤';
+    else if (type === 'recv') icon = '📥';
+    else if (type === 'warning') icon = '⚠️';
+    logLines.unshift(`[${time}] ${icon} ${msg}`);
+    logLines = logLines.slice(0, 6);
+    document.getElementById('compactLog').innerHTML = logLines.map(line => {
+        let cls = '';
+        if (line.includes('✅')) cls = 'success';
+        if (line.includes('❌')) cls = 'error';
+        return `<div class="log-line ${cls}">${line}</div>`;
+    }).join('');
+}
+
+function addHexHistory(send, recv) {
+    const div = document.getElementById('hexHistory');
+    const time = new Date().toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const entry = document.createElement('div');
+    entry.className = 'history-entry';
+    entry.innerHTML = `<span class="history-send">📤 [${time}] ${send}</span><br><span class="history-recv">📥 ${recv}</span>`;
+    div.insertBefore(entry, div.firstChild);
+    if (div.children.length > 50) div.removeChild(div.lastChild);
+}
+
+function clearHexHistory() {
+    document.getElementById('hexHistory').innerHTML = '<div class="history-entry" style="color:var(--muted2)">📋 Historique des trames</div>';
+    updateCompactLog('Historique effacé', 'info');
+}
+
+async function sendHexFrame() {
+    let frame = document.getElementById('hexFrameInput').value.trim();
+    if (!frame) return;
+    if (document.getElementById('autoCrcCheckbox').checked) frame = addCRCToFrame(frame);
+    if (!frame) return;
+    updateCompactLog(`Envoi: ${frame}`, 'send');
+    try {
+        const resp = await fetch('/api/v1/ats/send_raw', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({frame_hex: frame}) });
+        const data = await resp.json();
+        if (data.success) {
+            document.getElementById('consoleResponse').innerHTML = `<span style="color:var(--green)">✅ Réponse (${data.rx_len} octets)</span><br><span style="font-family:monospace">${data.rx_hex}</span>`;
+            addHexHistory(frame, data.rx_hex);
+            updateCompactLog(`Réponse: ${data.rx_hex}`, 'recv');
+        } else {
+            document.getElementById('consoleResponse').innerHTML = `<span class="console-error">❌ ${data.error}</span>`;
+            updateCompactLog(`Erreur: ${data.error}`, 'error');
+        }
+    } catch(e) {
+        document.getElementById('consoleResponse').innerHTML = `<span class="console-error">❌ Erreur réseau</span>`;
+        updateCompactLog(`Erreur réseau: ${e.message}`, 'error');
+    }
+}
+
+function toggleTelecom() {
+    const toggle = document.getElementById('telecomToggle');
+    const isActive = toggle.classList.contains('active');
+    const cmd = isActive ? 'remote_off' : 'remote_on';
+    updateCompactLog(`Cmd: ${cmd}`, 'send');
+    fetch('/api/v1/ats/' + cmd, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                toggle.classList.toggle('active');
+                updateCompactLog(`✅ ${data.message}`, 'success');
+                setTimeout(refreshNow, 500);
+            } else {
+                updateCompactLog(`❌ ${data.error || 'Échec'}`, 'error');
+            }
+        })
+        .catch(e => updateCompactLog(`❌ Erreur: ${e.message}`, 'error'));
+}
+
+function updateActiveCardBorder(sourceActive) {
+    ['cardOnduleur','cardReg50','cardReseau'].forEach(id => document.getElementById(id).classList.remove('card-active-blink'));
+    if (sourceActive.includes("Onduleur"))      document.getElementById('cardOnduleur').classList.add('card-active-blink');
+    else if (sourceActive.includes("Réseau"))   document.getElementById('cardReseau').classList.add('card-active-blink');
+    else if (sourceActive.includes("OFF") || sourceActive.includes("Aucune")) document.getElementById('cardReg50').classList.add('card-active-blink');
+}
+
+async function refreshNow() {
+    refreshCount++;
+    document.getElementById('refreshCounter').innerHTML = `Actus: ${refreshCount}`;
+    document.getElementById('lastRefresh').innerHTML = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    try {
+        const resp = await fetch('/api/v1/ats/status');
+        const data = await resp.json();
+        if (data.success) {
+            document.getElementById('led').className = 'led connected';
+            document.getElementById('statusText').innerHTML = '✅ Connecté';
+            if (data.model) document.getElementById('modelBadge').innerHTML = data.model;
+            const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.innerHTML = v; };
+            set('v1a', data.values.v1a + ' V');
+            set('v2a', data.values.v2a + ' V');
+            set('max1', data.values.max1 + ' V');
+            set('max2', data.values.max2 + ' V');
+            set('t1', data.values.t1);
+            set('t2', data.values.t2);
+            set('cnt1_display', data.values.cnt1);
+            set('cnt2_display', data.values.cnt2);
+            set('runtime', data.values.runtime);
+            set('swVer', data.values.swVer);
+            set('operation_mode', data.values.operation_mode);
+            set('modbus_addr', data.values.modbus_addr);
+            set('modbus_baud', data.values.modbus_baud);
+            set('modbus_parity', data.values.modbus_parity);
+            set('swModeReg', data.values.swMode);
+            set('swFaultReg', data.values.swFault);
+            set('sw1', data.values.sw1);
+            set('sw2', data.values.sw2);
+            set('middleOFF', data.values.middleOFF);
+            if (data.values.swRemote) {
+                set('swRemoteReg', data.values.swRemote);
+                const isRemoteActive = data.values.swRemote === "📡 Activé";
+                updateRemoteBanner(isRemoteActive);
+                updateRemoteIndicators(isRemoteActive);
+                const badge = document.getElementById('remoteBadgeReg');
+                if (badge) { badge.innerHTML = isRemoteActive ? '📡 Télécom: ON' : '🔒 Télécom: OFF'; badge.style.background = isRemoteActive ? 'var(--green)' : ''; badge.style.color = isRemoteActive ? 'white' : ''; }
+                document.getElementById('telecomToggle').classList.toggle('active', isRemoteActive);
+            }
+            const sw1 = data.values.sw1 || "", sw2 = data.values.sw2 || "", mo = data.values.middleOFF || "";
+            let src = "❌ Aucune";
+            if (sw1.includes("Fermé")) src = "🔋 Onduleur";
+            else if (sw2.includes("Fermé")) src = "⚡ Réseau";
+            else if (mo.includes("Fermé") || mo.includes("Activ")) src = "⏹️ OFF";
+            set('activeSource', src);
+            updateActiveCardBorder(src);
+            const v1 = parseInt(data.values.v1a) || 0, v2 = parseInt(data.values.v2a) || 0;
+            document.getElementById('onduleurDot').className = v1 > 50 ? "source-dot active" : "source-dot inactive";
+            document.getElementById('reseauDot').className   = v2 > 50 ? "source-dot active" : "source-dot inactive";
+            set('onduleurStatus', v1 > 50 ? "✅ Connecté" : "❌ Déconnecté");
+            set('reseauStatus',   v2 > 50 ? "✅ Connecté" : "❌ Déconnecté");
+            document.getElementById('cardOnduleur').style.border = v1 > 50 ? "2px solid var(--green)" : "1px solid var(--border)";
+            document.getElementById('cardReseau').style.border   = v2 > 50 ? "2px solid var(--green)" : "1px solid var(--border)";
+            if (data.values.s1a) updateStatusBadge('s1a_badge', data.values.s1a);
+            if (data.values.s2a) updateStatusBadge('s2a_badge', data.values.s2a);
+            updateCompactLog(`Actu #${refreshCount} OK`, 'success');
+        }
+    } catch(e) {
+        updateCompactLog(`Réseau: ${e.message}`, 'error');
+        document.getElementById('led').className = 'led';
+        document.getElementById('statusText').innerHTML = '❌ Déconnecté';
+    }
+}
+
+function updateStatusBadge(id, status) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (status.includes("Normal"))      { el.className = "badge-normal";  el.innerHTML = "✅ Normal"; }
+    else if (status.includes("Sous-tension")) { el.className = "badge-warning"; el.innerHTML = "⚠️ Sous-tension"; }
+    else if (status.includes("Sur-tension"))  { el.className = "badge-danger";  el.innerHTML = "⚠️ Sur-tension"; }
+    else { el.className = "badge-danger"; el.innerHTML = status; }
+}
+
+function updateRemoteIndicators(active) {
+    document.querySelectorAll('.remote-indicator').forEach(ind => {
+        ind.innerHTML = active ? '📡 ACTIF' : '🔒';
+        ind.classList.toggle('active', active);
+    });
+}
+
+function updateRemoteBanner(active) {
+    document.getElementById('remoteBanner').classList.toggle('hidden', !active);
+}
+
+async function toggleDebug() {
+    const endpoint = debugEnabled ? 'debug_off' : 'debug_on';
+    try {
+        const resp = await fetch('/api/v1/ats/' + endpoint);
+        const data = await resp.json();
+        if (data.success) {
+            debugEnabled = !debugEnabled;
+            const btn = document.getElementById('debugBtn');
+            btn.innerHTML = debugEnabled ? '🐛 Debug ON' : '🐛 Debug OFF';
+            btn.style.background = debugEnabled ? '#f59e0b' : '';
+            updateCompactLog(`Debug ${debugEnabled ? 'activé' : 'désactivé'}`, 'success');
+        }
+    } catch(e) {}
+}
+
+async function sendCmd(cmd) {
+    updateCompactLog(`Cmd: ${cmd}`, 'send');
+    try {
+        const resp = await fetch('/api/v1/ats/' + cmd, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) { updateCompactLog(`✅ ${data.message}`, 'success'); setTimeout(refreshNow, 500); }
+        else { updateCompactLog(`❌ ${data.error || 'Échec'}`, 'error'); }
+    } catch(e) { updateCompactLog(`❌ Erreur: ${e.message}`, 'error'); }
+}
+
+setInterval(refreshNow, 5000);
+refreshNow();
+</script>
+{% endblock %}

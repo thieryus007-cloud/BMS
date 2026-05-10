@@ -1,0 +1,27 @@
+// Solar PV inverter daily baseline rules.
+// Decides when to reset and/or capture the start-of-day ET112 energy counter.
+//
+// Input facts:
+//   SOLAR.new_day          (bool, true when ordinal day changed)
+//   SOLAR.baseline_absent  (bool, true when pvinv_baseline_kwh is None)
+//
+// Output facts:
+//   SOLAR.reset            (bool, default false — clear stored baseline)
+//   SOLAR.capture          (bool, default false — store current kWh as new baseline)
+
+// New calendar day: reset the stored baseline so it will be re-captured
+rule "SOLAR_Reset_On_NewDay" salience 100 no-loop {
+    when
+        SOLAR.new_day == true
+    then
+        SOLAR.reset = true;
+        SOLAR.capture = true;
+}
+
+// Baseline absent within the same day (restart / first message)
+rule "SOLAR_Capture_When_Absent" salience 100 no-loop {
+    when
+        SOLAR.baseline_absent == true
+    then
+        SOLAR.capture = true;
+}

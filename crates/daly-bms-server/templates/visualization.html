@@ -1,0 +1,478 @@
+{% extends "base.html" %}
+{% block title %}Visualisation ESS{% endblock %}
+{% block page_title %}⚡ Visualisation Système{% endblock %}
+{% block nav_viz %}active{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/reactflow@11/dist/style.css">
+<style>
+{% include "visualization.css" %}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="ess-flow-root" style="width:100%;height:calc(100vh - 56px)"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/reactflow@11/dist/umd/index.js" crossorigin></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+'use strict';
+
+const h = React.createElement;
+const { useState, useEffect, useCallback, useRef, useMemo, memo } = React;
+const { ReactFlow, Background, Controls, Panel, Handle, Position, useNodesState, useEdgesState, getSmoothStepPath, getBezierPath, EdgeLabelRenderer } = window.ReactFlow;
+
+const fmtKw  = w  => w  != null ? `${(w / 1000).toFixed(2)} kW` : '—';
+const socColor = s => s > 60 ? '#16a34a' : s > 30 ? '#ca8a04' : '#dc2626';
+
+function mkHandle(type, pos, id, style) {
+  return h(Handle, { type, position: pos, id, style: { background: '#94a3b8', width: 8, height: 8, ...style } });
+}
+
+{% include "viz_nodes_basic.js" %}
+{% include "viz_nodes_venus.js" %}
+{% include "viz_nodes_devices.js" %}
+{% include "viz_nodes_ats.js" %}
+{% include "viz_edges.js" %}
+{% include "viz_nodes_charts.js" %}
+
+const nodeTypes = {
+  summary: SummaryNode, bms: BmsNode, et112card: Et112CardNode, device: DeviceNode,
+  hub: HubNode, placeholder: PlaceholderNode, mpptGroup: MPPTGroupNode, smartshunt: SmartShuntNode,
+  temperature: TemperatureNode,
+  tongouGroup: TongouGroupNode,
+  waterheater: WaterHeaterNode,
+  inverter: InverterNode,
+  atsreseau: AtsReseauNode, atsonduleur: AtsOnduleurNode, atsmain: AtsMainNode,
+  spiralRace: SpiralRaceNode, sankey: SankeyNode
+};
+const edgeTypes = { doubleLine: AnimatedFlowEdge, customBezier: CustomBezierEdge, tripleAts: TripleAtsEdge };
+
+const NODES0 = [
+  { id: 'spiral-race',   type: 'spiralRace',  position: { x: -350, y: -30  }, data: { prodKwh: 0, soc: 0, irrWm2: 0 } },
+  { id: 'production',  type: 'summary',     position: { x: -30,  y: -30  }, data: { label: 'Production',  icon: '☀️',  value: '—', sub: 'Micro-onduleurs',   dotClass: '' } },
+  { id: 'batteries',   type: 'summary',     position: { x: 170,  y: -30  }, data: { label: 'Batteries',   icon: '🔋', value: '—', sub: '360 Ah + 320 Ah',  dotClass: '' } },
+  { id: 'meteo',       type: 'summary',     position: { x: 370,  y: -30  }, data: { label: 'Météo',       icon: '🌤️',  value: '—', sub: 'Irradiance solaire', dotClass: '' } },
+  { id: 'temp-ext',    type: 'temperature', position: { x: 570, y: -30 }, data: { label: 'Température', icon: '🌡️', live: null } },
+  { id: 'chauffe-eau',   type: 'waterheater', position: { x: 780,  y: 550 }, data: { label: 'Chauffe-eau',   icon: '🚿', live: null, heatpump: null, isClimatisation: false } },
+  { id: 'climatisation', type: 'waterheater', position: { x: 780,  y: 770 }, data: { label: 'Climatisation', icon: '❄️',  live: null, heatpump: null, isClimatisation: true  } },
+  { id: 'micro-ond',   type: 'et112card',   position: { x: 400, y: 275 }, data: { label: 'Micro-onduleurs', address: 7, live: null } },
+  { id: 'et112-reseau',   type: 'et112card', position: { x: -350, y: 469 }, data: { label: 'ET112-reseau', address: 9, live: null } },
+  { id: 'et112-maison',   type: 'et112card', position: { x: 400, y: 112 }, data: { label: 'ET112-Maison', address: 8, live: null } },
+  { id: 'onduleur',    type: 'inverter',    position: { x: 10,   y: 450 }, data: { live: null } },
+  { id: 'sankey',      type: 'sankey',      position: { x: 400, y: 420 }, data: { microPwr: 0, mpptPwr: 0, batPwr: 0, loadPwr: 0 } },
+  { id: 'hubMPPT',    type: 'hub', position: { x: 148,   y: 650 }, data: { live: null } },
+  { id: 'mppt',        type: 'mpptGroup',   position: { x: 400,  y: 700 }, data: { mppts: [], totalPowerW: 0, totalDcA: 0 } },
+  { id: 'smartshunt',  type: 'smartshunt',  position: { x: 35,   y: 715 }, data: { live: null } },
+  { id: 'hubBMS',    type: 'hub', position: { x: -30,  y: 780 }, data: { live: null } },
+  { id: 'bms1',        type: 'bms', position: { x: -350, y: 620  }, data: { label: 'BMS-360Ah', live: null } },
+  { id: 'bms2',        type: 'bms', position: { x: -350, y: 730  }, data: { label: 'BMS-320Ah', live: null } },
+  { id: 'bms3',        type: 'bms', position: { x: -350, y: 840 }, data: { label: 'BMS-620Ah', live: null } },
+  { id: 'tongou-group', type: 'tongouGroup', position: { x: 780, y: 70 }, data: { switches: [], disabled: false, _rev: 0 } },
+  { id: 'ats-reseau',   type: 'atsreseau',  position: { x: -303, y: 280 }, data: { v2a:'—', sw2:'Ouvert', s2a:'—', cnt2:'0', max2:'—', t2:'—', onForce: null, disabled: false, _rev: 0 } },
+  { id: 'ats-main',     type: 'atsmain',    position: { x: 60, y: 110 }, data: { swRemote:'—', swMode:'—', swFault:'—', middleOFF:'—', sw1:'—', sw2:'—', active_source:'—', onToggleRemote: null, onForceOff: null, disabled: false, _rev: 0 } },
+  { id: 'ats-onduleur', type: 'atsonduleur', position: { x: 60, y: 280 }, data: { v1a:'—', sw1:'Ouvert', s1a:'—', cnt1:'0', max1:'—', t1:'—', onForce: null, disabled: false, _rev: 0 } },
+];
+
+const COLOR = { ac: '#2563eb', dc: '#ea580c', bat: '#16a34a', gray: '#94a3b8' };
+
+function mkEdge(id, src, tgt, color, opts = {}) {
+  const { history, ...rest } = opts;
+  const data = history ? { history } : undefined;
+  return {
+    id, source: src, target: tgt,
+    type: 'doubleLine', animated: false,
+    style: { stroke: color, strokeWidth: 2.5 },
+    ...(data ? { data } : {}),
+    ...rest,
+  };
+}
+
+const HIST_ET112_7 = { metric: 'et112_power_w',                    address: '0x07', label: 'Micro-Onduleurs — W (6h)' };
+const HIST_ET112_8 = { metric: 'et112_power_w',                    address: '0x08', label: 'Chauffe-eau — W (6h)' };
+const HIST_ET112_9 = { metric: 'et112_power_w',                    address: '0x09', label: 'Climatisation — W (6h)' };
+const HIST_BMS_1   = { metric: 'bms_current',   bms_id: '0x01',                    label: 'BMS-360Ah — I (6h)' };
+const HIST_BMS_2   = { metric: 'bms_current',   bms_id: '0x02',                    label: 'BMS-320Ah — I (6h)' };
+const HIST_BMS_3   = { metric: 'bms_current',   bms_id: '0x03',                    label: 'BMS-3 — I (6h)' };
+const HIST_MPPT    = { metric: 'solar_total_w',                                     label: 'Solaire total — W (6h)' };
+const HIST_INV_DC  = { metric: 'venus_inverter_power_w',                            label: 'Onduleur — P DC (6h)' };
+const HIST_INV_AC  = { metric: 'venus_inverter_ac_output_power_w',                  label: 'Onduleur — P AC sortie (6h)' };
+const HIST_SHUNT   = { metric: 'venus_shunt_current_a',                             label: 'SmartShunt — I batterie (6h)' };
+
+const EDGES0 = [
+  mkEdge('e-ats-maison', 'ats-main', 'et112-maison',   COLOR.ac,  { sourceHandle: 'main-right', targetHandle: 'tl', type: 'customBezier', history: HIST_ET112_8 }),
+  mkEdge('e-ats-micro', 'micro-ond', 'ats-onduleur',   COLOR.ac,  { sourceHandle: 'sl', targetHandle: 'onduleur-right', type: 'customBezier', history: HIST_ET112_7 }),
+  mkEdge('e-onduleur-ats', 'ats-onduleur', 'onduleur',   COLOR.ac,  { sourceHandle: 'onduleur-bottom', targetHandle: 'tt', history: HIST_INV_AC }),
+  mkEdge('e-maison-switchs', 'et112-maison', 'tongou-group',   COLOR.ac,  { sourceHandle: 'sr', targetHandle: 'tl', type: 'customBezier', history: HIST_ET112_8 }),
+  mkEdge('e-ats-reseau', 'ats-reseau', 'et112-reseau',   COLOR.ac,  { sourceHandle: 'reseau-et112reseau', targetHandle: 'tt', history: HIST_ET112_9 }),
+  mkEdge('e-reseau-onduleur', 'et112-reseau', 'onduleur',   COLOR.ac,  { sourceHandle: 'sr', targetHandle: 'tl', history: HIST_ET112_9 }),
+  mkEdge('e-mppt-shu', 'mppt',      'hubMPPT', COLOR.dc,  { sourceHandle: 'sl', targetHandle: 'tr', type: 'customBezier', history: HIST_MPPT }),
+  mkEdge('e-ond-shu',  'onduleur',  'hubMPPT', COLOR.dc,  { sourceHandle: 'sb', targetHandle: 'tt', history: HIST_INV_DC }),
+  mkEdge('e-hub-shu',  'hubMPPT',  'smartshunt', COLOR.dc,  { sourceHandle: 'sb', targetHandle: 'tt', history: HIST_SHUNT }),
+  mkEdge('e-shu-hubBMS', 'hubBMS', 'smartshunt',  COLOR.bat, { sourceHandle: 'sr', targetHandle: 'tl', history: HIST_SHUNT }),
+  mkEdge('e-hubBMS-b1',  'bms1', 'hubBMS',       COLOR.bat, { sourceHandle: 'sr', targetHandle: 'tl', type: 'customBezier', history: HIST_BMS_1 }),
+  mkEdge('e-hubBMS-b2',  'bms2', 'hubBMS',       COLOR.bat, { sourceHandle: 'sr', targetHandle: 'tl', history: HIST_BMS_2 }),
+  mkEdge('e-hubBMS-b3',  'bms3', 'hubBMS',       COLOR.bat, { sourceHandle: 'sr', targetHandle: 'tl', type: 'customBezier', history: HIST_BMS_3 }),
+];
+
+
+function ESSFlow() {
+  const [nodes, setNodes, onNodesChange] = useNodesState(NODES0);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(EDGES0);
+  const [lastUpdate, setLastUpdate] = useState('—');
+  const [dataAge, setDataAge]       = useState(0);
+  const lastUpdateTsRef = useRef(null);
+  const [atsProcessing, setAtsProcessing] = useState(false);
+  const [atsRev, setAtsRev] = useState(0);
+const atsExecRef = useRef(null);
+  const atsBusyRef = useRef(false);
+
+  atsExecRef.current = async function(steps) {
+    if (atsBusyRef.current) return;
+    atsBusyRef.current = true;
+    setAtsProcessing(true);
+    try {
+      for (const step of steps) {
+        if (typeof step === 'string') await fetch('/api/v1/ats/' + step, { method: 'POST', cache: 'no-cache' });
+        else if (typeof step === 'number') await new Promise(r => setTimeout(r, step));
+      }
+    } finally {
+      atsBusyRef.current = false;
+      setAtsProcessing(false);
+    }
+  };
+
+  const handleAtsReseauForce = useCallback(() => {
+    console.log('[CALLBACK] Force Réseau appelé');
+    atsExecRef.current?.(['remote_on', 200, 'force_source2', 200, 'remote_off']);
+  }, []);
+
+  const handleAtsOnduleurForce = useCallback(() => {
+    console.log('[CALLBACK] Force Onduleur appelé');
+    atsExecRef.current?.(['remote_on', 200, 'force_source1', 200, 'remote_off']);
+  }, []);
+
+  const handleAtsToggleRemote = useCallback(() => {
+    console.log('[CALLBACK] Toggle Remote appelé');
+    atsExecRef.current?.(['remote_on', 300]);
+  }, []);
+
+  const handleAtsForceOff = useCallback(() => {
+    console.log('[CALLBACK] Force Off appelé');
+    if (window.confirm('⚠️ Confirmer Double OFF ?')) {
+      atsExecRef.current?.(['remote_on', 200, 'force_double', 200, 'remote_off']);
+    }
+  }, []);
+
+  const applyData = useCallback(function(d) {
+    const bms1 = d.bms1, bms2 = d.bms2;
+    const et7  = d.et7,  et8  = d.et8, et9 = d.et9;
+    const irr  = d.irr;
+    const mpptList        = d.mpptList        ?? [];
+    const mpptTotalPowerW = d.mpptTotalPowerW  ?? 0;
+    const mpptTotalDcA    = d.mpptTotalDcA     ?? 0;
+    const shunt = d.shunt;
+    const inverter = d.inverter;
+    const temp = d.temp;
+    const ats = d.ats;
+    const tasmotaDevices = d.tasmotaDevices || [];
+    const heatpumps = d.heatpumps || [];
+    const hp1 = heatpumps.find(h => h.mqtt_index === 1) ?? null;
+    const hp9 = heatpumps.find(h => h.mqtt_index === 9) ?? null;
+
+    const validBms = [bms1, bms2].filter(Boolean);
+    const avgSoc   = validBms.length
+      ? (validBms.reduce((s, b) => s + (b.Soc ?? 0), 0) / validBms.length).toFixed(0)
+      : null;
+    const totalPwr = validBms.reduce((s, b) => s + (b.Dc?.Power ?? 0), 0);
+    // Use SmartShunt SOC (Victron) as primary — falls back to DALY average only if absent
+    const displaySoc = shunt?.soc_percent != null ? shunt.soc_percent : (avgSoc != null ? parseFloat(avgSoc) : null);
+
+    const microPwr     = et7?.power_w ?? 0;
+    const totalProdPwr = microPwr + mpptTotalPowerW;
+    const prodVal      = fmtKw(totalProdPwr);
+    const mpptYieldSumG = mpptList.reduce((s, m) => s + (m.yield_today_kwh ?? 0), 0);
+    const prodSub      = et7 ? `${((et7.energy_export_wh ?? 0) / 1000).toFixed(1)} kWh ET112` : mpptList.length > 0 ? `${mpptYieldSumG.toFixed(2)} kWh MPPT` : 'Micro-onduleurs';
+    const prodDot      = (et7?.connected || mpptList.length > 0) ? (totalProdPwr > 50 ? 'live' : '') : '';
+    const batVal       = displaySoc != null ? `SOC ${displaySoc.toFixed(0)}%` : '—';
+    const batSub       = totalPwr ? `${totalPwr > 0 ? '+' : ''}${(totalPwr / 1000).toFixed(2)} kW` : '360 Ah + 320 Ah';
+    const batDot       = displaySoc == null ? '' : displaySoc > 50 ? 'live' : displaySoc > 20 ? 'warn' : 'alarm';
+    const irrVal       = irr?.irradiance_wm2 != null ? `${irr.irradiance_wm2.toFixed(0)} W/m²` : '—';
+    const irrSub       = irr?.total_yield_kwh != null ? `☀ ${irr.total_yield_kwh.toFixed(1)} kWh` : 'Irradiance solaire';
+    const irrDot       = irr ? 'live' : '';
+
+    setEdges(function (prev) {
+      const withFlow = prev.map(function (e) {
+        if (e.type !== 'doubleLine' && e.type !== 'customBezier') return e;
+        let fv = 0, rev = false, speedDiv = 500;
+        switch (e.id) {
+          case 'e-ats-maison':
+          case 'e-maison-switchs':  fv = Math.abs(et8?.power_w              ?? 0); break;
+          case 'e-ats-micro':       fv = Math.abs(et7?.power_w              ?? 0); break;
+          // Courant AC sortie onduleur (A) — diviseur adapté aux ampères
+          case 'e-onduleur-ats':    fv = Math.abs(inverter?.ac_output_current_a ?? 0); rev = true; speedDiv = 5; break;
+          case 'e-ats-reseau':
+          case 'e-reseau-onduleur': fv = Math.abs(et9?.power_w              ?? 0); break;
+          case 'e-mppt-shu':        fv = mpptTotalPowerW;                          break;
+          case 'e-ond-shu':         fv = Math.abs(inverter?.power_w         ?? 0); break;
+          case 'e-hub-shu':         fv = mpptTotalPowerW + Math.abs(inverter?.power_w ?? 0); break;
+          case 'e-shu-hubBMS': {
+            const pw = shunt?.power_w ?? 0; fv = Math.abs(pw); rev = pw > 0; break;
+          }
+          case 'e-hubBMS-b1': {
+            const pw = bms1?.Dc?.Power ?? 0; fv = Math.abs(pw); rev = pw > 0; break;
+          }
+          case 'e-hubBMS-b2': {
+            const pw = bms2?.Dc?.Power ?? 0; fv = Math.abs(pw); rev = pw > 0; break;
+          }
+        }
+        return {
+          ...e,
+          data: {
+            ...(e.data || {}),
+            flowValue:     fv,
+            reverse:       rev,
+            flowSpeed:     Math.min(4, Math.max(0.4, fv / speedDiv)),
+            flowColor:     e.style?.stroke ?? '#2563eb',
+            particleCount: 2,
+          },
+        };
+      });
+
+      if (!ats) return withFlow;
+
+      const sw1C   = (ats.sw1 || '').includes('Fermé');
+      const sw2C   = (ats.sw2 || '').includes('Fermé');
+      const midOff = (ats.middleOFF || '').includes('Activé');
+      const atsEdges = [];
+      if (!midOff) {
+        if (sw2C) {
+          const e2pwr = Math.abs(et9?.power_w ?? 0);
+          atsEdges.push({
+            id: 'ats-e2', source: 'ats-reseau', target: 'ats-main',
+            sourceHandle: 'reseau-out', targetHandle: 'ats-in-reseau',
+            type: 'tripleAts',
+            style: { stroke: sw1C ? '#6366f1' : '#10b981', strokeWidth: 2 },
+            data: {
+              useBezier: true,
+              flowValue: e2pwr,
+              flowSpeed: Math.min(4, Math.max(0.4, e2pwr / 500)),
+              flowColor: sw1C ? '#6366f1' : '#10b981',
+            }
+          });
+        }
+        if (sw1C) {
+          // Courant AC sortie onduleur (A) vers ATS-main — diviseur adapté aux ampères
+          const e1a = Math.abs(inverter?.ac_output_current_a ?? 0);
+          atsEdges.push({
+            id: 'ats-e1', source: 'ats-onduleur', target: 'ats-main',
+            sourceHandle: 'onduleur-out', targetHandle: 'ats-in-onduleur',
+            type: 'tripleAts',
+            style: { stroke: '#10b981', strokeWidth: 2 },
+            data: {
+              useBezier: false,
+              flowValue: e1a,
+              flowSpeed: Math.min(4, Math.max(0.4, e1a / 5)),
+              flowColor: '#10b981',
+            }
+          });
+        }
+      }
+      return [...withFlow.filter(function (e) { return !e.id.startsWith('ats-e'); }), ...atsEdges];
+    });
+
+    const newRev = atsRev + 1;
+    setAtsRev(newRev);
+
+    setNodes(prev => prev.map(n => {
+      switch (n.id) {
+        case 'spiral-race': {
+          const mpptYieldSum  = mpptList.reduce((s, m) => s + (m.yield_today_kwh ?? 0), 0);
+          const localProdKwh  = ((et7?.energy_export_wh ?? 0) / 1000) + mpptYieldSum;
+          const totalYieldKwh = irr?.total_yield_kwh ?? localProdKwh;
+          return { ...n, data: { ...n.data, totalYieldKwh, prodKwh: localProdKwh, soc: displaySoc ?? 0, irrWm2: irr?.irradiance_wm2 ?? 0 } };
+        }
+        case 'sankey': {
+          const loadPwr        = tasmotaDevices.reduce((s, d) => s + (d.connected ? (d.power_w ?? 0) : 0), 0);
+          const batChargePwr   = Math.max(0, totalPwr);
+          const batDischargePwr = Math.max(0, -totalPwr);
+          return { ...n, data: { ...n.data, microPwr: et7?.power_w ?? 0, mpptPwr: mpptTotalPowerW, batChargePwr, batDischargePwr, loadPwr } };
+        }
+        case 'production':
+          return { ...n, data: { ...n.data, value: prodVal, sub: prodSub, dotClass: prodDot } };
+        case 'batteries':
+          return { ...n, data: { ...n.data, value: batVal, sub: batSub, dotClass: batDot } };
+        case 'meteo':
+          return { ...n, data: { ...n.data, value: irrVal, sub: irrSub, dotClass: irrDot } };
+        case 'bms1': return { ...n, data: { ...n.data, live: bms1 ?? null } };
+        case 'bms2': return { ...n, data: { ...n.data, live: bms2 ?? null } };
+        case 'micro-ond':   return { ...n, data: { ...n.data, live: et7  ?? null } };
+        case 'et112-reseau': return { ...n, data: { ...n.data, live: et9 ?? null } };
+        case 'et112-maison': return { ...n, data: { ...n.data, live: et8 ?? null } };
+        case 'onduleur':    return { ...n, data: { ...n.data, live: inverter ?? null } };
+        case 'chauffe-eau':   return { ...n, data: { ...n.data, live: et8 ?? null, heatpump: hp1 } };
+        case 'climatisation': return { ...n, data: { ...n.data, live: et9 ?? null, heatpump: hp9 } };
+        case 'mppt':        return { ...n, data: { ...n.data, mppts: mpptList, totalPowerW: mpptTotalPowerW, totalDcA: mpptTotalDcA } };
+        case 'smartshunt':  return { ...n, data: { ...n.data, live: shunt ?? null } };
+        case 'temp-ext':    return { ...n, data: { ...n.data, live: temp ?? null } };
+        case 'tongou-group': return { ...n, data: { ...n.data, switches: tasmotaDevices, disabled: atsProcessing, _rev: newRev } };
+
+        case 'ats-reseau':
+          if (!ats) return n;
+          return {
+            ...n,
+            data: {
+              ...ats,
+              disabled: atsProcessing,
+              onForce: handleAtsReseauForce,
+              _rev: newRev
+            }
+          };
+        case 'ats-onduleur':
+          if (!ats) return n;
+          return {
+            ...n,
+            data: {
+              ...ats,
+              disabled: atsProcessing,
+              onForce: handleAtsOnduleurForce,
+              _rev: newRev
+            }
+          };
+        case 'ats-main':
+          if (!ats) return n;
+          return {
+            ...n,
+            data: {
+              ...ats,
+              disabled: atsProcessing,
+              onToggleRemote: handleAtsToggleRemote,
+              onForceOff: handleAtsForceOff,
+              _rev: newRev
+            }
+          };
+        default: return n;
+      }
+    }));
+
+    setLastUpdate(new Date().toLocaleTimeString('fr-FR'));
+    lastUpdateTsRef.current = Date.now();
+    setDataAge(0);
+  }, [atsProcessing, atsRev, handleAtsReseauForce, handleAtsOnduleurForce, handleAtsToggleRemote, handleAtsForceOff]);
+
+  useEffect(function() {
+    const safe = p => p.catch(() => null);
+    async function fetchAll() {
+      const [bms1, bms2, et7, et8, et9, irr, venusResp, tempResp, atsResp] = await Promise.all([
+        safe(fetch('/api/v1/bms/1/status').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/bms/2/status').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/et112/7/status').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/et112/8/status').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/et112/9/status').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/irradiance/status').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/venus/mppt').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/venus/temperatures').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/ats/status').then(r => r.ok ? r.json() : null)),
+      ]);
+
+      const tasmotaPromises = TASMOTA_IDS.map(async (id) => {
+        try {
+          const resp = await fetch(`/api/v1/tasmota/${id}/status`);
+          if (!resp.ok) return null;
+          const data = await resp.json();
+          return {
+            id: id,
+            name: data.name || `Switch ${id}`,
+            connected: true,
+            power_on: data.power_on ?? false,
+            power_w: data.power_w ?? 0,
+            voltage_v: data.voltage_v ?? 0,
+            current_a: data.current_a ?? 0,
+            energy_today_kwh: data.energy_today_kwh ?? 0
+          };
+        } catch {
+          return { id: id, name: `Switch ${id}`, connected: false };
+        }
+      });
+      const tasmotaDevices = (await Promise.all(tasmotaPromises)).filter(Boolean);
+
+      const mpptList        = venusResp?.mppts         ?? [];
+      const mpptTotalPowerW = venusResp?.total_power_w  ?? 0;
+      const mpptTotalDcA    = venusResp?.total_dc_current_a ?? 0;
+      const [shuntResp, inverterResp, heatpumpsResp] = await Promise.all([
+        safe(fetch('/api/v1/venus/smartshunt').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/venus/inverter').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/venus/heatpumps').then(r => r.ok ? r.json() : null)),
+      ]);
+      const shunt = shuntResp?.shunt ?? null;
+      const inverter = inverterResp?.inverter ?? null;
+      const heatpumps = heatpumpsResp?.heatpumps ?? [];
+      const temps = tempResp?.temperatures ?? [];
+      const temp = temps.length > 0 ? temps[0] : null;
+      const ats = atsResp?.values ?? null;
+
+      applyData({ bms1, bms2, et7, et8, et9, irr, mpptList, mpptTotalPowerW, mpptTotalDcA, shunt, inverter, temp, ats, tasmotaDevices, heatpumps });
+    }
+    fetchAll();
+    const timer = setInterval(fetchAll, 2000);
+
+    // Re-fetch immediately when tab becomes visible (browser throttles setInterval in background)
+    function onVisibility() {
+      if (!document.hidden) fetchAll();
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+
+    // Age counter — ticks every second to show data staleness
+    const ageTick = setInterval(function() {
+      if (lastUpdateTsRef.current) {
+        setDataAge(Math.floor((Date.now() - lastUpdateTsRef.current) / 1000));
+      }
+    }, 1000);
+
+    return function() {
+      clearInterval(timer);
+      clearInterval(ageTick);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [applyData]);
+
+  const legend = [
+    { color: COLOR.ac,  label: 'Courant AC' },
+    { color: COLOR.dc,  label: 'Bus DC' },
+    { color: COLOR.bat, label: 'Batterie' },
+  ];
+
+  return h(ReactFlow, {
+    nodes, edges, onNodesChange, onEdgesChange, nodeTypes, edgeTypes, fitView: true,
+    fitViewOptions: { padding: 0.06 }, minZoom: 0.2, maxZoom: 2.5,
+    nodesDraggable: false, nodesConnectable: false, elementsSelectable: false, preventScrolling: false,
+  },
+    h(Background, { variant: 'dots', gap: 20, size: 1, color: '#c8d3de' }),
+    h(Controls, { showInteractive: false }),
+    h(Panel, { position: 'bottom-left' },
+      h('div', { className: 'viz-panel viz-legend' },
+        ...legend.map(l => h('div', { key: l.color, className: 'viz-leg-item' },
+          h('div', { className: 'viz-leg-line', style: { background: l.color } }),
+          l.label
+        ))
+      )
+    ),
+    h(Panel, { position: 'bottom-right' },
+      h('div', { className: 'viz-panel', style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+        h('span', { style: {
+          width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block', flexShrink: 0,
+          background: dataAge < 5 ? '#22c55e' : dataAge < 15 ? '#f59e0b' : '#ef4444'
+        }}),
+        dataAge < 5
+          ? `Màj : ${lastUpdate}`
+          : `Màj : ${lastUpdate} (${dataAge}s)`
+      )
+    ),
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('ess-flow-root')).render(h(ESSFlow));
+</script>
+{% endblock %}

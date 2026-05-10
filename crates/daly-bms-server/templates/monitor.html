@@ -1,0 +1,639 @@
+{% extends "base.html" %}
+{% block title %}Monitoring Pi5 — ESS Monitor{% endblock %}
+{% block page_title %}Monitoring Pi5{% endblock %}
+{% block nav_monitor %}active{% endblock %}
+
+{% block content %}
+<div class="page-hdr">
+  <h1>🖥 Monitoring Pi5</h1>
+  <div class="page-hdr-meta">
+    <span>Màj : <span id="mon-ts">—</span></span>
+    <span class="sep">·</span>
+    <span id="mon-status-badge" class="bms-badge" style="background:#e2e8f0;color:#64748b">En attente…</span>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1.25rem;">
+
+  <!-- Services systemd -->
+  <div class="bms-card" id="card-systemd">
+    <div class="bms-hdr bms-hdr-sky">
+      <div class="bms-hdr-left"><span class="bms-hdr-name">⚙ Services Systemd</span></div>
+    </div>
+    <div id="systemd-list" style="padding:0.75rem;">
+      <div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Chargement…</div></div>
+    </div>
+  </div>
+
+  <!-- NEOHTOP System Overview -->
+  <div class="bms-card" id="card-sysmon" style="background:#0f172a;border:1px solid #1e293b;">
+    <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">◈ SYSTEM</span>
+      <span id="neo-uptime" style="font-family:monospace;font-size:0.72rem;color:#475569;">—</span>
+    </div>
+    <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.6rem;">
+
+      <div>
+        <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.72rem;margin-bottom:3px;">
+          <span style="color:#94a3b8;">CPU</span><span id="neo-cpu-val" style="color:#f1f5f9;font-weight:700;">—</span>
+        </div>
+        <div style="height:5px;background:#1e293b;border-radius:2px;overflow:hidden;">
+          <div id="neo-cpu-bar" style="height:100%;width:0%;border-radius:2px;transition:width 0.6s;background:#22c55e;"></div>
+        </div>
+      </div>
+
+      <div id="neo-temp-row" style="display:none;">
+        <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.72rem;">
+          <span style="color:#94a3b8;">Temp CPU</span><span id="neo-temp-val" style="font-weight:700;">—</span>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.72rem;margin-bottom:3px;">
+          <span style="color:#94a3b8;">RAM</span><span id="neo-ram-val" style="color:#f1f5f9;font-weight:700;">—</span>
+        </div>
+        <div style="height:5px;background:#1e293b;border-radius:2px;overflow:hidden;">
+          <div id="neo-ram-bar" style="height:100%;width:0%;border-radius:2px;transition:width 0.6s;background:#3b82f6;"></div>
+        </div>
+      </div>
+
+      <div id="neo-swap-row">
+        <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.72rem;margin-bottom:3px;">
+          <span style="color:#94a3b8;">Swap</span><span id="neo-swap-val" style="color:#f1f5f9;font-weight:700;">—</span>
+        </div>
+        <div style="height:4px;background:#1e293b;border-radius:2px;overflow:hidden;">
+          <div id="neo-swap-bar" style="height:100%;width:0%;border-radius:2px;transition:width 0.6s;background:#8b5cf6;"></div>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.72rem;margin-bottom:3px;">
+          <span style="color:#94a3b8;">Disk /</span><span id="neo-disk-val" style="color:#f1f5f9;font-weight:700;">—</span>
+        </div>
+        <div style="height:5px;background:#1e293b;border-radius:2px;overflow:hidden;">
+          <div id="neo-disk-bar" style="height:100%;width:0%;border-radius:2px;transition:width 0.6s;background:#a855f7;"></div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;margin-top:0.2rem;">
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.63rem;color:#64748b;margin-bottom:1px;">↓ RX/s</div>
+          <div id="neo-rx" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#22c55e;">—</div>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.63rem;color:#64748b;margin-bottom:1px;">↑ TX/s</div>
+          <div id="neo-tx" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#f97316;">—</div>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.63rem;color:#64748b;margin-bottom:1px;">Load 1m</div>
+          <div id="neo-load1" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#f1f5f9;">—</div>
+        </div>
+        <div style="background:#1e293b;border-radius:6px;padding:0.4rem 0.55rem;">
+          <div style="font-family:monospace;font-size:0.63rem;color:#64748b;margin-bottom:1px;">Load 5m</div>
+          <div id="neo-load5" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#f1f5f9;">—</div>
+        </div>
+      </div>
+
+      <div style="margin-top:0.3rem;border-top:1px solid #1e293b;padding-top:0.55rem;">
+        <div style="font-family:monospace;font-size:0.63rem;color:#64748b;margin-bottom:0.35rem;letter-spacing:0.05em;">SERVICES RÉSEAU</div>
+        <div id="neo-network-list" style="display:flex;flex-direction:column;gap:3px;"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Card unique : 3 règles — Courant Victron / Chauffe-eau / DEYE -->
+  <div class="bms-card" id="card-rules" style="background:#0f172a;border:1px solid #1e293b;">
+    <div style="padding:0.7rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">◈ RÈGLES SYSTÈME</span>
+      <span id="rules-ts" style="font-family:monospace;font-size:0.65rem;color:#475569;">—</span>
+    </div>
+    <div style="padding:0.75rem 0.9rem;display:flex;flex-direction:column;gap:0.85rem;">
+
+      <!-- a) Gestion Courant Victron -->
+      <div>
+        <div style="font-family:monospace;font-size:0.7rem;font-weight:700;color:#38bdf8;margin-bottom:0.4rem;display:flex;justify-content:space-between;">
+          <span>⚡ Gestion Courant Victron</span>
+          <span id="charge-ts" style="font-weight:400;color:#475569;font-size:0.63rem;">—</span>
+        </div>
+        <div style="display:flex;gap:0.4rem;margin-bottom:0.4rem;">
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;">
+            <div style="font-size:0.6rem;color:#64748b;">Courant max charge</div>
+            <div id="charge-current-val" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#22c55e;">—</div>
+          </div>
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;">
+            <div style="font-size:0.6rem;color:#64748b;">Power Assist</div>
+            <div id="charge-assist-val" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#94a3b8;">—</div>
+          </div>
+        </div>
+        <div id="charge-rule-grid" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
+      </div>
+
+      <div style="border-top:1px solid #1e293b;"></div>
+
+      <!-- b) Gestion Chauffe-eau -->
+      <div>
+        <div style="font-family:monospace;font-size:0.7rem;font-weight:700;color:#38bdf8;margin-bottom:0.4rem;display:flex;justify-content:space-between;">
+          <span>🚿 Gestion Chauffe-eau (LG ThinQ)</span>
+          <span id="rules-mode-badge" style="font-size:0.68rem;padding:1px 6px;border-radius:4px;background:#1e293b;color:#475569;">—</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.35rem;margin-bottom:0.4rem;">
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;">
+            <div style="font-size:0.6rem;color:#64748b;">Mode LG</div>
+            <div id="wh-mode-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#7dd3fc;">—</div>
+          </div>
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;">
+            <div style="font-size:0.6rem;color:#64748b;">Temp. actuelle</div>
+            <div id="wh-temp-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#f97316;">—</div>
+          </div>
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;">
+            <div style="font-size:0.6rem;color:#64748b;">Temp. cible</div>
+            <div id="wh-target-val" style="font-family:monospace;font-size:0.78rem;font-weight:700;color:#a78bfa;">—</div>
+          </div>
+        </div>
+        <div style="font-family:monospace;font-size:0.62rem;color:#475569;margin-bottom:0.35rem;">LG lu le : <span id="wh-read-ts">—</span></div>
+        <div id="rule-grid" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;">
+          <span style="font-family:monospace;font-size:0.65rem;color:#475569;">→</span>
+          <span id="rules-decision" style="font-family:monospace;font-size:0.73rem;font-weight:700;color:#94a3b8;">—</span>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid #1e293b;"></div>
+
+      <!-- c) Gestion Relais DEYE -->
+      <div>
+        <div style="font-family:monospace;font-size:0.7rem;font-weight:700;color:#38bdf8;margin-bottom:0.4rem;display:flex;justify-content:space-between;">
+          <span>🔌 Gestion Relais DEYE</span>
+          <span id="deye-state-badge" style="font-size:0.68rem;padding:1px 6px;border-radius:4px;background:#1e293b;color:#475569;">—</span>
+        </div>
+        <div style="display:flex;gap:0.4rem;margin-bottom:0.4rem;">
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;display:flex;align-items:center;gap:0.5rem;">
+            <span id="deye-dot" style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#475569;"></span>
+            <div>
+              <div style="font-size:0.6rem;color:#64748b;">Relais</div>
+              <div id="deye-on-val" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#94a3b8;">—</div>
+            </div>
+          </div>
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;">
+            <div style="font-size:0.6rem;color:#64748b;">Dernier changement</div>
+            <div id="deye-change-ts" style="font-family:monospace;font-size:0.7rem;color:#64748b;">—</div>
+          </div>
+        </div>
+        <div id="deye-rule-grid" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RS485 Health -->
+  <div class="bms-card" id="card-rs485" style="grid-column:1/-1">
+    <div class="bms-hdr bms-hdr-indigo">
+      <div class="bms-hdr-left"><span class="bms-hdr-name">🔌 Santé bus RS485</span></div>
+      <div class="bms-hdr-right"><span id="rs485-totals" class="bms-badge">—</span></div>
+    </div>
+    <div id="rs485-table-wrap" style="padding:0.25rem 0.25rem 0.5rem;overflow-x:auto;">
+      <div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Chargement…</div></div>
+    </div>
+  </div>
+
+  <!-- NEOHTOP Process list -->
+  <div class="bms-card" id="card-proc" style="grid-column:1/-1;background:#0f172a;border:1px solid #1e293b;">
+    <div style="padding:0.65rem 0.9rem;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-family:monospace;font-weight:700;color:#7dd3fc;font-size:0.85rem;">◈ PROCESSUS</span>
+      <span style="font-family:monospace;font-size:0.68rem;color:#475569;">top 20 par %CPU</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-family:monospace;font-size:0.76rem;">
+        <thead>
+          <tr style="color:#475569;text-align:left;border-bottom:1px solid #1e293b;">
+            <th style="padding:0.35rem 0.6rem;font-weight:500;">PID</th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;">NOM</th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;text-align:right;">CPU%</th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;width:90px;"></th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;text-align:right;">MEM%</th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;text-align:right;">RSS</th>
+            <th style="padding:0.35rem 0.6rem;font-weight:500;">État</th>
+          </tr>
+        </thead>
+        <tbody id="proc-tbody">
+          <tr><td colspan="7" style="padding:1rem;text-align:center;color:#475569;">Chargement…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Log archive viewer -->
+  <div class="bms-card" id="card-logs" style="grid-column:1/-1;">
+    <div class="bms-hdr bms-hdr-amber">
+      <div class="bms-hdr-left"><span class="bms-hdr-name">📁 Archives de logs</span></div>
+      <div class="bms-hdr-right" style="display:flex;align-items:center;gap:6px;">
+        <select id="log-file-select" style="font-size:0.72rem;border:1px solid var(--border);border-radius:4px;padding:2px 6px;background:var(--bg);color:var(--text);">
+          <option value="">— choisir un fichier —</option>
+        </select>
+        <button onclick="loadLogFile()" style="font-size:0.72rem;padding:3px 10px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;">Charger</button>
+      </div>
+    </div>
+    <div id="log-content-wrap" style="padding:0.5rem;">
+      <div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">Sélectionner un fichier de log</div></div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function barColor(p){return p>85?'#ef4444':p>65?'#eab308':'#22c55e';}
+function fmtUptime(s){
+  if(s>=86400)return Math.floor(s/86400)+'j '+Math.floor((s%86400)/3600)+'h';
+  if(s>=3600) return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+  return Math.floor(s/60)+'m '+Math.floor(s%60)+'s';
+}
+function fmtBytes(b){
+  if(b>=1e9)return (b/1e9).toFixed(1)+' GB/s';
+  if(b>=1e6)return (b/1e6).toFixed(1)+' MB/s';
+  if(b>=1e3)return (b/1e3).toFixed(0)+' KB/s';
+  return b+' B/s';
+}
+function fmtMb(mb){return mb>=1024?(mb/1024).toFixed(1)+' GB':mb+' MB';}
+function neoBar(pct,col){
+  const c=col||barColor(pct);
+  return `<div style="display:inline-block;width:80px;height:5px;background:#1e293b;border-radius:2px;vertical-align:middle;"><div style="width:${Math.min(100,pct)}%;height:100%;border-radius:2px;background:${c};"></div></div>`;
+}
+function stateDot(s){
+  const r=s&&s[0];
+  if(r==='R')return '<span style="color:#22c55e;font-weight:700;">R</span>';
+  if(r==='S')return '<span style="color:#3b82f6;">S</span>';
+  if(r==='D')return '<span style="color:#ef4444;font-weight:700;">D</span>';
+  if(r==='Z')return '<span style="color:#ef4444;">Z</span>';
+  return `<span style="color:#475569;">${s||'?'}</span>`;
+}
+
+async function fetchMonitor(){
+  try{
+    const r=await fetch('/api/v1/monitor/status');
+    if(!r.ok)return;
+    const d=await r.json();
+    if(!d.available||!d.monitor)return;
+    const m=d.monitor;
+
+    document.getElementById('mon-ts').textContent=new Date().toLocaleTimeString('fr-FR');
+    const allOk=[...(m.services||[]),...(m.network_services||[])].every(s=>s.active);
+    const badge=document.getElementById('mon-status-badge');
+    badge.textContent=allOk?'✅ Nominal':'⚠ Anomalie';
+    badge.style.background=allOk?'#dcfce7':'#fee2e2';
+    badge.style.color=allOk?'#15803d':'#dc2626';
+
+    // Services systemd
+    const sysEl=document.getElementById('systemd-list');
+    if(sysEl&&m.services){
+      sysEl.innerHTML=m.services.map(s=>`
+        <div style="display:flex;align-items:center;gap:0.6rem;padding:0.4rem 0.1rem;border-bottom:1px solid var(--border)">
+          <span style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:${s.active?'#16a34a':'#dc2626'};${s.active?'box-shadow:0 0 5px #16a34a66':''}"></span>
+          <span style="font-weight:600;font-size:0.8rem;flex:1">${s.name}</span>
+          <span style="font-size:0.68rem;color:var(--muted2);font-family:monospace">${s.status}</span>
+        </div>`).join('');
+    }
+
+    // Uptime
+    document.getElementById('neo-uptime').textContent='uptime '+fmtUptime(m.uptime_secs||0);
+
+    // CPU
+    const cpu=m.cpu_percent||0;
+    document.getElementById('neo-cpu-val').textContent=cpu.toFixed(1)+'%';
+    document.getElementById('neo-cpu-val').style.color=barColor(cpu);
+    const cpuBar=document.getElementById('neo-cpu-bar');
+    cpuBar.style.width=cpu+'%'; cpuBar.style.background=barColor(cpu);
+
+    // Temp
+    if(m.cpu_temp_c!=null){
+      document.getElementById('neo-temp-row').style.display='block';
+      const tc=m.cpu_temp_c;
+      const tc_col=tc>75?'#ef4444':tc>60?'#eab308':'#22c55e';
+      document.getElementById('neo-temp-val').innerHTML=`<span style="color:${tc_col}">${tc.toFixed(1)} °C</span>`;
+    }
+
+    // RAM
+    const ram=m.memory_percent||0;
+    document.getElementById('neo-ram-val').textContent=fmtMb(m.mem_used_mb||0)+' / '+fmtMb(m.mem_total_mb||0)+' ('+ram.toFixed(0)+'%)';
+    const ramBar=document.getElementById('neo-ram-bar');
+    ramBar.style.width=ram+'%'; ramBar.style.background=barColor(ram);
+
+    // Swap
+    const swapT=m.swap_total_mb||0, swapU=m.swap_used_mb||0;
+    if(swapT>0){
+      document.getElementById('neo-swap-val').textContent=fmtMb(swapU)+' / '+fmtMb(swapT);
+      document.getElementById('neo-swap-bar').style.width=(swapU/swapT*100)+'%';
+    } else { document.getElementById('neo-swap-row').style.display='none'; }
+
+    // Disk
+    const disk=m.disk_percent||0;
+    document.getElementById('neo-disk-val').textContent=disk.toFixed(0)+'%';
+    document.getElementById('neo-disk-val').style.color=barColor(disk);
+    const diskBar=document.getElementById('neo-disk-bar');
+    diskBar.style.width=disk+'%'; diskBar.style.background=barColor(disk);
+
+    // Network I/O
+    document.getElementById('neo-rx').textContent=fmtBytes(m.net_rx_bps||0);
+    document.getElementById('neo-tx').textContent=fmtBytes(m.net_tx_bps||0);
+
+    // Load avg
+    if(m.load_avg&&m.load_avg.length>=2){
+      document.getElementById('neo-load1').textContent=m.load_avg[0].toFixed(2);
+      document.getElementById('neo-load5').textContent=m.load_avg[1].toFixed(2);
+    }
+
+    // Services réseau
+    const netEl=document.getElementById('neo-network-list');
+    if(netEl&&m.network_services){
+      netEl.innerHTML=m.network_services.map(s=>`
+        <div style="display:flex;align-items:center;gap:6px;font-family:monospace;font-size:0.72rem;">
+          <span style="width:7px;height:7px;border-radius:50%;background:${s.active?'#22c55e':'#ef4444'};flex-shrink:0;${s.active?'box-shadow:0 0 4px #22c55e66':''}"></span>
+          <span style="color:${s.active?'#94a3b8':'#ef4444'};flex:1">${s.name}</span>
+          <span style="color:#334155;font-size:0.65rem;">${s.status}</span>
+        </div>`).join('');
+    }
+
+    // Processes
+    const procs=m.processes||[];
+    const tbody=document.getElementById('proc-tbody');
+    if(procs.length===0){
+      tbody.innerHTML='<tr><td colspan="7" style="padding:1rem;text-align:center;color:#475569;">Aucun processus</td></tr>';
+    } else {
+      tbody.innerHTML=procs.map(p=>{
+        const cpuC=p.cpu_percent>50?'#ef4444':p.cpu_percent>20?'#eab308':'#22c55e';
+        const memC=p.mem_percent>20?'#ef4444':p.mem_percent>10?'#eab308':'#3b82f6';
+        return `<tr style="border-bottom:1px solid #0f172a;">
+          <td style="padding:0.28rem 0.6rem;color:#475569;">${p.pid}</td>
+          <td style="padding:0.28rem 0.6rem;color:#e2e8f0;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.name}</td>
+          <td style="padding:0.28rem 0.6rem;text-align:right;color:${cpuC};font-weight:${p.cpu_percent>5?'700':'400'};">${p.cpu_percent.toFixed(1)}%</td>
+          <td style="padding:0.28rem 0.6rem;">${neoBar(Math.min(p.cpu_percent*2,100),cpuC)}</td>
+          <td style="padding:0.28rem 0.6rem;text-align:right;color:${memC};">${p.mem_percent.toFixed(1)}%</td>
+          <td style="padding:0.28rem 0.6rem;text-align:right;color:#64748b;">${p.mem_rss_mb.toFixed(0)} MB</td>
+          <td style="padding:0.28rem 0.6rem;">${stateDot(p.state)}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch(e){ console.warn('fetchMonitor:',e); }
+}
+
+// RS485 Health
+function fmtRs485Age(iso){
+  if(!iso)return '—';
+  const ts=new Date(iso).getTime(); if(isNaN(ts))return '—';
+  const age=Math.max(0,Math.floor((Date.now()-ts)/1000));
+  if(age<60)return age+'s'; if(age<3600)return Math.floor(age/60)+'min';
+  if(age<86400)return Math.floor(age/3600)+'h'; return Math.floor(age/86400)+'j';
+}
+function kindBadge(k){
+  const pal={BMS:{bg:'#dbeafe',fg:'#1d4ed8'},ET112:{bg:'#fef3c7',fg:'#a16207'},ATS:{bg:'#f3e8ff',fg:'#7e22ce'},PRALRAN:{bg:'#dcfce7',fg:'#15803d'}};
+  const c=pal[k]||{bg:'#e2e8f0',fg:'#475569'};
+  return `<span style="background:${c.bg};color:${c.fg};padding:2px 6px;border-radius:4px;font-size:0.65rem;font-weight:600">${k}</span>`;
+}
+async function fetchRs485Health(){
+  try{
+    const r=await fetch('/api/v1/monitor/rs485-health'); if(!r.ok)return;
+    const d=await r.json();
+    const el=document.getElementById('rs485-table-wrap'); if(!el)return;
+    const devices=(d&&d.devices)||[];
+    if(devices.length===0){ el.innerHTML='<div class="empty-state"><div class="empty-icon">—</div><div class="empty-title">Aucun appareil</div></div>'; return; }
+    const rows=devices.map(dev=>{
+      const total=(dev.successful_polls||0)+(dev.timeout_count||0)+(dev.crc_error_count||0)+(dev.other_error_count||0);
+      const rate=total>0?(dev.successful_polls||0)/total*100:0;
+      const rc=rate>=95?'#16a34a':rate>=80?'#ca8a04':'#dc2626';
+      const addr='0x'+(dev.address!=null?dev.address.toString(16).padStart(2,'0'):'?');
+      const lastErr=dev.last_error_ts?`<span title="${(dev.last_error_message||'').replace(/"/g,'&quot;')}">${fmtRs485Age(dev.last_error_ts)}</span>`:'—';
+      return `<tr><td style="padding:.4rem .6rem;font-family:monospace;font-weight:600">${addr}</td>
+        <td style="padding:.4rem .6rem">${kindBadge(dev.kind||'—')}</td>
+        <td style="padding:.4rem .6rem">${dev.name||'—'}</td>
+        <td style="padding:.4rem .6rem;text-align:right;color:${rc};font-weight:600">${rate.toFixed(1)}%</td>
+        <td style="padding:.4rem .6rem;text-align:right;font-family:monospace">${dev.successful_polls||0}</td>
+        <td style="padding:.4rem .6rem;text-align:right;font-family:monospace;color:${dev.timeout_count>0?'#dc2626':'inherit'}">${dev.timeout_count||0}</td>
+        <td style="padding:.4rem .6rem;text-align:right;font-family:monospace;color:${dev.crc_error_count>0?'#dc2626':'inherit'}">${dev.crc_error_count||0}</td>
+        <td style="padding:.4rem .6rem;text-align:right;font-size:.7rem;color:var(--muted2)">${fmtRs485Age(dev.last_success_ts)}</td>
+        <td style="padding:.4rem .6rem;text-align:right;font-size:.7rem;color:var(--muted2)">${lastErr}</td></tr>`;
+    }).join('');
+    el.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:.78rem"><thead><tr style="background:var(--bg2);color:var(--muted2);text-align:left;font-size:.7rem">
+      <th style="padding:.4rem .6rem">Addr</th><th style="padding:.4rem .6rem">Type</th><th style="padding:.4rem .6rem">Nom</th>
+      <th style="padding:.4rem .6rem;text-align:right">Succès%</th><th style="padding:.4rem .6rem;text-align:right">OK</th>
+      <th style="padding:.4rem .6rem;text-align:right">Timeout</th><th style="padding:.4rem .6rem;text-align:right">CRC</th>
+      <th style="padding:.4rem .6rem;text-align:right">Dern. OK</th><th style="padding:.4rem .6rem;text-align:right">Dern. err.</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+    const t=(d&&d.totals)||{};
+    const tot=(t.successful_polls||0)+(t.timeout_count||0)+(t.crc_error_count||0)+(t.other_error_count||0);
+    const rate=tot>0?(t.successful_polls||0)/tot*100:0;
+    const badge=document.getElementById('rs485-totals');
+    if(badge){
+      badge.textContent=rate.toFixed(1)+'% ('+(t.successful_polls||0)+'/'+tot+')';
+      badge.style.background=rate>=95?'#dcfce7':rate>=80?'#fef3c7':'#fee2e2';
+      badge.style.color=rate>=95?'#15803d':rate>=80?'#a16207':'#dc2626';
+    }
+  } catch(e){}
+}
+
+// Log archive
+async function loadLogList(){
+  try{
+    const r=await fetch('/api/v1/monitor/logs'); if(!r.ok)return;
+    const d=await r.json();
+    const sel=document.getElementById('log-file-select'); if(!sel||!d.ok)return;
+    sel.innerHTML='<option value="">— choisir —</option>'+(d.files||[]).map(f=>`<option value="${f.name}">${f.name} (${f.size_kb} KB)</option>`).join('');
+  } catch(e){}
+}
+async function loadLogFile(){
+  const sel=document.getElementById('log-file-select');
+  const name=sel&&sel.value; if(!name)return;
+  const wrap=document.getElementById('log-content-wrap');
+  wrap.innerHTML='<div style="padding:1rem;color:var(--muted2);font-size:0.8rem;">Chargement…</div>';
+  try{
+    const r=await fetch('/api/v1/monitor/logs/content?name='+encodeURIComponent(name)+'&lines=500');
+    if(!r.ok){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">Erreur chargement</div>';return;}
+    const d=await r.json();
+    if(!d.ok){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">'+d.reason+'</div>';return;}
+    const lines=d.lines||[];
+    const html=lines.map(line=>{
+      let color='#94a3b8';
+      if(line.includes(' WARN ')) color='#eab308';
+      if(line.includes(' ERROR ')) color='#ef4444';
+      if(line.includes(' INFO ')) color='#86efac';
+      const e=line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return `<div style="color:${color};white-space:pre;font-size:0.72rem;line-height:1.5;">${e}</div>`;
+    }).join('');
+    wrap.innerHTML=`<div id="log-scroll" style="background:#0f172a;border-radius:8px;padding:0.75rem;max-height:420px;overflow-y:auto;font-family:monospace;">${html||'<span style="color:#475569;">Fichier vide</span>'}</div>`;
+    const sc=document.getElementById('log-scroll'); if(sc) sc.scrollTop=sc.scrollHeight;
+  } catch(e){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">Erreur: '+e.message+'</div>';}
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function ruleRow(label, ok, valueStr, detail) {
+  const dot = `<span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:${ok?'#22c55e':'#ef4444'};${ok?'box-shadow:0 0 5px #22c55e66':''}"></span>`;
+  return `<div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
+    ${dot}
+    <span style="color:#94a3b8;flex:1;">${label}</span>
+    <span style="color:${ok?'#22c55e':'#ef4444'};font-weight:600;">${valueStr}</span>
+    ${detail?`<span style="color:#475569;font-size:0.65rem;">${detail}</span>`:''}
+  </div>`;
+}
+
+function fmtTs(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return '—';
+  const age = Math.floor((Date.now() - d) / 1000);
+  const timeStr = d.toLocaleTimeString('fr-FR');
+  if (age < 60) return `${timeStr} (${age}s)`;
+  if (age < 3600) return `${timeStr} (${Math.floor(age/60)}min)`;
+  return `${timeStr} (${Math.floor(age/3600)}h)`;
+}
+
+const EM_BASE = 'http://' + location.hostname + ':8081';
+
+async function fetchRulesStatus() {
+  const safe = p => p.catch(() => null);
+
+  // Fetch local BMS/irradiance/inverter data from daly-bms-server
+  const [bms1r, bms2r, irrR, invR, emR] = await Promise.all([
+    safe(fetch('/api/v1/bms/1/status').then(r => r.ok ? r.json() : null)),
+    safe(fetch('/api/v1/bms/2/status').then(r => r.ok ? r.json() : null)),
+    safe(fetch('/api/v1/irradiance/status').then(r => r.ok ? r.json() : null)),
+    safe(fetch('/api/v1/venus/inverter').then(r => r.ok ? r.json() : null)),
+    safe(fetch(EM_BASE + '/api/rules-status').then(r => r.ok ? r.json() : null)),
+  ]);
+
+  // ── SOC — SmartShunt Victron (valeur exacte utilisée par l'energy-manager) ─
+  const emSoc  = emR?.soc_pct ?? null;
+  const socOk  = emSoc != null && emSoc >= 90;
+
+  // ── Irradiance — valeur directe du capteur PRALRAN (daly-bms-server)
+  const irr   = irrR?.irradiance_wm2 ?? null;
+  const irrOk = irr != null && irr >= 300;
+
+  // ── Grid / AC IN — valeur vue par l'energy-manager (VEBus IgnoreAcIn1) ───
+  const emAcIgnore = emR?.ac_ignore ?? null;          // 0=grid, 1=off-grid (i64)
+  const inv        = invR?.inverter ?? null;
+  const acIgnore   = emAcIgnore != null ? (emAcIgnore === 1) : (inv?.ac_in_ignore ?? null);
+  const gridOffOk  = acIgnore === true;
+
+  const tsEl2 = document.getElementById('rules-ts');
+  if (tsEl2) tsEl2.textContent = 'Màj ' + new Date().toLocaleTimeString('fr-FR');
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Card b) Chauffe-eau
+  // ══════════════════════════════════════════════════════════════════════════
+  try {
+    const wh = emR?.water_heater ?? null;
+    const whMode = wh?.mode ?? '—';
+    const modeOk = whMode === 'HEAT_PUMP';
+
+    const badge = document.getElementById('rules-mode-badge');
+    if (badge) {
+      badge.textContent = whMode;
+      badge.style.background = modeOk ? '#14532d' : '#1c1917';
+      badge.style.color      = modeOk ? '#4ade80' : '#78716c';
+    }
+    const modeEl = document.getElementById('wh-mode-val');
+    if (modeEl) { modeEl.textContent = whMode; modeEl.style.color = modeOk ? '#4ade80' : '#f87171'; }
+    const tempEl = document.getElementById('wh-temp-val');
+    if (tempEl) tempEl.textContent = wh?.current_temp_c != null ? wh.current_temp_c.toFixed(1) + ' °C' : '—';
+    const tgtEl = document.getElementById('wh-target-val');
+    if (tgtEl) tgtEl.textContent = wh?.target_temp_c != null ? wh.target_temp_c.toFixed(1) + ' °C' : '—';
+    const readTs = document.getElementById('wh-read-ts');
+    if (readTs) readTs.textContent = fmtTs(wh?.last_read_ts);
+
+    const grid = document.getElementById('rule-grid');
+    if (grid) {
+      grid.innerHTML = [
+        ruleRow('SOC ≥ 90 % (SmartShunt)',           socOk,    emSoc  != null ? `${emSoc.toFixed(1)} %`   : '—', null),
+        ruleRow('Irradiance ≥ 300 W/m²',           irrOk,    irr    != null ? `${irr.toFixed(0)} W/m²` : '—', null),
+        ruleRow('Grid déconnecté (AC IN Ignored)', gridOffOk, acIgnore != null ? (acIgnore ? 'ACTIF' : 'Normal') : '—', null),
+      ].join('');
+    }
+
+    const allOk = socOk && irrOk && gridOffOk;
+    const dec = document.getElementById('rules-decision');
+    if (dec) {
+      dec.textContent = allOk ? 'Cible calculée : HEAT_PUMP' : 'Cible calculée : VACATION';
+      dec.style.color = allOk ? '#4ade80' : '#94a3b8';
+    }
+  } catch(e) { console.warn('fetchRulesStatus/wh:', e); }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Card a) Courant Victron
+  // ══════════════════════════════════════════════════════════════════════════
+  try {
+    const cc = emR?.charge_current ?? null;
+    const currentA = cc?.current_a ?? null;
+    const assist   = cc?.power_assist ?? null;
+
+    const curEl = document.getElementById('charge-current-val');
+    if (curEl) {
+      curEl.textContent = currentA != null ? `${currentA} A` : '—';
+      curEl.style.color = currentA != null ? '#22c55e' : '#94a3b8';
+    }
+    const assEl = document.getElementById('charge-assist-val');
+    if (assEl) {
+      assEl.textContent = assist != null ? (assist === 1 ? 'ACTIVÉ' : 'Désactivé') : '—';
+      assEl.style.color = assist === 1 ? '#22c55e' : '#94a3b8';
+    }
+    const tsEl = document.getElementById('charge-ts');
+    if (tsEl) tsEl.textContent = fmtTs(cc?.last_ts);
+
+    // Condition rows for charge card
+    const offgrid = acIgnore === true;
+    const cGrid = document.getElementById('charge-rule-grid');
+    if (cGrid) {
+      cGrid.innerHTML = [
+        ruleRow('Mode réseau', !offgrid, offgrid ? 'Off-grid' : 'Grid', null),
+        ruleRow('SOC (SmartShunt)', emSoc != null, emSoc != null ? `${emSoc.toFixed(1)} %` : '—', null),
+        ruleRow('Courant VEBus appliqué', currentA != null, currentA != null ? `${currentA} A` : '—', null),
+      ].join('');
+    }
+  } catch(e) { console.warn('fetchRulesStatus/charge:', e); }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Card c) Relais DEYE
+  // ══════════════════════════════════════════════════════════════════════════
+  try {
+    const deye = emR?.deye ?? null;
+    const deyeOn = deye?.on ?? null;
+
+    const badge = document.getElementById('deye-state-badge');
+    if (badge) {
+      badge.textContent   = deyeOn === true ? 'ON' : deyeOn === false ? 'OFF' : '—';
+      badge.style.background = deyeOn ? '#14532d' : '#1c1917';
+      badge.style.color      = deyeOn ? '#4ade80' : '#78716c';
+    }
+    const dot = document.getElementById('deye-dot');
+    if (dot) {
+      dot.style.background = deyeOn ? '#22c55e' : '#ef4444';
+      dot.style.boxShadow  = deyeOn ? '0 0 5px #22c55e66' : '';
+    }
+    const onEl = document.getElementById('deye-on-val');
+    if (onEl) {
+      onEl.textContent = deyeOn === true ? 'Actif' : deyeOn === false ? 'Inactif' : '—';
+      onEl.style.color = deyeOn ? '#22c55e' : '#94a3b8';
+    }
+    const chEl = document.getElementById('deye-change-ts');
+    if (chEl) chEl.textContent = fmtTs(deye?.last_change);
+
+    // Conditions for DEYE
+    const dGrid = document.getElementById('deye-rule-grid');
+    if (dGrid) {
+      dGrid.innerHTML = [
+        ruleRow('Grid déconnecté',   gridOffOk, acIgnore != null ? (acIgnore ? 'ACTIF' : 'Normal') : '—', null),
+        ruleRow('Relais DEYE actif', !!deyeOn,  deyeOn != null ? (deyeOn ? 'ON' : 'OFF') : '—', null),
+      ].join('');
+    }
+  } catch(e) { console.warn('fetchRulesStatus/deye:', e); }
+}
+
+fetchMonitor();
+fetchRs485Health();
+fetchRulesStatus();
+loadLogList();
+setInterval(fetchMonitor, 10000);
+setInterval(fetchRs485Health, 15000);
+setInterval(fetchRulesStatus, 15000);
+</script>
+{% endblock %}

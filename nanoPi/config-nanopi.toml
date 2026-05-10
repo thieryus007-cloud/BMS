@@ -1,0 +1,256 @@
+# =============================================================================
+# config.toml — dbus-mqtt-venus (NanoPi Venus OS)
+# Chemin cible : /data/daly-bms/config.toml
+#
+# Déploiement depuis Pi5 :
+#   scp nanoPi/config-nanopi.toml root@192.168.1.120:/data/daly-bms/config.toml
+#   ssh root@192.168.1.120 "svc -t /service/dbus-mqtt-venus"
+#
+# Vérification :
+#   ssh root@192.168.1.120 "dbus -y | grep victronenergy"
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# MQTT broker — NanoPi est le broker (mosquitto sur 127.0.0.1)
+# topic_prefix = préfixe BMS uniquement (santuario/bms)
+# Les autres devices ont leur propre préfixe déclaré ci-dessous.
+# -----------------------------------------------------------------------------
+[mqtt]
+host         = "127.0.0.1"
+port         = 1883
+topic_prefix = "santuario/bms"
+
+# -----------------------------------------------------------------------------
+# Venus OS D-Bus
+# dbus_bus = "system"  → production Venus OS (bus système)
+# dbus_bus = "session" → dev/test (bus session)
+# -----------------------------------------------------------------------------
+[venus]
+enabled        = true
+dbus_bus       = "system"
+service_prefix = "mqtt"       # → mqtt_1, mqtt_2, etc.
+watchdog_sec   = 30           # timeout déconnexion (s)
+republish_sec  = 25           # republication forcée (s)
+
+# -----------------------------------------------------------------------------
+# BMS Daly — batteries
+# Topics  : santuario/bms/{mqtt_index}/venus
+# D-Bus   : com.victronenergy.battery.mqtt_{mqtt_index}
+# ATTENTION : device_instance 151/152 (≠ 141/142 réservés à dbus-mqtt-battery legacy)
+# -----------------------------------------------------------------------------
+[[bms]]
+address         = "0x01"
+name            = "BMS-360Ah"
+mqtt_index      = 1
+device_instance = 151
+capacity_ah     = 360.0
+max_charge_a    = 200.0
+max_discharge_a = 120.0
+
+[[bms]]
+address         = "0x02"
+name            = "BMS-320Ah"
+mqtt_index      = 2
+device_instance = 152
+capacity_ah     = 320.0
+max_charge_a    = 200.0
+max_discharge_a = 120.0
+
+# -----------------------------------------------------------------------------
+# Capteurs de température
+# Topics : santuario/heat/{mqtt_index}/venus
+# D-Bus  : com.victronenergy.temperature.mqtt_{mqtt_index}
+#
+# temperature_type :
+#   0=battery  1=fridge  2=generic  3=room  4=outdoor
+#   5=waterheater  6=freezer
+# -----------------------------------------------------------------------------
+[heat]
+topic_prefix = "santuario/heat"
+
+[[sensors]]
+mqtt_index       = 1
+name             = "Temperature Exterieure"
+temperature_type = 4            # outdoor
+device_instance  = 20
+
+# Ajouter d'autres capteurs selon les besoins :
+# [[sensors]]
+# mqtt_index       = 2
+# name             = "Eau chaude sanitaire"
+# temperature_type = 5           # waterheater
+# device_instance  = 21
+
+# -----------------------------------------------------------------------------
+# Pompes à chaleur / chauffe-eau
+# Topics : santuario/heatpump/{mqtt_index}/venus
+# D-Bus  : com.victronenergy.heatpump.mqtt_{mqtt_index}
+# -----------------------------------------------------------------------------
+[heatpump]
+topic_prefix = "santuario/heatpump"
+
+[[heatpumps]]
+mqtt_index      = 8             # ET112 addr=0x08 (SN: 119215X) — PAC Chauffe-eau branché ✅
+name            = "PAC Chauffe-eau"
+device_instance = 30
+
+[[heatpumps]]
+mqtt_index      = 9             # ET112 addr=0x09 (SN: 061077X) — PAC Climatisation branché ✅
+name            = "PAC Climatisation"
+device_instance = 31
+
+# -----------------------------------------------------------------------------
+# Capteur météo / irradiance (singleton — un seul capteur)
+# Topic fixe : santuario/meteo/venus
+# D-Bus      : com.victronenergy.meteo
+# -----------------------------------------------------------------------------
+[meteo]
+topic           = "santuario/meteo/venus"
+product_name    = "Capteur Irradiance"
+device_instance = 40
+
+# -----------------------------------------------------------------------------
+# Switches / ATS
+# Topics : santuario/switch/{mqtt_index}/venus
+# D-Bus  : com.victronenergy.switch.mqtt_{mqtt_index}
+#
+# Position : 0=AC1 (onduleur)  1=AC2 (réseau)
+# State    : 0=Off  1=On  (Tasmota) / 0=inactive 1=active 2=alerted (ATS)
+#
+# command_topic (optionnel) :
+#   Si défini, expose /SwitchableOutput/0/State sur D-Bus → switch contrôlable
+#   depuis la console Venus OS (même principe que les switches Shelly).
+#   Lorsque l'utilisateur bascule ON/OFF dans la console, le service publie
+#   "ON" ou "OFF" sur ce topic MQTT Tasmota.
+#   → Sans command_topic : affichage lecture seule seulement (ex: ATS CHINT).
+#
+# group (optionnel) :
+#   Regroupe plusieurs switches sur la même carte dans la console Venus.
+#   Laisser vide = regroupement par service D-Bus (défaut).
+# -----------------------------------------------------------------------------
+[switch]
+topic_prefix = "santuario/switch"
+
+[[switches]]
+mqtt_index      = 1
+name            = "ATS CHINT"
+device_instance = 60
+# Pas de command_topic → ATS géré via Modbus RS485, lecture seule dans Venus
+
+[[switches]]
+mqtt_index      = 2
+name            = "tongou_3BC764"              # 192.168.1.115
+device_instance = 61
+command_topic   = "cmnd/tongou_3BC764/Power"   # → contrôlable depuis console Venus
+custom_name     = "Tongou 1"                   # nom affiché dans la console Venus OS
+group           = "Tongou"                     # regroupe les 4 Tongou sur une même carte
+
+[[switches]]
+mqtt_index      = 3
+name            = "tongou_0A3FA0"              # 192.168.1.72
+device_instance = 62
+command_topic   = "cmnd/tongou_0A3FA0/Power"
+custom_name     = "Tongou 2"
+group           = "Tongou"
+
+[[switches]]
+mqtt_index      = 4
+name            = "tongou_0A3C14"              # 192.168.1.250
+device_instance = 63
+command_topic   = "cmnd/tongou_0A3C14/Power"
+custom_name     = "Tongou 3"
+group           = "Tongou"
+
+[[switches]]
+mqtt_index      = 5
+name            = "tongou_0A4040"              # 192.168.1.53
+device_instance = 64
+command_topic   = "cmnd/tongou_0A4040/Power"
+custom_name     = "Tongou 4"
+group           = "Tongou"
+
+[[switches]]
+mqtt_index      = 6
+name            = "tongou_3ACC34"              # 192.168.1.80
+device_instance = 65
+command_topic   = "cmnd/tongou_3ACC34/Power"
+custom_name     = "Tongou 5"
+group           = "Tongou"
+
+# -----------------------------------------------------------------------------
+# Compteurs réseau / consommation AC
+# Topics : santuario/grid/{mqtt_index}/venus
+# D-Bus  : com.victronenergy.grid.mqtt_{mqtt_index}
+#          com.victronenergy.acload.mqtt_{mqtt_index} (si service_type="acload")
+#
+# PLAN MIGRATION 3 ET112 (quand tous sur Pi5) :
+#   mqtt_index=3 → pvinverter (ci-dessous, section [pvinverter])
+#   mqtt_index=4 → acload PAC climatisation (AC Out 1)
+#   mqtt_index=5 → acload chauffe-eau (AC Out 1)
+#
+# Le daly-bms-server publie les ET112 acload sur santuario/grid/{n}/venus
+# avec un payload GridPayload (même format que grid, service_type="acload").
+# -----------------------------------------------------------------------------
+[grid]
+topic_prefix = "santuario/grid"
+
+# Décommenter quand un compteur réseau sera connecté :
+# [[grids]]
+# mqtt_index      = 1
+# name            = "Compteur réseau"
+# device_instance = 401
+# service_type    = "grid"     # "grid" ou "acload"
+
+# Décommenter lors de la migration des ET112 acload depuis le Victron vers Pi5 :
+# [[grids]]
+# mqtt_index      = 4
+# name            = "PAC Climatisation"
+# device_instance = 501
+# service_type    = "acload"   # AC Out 1 — consommation PAC climatisation
+#
+# [[grids]]
+# mqtt_index      = 5
+# name            = "Chauffe-eau"
+# device_instance = 502
+# service_type    = "acload"   # AC Out 1 — consommation chauffe-eau
+
+# -----------------------------------------------------------------------------
+# Onduleurs PV / compteurs énergie ET112 (Carlo Gavazzi)
+# Topics : santuario/pvinverter/{mqtt_index}/venus
+# D-Bus  : com.victronenergy.pvinverter.mqtt_{mqtt_index}
+#
+# ARCHITECTURE 3 ET112 SUR PI5 (migration depuis Victron) :
+#
+#   ET112 #1 — Micro-onduleurs (mqtt_index=3, device_instance=63)
+#     → Remplace com.victronenergy.pvinverter.cgwacs_ttyUSB0_mb2 (Victron direct)
+#     → Adresse RS485 actuelle : 0x07 (Pi5 /dev/ttyUSB1)
+#     → Publié par daly-bms-server → santuario/pvinverter/3/venus
+#
+#   ET112 #2 — PAC Climatisation (acload) → section [[grids]] mqtt_index=4
+#   ET112 #3 — Chauffe-eau (acload)       → section [[grids]] mqtt_index=5
+#
+# /Ac/Power, /Ac/Energy/Forward, /Ac/L1/{Voltage,Current,Power,Energy/Forward}
+# /StatusCode=7 (Running), /ErrorCode=0, /Position=1 (AC Output)
+# /IsGenericEnergyMeter=1 (ET112 masquerade en pvinverter)
+# -----------------------------------------------------------------------------
+[pvinverter]
+topic_prefix = "santuario/pvinverter"
+
+[[pvinverters]]
+mqtt_index      = 7             # ET112 addr=0x07 (SN: 119253X) — Micro-Onduleurs branché ✅
+name            = "Micro Onduleurs"
+device_instance = 32
+
+# -----------------------------------------------------------------------------
+# Platform Pi5 — état backup/restore (singleton)
+# Topic fixe : santuario/platform/venus
+# D-Bus      : com.victronenergy.platform
+#
+# Backup.Status  : 0=idle  1=running  2=OK  3=error
+# Restore.Status : 0=idle  1=running  2=OK  3=error
+# -----------------------------------------------------------------------------
+[platform]
+topic           = "santuario/platform/venus"
+product_name    = "Pi5 Platform"
+device_instance = 50
+enabled         = true
