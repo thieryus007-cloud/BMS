@@ -3,6 +3,9 @@
 # Déployer sur Pi5 : sudo cp mqtt-broker.toml /etc/daly-bms/mqtt-broker.toml
 # =============================================================================
 
+# Identifiant du nœud broker (requis par rumqttd::Config)
+id = 0
+
 [router]
 id                        = 0
 max_connections           = 1000
