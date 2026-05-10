@@ -38,30 +38,44 @@ CROSS_LINKER_MUSL := aarch64-linux-musl-gcc
 CROSS_LINKER_ARMV7 := arm-linux-gnueabihf-gcc
 
 # =============================================================================
-# Infrastructure Docker (Mosquitto uniquement — Tsink est embarqué dans daly-bms-server)
+# MQTT — Broker rumqttd + Bridge Pi5↔NanoPi (remplace Mosquitto/Docker)
 # =============================================================================
 
-.PHONY: up down restart logs reset ps
+MQTT_BROKER_BIN := mqtt-broker
+MQTT_BRIDGE_BIN := mqtt-bridge
 
-up:
-	docker compose -f docker-compose.infra.yml up -d
-	@echo "✓ Infra démarrée — Mosquitto MQTT:1883"
+.PHONY: up down restart logs ps mqtt-start mqtt-stop mqtt-restart mqtt-logs mqtt-status
 
-down:
-	docker compose -f docker-compose.infra.yml down
+# Aliases de compatibilité (anciennement Docker)
+up: mqtt-start
+down: mqtt-stop
+restart: mqtt-restart
+logs: mqtt-logs
+ps: mqtt-status
 
-restart:
-	docker compose -f docker-compose.infra.yml restart
+mqtt-start:
+	sudo systemctl start mqtt-broker mqtt-bridge
+	@echo "✓ MQTT démarré — broker :1883 | ws :9001 | bridge Pi5↔NanoPi"
 
-logs:
-	docker compose -f docker-compose.infra.yml logs -f
+mqtt-stop:
+	sudo systemctl stop mqtt-bridge mqtt-broker
 
-reset:
-	docker compose -f docker-compose.infra.yml down -v
-	@echo "⚠ Volumes Mosquitto supprimés (MQTT retained perdu)"
+mqtt-restart:
+	sudo systemctl restart mqtt-bridge mqtt-broker
 
-ps:
-	docker compose -f docker-compose.infra.yml ps
+mqtt-logs:
+	journalctl -u mqtt-broker -u mqtt-bridge -f --no-pager
+
+mqtt-status:
+	@systemctl status mqtt-broker mqtt-bridge --no-pager -l || true
+
+build-mqtt-arm: check-arm-deps
+	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(CROSS_LINKER_GNU) \
+	RUSTFLAGS="$(ARM_RUSTFLAGS)" \
+	$(CARGO) build --release --target $(TARGET_ARM) --bin $(MQTT_BROKER_BIN) --bin $(MQTT_BRIDGE_BIN)
+	@echo "✓ Binaires MQTT ARM Pi5 :"
+	@echo "  $(ARM_RELEASE_DIR)/$(MQTT_BROKER_BIN)"
+	@echo "  $(ARM_RELEASE_DIR)/$(MQTT_BRIDGE_BIN)"
 
 # =============================================================================
 # Vérification des dépendances cross-compilation
@@ -104,7 +118,7 @@ check-musl-deps:
 # Compilation — Version optimisée
 # =============================================================================
 
-.PHONY: build build-arm build-arm-debug build-arm-musl build-arm-v7 build-venus build-venus-arm build-venus-armv7 build-venus-v7 build-energy build-energy-arm install-energy run-energy
+.PHONY: build build-arm build-arm-debug build-arm-musl build-arm-v7 build-venus build-venus-arm build-venus-armv7 build-venus-v7 build-energy build-energy-arm install-energy run-energy build-mqtt-arm
 
 VENUS_BIN := dbus-mqtt-venus
 

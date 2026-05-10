@@ -9,6 +9,8 @@ members = [
     "crates/daly-bms-server",
     "crates/dbus-mqtt-venus",
     "crates/energy-manager",
+    "crates/mqtt-broker",
+    "crates/mqtt-bridge",
 ]
 
 [workspace.package]
@@ -52,6 +54,7 @@ tower-http    = { version = "0.5",  features = ["cors", "trace", "compression-gz
 
 # ── MQTT ───────────────────────────────────────────────────────────────────────
 rumqttc       = "0.25"
+rumqttd       = { version = "0.19", default-features = false }
 
 # ── SQLite (alertes) ───────────────────────────────────────────────────────────
 rusqlite      = { version = "0.31", features = ["bundled"] }

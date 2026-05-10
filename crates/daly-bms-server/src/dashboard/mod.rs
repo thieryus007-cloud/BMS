@@ -766,6 +766,15 @@ pub async fn dashboard_monitor() -> Response {
 }
 
 #[derive(Template)]
+#[template(path = "mqtt.html")]
+struct MqttTemplate {}
+
+/// Page dashboard MQTT broker + bridge (standalone, données via API JS).
+pub async fn dashboard_mqtt() -> Response {
+    render(MqttTemplate {})
+}
+
+#[derive(Template)]
 #[template(path = "console.html")]
 struct ConsoleTemplate {}
 
@@ -817,6 +826,7 @@ pub fn build_dashboard_router() -> Router<AppState> {
         .route("/dashboard/tasmota/:id",       get(dashboard_tasmota))
         .route("/dashboard/ats",               get(dashboard_ats))
         .route("/dashboard/monitor",           get(dashboard_monitor))
+        .route("/dashboard/mqtt",              get(dashboard_mqtt))
         .route("/dashboard/console",           get(dashboard_console))
         .route("/dashboard/visualization",     get(dashboard_visualization))
         .route("/visualization",               get(dashboard_visualization))

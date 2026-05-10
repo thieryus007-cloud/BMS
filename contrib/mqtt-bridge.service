@@ -1,0 +1,32 @@
+[Unit]
+Description=Bridge MQTT Rust — Pi5 (rumqttd :1883) ↔ NanoPi (192.168.1.120:1883)
+Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
+After=network-online.target mqtt-broker.service
+Wants=network-online.target
+Requires=mqtt-broker.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+WatchdogSec=90
+User=pi5compute
+Group=pi5compute
+
+ExecStart=/usr/local/bin/mqtt-bridge \
+    --config /etc/daly-bms/config.toml \
+    --metrics-addr 127.0.0.1:8084
+
+WorkingDirectory=/home/pi5compute/Daly-BMS-Rust
+
+Environment=RUST_LOG=info
+EnvironmentFile=-/etc/daly-bms/.env
+
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=0
+
+LimitNOFILE=4096
+MemoryMax=30M
+
+[Install]
+WantedBy=multi-user.target

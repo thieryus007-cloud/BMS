@@ -19,7 +19,12 @@
 | Logs BMS | `journalctl -u daly-bms -f` |
 | Compiler Pi5 | `make build-arm` |
 | Déployer binaire Pi5 | `sudo systemctl stop daly-bms && sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ && sudo systemctl start daly-bms` |
-| Docker start/stop/logs | `make up` / `make down` / `make logs` |
+| MQTT start/stop/logs | `make mqtt-start` / `make mqtt-stop` / `make mqtt-logs` |
+| Compiler MQTT (broker+bridge) | `make build-mqtt-arm` |
+| Déployer mqtt-broker | `sudo systemctl stop mqtt-broker && sudo cp target/aarch64-unknown-linux-gnu/release/mqtt-broker /usr/local/bin/ && sudo systemctl start mqtt-broker` |
+| Déployer mqtt-bridge | `sudo systemctl stop mqtt-bridge && sudo cp target/aarch64-unknown-linux-gnu/release/mqtt-bridge /usr/local/bin/ && sudo systemctl start mqtt-bridge` |
+| Métriques broker | `curl http://localhost:8082/metrics` |
+| Métriques bridge | `curl http://localhost:8084/metrics` |
 | Logs energy-manager | `journalctl -u energy-manager -f` |
 | Compiler energy-manager | `make build-energy-arm` |
 | Déployer energy-manager | `sudo systemctl stop energy-manager && sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ && sudo systemctl start energy-manager` |
@@ -49,6 +54,9 @@ make build-venus-v7 && make install-venus-v7
 3d. Config NanoPi       : scp nanoPi/config-nanopi.toml root@192.168.1.120:/data/daly-bms/config.toml && ssh root@192.168.1.120 "svc -t /service/dbus-mqtt-venus"
 3e. energy-manager code : make build-energy-arm → sudo systemctl stop energy-manager → sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ → sudo systemctl start energy-manager
 3f. Config seule (energy): sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart energy-manager
+3g. mqtt-broker code    : make build-mqtt-arm → sudo systemctl restart mqtt-broker mqtt-bridge
+3h. Config bridge seule : sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart mqtt-bridge
+3i. Config broker seule : sudo cp crates/mqtt-broker/mqtt-broker.toml /etc/daly-bms/ && sudo systemctl restart mqtt-broker
 ```
 
 ---
@@ -57,17 +65,25 @@ make build-venus-v7 && make install-venus-v7
 
 ```
 Pi5 (192.168.1.141, pi5compute)
+  mqtt-broker (systemd, :1883/:9001) ← rumqttd — remplace Mosquitto/Docker
+    ├── TCP  :1883  ← tous les clients MQTT locaux
+    ├── WS   :9001  ← explorateur dashboard JS
+    ├── HTTP :8082  ← /metrics pour monitor agent
+    └── Persistence : /var/lib/mqtt-broker
+  mqtt-bridge (systemd) ← bridge Pi5 ↔ NanoPi
+    ├── SUB localhost:1883 → republish NanoPi (W/ R/ santuario/ shellypro2pm/)
+    ├── SUB NanoPi:1883   → republish local  (N/ santuario/ shellypro2pm/)
+    └── HTTP :8084  ← /metrics (compteurs, état connexion)
   daly-bms-server (systemd, :8080)
     ├── RS485 /dev/ttyUSB0 → 2 BMS + 3 ET112 + 1 PRALRAN
     ├── REST API + WebSocket :8080
-    ├── MQTT publish → 192.168.1.120:1883
+    ├── MQTT publish → localhost:1883 (broker local rumqttd)
     └── VictoriaMetrics → localhost:8428
   energy-manager (systemd, :8081)
-    ├── MQTT subscribe/publish → 192.168.1.120:1883
+    ├── MQTT subscribe/publish → localhost:1883 (broker local rumqttd)
     ├── Logique solaire, DEYE, chauffe-eau, charge, météo
     ├── WebSocket live events :8081/live
     └── VictoriaMetrics → localhost:8428
-  Docker: mosquitto:1883
 
 NanoPi (192.168.1.120, root)
   dbus-mqtt-venus (runit /service/dbus-mqtt-venus)
@@ -123,6 +139,14 @@ crates/energy-manager/rules/            ← règles `.grl` (rust-rule-engine) :
                                           charge_current, deye_command, inverter,
                                           irradiance, smartshunt, solar_power,
                                           water_heater
+crates/mqtt-broker/src/                 ← broker MQTT Rust (rumqttd) — remplace Mosquitto
+  main.rs                               ← wrapper rumqttd + HTTP /metrics :8082
+  mqtt-broker.toml                      ← config déployée dans /etc/daly-bms/
+crates/mqtt-bridge/src/                 ← bridge bidirectionnel Pi5 ↔ NanoPi (rumqttc)
+  main.rs                               ← entrée, métriques HTTP :8084
+  bridge.rs                             ← demi-bridges nanopi→local et local→nanopi
+  config.rs                             ← lecture [mqtt_bridge] depuis Config.toml
+  metrics.rs                            ← compteurs atomiques + snapshot JSON
 crates/dbus-mqtt-venus/src/             ← bridge MQTT→D-Bus NanoPi
 contrib/daly-bms.service                ← unité systemd daly-bms-server
 contrib/energy-manager.service          ← unité systemd energy-manager
@@ -283,7 +307,11 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Dashboard affiche cumul brut | Vérifier `pvinv_baseline` retained MQTT (`santuario/persist/pvinv_baseline`) |
 | energy-manager ne démarre pas | `journalctl -u energy-manager -n 50` — souvent TOML manquant ou `.env` absent |
 | `missing field energy_manager` | `sudo cp Config.toml /etc/daly-bms/config.toml` — section `[energy_manager]` absente |
-| energy-manager ne reçoit pas MQTT | Vérifier `portal_id` dans Config.toml et que Mosquitto est accessible sur `mqtt.host` |
+| energy-manager ne reçoit pas MQTT | Vérifier `portal_id` dans Config.toml et que mqtt-broker est actif (`systemctl status mqtt-broker`) |
+| mqtt-broker ne démarre pas | `journalctl -u mqtt-broker -n 30` — souvent `/var/lib/mqtt-broker` owner incorrect |
+| mqtt-bridge déconnecté NanoPi | `journalctl -u mqtt-bridge -n 30` — NanoPi inaccessible? `ping 192.168.1.120` |
+| Retained messages perdus après migration | Normaux — recréés au prochain publish retain (ex: `pvinv_baseline` par energy-manager) |
+| Double messages venus (boucle bridge) | Vérifier que client_id des bridges sont uniques (déjà le cas dans le code) |
 | LG ThinQ ne répond pas | Vérifier `LG_BEARER_TOKEN` et `LG_API_KEY` dans `/etc/daly-bms/.env` |
 
 ---
@@ -302,6 +330,8 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 10. Nom exact D-Bus onduleur Victron direct : `cgwacs_ttyUSB0_mb2` (pas `rs485`).
 11. `make reset` efface les volumes Docker (retained MQTT perdu) → préférer `make down && make up`.
 12. Secrets : ne jamais committer `.env`.
+13. **MQTT** : broker = `mqtt-broker` (rumqttd systemd), plus de Docker. `make mqtt-start/stop/logs` remplace `make up/down/logs`.
+14. Config bridge MQTT : `[mqtt_bridge]` dans Config.toml (portal_id + remote_host NanoPi).
 
 ---
 
@@ -315,4 +345,5 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Debug MQTT | `MQTT_DEBUGGING_GUIDE.md` |
 | Debug onduleur / SmartShunt | `DEBUG_ONDULEUR_SMARTSHUNT.md` |
 | Guide energy-manager — modifier/ajouter/retirer une fonctionnalité | `docs/energy-manager-guide.md` |
+| Migration MQTT / broker rumqttd / bridge / dashboard | `docs/mqtt-broker.md` |
 | Architecture bus RS485 unifié (`rs485-bus` vs `daly-bms-core`) | `docs/architecture-rs485-bus.md` |

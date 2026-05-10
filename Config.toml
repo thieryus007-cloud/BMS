@@ -74,10 +74,10 @@ format = "pretty"
 [mqtt]
 enabled = true
 
-# Windows avec Docker Desktop local → "localhost"
-# Windows avec NanoPi comme broker → "192.168.1.120"
-# Raspberry Pi 5 production        → "localhost" (Mosquitto local) ou IP NanoPi
-host = "192.168.1.120"
+# Broker local rumqttd (ex-Mosquitto Docker)
+# Pi5 production → "127.0.0.1" (broker rumqttd local)
+# Dev Windows    → "192.168.1.141" (IP Pi5 avec rumqttd)
+host = "127.0.0.1"
 port = 1883
 
 # Préfixe des topics (ex: santuario/bms/1/venus)
@@ -526,7 +526,7 @@ device_instance = 152
 
 # --- MQTT ---
 [energy_manager.mqtt]
-host              = "192.168.1.141"   # broker Mosquitto local Pi5
+host              = "127.0.0.1"       # broker rumqttd local Pi5 (ex-Mosquitto Docker)
 port              = 1883
 keep_alive_secs   = 60
 reconnect_delay_secs = 10
@@ -605,3 +605,17 @@ host_tag             = "pi5"
 # --- Statut plateforme ---
 [energy_manager.platform]
 publish_interval_secs = 60
+
+# =============================================================================
+# Bridge MQTT — Pi5 (rumqttd :1883) ↔ NanoPi (192.168.1.120:1883)
+# Utilisé par le service mqtt-bridge (remplace section bridge mosquitto.conf)
+# portal_id doit correspondre à l'ID Victron GX (voir energy_manager.portal_id)
+# =============================================================================
+[mqtt_bridge]
+local_host       = "127.0.0.1"
+local_port       = 1883
+remote_host      = "192.168.1.120"
+remote_port      = 1883
+portal_id        = "c0619ab9929a"
+reconnect_secs   = 30
+keepalive_secs   = 60

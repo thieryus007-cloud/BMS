@@ -303,6 +303,32 @@ pub struct ProcessInfo {
     pub state:       String,
 }
 
+/// Statut agrégé du broker MQTT et du bridge — alimenté par le monitor agent.
+#[derive(Clone, Serialize, Debug, Default)]
+pub struct MqttStatus {
+    pub timestamp: Option<DateTime<Utc>>,
+    /// Broker rumqttd accessible sur :1883
+    pub broker_running:    bool,
+    /// Uptime broker en secondes (depuis démarrage du process)
+    pub broker_uptime_secs: u64,
+    /// Messages reçus par le broker depuis son démarrage
+    pub broker_msgs_rx:    u64,
+    /// Bridge connecté au broker local
+    pub bridge_local_ok:   bool,
+    /// Bridge connecté au NanoPi distant
+    pub bridge_remote_ok:  bool,
+    /// Messages forwarded Pi5 → NanoPi depuis démarrage du bridge
+    pub bridge_l2r_total:  u64,
+    /// Messages forwarded NanoPi → Pi5 depuis démarrage du bridge
+    pub bridge_r2l_total:  u64,
+    /// Reconnexions bridge (côté local)
+    pub bridge_reconnects_local:  u64,
+    /// Reconnexions bridge (côté NanoPi)
+    pub bridge_reconnects_remote: u64,
+    /// Uptime bridge en secondes
+    pub bridge_uptime_secs: u64,
+}
+
 /// Snapshot de monitoring système Pi5.
 #[derive(Clone, Serialize, Debug)]
 pub struct MonitorSnapshot {
@@ -424,6 +450,9 @@ pub struct AppState {
     /// Dernier snapshot du monitoring système Pi5.
     pub monitor_snapshot: Arc<RwLock<Option<MonitorSnapshot>>>,
 
+    /// Statut MQTT (broker rumqttd + bridge NanoPi) — mis à jour par le monitor agent.
+    pub mqtt_status: Arc<RwLock<MqttStatus>>,
+
     /// Dernier snapshot ATS CHINT (None si non configuré ou en attente).
     pub ats_snapshot: Arc<RwLock<Option<AtsSnapshot>>>,
 
@@ -517,6 +546,7 @@ impl AppState {
             venus_temperatures: Arc::new(RwLock::new(BTreeMap::new())),
             venus_heatpumps: Arc::new(RwLock::new(BTreeMap::new())),
             monitor_snapshot: Arc::new(RwLock::new(None)),
+            mqtt_status: Arc::new(RwLock::new(MqttStatus::default())),
             ats_snapshot: Arc::new(RwLock::new(None)),
             ats_bus: Arc::new(RwLock::new(None)),
             rs485_stats: Arc::new(RwLock::new(BTreeMap::new())),
@@ -1022,6 +1052,18 @@ impl AppState {
     /// Retourne le dernier snapshot de monitoring système.
     pub async fn monitor_latest(&self) -> Option<MonitorSnapshot> {
         self.monitor_snapshot.read().await.clone()
+    }
+
+    // ==========================================================================
+    // Méthodes MQTT status
+    // ==========================================================================
+
+    pub async fn on_mqtt_status(&self, status: MqttStatus) {
+        *self.mqtt_status.write().await = status;
+    }
+
+    pub async fn mqtt_status_latest(&self) -> MqttStatus {
+        self.mqtt_status.read().await.clone()
     }
 
     // ==========================================================================

@@ -1,0 +1,405 @@
+{% extends "base.html" %}
+{% block title %}MQTT Broker — ESS Monitor{% endblock %}
+{% block page_title %}MQTT Broker{% endblock %}
+{% block nav_mqtt %}active{% endblock %}
+
+{% block content %}
+<div class="page-hdr">
+  <h1>📡 MQTT Broker &amp; Bridge</h1>
+  <div class="page-hdr-meta">
+    <span>Màj : <span id="mqtt-ts">—</span></span>
+    <span class="sep">·</span>
+    <span id="mqtt-status-badge" class="bms-badge" style="background:#e2e8f0;color:#64748b">En attente…</span>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1.25rem;">
+
+  <!-- ═══════════════════════════════════════════════════════════ Broker -->
+  <div class="bms-card" id="card-broker">
+    <div class="bms-hdr" style="background:linear-gradient(135deg,#dbeafe,#bfdbfe);">
+      <div class="bms-hdr-left">
+        <span class="bms-hdr-name">⚡ Broker rumqttd</span>
+        <span id="broker-badge" class="bms-badge" style="background:#e2e8f0;color:#64748b">—</span>
+      </div>
+    </div>
+    <div style="padding:0.85rem 1rem;display:flex;flex-direction:column;gap:0.55rem;">
+      <div class="kpi-row">
+        <span class="kpi-label">Port TCP</span>
+        <span class="kpi-val" style="font-family:monospace;">:1883</span>
+      </div>
+      <div class="kpi-row">
+        <span class="kpi-label">WebSocket</span>
+        <span class="kpi-val" style="font-family:monospace;">:9001</span>
+      </div>
+      <div class="kpi-row">
+        <span class="kpi-label">Uptime</span>
+        <span class="kpi-val" id="broker-uptime">—</span>
+      </div>
+      <div class="kpi-row">
+        <span class="kpi-label">Messages reçus</span>
+        <span class="kpi-val" id="broker-msgs-rx">—</span>
+      </div>
+      <div class="kpi-row">
+        <span class="kpi-label">Persistence</span>
+        <span class="kpi-val" style="font-family:monospace;font-size:0.78rem;">/var/lib/mqtt-broker</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════ Bridge -->
+  <div class="bms-card" id="card-bridge">
+    <div class="bms-hdr" style="background:linear-gradient(135deg,#d1fae5,#a7f3d0);">
+      <div class="bms-hdr-left">
+        <span class="bms-hdr-name">🔗 Bridge Pi5 ↔ NanoPi</span>
+        <span id="bridge-badge" class="bms-badge" style="background:#e2e8f0;color:#64748b">—</span>
+      </div>
+    </div>
+    <div style="padding:0.85rem 1rem;display:flex;flex-direction:column;gap:0.55rem;">
+      <div class="kpi-row">
+        <span class="kpi-label">Local (rumqttd)</span>
+        <span class="kpi-val" id="bridge-local">—</span>
+      </div>
+      <div class="kpi-row">
+        <span class="kpi-label">NanoPi (192.168.1.120)</span>
+        <span class="kpi-val" id="bridge-remote">—</span>
+      </div>
+      <div class="kpi-row">
+        <span class="kpi-label">Uptime</span>
+        <span class="kpi-val" id="bridge-uptime">—</span>
+      </div>
+      <div class="kpi-row">
+        <span class="kpi-label">→ NanoPi (total)</span>
+        <span class="kpi-val" id="bridge-l2r">—</span>
+      </div>
+      <div class="kpi-row">
+        <span class="kpi-label">← NanoPi (total)</span>
+        <span class="kpi-val" id="bridge-r2l">—</span>
+      </div>
+      <div class="kpi-row">
+        <span class="kpi-label">Reconnexions local</span>
+        <span class="kpi-val" id="bridge-recon-local">—</span>
+      </div>
+      <div class="kpi-row">
+        <span class="kpi-label">Reconnexions NanoPi</span>
+        <span class="kpi-val" id="bridge-recon-remote">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════ Topics bridgés -->
+  <div class="bms-card" id="card-topics" style="grid-column:span 1;">
+    <div class="bms-hdr" style="background:linear-gradient(135deg,#fef3c7,#fde68a);">
+      <div class="bms-hdr-left"><span class="bms-hdr-name">📋 Topics Bridgés</span></div>
+    </div>
+    <div style="padding:0.75rem 1rem;">
+      <p style="font-size:0.78rem;color:var(--muted);margin:0 0 0.6rem;">
+        Règles reproduisant <code>mosquitto.conf / connection nanopi-venus-bridge</code>
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);">
+            <th style="text-align:left;padding:0.3rem 0.4rem;color:var(--muted);">Topic</th>
+            <th style="text-align:center;padding:0.3rem 0.4rem;color:var(--muted);">Direction</th>
+            <th style="text-align:center;padding:0.3rem 0.4rem;color:var(--muted);">QoS</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="topic-row"><td><code>N/c0619ab9929a/#</code></td><td style="text-align:center;">← NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>W/c0619ab9929a/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">1</td></tr>
+          <tr class="topic-row"><td><code>R/c0619ab9929a/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">1</td></tr>
+          <tr class="topic-row"><td><code>santuario/#</code></td><td style="text-align:center;">← NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>santuario/heat/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>santuario/heatpump/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>santuario/meteo/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>santuario/switch/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>santuario/grid/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>santuario/platform/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>santuario/inverter/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>santuario/system/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>santuario/pvinverter/#</code></td><td style="text-align:center;">→ NanoPi</td><td style="text-align:center;">0</td></tr>
+          <tr class="topic-row"><td><code>shellypro2pm-.../#</code></td><td style="text-align:center;">↔ Bidi</td><td style="text-align:center;">0</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════ WebSocket MQTT Explorer -->
+  <div class="bms-card" id="card-ws" style="grid-column:1/-1;">
+    <div class="bms-hdr" style="background:linear-gradient(135deg,#ede9fe,#ddd6fe);">
+      <div class="bms-hdr-left">
+        <span class="bms-hdr-name">🔍 Explorateur MQTT (WebSocket :9001)</span>
+      </div>
+      <div style="display:flex;gap:0.5rem;align-items:center;">
+        <input id="ws-topic" type="text" value="santuario/#"
+               style="font-family:monospace;font-size:0.8rem;padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:4px;background:var(--surface2);color:var(--text);width:200px;">
+        <button id="ws-connect-btn" onclick="wsToggle()"
+                style="padding:0.3rem 0.75rem;border-radius:5px;border:none;cursor:pointer;background:var(--accent);color:#fff;font-size:0.8rem;">
+          Connecter
+        </button>
+        <button onclick="wsClear()"
+                style="padding:0.3rem 0.75rem;border-radius:5px;border:1px solid var(--border);cursor:pointer;background:var(--surface2);color:var(--text);font-size:0.8rem;">
+          Effacer
+        </button>
+      </div>
+    </div>
+    <div style="padding:0.75rem 1rem;">
+      <div id="ws-status" style="font-size:0.78rem;margin-bottom:0.5rem;color:var(--muted);">
+        WebSocket déconnecté — cliquez sur "Connecter"
+      </div>
+      <div id="ws-log"
+           style="font-family:monospace;font-size:0.75rem;height:320px;overflow-y:auto;background:var(--bg2);
+                  border:1px solid var(--border);border-radius:6px;padding:0.6rem;color:var(--text2);">
+        <div style="color:var(--muted);"># En attente de messages…</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<style>
+.kpi-row { display:flex;justify-content:space-between;font-size:0.83rem; }
+.kpi-label { color:var(--muted); }
+.kpi-val   { font-weight:600; }
+.topic-row td { padding:0.28rem 0.4rem;border-bottom:1px solid var(--border); }
+.topic-row:last-child td { border-bottom:none; }
+.topic-row code { font-size:0.75rem;color:var(--accent); }
+</style>
+
+<script>
+// =============================================================================
+// Polling REST /api/v1/mqtt/status
+// =============================================================================
+
+function fmtUptime(s) {
+  if (!s) return '—';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h > 0) return h + 'h ' + m + 'm';
+  if (m > 0) return m + 'm ' + sec + 's';
+  return sec + 's';
+}
+
+function connBadge(ok) {
+  return ok
+    ? '<span class="bms-badge" style="background:#dcfce7;color:#16a34a">Connecté</span>'
+    : '<span class="bms-badge" style="background:#fee2e2;color:#dc2626">Déconnecté</span>';
+}
+
+async function refreshMqtt() {
+  try {
+    const r = await fetch('/api/v1/mqtt/status');
+    const d = await r.json();
+    const b = d.broker, br = d.bridge;
+
+    // Timestamp
+    document.getElementById('mqtt-ts').textContent =
+      d.timestamp ? new Date(d.timestamp).toLocaleTimeString('fr-FR') : '—';
+
+    // Badge global
+    const allOk = b.running && br.local_connected && br.remote_connected;
+    const badge = document.getElementById('mqtt-status-badge');
+    badge.textContent = allOk ? 'OK' : 'Dégradé';
+    badge.style.background = allOk ? '#dcfce7' : '#fef3c7';
+    badge.style.color       = allOk ? '#16a34a' : '#92400e';
+
+    // Broker
+    const brokerBadge = document.getElementById('broker-badge');
+    brokerBadge.innerHTML = b.running
+      ? '<span style="color:#16a34a;">● Actif</span>'
+      : '<span style="color:#dc2626;">● Arrêté</span>';
+    document.getElementById('broker-uptime').textContent   = fmtUptime(b.uptime_secs);
+    document.getElementById('broker-msgs-rx').textContent  = (b.messages_rx ?? 0).toLocaleString('fr-FR') + ' msgs';
+
+    // Bridge
+    const bridgeBadge = document.getElementById('bridge-badge');
+    const bridgeOk = br.local_connected && br.remote_connected;
+    bridgeBadge.innerHTML = bridgeOk
+      ? '<span style="color:#16a34a;">● Actif</span>'
+      : '<span style="color:#dc2626;">● Dégradé</span>';
+    document.getElementById('bridge-local').innerHTML  = connBadge(br.local_connected);
+    document.getElementById('bridge-remote').innerHTML = connBadge(br.remote_connected);
+    document.getElementById('bridge-uptime').textContent = fmtUptime(br.uptime_secs);
+    document.getElementById('bridge-l2r').textContent    = (br.msgs_local_to_remote ?? 0).toLocaleString('fr-FR') + ' msgs';
+    document.getElementById('bridge-r2l').textContent    = (br.msgs_remote_to_local ?? 0).toLocaleString('fr-FR') + ' msgs';
+    document.getElementById('bridge-recon-local').textContent  = br.reconnects_local ?? 0;
+    document.getElementById('bridge-recon-remote').textContent = br.reconnects_remote ?? 0;
+
+  } catch (e) {
+    document.getElementById('mqtt-status-badge').textContent = 'Erreur';
+  }
+}
+
+refreshMqtt();
+setInterval(refreshMqtt, 10000);
+
+// =============================================================================
+// WebSocket MQTT Explorer (connexion vers :9001, protocole MQTT over WS)
+// =============================================================================
+
+let mqttWs = null;
+let wsConnected = false;
+let msgCount = 0;
+const MAX_LINES = 200;
+
+function wsToggle() {
+  wsConnected ? wsDisconnect() : wsConnect();
+}
+
+function wsConnect() {
+  const topic = document.getElementById('ws-topic').value.trim() || '#';
+  const host   = window.location.hostname;
+  const url    = `ws://${host}:9001/mqtt`;
+
+  wsLog('info', `Connexion à ${url} (topic: ${topic})…`);
+
+  try {
+    // Connexion WebSocket avec sous-protocole MQTT
+    mqttWs = new WebSocket(url, ['mqtt']);
+    mqttWs.binaryType = 'arraybuffer';
+  } catch(e) {
+    wsLog('error', 'WebSocket non supporté ou broker inaccessible : ' + e.message);
+    return;
+  }
+
+  mqttWs.onopen = () => {
+    wsConnected = true;
+    document.getElementById('ws-connect-btn').textContent = 'Déconnecter';
+    document.getElementById('ws-status').innerHTML =
+      '<span style="color:#16a34a;">●</span> Connecté — abonnement sur <code>' + topic + '</code>';
+
+    // MQTT CONNECT packet (v3.1.1, clean session, no auth)
+    const clientId = 'ess-explorer-' + Math.random().toString(36).slice(2, 8);
+    mqttWs.send(buildConnect(clientId));
+  };
+
+  mqttWs.onmessage = (ev) => {
+    const data = new Uint8Array(ev.data);
+    handlePacket(data, topic);
+  };
+
+  mqttWs.onerror = () => {
+    wsLog('error', 'Erreur WebSocket — vérifier que le broker est actif sur :9001');
+  };
+
+  mqttWs.onclose = () => {
+    wsConnected = false;
+    document.getElementById('ws-connect-btn').textContent = 'Connecter';
+    document.getElementById('ws-status').innerHTML =
+      '<span style="color:#dc2626;">●</span> Déconnecté';
+    wsLog('info', 'Connexion fermée');
+  };
+}
+
+function wsDisconnect() {
+  if (mqttWs) { mqttWs.close(); mqttWs = null; }
+}
+
+function wsClear() {
+  document.getElementById('ws-log').innerHTML =
+    '<div style="color:var(--muted);"># Log effacé</div>';
+  msgCount = 0;
+}
+
+// Build MQTT CONNECT packet (v3.1.1)
+function buildConnect(clientId) {
+  const idBytes = new TextEncoder().encode(clientId);
+  const plen    = 10 + 2 + idBytes.length;
+  const buf     = new Uint8Array(2 + plen);
+  let i = 0;
+  buf[i++] = 0x10;          // CONNECT type
+  buf[i++] = plen;          // remaining length
+  buf[i++] = 0; buf[i++] = 4; // protocol name length
+  buf[i++] = 0x4D; buf[i++] = 0x51; buf[i++] = 0x54; buf[i++] = 0x54; // MQTT
+  buf[i++] = 0x04;          // protocol level 3.1.1
+  buf[i++] = 0x02;          // connect flags: clean session
+  buf[i++] = 0; buf[i++] = 60; // keepalive 60s
+  buf[i++] = 0; buf[i++] = idBytes.length;
+  idBytes.forEach(b => { buf[i++] = b; });
+  return buf.buffer;
+}
+
+// Build MQTT SUBSCRIBE packet
+function buildSubscribe(topic, msgId) {
+  const topicBytes = new TextEncoder().encode(topic);
+  const plen = 2 + 2 + topicBytes.length + 1;
+  const buf  = new Uint8Array(2 + plen);
+  let i = 0;
+  buf[i++] = 0x82;          // SUBSCRIBE type + flags
+  buf[i++] = plen;
+  buf[i++] = (msgId >> 8) & 0xFF; buf[i++] = msgId & 0xFF;
+  buf[i++] = 0; buf[i++] = topicBytes.length;
+  topicBytes.forEach(b => { buf[i++] = b; });
+  buf[i++] = 0x00;          // QoS 0
+  return buf.buffer;
+}
+
+// Parse received MQTT packet
+function handlePacket(data, subTopic) {
+  if (data.length < 2) return;
+  const type = (data[0] & 0xF0) >> 4;
+
+  if (type === 2) {
+    // CONNACK — subscribe now
+    if (data[3] === 0) {
+      wsLog('ok', 'CONNACK reçu — abonnement sur ' + subTopic);
+      mqttWs.send(buildSubscribe(subTopic, 1));
+    } else {
+      wsLog('error', 'CONNACK erreur code=' + data[3]);
+    }
+  } else if (type === 9) {
+    // SUBACK
+    wsLog('ok', 'SUBACK — abonnement confirmé');
+  } else if (type === 3) {
+    // PUBLISH — parse topic + payload
+    try {
+      let i = 1;
+      let remLen = 0, mult = 1;
+      do { remLen += (data[i] & 0x7F) * mult; mult *= 128; } while (data[i++] & 0x80);
+      const topicLen = (data[i] << 8) | data[i+1]; i += 2;
+      const topicBytes = data.slice(i, i + topicLen); i += topicLen;
+      const topic = new TextDecoder().decode(topicBytes);
+      // Skip packet id for QoS > 0
+      if ((data[0] & 0x06) > 0) i += 2;
+      const payload = new TextDecoder().decode(data.slice(i));
+      wsLogMsg(topic, payload);
+      msgCount++;
+    } catch(_) {}
+  }
+}
+
+function wsLog(level, msg) {
+  const log = document.getElementById('ws-log');
+  const colors = { info: 'var(--muted)', ok: '#16a34a', error: '#dc2626' };
+  const line = document.createElement('div');
+  line.style.color = colors[level] || 'var(--text)';
+  line.textContent = new Date().toLocaleTimeString('fr-FR') + '  ' + msg;
+  log.appendChild(line);
+  trimLog(log);
+  log.scrollTop = log.scrollHeight;
+}
+
+function wsLogMsg(topic, payload) {
+  const log = document.getElementById('ws-log');
+  const line = document.createElement('div');
+
+  let pretty = payload;
+  try { pretty = JSON.stringify(JSON.parse(payload), null, null); } catch(_) {}
+
+  line.innerHTML =
+    '<span style="color:var(--accent);">' + escHtml(topic) + '</span>' +
+    ' <span style="color:var(--muted);">→</span> ' +
+    '<span style="color:var(--text);">' + escHtml(pretty.slice(0, 200)) + '</span>';
+  log.appendChild(line);
+  trimLog(log);
+  log.scrollTop = log.scrollHeight;
+}
+
+function trimLog(log) {
+  while (log.children.length > MAX_LINES) log.removeChild(log.firstChild);
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+{% endblock %}

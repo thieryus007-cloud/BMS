@@ -1,15 +1,16 @@
 //! Agent de monitoring autonome — surveille l'ensemble du système Pi5.
 //!
 //! Vérifie toutes les 30 secondes :
-//! - Services systemd daly-bms + energy-manager (via systemctl)
-//! - Services réseau via sonde TCP : mosquitto, energy-manager, venus MQTT
+//! - Services systemd daly-bms, energy-manager, mqtt-broker, mqtt-bridge
+//! - Services réseau via sonde TCP : mqtt-broker :1883, energy-manager :8081, venus MQTT :1883
+//! - Métriques MQTT via HTTP : mqtt-broker :8082/metrics, mqtt-bridge :8084/metrics
 //! - Port série RS485 (/dev/ttyUSB0)
 //! - CPU, RAM, disque, charge système, uptime
 //! - Liste des processus (top 20 par CPU%)
 //! - I/O réseau (octets/s)
 //! - Température CPU
 
-use crate::state::{AppState, MonitorSnapshot, ProcessInfo, ServiceStatus};
+use crate::state::{AppState, MqttStatus, MonitorSnapshot, ProcessInfo, ServiceStatus};
 use crate::vm_client::VmRow;
 use chrono::Utc;
 use std::time::{Duration, Instant};
@@ -18,15 +19,19 @@ use tokio::process::Command;
 use tokio::time::interval;
 use tracing::{info, warn};
 
-/// Services réseau à sonder : (label, host, port, conteneur_docker_pour_restart).
-const TCP_SERVICES: &[(&str, &str, u16, Option<&str>)] = &[
-    ("mosquitto",      "127.0.0.1",     1883, Some("mosquitto")),
-    ("energy-manager", "127.0.0.1",     8081, None),
-    ("venus-mqtt",     "192.168.1.120", 1883, None),
+/// Services réseau à sonder : (label, host, port).
+const TCP_SERVICES: &[(&str, &str, u16)] = &[
+    ("mqtt-broker",  "127.0.0.1",     1883),
+    ("energy-manager", "127.0.0.1",   8081),
+    ("venus-mqtt",   "192.168.1.120", 1883),
 ];
 
 /// Port série RS485.
 const RS485_PORT: &str = "/dev/ttyUSB0";
+
+/// URL métriques HTTP des services MQTT (broker + bridge).
+const MQTT_BROKER_METRICS: &str = "http://127.0.0.1:8082/metrics";
+const MQTT_BRIDGE_METRICS:  &str = "http://127.0.0.1:8084/metrics";
 
 // =============================================================================
 // Agent principal
@@ -64,6 +69,10 @@ pub async fn run_monitor_agent(state: AppState) {
         }
 
         state.on_monitor_snapshot(snap).await;
+
+        // Collecte statut MQTT (broker + bridge via HTTP /metrics)
+        let mqtt = collect_mqtt_status().await;
+        state.on_mqtt_status(mqtt).await;
     }
 }
 
@@ -96,42 +105,25 @@ async fn collect_snapshot(_state: &AppState, net_rx_bps: u64, net_tx_bps: u64) -
         } else if em_status.is_empty() { "unknown".to_string() } else { em_status },
     });
 
-    let mosquitto_systemd = check_systemd_service("mosquitto").await == "active";
-    services.push(ServiceStatus {
-        name:   "mosquitto".to_string(),
-        active: mosquitto_systemd || tcp_probe("127.0.0.1", 1883).await,
-        status: if mosquitto_systemd { "active".to_string() } else { "inactive".to_string() },
-    });
+    // Services MQTT (broker + bridge) via systemd
+    for svc in &["mqtt-broker", "mqtt-bridge"] {
+        let st = check_systemd_service(svc).await;
+        let active = st == "active";
+        services.push(ServiceStatus {
+            name:   svc.to_string(),
+            active,
+            status: if active { "active".to_string() } else if st.is_empty() { "unknown".to_string() } else { st },
+        });
+    }
 
     // ── Sondes TCP ───────────────────────────────────────────────────────────
-    for &(name, host, port, docker_name) in TCP_SERVICES {
+    for &(name, host, port) in TCP_SERVICES {
         let reachable = tcp_probe(host, port).await;
-
-        if !reachable {
-            if let Some(cname) = docker_name {
-                if restart_docker_container(cname).await {
-                    let msg = format!("Redémarré conteneur Docker: {}", cname);
-                    info!("{}", msg);
-                    auto_actions.push(msg);
-                    network_services.push(ServiceStatus {
-                        name: name.to_string(), active: false, status: "restarted".to_string(),
-                    });
-                } else {
-                    warn!("Échec redémarrage conteneur Docker: {}", cname);
-                    network_services.push(ServiceStatus {
-                        name: name.to_string(), active: false, status: "down".to_string(),
-                    });
-                }
-            } else {
-                network_services.push(ServiceStatus {
-                    name: name.to_string(), active: false, status: "unreachable".to_string(),
-                });
-            }
-        } else {
-            network_services.push(ServiceStatus {
-                name: name.to_string(), active: true, status: format!("{}:{}", host, port),
-            });
-        }
+        network_services.push(ServiceStatus {
+            name:   name.to_string(),
+            active: reachable,
+            status: if reachable { format!("{}:{}", host, port) } else { "unreachable".to_string() },
+        });
     }
 
     // ── Port série RS485 ─────────────────────────────────────────────────────
@@ -316,11 +308,81 @@ async fn check_systemd_service(name: &str) -> String {
     }
 }
 
-async fn restart_docker_container(name: &str) -> bool {
-    match Command::new("docker").args(["restart", name]).output().await {
-        Ok(out) => out.status.success(),
-        Err(_)  => false,
+/// Collecte les statuts MQTT en appelant les endpoints HTTP /metrics du broker et du bridge.
+async fn collect_mqtt_status() -> MqttStatus {
+    use tokio::time::timeout;
+
+    // ── Broker metrics ────────────────────────────────────────────────────────
+    let broker = timeout(Duration::from_secs(2), fetch_json(MQTT_BROKER_METRICS)).await;
+    let (broker_running, broker_uptime_secs, broker_msgs_rx) = match broker {
+        Ok(Ok(v)) => (
+            v.get("status").and_then(|s| s.as_str()) == Some("running"),
+            v.get("uptime_secs").and_then(|v| v.as_u64()).unwrap_or(0),
+            v.get("messages_rx").and_then(|v| v.as_u64()).unwrap_or(0),
+        ),
+        _ => {
+            // Si HTTP échoue, on tente la sonde TCP directement
+            let tcp_ok = tcp_probe("127.0.0.1", 1883).await;
+            (tcp_ok, 0, 0)
+        }
+    };
+
+    // ── Bridge metrics ────────────────────────────────────────────────────────
+    let bridge = timeout(Duration::from_secs(2), fetch_json(MQTT_BRIDGE_METRICS)).await;
+    let (bridge_local_ok, bridge_remote_ok, bridge_l2r, bridge_r2l,
+         bridge_recon_local, bridge_recon_remote, bridge_uptime) = match bridge {
+        Ok(Ok(v)) => (
+            v.get("local_connected").and_then(|b| b.as_bool()).unwrap_or(false),
+            v.get("remote_connected").and_then(|b| b.as_bool()).unwrap_or(false),
+            v.get("msgs_local_to_remote").and_then(|n| n.as_u64()).unwrap_or(0),
+            v.get("msgs_remote_to_local").and_then(|n| n.as_u64()).unwrap_or(0),
+            v.get("reconnects_local").and_then(|n| n.as_u64()).unwrap_or(0),
+            v.get("reconnects_remote").and_then(|n| n.as_u64()).unwrap_or(0),
+            v.get("uptime_secs").and_then(|n| n.as_u64()).unwrap_or(0),
+        ),
+        _ => (false, false, 0, 0, 0, 0, 0),
+    };
+
+    MqttStatus {
+        timestamp:             Some(Utc::now()),
+        broker_running,
+        broker_uptime_secs,
+        broker_msgs_rx,
+        bridge_local_ok,
+        bridge_remote_ok,
+        bridge_l2r_total:      bridge_l2r,
+        bridge_r2l_total:      bridge_r2l,
+        bridge_reconnects_local:  bridge_recon_local,
+        bridge_reconnects_remote: bridge_recon_remote,
+        bridge_uptime_secs:    bridge_uptime,
     }
+}
+
+/// Fetch JSON depuis une URL locale (pas de dépendance reqwest — tokio + hyper léger).
+async fn fetch_json(url: &str) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    let addr = url
+        .trim_start_matches("http://")
+        .splitn(2, '/')
+        .next()
+        .unwrap_or("127.0.0.1:8082");
+    let path = url
+        .trim_start_matches("http://")
+        .splitn(2, '/')
+        .nth(1)
+        .map(|p| format!("/{p}"))
+        .unwrap_or_else(|| "/metrics".to_string());
+
+    let stream = TcpStream::connect(addr).await?;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = stream;
+    let req = format!("GET {path} HTTP/1.0\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    stream.write_all(req.as_bytes()).await?;
+
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).await?;
+    let text = std::str::from_utf8(&buf).unwrap_or("");
+    let body = text.splitn(2, "\r\n\r\n").nth(1).unwrap_or(text);
+    Ok(serde_json::from_str(body)?)
 }
 
 async fn read_load_avg() -> [f32; 3] {
