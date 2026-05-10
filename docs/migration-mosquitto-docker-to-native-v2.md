@@ -369,7 +369,7 @@ cat .env | grep -i mosquitto > /tmp/mosquitto-env-backup.txt 2>/dev/null || true
 cp Config.toml Config.toml.bak.$(date +%Y%m%d_%H%M%S)
 ```
 
-### 6.2 Créer le répertoire de contribution pour Mosquitto natif
+### 6.2 Créer le répertoire de contribution pour Mosquitto natif  ✅ OK Fait
 
 ```bash
 mkdir -p contrib/mosquitto
