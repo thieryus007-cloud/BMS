@@ -202,15 +202,47 @@ ssh root@192.168.1.120 "dbus -y | grep victronenergy"
 
 ## 6. TOPICS MQTT (préfixe `santuario/`)
 
-| Topic | Service D-Bus |
-|-------|---------------|
-| `bms/{n}/venus` | `battery.mqtt_{n}` |
-| `heat/{n}/venus` | `temperature.mqtt_{n}` |
-| `heatpump/{n}/venus` | `heatpump.mqtt_{n}` |
-| `switch/{n}/venus` | `switch.mqtt_{n}` |
-| `grid/{n}/venus` | `grid.mqtt_{n}` |
-| `pvinverter/{n}/venus` | `pvinverter.mqtt_{n}` |
-| `meteo/venus` | `meteo` (singleton) |
+| Topic | Publié par | Service D-Bus NanoPi |
+|-------|-----------|----------------------|
+| `bms/{n}/venus` | daly-bms-server (Pi5) | `battery.mqtt_{n}` |
+| `heat/{n}/venus` | daly-bms-server (Pi5) | `temperature.mqtt_{n}` |
+| `heatpump/{n}/venus` | daly-bms-server (Pi5) | `heatpump.mqtt_{n}` |
+| `switch/{n}/venus` | daly-bms-server (Pi5, ATS+Tongou) | `switch.mqtt_{n}` |
+| `grid/{n}/venus` | daly-bms-server (Pi5) | `grid.mqtt_{n}` |
+| `pvinverter/{n}/venus` | daly-bms-server (Pi5) | `pvinverter.mqtt_{n}` |
+| `meteo/venus` | daly-bms-server (Pi5) | `meteo` (singleton) |
+
+**TOUS les topics `santuario/*` sont publiés par Pi5 → bridgés vers NanoPi.**
+**NanoPi ne publie RIEN en `santuario/*`.** → Ne jamais mettre `santuario/#` dans la direction NanoPi→Pi5 du bridge (boucle infinie).
+
+### Règles bridge mqtt-bridge (CRITIQUE — anti-boucle)
+
+| Direction | Topics autorisés | Raison |
+|-----------|-----------------|--------|
+| **local→nanopi** | `santuario/#`, `W/{portal}/#`, `R/{portal}/#`, `cmnd/#`, `shellypro2pm-.../rpc` | Pi5 → NanoPi uniquement |
+| **nanopi→local** | `N/{portal}/#`, `tele/#`, `stat/#`, `shellypro2pm-.../#`, `daly-bms-shelly/rpc` | NanoPi → Pi5 uniquement |
+
+⚠ **Un topic dans les deux sens = boucle infinie = flood MQTT = devices qui flashent dans VRM.**
+
+### Commandes Tasmota/Tongou
+
+| Action | Topic | Direction bridge |
+|--------|-------|-----------------|
+| Mesure énergie | `tele/{id}/SENSOR` | NanoPi→Pi5 |
+| État relais | `stat/{id}/POWER` | NanoPi→Pi5 |
+| Commande ON/OFF depuis Pi5 web | `cmnd/{id}/POWER` | Pi5→NanoPi |
+| Commande depuis Venus console | `cmnd/{id}/Power` (dbus-mqtt-venus) | Direct NanoPi |
+
+### ATS CHINT vs Tongou — mqtt_index
+
+| mqtt_index | Device | Topic |
+|-----------|--------|-------|
+| 1 | ATS CHINT NXZB (RS485) | `santuario/switch/1/venus` |
+| 2 | Tongou Switch1 (tongou_3BC764) | `santuario/switch/2/venus` |
+| 3 | Tongou Switch2 (tongou_0A3FA0) | `santuario/switch/3/venus` |
+| 4 | Tongou Switch3 (tongou_0A3C14) | `santuario/switch/4/venus` |
+| 5 | Tongou Switch4 (tongou_0A4040) | `santuario/switch/5/venus` |
+| 6 | Tongou Switch5 (tongou_3ACC34) | `santuario/switch/6/venus` |
 
 ---
 
@@ -311,6 +343,9 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | mqtt-broker ne démarre pas | `journalctl -u mqtt-broker -n 30` — souvent `/var/lib/mqtt-broker` owner incorrect |
 | mqtt-bridge déconnecté NanoPi | `journalctl -u mqtt-bridge -n 30` — NanoPi inaccessible? `ping 192.168.1.120` |
 | Retained messages perdus après migration | Normaux — recréés au prochain publish retain (ex: `pvinv_baseline` par energy-manager) |
+| **BMS/pvinverter flashent dans VRM (apparaissent/disparaissent)** | **Boucle bridge — vérifier que `santuario/#` N'EST PAS dans nanopi→local (voir bridge.rs)** |
+| **Flood MQTT (des centaines de messages/sec dans l'explorateur)** | **Boucle bridge — un topic est dans les deux directions simultanement** |
+| **Commandes Tongou depuis web Pi5 ignorées** | **`cmnd/#` absent de local→nanopi dans bridge.rs** |
 | Double messages venus (boucle bridge) | Vérifier que client_id des bridges sont uniques (déjà le cas dans le code) |
 | LG ThinQ ne répond pas | Vérifier `LG_BEARER_TOKEN` et `LG_API_KEY` dans `/etc/daly-bms/.env` |
 
@@ -332,6 +367,8 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 12. Secrets : ne jamais committer `.env`.
 13. **MQTT** : broker = `mqtt-broker` (rumqttd systemd), plus de Docker. `make mqtt-start/stop/logs` remplace `make up/down/logs`.
 14. Config bridge MQTT : `[mqtt_bridge]` dans Config.toml (portal_id + remote_host NanoPi).
+15. **BRIDGE ANTI-BOUCLE** : `santuario/#` = direction Pi5→NanoPi SEULEMENT. Ne JAMAIS mettre `santuario/#` dans nanopi→local. Voir section 6 pour les règles complètes.
+16. **Tasmota commandes** : Pi5 web publie `cmnd/{id}/POWER` sur broker local → bridge local→nanopi → switch sur NanoPi. `cmnd/#` doit être dans local→nanopi.
 
 ---
 

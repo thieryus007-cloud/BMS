@@ -4,6 +4,21 @@
 //!   - `run_nanopi_to_local` : abonné sur NanoPi, republish vers Pi5 local
 //!   - `run_local_to_nanopi` : abonné sur Pi5 local, republish vers NanoPi
 //!
+//! ⚠ RÈGLE ANTI-BOUCLE (CRITICAL)
+//! ─────────────────────────────
+//! Un broker MQTT n'a pas de protection native contre les boucles de bridge.
+//! Mosquitto a un mécanisme interne (bridge protocol) ; notre bridge custom NON.
+//! Règle absolue : un topic ne peut apparaître que dans UNE SEULE direction.
+//!
+//!   - santuario/*  → UNIQUEMENT local→nanopi  (publié par Pi5, consommé par NanoPi)
+//!   - N/{portal}/# → UNIQUEMENT nanopi→local   (publié par Venus OS sur NanoPi)
+//!   - tele/# stat/# → UNIQUEMENT nanopi→local  (publié par Tongou/Tasmota sur NanoPi)
+//!   - cmnd/#        → UNIQUEMENT local→nanopi  (commandes Pi5 vers Tongou sur NanoPi)
+//!   - shellypro2pm-ec62608840a4/# → nanopi→local (status Shelly depuis NanoPi)
+//!   - shellypro2pm-ec62608840a4/rpc → local→nanopi (commandes RPC vers Shelly)
+//!
+//! Si un topic est ajouté dans les deux sens → boucle instantanée → flood MQTT.
+//!
 //! En cas de déconnexion, reconnexion automatique avec backoff.
 
 use crate::{config::BridgeConfig, metrics::BridgeMetrics};
@@ -18,16 +33,16 @@ use tracing::{info, warn};
 // =============================================================================
 
 fn nanopi_to_local_subscriptions(portal: &str) -> Vec<(String, QoS)> {
+    // ⚠ NE PAS ajouter santuario/* ici — ces topics viennent de Pi5, pas de NanoPi.
+    // Les ajouter créerait une boucle infinie avec local_to_nanopi_subscriptions().
     vec![
-        // Venus OS données publiées par Venus OS
+        // Venus OS données télémétriques publiées par Cerbo GX sur NanoPi
         (format!("N/{portal}/#"), QoS::AtMostOnce),
-        // Données BMS publiées par dbus-mqtt-venus sur NanoPi
-        ("santuario/#".to_string(), QoS::AtMostOnce),
-        // Shelly Pro 2PM : status et événements publiés par le device sur NanoPi
+        // Shelly Pro 2PM : status/events publiés par le device connecté au broker NanoPi
         ("shellypro2pm-ec62608840a4/#".to_string(), QoS::AtMostOnce),
-        // Réponses RPC Shelly (topic de réponse daly-bms-shelly/rpc sur NanoPi)
+        // Réponses RPC Shelly (le device répond sur ce topic sur le broker NanoPi)
         ("daly-bms-shelly/rpc".to_string(), QoS::AtMostOnce),
-        // Tasmota / Tongou : mesures énergie et état relais publiés sur NanoPi
+        // Tasmota / Tongou : tele/{id}/SENSOR et stat/{id}/POWER depuis NanoPi
         ("tele/#".to_string(), QoS::AtMostOnce),
         ("stat/#".to_string(), QoS::AtMostOnce),
     ]
