@@ -458,7 +458,7 @@ sudo chmod 755 /var/log/mosquitto
 
 ---
 
-## 8. Configuration mosquitto.conf complète
+## 8. Configuration mosquitto.conf complète ✅ OK Fait
 
 Créer `/etc/mosquitto/mosquitto.conf` :
 
@@ -645,7 +645,7 @@ keepalive_interval 60
 
 ---
 
-## 9. Service systemd mosquitto-broker ****** FAIT.  ****** 
+## 9. Service systemd mosquitto-broker ✅ OK Fait 
 
 Créer `contrib/mosquitto-broker.service` :
 
