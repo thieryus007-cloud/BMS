@@ -25,6 +25,9 @@ fn nanopi_to_local_subscriptions(portal: &str) -> Vec<(String, QoS)> {
         ("santuario/#".to_string(), QoS::AtMostOnce),
         // Shelly bidirectionnel
         ("shellypro2pm-ec62608840a4/#".to_string(), QoS::AtMostOnce),
+        // Tasmota / Tongou : mesures énergie et état relais publiés sur NanoPi
+        ("tele/#".to_string(), QoS::AtMostOnce),
+        ("stat/#".to_string(), QoS::AtMostOnce),
     ]
 }
 
