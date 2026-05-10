@@ -1,0 +1,6 @@
+# Plugin REST de management — debug uniquement, bind localhost.
+# Voir docs/rmqtt-migration-guide.md §7.1
+http_laddr = "127.0.0.1:8083"
+workers = 1
+max_row_limit = 10_000
+message_type = 1
