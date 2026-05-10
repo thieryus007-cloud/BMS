@@ -3,6 +3,7 @@ Description=Broker MQTT Rust (rumqttd) — remplace Mosquitto/Docker sur Pi5
 Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
 After=network.target
 Before=daly-bms.service energy-manager.service mqtt-bridge.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=notify
@@ -21,13 +22,10 @@ Environment=RUST_LOG=info,rumqttd=warn
 
 Restart=on-failure
 RestartSec=5s
-StartLimitIntervalSec=0
 
-# Répertoire de travail pour la persistence rumqttd
 StateDirectory=mqtt-broker
 StateDirectoryMode=0750
 
-# Limits
 LimitNOFILE=65536
 MemoryMax=200M
 

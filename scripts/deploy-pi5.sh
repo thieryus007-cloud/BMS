@@ -80,6 +80,14 @@ if [ "$SKIP_MQTT" = false ]; then
   sudo chmod 644 /etc/daly-bms/mqtt-broker.toml
   info "mqtt-broker.toml déployé dans /etc/daly-bms/"
 
+  # Arrêter Mosquitto Docker s'il tourne encore (libère le port :1883)
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "mosquitto\|dalybms"; then
+    step "Arrêt Mosquitto Docker (libération port :1883)…"
+    docker compose -f docker-compose.infra.yml down 2>/dev/null || docker stop dalybms-mosquitto 2>/dev/null || true
+    sleep 2
+    info "Mosquitto Docker arrêté"
+  fi
+
   # Déployer le binaire
   sudo systemctl stop mqtt-bridge 2>/dev/null || true
   sudo systemctl stop mqtt-broker 2>/dev/null || true
