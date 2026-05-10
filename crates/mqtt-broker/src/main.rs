@@ -87,7 +87,7 @@ async fn main() -> Result<()> {
         .with_context(|| format!("Parse config TOML : {}", cli.config.display()))?;
 
     info!("Broker MQTT démarré — TCP :1883, WS :9001");
-    info!("Persistence : {}", config.router.path.display());
+    info!("Persistence : {}", config.router.dir.display());
 
     // ── Métriques partagées ───────────────────────────────────────────────────
     let metrics = Arc::new(BrokerMetrics::default());
@@ -110,18 +110,15 @@ async fn main() -> Result<()> {
     // Abonnement wildcard pour compter tous les messages
     link_tx.subscribe("#").context("Subscribe #")?;
 
+    // link_rx.recv() est synchrone → spawn_blocking pour ne pas bloquer le runtime
     let metrics_clone = Arc::clone(&metrics);
-    tokio::spawn(async move {
+    tokio::task::spawn_blocking(move || {
         loop {
-            match link_rx.recv().await {
+            match link_rx.recv() {
                 Ok(Some(_notif)) => {
                     metrics_clone.messages_rx.fetch_add(1, Ordering::Relaxed);
                 }
-                Ok(None) => break,
-                Err(e) => {
-                    warn!("Link monitor erreur : {e}");
-                    break;
-                }
+                Ok(None) | Err(_) => break,
             }
         }
     });

@@ -7,7 +7,7 @@
 # Créer : sudo mkdir -p /var/lib/mqtt-broker && sudo chown mqtt-broker:mqtt-broker /var/lib/mqtt-broker
 [router]
 id                     = 0
-path                   = "/var/lib/mqtt-broker"
+dir                    = "/var/lib/mqtt-broker"
 max_connections        = 1000
 max_outgoing_packet_count = 200
 max_segment_size       = 104857600   # 100 MB

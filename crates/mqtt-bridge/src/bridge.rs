@@ -8,7 +8,7 @@
 
 use crate::{config::BridgeConfig, metrics::BridgeMetrics};
 use anyhow::Result;
-use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS};
+use rumqttc::{AsyncClient, MqttOptions, QoS};
 use std::{sync::Arc, time::Duration};
 use tokio::time::sleep;
 use tracing::{info, warn};
