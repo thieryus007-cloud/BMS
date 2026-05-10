@@ -1,0 +1,607 @@
+# =============================================================================
+# DalyBMS — Rust Edition — Configuration principale
+# =============================================================================
+# Ce fichier est utilisé pour :
+#   - Développement Windows (cargo run, BMS réel ou simulateur)
+#   - Déploiement natif Linux / Raspberry Pi 5
+#
+# Pour la stack Docker complète (docker compose up), utiliser Config.docker.toml.
+#
+# Ordre de chargement :
+#   1. Variable d'environnement DALY_CONFIG
+#   2. ./Config.toml  (répertoire courant — Windows / dev)
+#   3. /etc/daly-bms/config.toml  (Linux production)
+# Date de référence : mars 2026
+
+[serial]
+# Port série RS485 (USB → /dev/ttyUSB* ou /dev/ttyACM*)
+# Sur Linux : /dev/ttyUSB0 ou /dev/ttyUSB1
+# Sur Windows : laisser vide pour auto-détection, ou spécifier COM5, COM6...
+port = ""   # vide = auto-détection au démarrage (scan ttyUSB*)
+
+# Vitesse de communication (Daly standard = 9600)
+baud = 9600
+
+# Intervalle de polling global (en millisecondes)
+# 1000 ms = 1 requête par seconde → bon équilibre réactivité / charge CPU
+poll_interval_ms = 1000
+
+# Nombre maximum de cellules attendues (utilisé pour parsing multi-trames)
+default_cell_count = 16
+
+# Nombre de sondes NTC attendues
+default_temp_sensors = 4
+
+# Taille du ring buffer en mémoire (nombre de snapshots conservés)
+# 3600 = 1 heure à 1 Hz → bon pour historique court terme + export CSV
+ring_buffer_size = 3600
+
+# Activer la découverte automatique au démarrage (sonde 0x01 → 0xFF)
+# Recommandé : activer une fois pour détecter, puis passer en manuel
+auto_discover = false
+
+# Plage de découverte auto (si activée)
+auto_discover_start = 1
+auto_discover_end   = 16
+
+# Liste explicite des BMS (recommandé en production)
+# Format : "0x01,0x02,0x03" ou tableau TOML ["0x01", "0x02"]
+addresses = ["0x01", "0x02"]
+
+
+[api]
+# Interface et port d'écoute (0.0.0.0 = accessible depuis le réseau local)
+bind = "0.0.0.0:8080"
+
+# Clé API pour protéger les endpoints d'écriture (MOS, SOC, config, reset)
+# Vide ou absent = pas d'authentification (développement uniquement !)
+# En production : générez une clé forte (ex: openssl rand -hex 32)
+api_key = ""
+
+# Activer CORS (utile si dashboard sur un autre domaine/port en dev)
+cors_allow_all = true
+# cors_origins = ["http://localhost:3000", "https://dalybms.local"]
+
+
+[logging]
+# Niveau de logs (trace, debug, info, warn, error)
+level = "trace"
+
+# Format des logs (pretty = coloré et lisible, json = pour parsing)
+format = "pretty"
+
+
+[mqtt]
+enabled = true
+
+# Windows avec Docker Desktop local → "localhost"
+# Windows avec NanoPi comme broker → "192.168.1.120"
+# Raspberry Pi 5 production        → "localhost" (Mosquitto local) ou IP NanoPi
+host = "192.168.1.120"
+port = 1883
+
+# Préfixe des topics (ex: santuario/bms/1/venus)
+topic_prefix = "santuario/bms"
+
+# Intervalle de publication (secondes)
+publish_interval_sec = 1
+
+# Authentification MQTT (optionnelle)
+# username = ""
+# password = ""
+
+# Format de publication
+# "json" = un message JSON complet par BMS
+# "simple" = un topic par valeur (ex: santuario/bms/1/soc → 75.2)
+format = "json"
+
+
+# =============================================================================
+# Venus OS D-Bus bridge (dbus-mqtt-venus)
+# =============================================================================
+# Ce service publie chaque BMS comme com.victronenergy.battery.{prefix}_{index}
+# sur le bus D-Bus de Venus OS, alimenté par les payloads MQTT /venus.
+#
+# Prérequis :
+#   - daly-bms-server actif avec mqtt.enabled = true
+#   - Broker Mosquitto accessible (mqtt.host + mqtt.port ci-dessus)
+#   - dbus-mqtt-venus déployé sur le NanoPi/GX (voir nanoPi/install-venus.sh)
+
+[venus]
+enabled = true
+
+# Bus D-Bus :
+#   "system"  → /var/run/dbus/system_bus_socket (Venus OS production)
+#   "session" → $DBUS_SESSION_BUS_ADDRESS       (test développement sans sudo)
+dbus_bus = "system"
+
+# Préfixe du suffixe de service D-Bus.
+# Service résultant : com.victronenergy.battery.{prefix}_{mqtt_index}
+# Ex: "mqtt" + mqtt_index=1 → com.victronenergy.battery.mqtt_1
+service_prefix = "mqtt"
+
+# Watchdog (secondes) : si aucune donnée MQTT pendant ce délai,
+# /Connected passe à 0 → Venus OS marque la batterie comme hors ligne
+watchdog_sec = 30
+
+# Intervalle de republication forcée (secondes) — garantit le keepalive Venus OS
+# Doit être < watchdog_sec et < 60s (keepalive MQTT bridge Venus)
+republish_sec = 25
+
+
+# =============================================================================
+# Capteurs de température extérieure (com.victronenergy.temperature.{n})
+# =============================================================================
+# Topic MQTT source : santuario/heat/{n}/venus
+# Payload attendu (publié par Node-RED depuis Open-Meteo) :
+#   { "Temperature": 15.3, "TemperatureType": 4, "Humidity": 65.0, "Pressure": 101.3 }
+#
+# TemperatureType : 0=battery 1=fridge 2=generic 3=Room 4=Outdoor 5=WaterHeater 6=Freezer
+# La valeur config a PRIORITÉ sur celle du payload.
+
+[heat]
+# Préfixe des topics température (séparé du BMS prefix)
+topic_prefix = "santuario/heat"
+
+[[sensors]]
+mqtt_index       = 1       # Topic : santuario/heat/1/venus
+name             = "Temperature Exterieure"
+temperature_type = 4       # 4 = Outdoor
+device_instance  = 20      # DeviceInstance Venus OS / VRM
+
+# =============================================================================
+# Pompes à chaleur / chauffe-eau (com.victronenergy.heatpump.{n})
+# =============================================================================
+# Topic MQTT source : santuario/heatpump/{n}/venus
+# Payload attendu (publié par Node-RED) :
+#   { "State": 0, "Temperature": 55.0, "TargetTemperature": 60.0,
+#     "Ac": { "Power": 1200.0, "Energy": { "Forward": 125.5 } }, "Position": 0 }
+#
+# /State             — enum état (TBD Victron)
+# /Temperature       — température eau courante °C
+# /TargetTemperature — température eau cible °C
+# /Ac/Power          — puissance consommée W
+# /Ac/Energy/Forward — énergie totale kWh
+# /Position          — 0=AC Output, 1=AC Input
+
+[heatpump]
+# Préfixe des topics heatpump
+topic_prefix = "santuario/heatpump"
+
+# Les PAC/chauffe-eau sont déclarés via [[et112.devices]] (service_type="heatpump")
+# et configurés dans nanoPi/config-nanopi.toml côté dbus-mqtt-venus.
+# Aucun [[heatpumps]] ici — daly-bms-server ne lit pas cette section.
+
+# =============================================================================
+# Capteur météo / irradiance RS485 (com.victronenergy.meteo)
+# =============================================================================
+# Topic MQTT source FIXE : santuario/meteo/venus (sans index — un seul capteur)
+# Payload attendu (publié par Node-RED depuis capteur RS485 Pi5) :
+#   { "Irradiance": 750.0, "TodaysYield": 12.5 }
+#
+# /Irradiance    — irradiance courante W/m²
+# /TodaysYield   — production du jour kWh (depuis le lever du soleil)
+
+[meteo]
+topic           = "santuario/meteo/venus"
+product_name    = "Capteur Irradiance"
+device_instance = 40      # DeviceInstance Venus OS / VRM
+
+
+# =============================================================================
+# Capteur irradiance PRALRAN (RS485 Modbus RTU — bus unifié)
+# =============================================================================
+# Matériel : Solar Radiation Sensor PRALRAN, adresse Modbus RTU 0x05
+# Branché sur le BUS UNIFIÉ /dev/ttyUSB0 (même bus que BMS Daly)
+# Registre 0x0000 → irradiance W/m² (FC04, uint16 big-endian)
+# Publie sur MQTT : santuario/irradiance/raw (retain=true)
+# Même topic que l'ancien irradiance_reader.py → Node-RED inchangé
+
+[irradiance]
+address          = "0x05"
+name             = "Irradiance PRALRAN"
+poll_interval_ms = 5000
+
+
+# =============================================================================
+# Compteur énergie ET112 Carlo Gavazzi (RS485 Modbus RTU — bus unifié)
+# =============================================================================
+# ARCHITECTURE UNIFIÉE : tous les ET112 partagent le BUS RS485 /dev/ttyUSB0
+# (même bus que les BMS Daly 0x01-0x04 et irradiance 0x05)
+# Les champs port/baud sont supprimés — bus hérité du SharedBus global.
+#
+# Adresses RS485 (configurées physiquement sur les compteurs) :
+#   0x07 = Micro-onduleurs → D-Bus pvinverter (mqtt_3, instance 63)
+#   0x08 = PAC Chauffe-eau  → D-Bus pvinverter ou acload
+#   0x09 = PAC Climatisation → D-Bus pvinverter ou acload
+
+[et112]
+# Intervalle de polling en millisecondes (2000 = toutes les 2 secondes)
+poll_interval_ms = 2000
+
+# Taille du ring buffer (1800 = 1 heure à 1 mesure/2s)
+ring_buffer_size = 1800
+
+[[et112.devices]]               # SN: 119253X — branché ✅
+address          = "0x07"
+name             = "ET112-Micro-Onduleurs"
+mqtt_index       = 7           # → santuario/pvinverter/7/venus
+service_type     = "pvinverter"
+device_instance  = 32
+position         = 1
+
+[[et112.devices]]               # SN: 119215X — branché ✅
+address          = "0x08"
+name             = "ET112-Maison"
+mqtt_index       = 8           # → santuario/heatpump/8/venus
+service_type     = "heatpump"
+device_instance  = 30
+position         = 1
+
+[[et112.devices]]               # SN: 061077X — branché ✅
+address          = "0x09"
+name             = "ET112-Réseau"
+mqtt_index       = 9           # → santuario/heatpump/9/venus
+service_type     = "heatpump"
+device_instance  = 31
+position         = 1
+
+
+# =============================================================================
+# ATS CHINT NXZB / NXZBN (RS485 Modbus RTU — BUS UNIFIÉ /dev/ttyUSB0)
+# =============================================================================
+# L'ATS est câblé sur le MÊME bus RS485 que les BMS Daly, ET112 et irradiance.
+# Aucun port dédié — il partage le SharedBus ouvert par [serial].
+#
+# ⚠ PARITÉ : le bus unifié tourne en 9600-8N1 (parité None).
+#   L'ATS doit être configuré en parité NONE via son bouton Setup physique
+#   ou via le registre Modbus 0x000E = 0x0000 (0=None, 1=Odd, 2=Even).
+#
+# Adresses RS485 sur le bus unifié /dev/ttyUSB0 :
+#   0x01 → BMS-360Ah (Daly)
+#   0x02 → BMS-320Ah (Daly)
+#   0x05 → Irradiance PRALRAN
+#   0x06 → ATS CHINT NXZB  ← ici
+#   0x07 → ET112 Micro-Onduleurs
+#   0x08 → ET112 PAC Chauffe-eau
+#   0x09 → ET112 PAC Climatisation
+#
+# Registres Modbus ATS (FC=03 lecture) :
+#   0x0006–0x000B : tensions phases (V) sources 1 et 2
+#   0x000C        : version logicielle (÷100)
+#   0x000D        : fréquences (MN uniquement)
+#   0x000E        : parité Modbus (0=None, 1=Odd, 2=Even) ← configurer à 0
+#   0x0015–0x0017 : compteurs commutations + runtime (h)
+#   0x004F        : statut tensions (bitfield phases)
+#   0x0050        : statut commutation (SW1/SW2, mode, télécommande, défaut)
+#   0x0100–0x0101 : adresse et baud Modbus configurés
+#   0x2065–0x206D : seuils UV/OV, délais T1-T4, mode (MN uniquement)
+#
+# Commandes Modbus (FC=06 écriture) :
+#   0x2800 = 0x0004 → activer télécommande
+#   0x2800 = 0x0000 → désactiver télécommande
+#   0x2700 = 0x0000 → forcer source 1 (Onduleur / AC2)
+#   0x2700 = 0x00AA → forcer source 2 (Réseau / AC1)
+#   0x2700 = 0x00FF → forcer double déclenché (neutre)
+#
+# Intégration Venus OS :
+#   MQTT topic    : santuario/switch/{mqtt_index}/venus
+#   D-Bus service : com.victronenergy.switch.mqtt_1 (instance 60)
+#   /Position     : 0 = AC1/Réseau, 1 = AC2/Onduleur
+#   /State        : 0 = inactif, 1 = actif, 2 = alerte
+
+[ats]
+# Activer le monitoring et les commandes ATS
+enabled = true
+
+# Adresse Modbus de l'ATS (défaut usine CHINT = 6)
+# Vérifier avec : mbpoll -m rtu -a 1:15 -b 9600 -t 3 -r 1 -c 1 /dev/ttyUSB0
+address = 6
+
+# Nom affiché dans le dashboard web et les logs
+name = "ATS CHINT NXZB"
+
+# Intervalle de polling en millisecondes (2000 = toutes les 2 secondes)
+poll_interval_ms = 2000
+
+# Index MQTT → topic santuario/switch/{mqtt_index}/venus
+# Doit correspondre à [[switches]].mqtt_index dans nanoPi/config-nanopi.toml
+mqtt_index = 1
+
+# Instance D-Bus Venus OS / VRM portal
+# Doit correspondre à [[switches]].device_instance dans config-nanopi.toml
+device_instance = 60
+
+
+# =============================================================================
+# Prises connectées Tasmota (MQTT natif Tasmota)
+# =============================================================================
+# Tasmota publie automatiquement via MQTT :
+#   tele/{tasmota_id}/SENSOR  → mesures énergie (puissance, tension, courant, kWh)
+#   stat/{tasmota_id}/POWER   → état relais ON/OFF
+#
+# Prérequis :
+#   - Tasmota configuré pour publier sur le broker MQTT (mqtt.host / mqtt.port)
+#   - Dans l'interface Tasmota : Configuration → MQTT → Host + User + Password
+#   - Option "Full Topic" recommandée : %prefix%/%topic%/ (défaut Tasmota)
+#
+# service_type = "switch" → forward vers Venus OS com.victronenergy.switch (si mqtt_index défini)
+# service_type = "acload" → forward vers Venus OS com.victronenergy.grid (acload)
+
+[tasmota]
+# Taille du ring buffer par prise (720 = 1 heure si SENSOR toutes les 5s)
+ring_buffer_size = 720
+
+[[tasmota.devices]]
+id              = 1                  # Identifiant interne unique (clé du ring buffer)
+tasmota_id      = "tongou_3BC764"    # Topics : tele/tongou_3BC764/STATE, stat/tongou_3BC764/POWER
+name            = "Tongou Switch1"
+mqtt_index      = 2                  # → forward santuario/switch/2/venus → D-Bus switch.mqtt_2
+service_type    = "switch"
+device_instance = 61                 # Instance D-Bus Venus OS (60=ATS CHINT, 61=Tongou)
+
+[[tasmota.devices]]
+id              = 2                  # Identifiant interne unique (clé du ring buffer)
+tasmota_id      = "tongou_0A3FA0"    # Topics : tele/tongou_0A3FA0/STATE, stat/tongou_0A3FA0/POWER
+name            = "Tongou Switch2"
+mqtt_index      = 3                  # → forward santuario/switch/2/venus → D-Bus switch.mqtt_3
+service_type    = "switch"
+device_instance = 62                 # Instance D-Bus Venus OS (60=ATS CHINT, 61=Tongou)
+
+[[tasmota.devices]]
+id              = 3                  # Identifiant interne unique (clé du ring buffer)
+tasmota_id      = "tongou_0A3C14"    # Topics : tele/tongou_0A3C14/STATE, stat/tongou_0A3C14/POWER
+name            = "Tongou Switch3"
+mqtt_index      = 4                  # → forward santuario/switch/2/venus → D-Bus switch.mqtt_4
+service_type    = "switch"
+device_instance = 63                 # Instance D-Bus Venus OS (60=ATS CHINT, 61=Tongou)
+
+[[tasmota.devices]]
+id              = 4                  # Identifiant interne unique (clé du ring buffer)
+tasmota_id      = "tongou_0A4040"    # Topics : tele/tongou_0A4040/STATE, stat/tongou_0A4040/POWER
+name            = "Tongou Switch4"
+mqtt_index      = 5                 # → forward santuario/switch/5/venus → D-Bus switch.mqtt_5
+service_type    = "switch"
+device_instance = 64                 # Instance D-Bus Venus OS
+
+[[tasmota.devices]]
+id              = 5                  # Identifiant interne unique (clé du ring buffer)
+tasmota_id      = "tongou_3ACC34"    # 192.168.1.80  tongou-3ACC34
+name            = "Tongou Switch5"
+mqtt_index      = 6                  # → forward santuario/switch/6/venus → D-Bus switch.mqtt_6
+service_type    = "switch"
+device_instance = 65                 # Instance D-Bus Venus OS
+
+# Décommenter et adapter pour chaque prise Tasmota supplémentaire :
+# [[tasmota.devices]]
+# id           = 2           # Identifiant interne unique (clé du ring buffer)
+# tasmota_id   = "tasmota_01" # Nom du device Tasmota dans les topics MQTT
+# name         = "Prise Salon"
+# mqtt_index   = 3            # Optionnel — forward Venus OS switch/3/venus
+# service_type = "switch"     # "switch" (défaut) ou "acload"
+# device_instance = 500       # Optionnel — instance D-Bus Venus OS
+
+# =============================================================================
+# Shelly Pro 2PM — compteurs d'énergie 2 canaux
+# =============================================================================
+# Topics : {shelly_id}/status/switch:0  et  /status/switch:1
+# Commandes : {shelly_id}/rpc  (Switch.Set via MQTT RPC)
+[shelly]
+ring_buffer_size = 720
+
+[[shelly.devices]]
+id        = 1
+shelly_id = "shellypro2pm-ec62608840a4"   # IP 192.168.1.136
+name      = "DEYE — Shelly Pro 2PM"
+
+
+# =============================================================================
+# VictoriaMetrics — Stockage time-series externe (service systemd sur Pi5)
+# =============================================================================
+# VictoriaMetrics tourne en service systemd natif (PAS Docker) sur le Pi5.
+# Installation : /usr/local/bin/victoria-metrics
+# Service      : /etc/systemd/system/victoria-metrics.service
+# Données      : /var/lib/victoria-metrics/
+# Logs         : journalctl -u victoria-metrics -f
+[victoriametrics]
+enabled = true
+
+# URL de l'instance VictoriaMetrics (bind 127.0.0.1 = non exposé sur le réseau)
+url = "http://127.0.0.1:8428"
+
+# Timeout des requêtes HTTP vers VM en secondes
+timeout_secs = 10
+
+
+[alerts]
+# Chemin de la base SQLite pour journal des alertes.
+# Laisser vide pour désactiver complètement les alertes.
+db_path = "/var/lib/daly-bms/alerts.db"
+
+# Intervalle d'évaluation des règles (secondes)
+check_interval_sec = 1.0
+
+# Telegram (optionnel)
+telegram_token = ""
+telegram_chat_id = ""
+
+# Email SMTP (optionnel)
+smtp_host = ""
+smtp_port = 587
+smtp_username = ""
+smtp_password = ""
+smtp_from = "dalybms@santuario.local"
+smtp_to = "admin@santuario.local"
+
+# Durées minimales "for:" avant déclenchement (secondes).
+# 0 = déclencher immédiatement (comportement legacy).
+soc_critical_for_secs = 180   # 3 minutes
+soc_low_for_secs      = 300   # 5 minutes
+temp_high_for_secs    = 180   # 3 minutes
+current_high_for_secs = 120   # 2 minutes
+voltage_for_secs      = 60    # 1 minute
+
+# Seuils d'alertes logicielles (indépendants des seuils hardware BMS)
+[alerts.thresholds]
+cell_ovp_v           = 3.60
+cell_uvp_v           = 2.90
+cell_delta_mv        = 100
+soc_low_percent      = 20.0
+soc_critical_percent = 15.0   # SOC critique ESS (était 10, aligné avec vmalert plan)
+temp_high_c          = 45.0
+current_high_a       = 100.0  # Courant décharge max via SmartShunt (était 80A BMS seul)
+pack_ovp_v           = 57.0   # Tension pack trop haute (V)
+pack_uvp_v           = 44.0   # Tension pack trop basse (V)
+
+
+[read_only]
+# Mode lecture seule globale (désactive TOUTES les commandes d'écriture)
+# Très recommandé en production si pas de besoin de contrôle distant
+enabled = false
+
+
+# =============================================================================
+# Configurations individuelles par BMS (optionnel)
+# =============================================================================
+# Une section [[bms]] par appareil.  Si absente, les valeurs par défaut sont
+# utilisées (capacité 100 Ah, pas de nom personnalisé).
+# L'adresse est l'adresse RS485 décimale ou hexadécimale.
+
+[[bms]]
+address         = "0x01"
+name            = "BMS-360Ah"
+capacity_ah     = 360.0
+max_charge_a    = 200.0
+max_discharge_a = 120.0
+mqtt_index      = 1
+device_instance = 151
+
+[[bms]]
+address         = "0x02"
+name            = "BMS-320Ah"
+capacity_ah     = 320.0
+max_charge_a    = 200.0
+max_discharge_a = 120.0
+mqtt_index      = 2
+device_instance = 152
+
+# [[bms]]                          # ← décommenter quand branché
+# address         = "0x03"
+# name            = "BMS-628Ah"
+# capacity_ah     = 628.0
+# max_charge_a    = 200.0
+# max_discharge_a = 120.0
+# mqtt_index      = 3
+# device_instance = 153
+
+# [[bms]]                          # ← décommenter quand branché
+# address         = "0x04"
+# name            = "BMS-4"
+# capacity_ah     = 100.0
+# max_charge_a    = 200.0
+# max_discharge_a = 120.0
+# mqtt_index      = 4
+# device_instance = 154
+
+
+# =============================================================================
+# Notes supplémentaires
+# =============================================================================
+# - Les chemins absolus sont fortement recommandés en systemd/Docker
+# - Pour la Phase 2 (tout en Docker) : montez /etc/daly-bms/config.toml comme volume
+# - Les variables d'environnement ont priorité sur le fichier TOML
+#   (ex: DALY_API_KEY=xxx cargo run)
+# - Logs : journalctl -u daly-bms -f  ou  RUST_LOG=debug daly-bms-server
+
+
+# =============================================================================
+# energy-manager — Gestionnaire d'énergie (remplace Node-RED)
+# =============================================================================
+# Binaire séparé : energy-manager
+# Port WebSocket live : 8081 (/live)
+# Service systemd    : energy-manager
+# Secrets dans .env  : LG_DEVICE_ID, LG_BEARER_TOKEN, LG_API_KEY
+
+[energy_manager]
+
+# --- MQTT ---
+[energy_manager.mqtt]
+host              = "192.168.1.141"   # broker Mosquitto local Pi5
+port              = 1883
+keep_alive_secs   = 60
+reconnect_delay_secs = 10
+# username = ""
+# password = ""
+
+# --- WebSocket live ---
+[energy_manager.api]
+bind = "0.0.0.0:8081"
+
+# --- Victron / Venus OS ---
+[energy_manager.victron]
+portal_id            = "c0619ab9929a"   # ID portail Victron GX
+vebus_instance       = 275              # instance VEBus (Quattro/Multiplus)
+mppt1_instance       = 273             # SmartSolar MPPT 1
+mppt2_instance       = 289             # SmartSolar MPPT 2
+pvinverter_instance  = 32              # ET112 Micro-Onduleurs
+shelly_deye_id       = "shellypro2pm-ec62608840a4"
+shelly_deye_channel  = 0
+tasmota_waterheater_id = "tongou_3BC764"
+# SmartShunt device instance sur Venus OS — vérifier avec :
+#   ssh root@192.168.1.120 "dbus -y | grep battery"
+smartshunt_instance  = 290             # à ajuster selon dbus-spy
+
+# --- Open-Meteo (météo locale) ---
+[energy_manager.open_meteo]
+enabled            = true
+latitude           = 43.9025          # Badalucco (San Bernardo)
+longitude          = 7.8364
+poll_interval_secs = 300              # 5 minutes
+
+# --- LG ThinQ (chauffe-eau) ---
+[energy_manager.lg_thinq]
+enabled            = true
+base_url           = "https://api-eic.lgthinq.com"
+device_id          = "918c240ab4c6e3eee70a4e9ac015c18ddd8b4f933c3d9ff813446d8f8dddf720"
+bearer_token       = "thinqpat_975d93159fdcf31033e33a3b9c49009ae1ffbf345dfa6dcb4e2f"
+api_key            = "v6GFvkweNo7DK7yD3ylIZ9w52aKBU0eJ7wLXkSR3"
+country            = "FR"
+client_id          = "Santuario-123456"
+poll_interval_secs = 600              # 10 minutes
+
+# --- Gestion courant de charge ---
+[energy_manager.charge_current]
+offgrid_max_a         = 70.0          # A max hors réseau
+grid_pv_excess_a      = 4.0           # A si surplus PV + réseau
+grid_no_excess_a      = 0.0           # A si pas de surplus + réseau
+pv_excess_threshold_w = 50.0          # W minimum pour déclencher l'excédent
+
+# --- Commande relais DEYE (via Shelly) ---
+[energy_manager.deye]
+freq_high_hz          = 52.0          # Hz — seuil de coupure
+freq_low_hz           = 50.3          # Hz — seuil de réactivation
+cut_delay_secs        = 15            # s — délai avant coupure
+reenable_delay_secs   = 45            # s — délai avant réactivation
+lockout_secs          = 120           # s — anti-oscillation après coupure
+
+# --- Chauffe-eau LG ThinQ ---
+[energy_manager.water_heater]
+solar_min_w           = 1000        # W — production min pour HEAT_PUMP
+debounce_secs         = 300           # s — 5 min avant changement de mode
+mode_change_min_secs  = 900           # s — 15 min entre deux changements
+heat_pump_target_c    = 60.0          # °C cible en HEAT_PUMP
+vacation_target_c     = 45.0          # °C cible en VACATION
+temp_set_delay_secs   = 15            # s — délai avant réglage temp
+keepalive_secs        = 25            # s — keepalive Venus OS watchdog
+irradiance_min_wm2    = 300         # W/m² — irradiance min pour activer HEAT_PUMP
+
+# --- Production solaire ---
+[energy_manager.solar]
+bms_server_url       = "http://192.168.1.141:8080"
+persist_measurement  = "solar_persist"
+power_measurement    = "solar_power"
+host_tag             = "pi5"
+
+# --- Statut plateforme ---
+[energy_manager.platform]
+publish_interval_secs = 60
