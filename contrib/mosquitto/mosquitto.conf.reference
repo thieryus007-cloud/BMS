@@ -1,1 +1,80 @@
+# =============================================================================
+# Mosquitto — Configuration pour DalyBMS.   ancienne config mosquitto pour docker
+# =============================================================================
+
+# Listener MQTT standard
+listener 1883 0.0.0.0
+
+# Listener MQTT over WebSocket (utile pour dashboard JS / Node-RED)
+listener 9001
+protocol websockets
+
+# Permettre les connexions anonymes (réseau local uniquement)
+# En production : configurer allow_anonymous false + password_file
+allow_anonymous true
+
+# Persistance des messages (reconnexion propre des clients)
+persistence true
+persistence_location /mosquitto/data/
+
+# Logs
+log_dest file /mosquitto/log/mosquitto.log
+log_dest stdout
+log_type error
+log_type warning
+log_type notice
+log_type information
+log_timestamp true
+
+# QoS max supporté
+max_qos 2
+
+# Taille max d'un message (1 MB suffisant pour les snapshots JSON BMS)
+message_size_limit 1048576
+
+# =============================================================================
+# Bridge MQTT — NanoPi Neo3 (Venus OS) ↔ Pi5
+# Pont bidirectionnel pour les topics Venus OS et Shelly
+# NanoPi : 192.168.1.120:1883
+# =============================================================================
+
+connection nanopi-venus-bridge
+address 192.168.1.120:1883
+start_type automatic
+try_private false
+cleansession false
+restart_timeout 30
+
+# Venus OS data — lecture depuis NanoPi (N/ = données publiées par Venus)
+topic N/c0619ab9929a/# in 0
+
+# Venus OS commandes — écriture vers NanoPi (W/ = commandes pour Venus)
+# QoS 1 : garantit la livraison même si le NanoPi redémarre (message mis en file)
+topic W/c0619ab9929a/# out 1
+
+# Venus OS keepalive — requêtes de lecture (R/ = demande de valeur fraîche)
+topic R/c0619ab9929a/# out 1
+
+# Shelly topics — bidirectionnel (pendant transition avant reconfiguration Shelly)
+topic shellypro2pm-ec62608840a4/# both 0
+
+# BMS data — lecture depuis NanoPi (publié par dbus-mqtt-venus Rust)
+topic santuario/# in 0
+
+# Capteurs → NanoPi — commandes Node-RED vers service Rust (Pi5 → NanoPi)
+# heat = température extérieure, heatpump = chauffe-eau, meteo = irradiance
+# switch = ATS/relais, grid = compteur réseau/acload, platform = backup Pi5
+topic santuario/heat/#     out 0
+topic santuario/heatpump/# out 0
+topic santuario/meteo/#    out 0
+topic santuario/switch/#   out 0
+topic santuario/grid/#     out 0
+topic santuario/platform/# out 0
+
+# Dashboard temps réel → NanoPi — données agrégées par Node-RED depuis D-Bus
+# Publiés par Node-RED sur broker Pi5 local, forwardés vers NanoPi pour que
+# daly-bms-server (connecté au NanoPi 192.168.1.120:1883) puisse les recevoir
+topic santuario/inverter/# out 0
+topic santuario/system/#   out 0
+topic santuario/pvinverter/# out 0
 
