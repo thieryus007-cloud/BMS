@@ -1088,13 +1088,22 @@ journalctl -u mosquitto-broker | grep -i "loop\|duplicate\|dropped"
 En cas d'échec, retour à Mosquitto Docker en **< 5 minutes** :
 
 ```bash
+# Correction du rollback Config.toml
+
 # 1. Arrêter Mosquitto natif
 sudo systemctl stop mosquitto-broker
 sudo systemctl disable mosquitto-broker
 
 # 2. Restaurer Config.toml avec les anciens hôtes
-sudo sed -i 's/host = "127.0.0.1"/host = "192.168.1.120"/' /etc/daly-bms/config.toml
-sudo sed -i 's/host = "127.0.0.1"/host = "192.168.1.141"/' /etc/daly-bms/config.toml
+# Section [mqtt] (daly-bms-server) → 192.168.1.120 (NanoPi)
+sudo sed -i '/^\[mqtt\]$/,/^\[/ s/host = "127.0.0.1"/host = "192.168.1.120"/' /etc/daly-bms/config.toml
+
+# Section [energy_manager.mqtt] → 192.168.1.141 (Pi5 via réseau)
+sudo sed -i '/^\[energy_manager\.mqtt\]$/,/^\[/ s/host = "127.0.0.1"/host = "192.168.1.141"/' /etc/daly-bms/config.toml
+
+# Vérifier le résultat
+grep -A2 '^\[mqtt\]$' /etc/daly-bms/config.toml
+grep -A2 '^\[energy_manager\.mqtt\]$' /etc/daly-bms/config.toml
 
 # 3. Relancer Docker Mosquitto
 cd ~/Daly-BMS-Rust
