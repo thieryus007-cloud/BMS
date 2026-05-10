@@ -2,7 +2,7 @@
 # DalyBMS — Rust Edition — Makefile (Optimisé Pi5)
 # =============================================================================
 # Usage :
-# make up → démarrer l'infra Docker (Mosquitto uniquement)
+# make up → démarrer mqtt-broker + mqtt-bridge (anciennement Mosquitto Docker)
 # make build → compiler en release (x86_64)
 # make build-arm → compiler pour aarch64 (Raspberry Pi CM5 / NanoPi) [OPTIMISÉ]
 # make build-arm-debug → compiler avec symboles pour profiling (perf/flamegraph)
@@ -294,8 +294,6 @@ BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
 
 # sync : utiliser sur Pi5 à la place de git pull
 # Écrase les fichiers locaux sans créer de commits.
-# Corrige automatiquement les fichiers créés avec owner root par Docker
-# (ex: docker/mosquitto/config/mosquitto.conf) avant le reset.
 .PHONY: sync
 sync:
 	git fetch origin $(BRANCH)
@@ -381,10 +379,11 @@ help:
 	@echo "DalyBMS Rust Edition — Commandes disponibles :"
 	@echo ""
 	@echo " Infrastructure Docker :"
-	@echo "  make up              Démarrer Mosquitto"
-	@echo "  make down            Arrêter l'infra"
-	@echo "  make logs            Voir les logs Docker"
-	@echo "  make ps              État des containers"
+	@echo "  make mqtt-start      Démarrer mqtt-broker + mqtt-bridge"
+	@echo "  make mqtt-stop       Arrêter mqtt-broker + mqtt-bridge"
+	@echo "  make mqtt-logs       Logs MQTT temps réel"
+	@echo "  make mqtt-status     État des services MQTT"
+	@echo "  make up/down/logs/ps → alias mqtt-start/stop/logs/status"
 	@echo ""
 	@echo " Compilation :"
 	@echo "  make build           Compiler pour l'architecture locale"

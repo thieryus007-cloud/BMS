@@ -328,7 +328,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 8. Templates Askama → `make build-arm` + redéploiement après tout changement HTML.
 9. **CLAUDE.md = mémoire projet** : toute info découverte → ajouter ici + commit.
 10. Nom exact D-Bus onduleur Victron direct : `cgwacs_ttyUSB0_mb2` (pas `rs485`).
-11. `make reset` efface les volumes Docker (retained MQTT perdu) → préférer `make down && make up`.
+11. **Docker supprimé** — plus de `docker-compose.infra.yml` ni de répertoire `docker/`. Si Mosquitto Docker tourne encore : `docker stop dalybms-mosquitto && docker rm dalybms-mosquitto`.
 12. Secrets : ne jamais committer `.env`.
 13. **MQTT** : broker = `mqtt-broker` (rumqttd systemd), plus de Docker. `make mqtt-start/stop/logs` remplace `make up/down/logs`.
 14. Config bridge MQTT : `[mqtt_bridge]` dans Config.toml (portal_id + remote_host NanoPi).
