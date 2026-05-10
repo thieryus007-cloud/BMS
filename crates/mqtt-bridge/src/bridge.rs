@@ -43,7 +43,8 @@ fn local_to_nanopi_subscriptions(portal: &str) -> Vec<(String, QoS)> {
         (format!("W/{portal}/#"), QoS::AtLeastOnce),
         // Venus OS keepalive / requêtes lecture — QoS 1
         (format!("R/{portal}/#"), QoS::AtLeastOnce),
-        // Topics santuario envoyés depuis Pi5 vers NanoPi
+        // Topics santuario envoyés depuis Pi5 vers NanoPi (dbus-mqtt-venus)
+        ("santuario/bms/#".to_string(),       QoS::AtLeastOnce), // BMS → battery.mqtt_1/2
         ("santuario/heat/#".to_string(),      QoS::AtMostOnce),
         ("santuario/heatpump/#".to_string(),  QoS::AtMostOnce),
         ("santuario/meteo/#".to_string(),     QoS::AtMostOnce),
@@ -52,7 +53,9 @@ fn local_to_nanopi_subscriptions(portal: &str) -> Vec<(String, QoS)> {
         ("santuario/platform/#".to_string(),  QoS::AtMostOnce),
         ("santuario/inverter/#".to_string(),  QoS::AtMostOnce),
         ("santuario/system/#".to_string(),    QoS::AtMostOnce),
-        ("santuario/pvinverter/#".to_string(), QoS::AtMostOnce),
+        ("santuario/pvinverter/#".to_string(), QoS::AtMostOnce), // ET112 micro-onduleurs
+        // Commandes Tasmota/Tongou publiées par Pi5 vers switches sur NanoPi
+        ("cmnd/#".to_string(),                QoS::AtLeastOnce),
         // Shelly : commandes RPC seulement (status sont bridgés nanopi→local, pas l'inverse)
         ("shellypro2pm-ec62608840a4/rpc".to_string(), QoS::AtMostOnce),
     ]
