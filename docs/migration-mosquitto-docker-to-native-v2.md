@@ -309,6 +309,16 @@ which mosquitto                    # doit être vide
 df -h /
 # S'assurer d'avoir au moins 500 Mo libres
 
+~/Daly-BMS-Rust $ dpkg -l | grep mosquitto
+ii  libmosquitto1:arm64                              2.0.21-1                             arm64        MQTT version 5.0/3.1.1/3.1 client library
+ii  mosquitto-clients                                2.0.21-1                             arm64        Mosquitto command line MQTT clients
+~/Daly-BMS-Rust $ which mosquitto
+~/Daly-BMS-Rust $ df -h /
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/mmcblk0p2   29G   13G   15G  48% /
+
+
+
 # Vérifier la connectivité NanoPi
 ping -c 3 192.168.1.120
 ssh root@192.168.1.120 "systemctl is-active mosquitto"
