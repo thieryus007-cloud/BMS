@@ -436,7 +436,7 @@ chmod +x contrib/mosquitto/verify-no-loop.sh
 
 > **IMPORTANT** : Ne PAS supprimer Docker Mosquitto maintenant. Le broker doit rester actif jusqu'à ce que le natif soit prêt.
 
-### 7.2 Installer les packages Debian
+### 7.2 Installer les packages Debian  ✅ OK Fait
 
 ```bash
 sudo apt update
