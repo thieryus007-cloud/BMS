@@ -291,7 +291,7 @@ grep '^portal_id' Config.toml
 grep -A5 '^\[\[bms\]\]' Config.toml | head -20
 ```
 
-### 5.2 Sur le Pi5 (vérifications préalables)
+### 5.2 Sur le Pi5 (vérifications préalables)   ✅ OK Fait
 
 ```bash
 ssh pi5compute@192.168.1.141
@@ -430,7 +430,7 @@ chmod +x contrib/mosquitto/verify-no-loop.sh
 
 ---
 
-## 7. Installation Mosquitto natif
+## 7. Installation Mosquitto natif  ✅ OK Fait
 
 ### 7.1 Supprimer Docker Mosquitto (PAS encore)
 
@@ -452,7 +452,7 @@ sudo systemctl disable mosquitto
 # (on utilisera notre propre service systemd plus restrictif)
 ```
 
-### 7.3 Créer les répertoires de données
+### 7.3 Créer les répertoires de données  ✅ OK Fait
 
 ```bash
 # Répertoires requis
