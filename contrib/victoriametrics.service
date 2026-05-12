@@ -1,0 +1,21 @@
+[Unit]
+Description=VictoriaMetrics Time Series Database
+After=network-online.target mnt-nvme.mount
+Requires=mnt-nvme.mount
+
+[Service]
+Type=simple
+User=victoriametrics
+Group=victoriametrics
+ExecStart=/usr/local/bin/victoria-metrics-prod \
+  -storageDataPath=/mnt/nvme/victoria-metrics \
+  -retentionPeriod=2y \
+  -httpListenAddr=:8428 \
+  -selfScrapeInterval=0 \
+  -maxLabelsPerTimeseries=30 \
+  -search.maxQueryDuration=30s \
+  -search.maxConcurrentRequests=4
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
