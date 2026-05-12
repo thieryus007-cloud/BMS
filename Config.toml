@@ -76,8 +76,8 @@ enabled = true
 
 # Windows avec Docker Desktop local → "localhost"
 # Windows avec NanoPi comme broker → "192.168.1.120"
-# Raspberry Pi 5 production        → "localhost" (Mosquitto local) ou IP NanoPi
-host = "192.168.1.120"
+# Raspberry Pi 5 production        → "127.0.0.1" (Mosquitto natif local, bridgé vers NanoPi)
+host = "127.0.0.1"
 port = 1883
 
 # Préfixe des topics (ex: santuario/bms/1/venus)
@@ -526,7 +526,7 @@ device_instance = 152
 
 # --- MQTT ---
 [energy_manager.mqtt]
-host              = "192.168.1.141"   # broker Mosquitto local Pi5
+host              = "127.0.0.1"       # broker Mosquitto natif Pi5 (loopback)
 port              = 1883
 keep_alive_secs   = 60
 reconnect_delay_secs = 10

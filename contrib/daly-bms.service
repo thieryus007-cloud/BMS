@@ -1,8 +1,9 @@
 [Unit]
 Description=DalyBMS Server — Rust RS485 BMS monitor
 Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
-After=network.target
+After=network.target mosquitto-broker.service
 Wants=network.target
+Requires=mosquitto-broker.service
 
 [Service]
 Type=notify

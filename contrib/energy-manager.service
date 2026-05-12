@@ -1,8 +1,9 @@
 [Unit]
 Description=Energy Manager — Gestionnaire d'énergie Rust (remplace Node-RED)
 Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
-After=network-online.target mosquitto.service
+After=network-online.target mosquitto-broker.service daly-bms.service
 Wants=network-online.target
+Requires=mosquitto-broker.service
 PartOf=daly-bms.service
 
 [Service]
