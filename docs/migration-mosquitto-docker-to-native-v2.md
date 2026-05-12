@@ -31,6 +31,7 @@
 15. [Procédure de rollback](#15-procédure-de-rollback)
 16. [Nettoyage post-migration](#16-nettoyage-post-migration)
 17. [Checklist finale](#17-checklist-finale)
+18. [Journal d'exécution — 12 mai 2026](#18-journal-dexécution--12-mai-2026--migration-réussie)
 
 ---
 
@@ -705,7 +706,7 @@ WantedBy=multi-user.target
 
 ---
 
-## 10. Mise à jour des dépendances systemd
+## 10. Mise à jour des dépendances systemd  ✅ OK Fait
 
 ### 10.1 Patch `contrib/daly-bms.service`
 
@@ -746,7 +747,7 @@ sudo systemctl enable mosquitto-broker
 
 ---
 
-## 11. Mise à jour Config.toml Pi5
+## 11. Mise à jour Config.toml Pi5  ✅ OK Fait
 
 ### 11.1 Section `[mqtt]` (daly-bms-server) — ligne ~74
 
@@ -814,7 +815,11 @@ sudo cp Config.toml /etc/daly-bms/config.toml
 
 ---
 
-## 12. Déploiement pas à pas
+## 12. Déploiement pas à pas  ✅ OK Fait (script automatisé)
+
+> **Note** : Toutes les étapes ci-dessous sont automatisées par
+> `contrib/mosquitto/deploy-mosquitto-native.sh`. Voir §18 pour le journal
+> d'exécution réel. La section reste à titre de référence manuelle.
 
 > **Convention** : Les fichiers de configuration Mosquitto natif sont versionnés dans le dépôt sous `contrib/mosquitto/`.
 
@@ -859,9 +864,11 @@ sudo chmod 750 /var/lib/mosquitto
 # Déployer la configuration
 sudo cp contrib/mosquitto/mosquitto.conf /etc/mosquitto/mosquitto.conf
 
-# Vérifier la syntaxe
-sudo -u mosquitto mosquitto -c /etc/mosquitto/mosquitto.conf -t
-# → doit afficher "Configuration file syntax OK" et quitter
+# Vérifier la syntaxe (Mosquitto 2.0 n'a pas d'option -t : démarrage bref)
+sudo -u mosquitto timeout 2 mosquitto -c /etc/mosquitto/mosquitto.conf
+# → Erreur de config → message immédiat (Unknown configuration variable, Error found at)
+# → "Address already in use" sur 1883/9001 → config OK (Docker tient encore le port)
+# → Aucune erreur jusqu'au timeout → config OK
 ```
 
 ### Étape 3 — Déployer les unités systemd
@@ -979,7 +986,7 @@ ps aux | grep mosquitto | grep -v grep
 
 ---
 
-## 13. Vérification flux par flux
+## 13. Vérification flux par flux  ✅ OK Fait
 
 ### 13.1 Checklist VRM (https://vrm.victronenergy.com)
 
@@ -1051,7 +1058,7 @@ ssh root@192.168.1.120 "tail -f /var/log/dbus-mqtt-venus/current"
 
 ---
 
-## 14. Anti-boucle — vérification automatique
+## 14. Anti-boucle — vérification automatique  ✅ OK Fait
 
 ### 14.1 Script de vérification
 
@@ -1232,6 +1239,135 @@ sudo systemctl daemon-reload
 □ Archiver docker-compose.infra.yml et docker/mosquitto/ après 24h de stabilité
 □ Supprimer les backups .bak une semaine après confirmation
 ```
+
+---
+
+## 18. Journal d'exécution — 12 mai 2026  ✅ Migration réussie
+
+Migration exécutée via `./contrib/mosquitto/deploy-mosquitto-native.sh`
+depuis `~/Daly-BMS-Rust` (user `pi5compute@pi5compute`).
+
+### Sortie console
+
+```text
+$ ./contrib/mosquitto/deploy-mosquitto-native.sh
+[INFO] Vérifications préalables
+[ OK ] Tous les fichiers source présents
+===== Plan d'exécution =====
+ 1. Backups + déploiement /etc/mosquitto/mosquitto.conf
+ 2. mosquitto -c ... -t (vérif syntaxe)
+ 3. Installation verify-no-loop.sh -> /usr/local/bin/
+ 4. Anti-boucle (verify-no-loop.sh)
+ 5. Installation 3 unités systemd + daemon-reload + enable mosquitto-broker
+ 6. Déploiement Config.toml -> /etc/daly-bms/config.toml
+ 7. BASCULE : arrêt daly-bms+energy-manager+Docker -> démarrage natif
+ 8. Tests pub/sub local + état bridges
+ 9. Redémarrage daly-bms + energy-manager
+Démarrer ? (y/N) y
+[INFO] [1/9] Déploiement /etc/mosquitto/mosquitto.conf
+[ OK ] Backup /etc/mosquitto/mosquitto.conf.bak.20260512_182350
+[ OK ] /etc/mosquitto/mosquitto.conf déployé
+[INFO] [2/9] Vérification syntaxe mosquitto.conf
+[ OK ] Syntaxe OK
+[INFO] [3/9] Installation verify-no-loop.sh -> /usr/local/bin/
+[ OK ] /usr/local/bin/verify-no-loop.sh installé
+[INFO] [4/9] Vérification anti-boucle
+=== Topics EGRESS (out) ===
+cmnd/#
+R/c0619ab9929a/#
+santuario/bms/#
+santuario/heatpump/#
+santuario/heat/+/venus
+santuario/irradiance/raw
+santuario/meteo/venus
+santuario/platform/venus
+santuario/pvinverter/#
+santuario/switch/#
+santuario/system/venus
+shellypro2pm-ec62608840a4/rpc
+W/c0619ab9929a/#
+=== Topics INGRESS (in) ===
+daly-bms-shelly/rpc
+N/c0619ab9929a/#
+shellypro2pm-ec62608840a4/#
+stat/#
+tele/#
+=== INTERSECTION (DANGER — topics en double) ===
+✅ OK : Aucun topic en double. Pas de risque de boucle.
+[ OK ] Aucun topic en double IN/OUT
+[INFO] [5/9] Déploiement unités systemd
+[ OK ] /etc/systemd/system/mosquitto-broker.service
+[ OK ] /etc/systemd/system/daly-bms.service
+[ OK ] /etc/systemd/system/energy-manager.service
+Created symlink '/etc/systemd/system/multi-user.target.wants/mosquitto-broker.service' → '/etc/systemd/system/mosquitto-broker.service'.
+[ OK ] daemon-reload + enable mosquitto-broker
+[INFO] [6/9] Déploiement Config.toml -> /etc/daly-bms/config.toml
+[ OK ] Backup /etc/daly-bms/config.toml.bak.20260512_182350
+[ OK ] /etc/daly-bms/config.toml déployé
+===== BASCULE — fenêtre indisponible ~10-30s =====
+  - Arrêt daly-bms + energy-manager
+  - docker compose down (Mosquitto)
+  - Démarrage mosquitto-broker.service
+  - Redémarrage daly-bms + energy-manager
+Basculer maintenant ? (y/N) y
+[INFO] [7/9] Arrêt daly-bms + energy-manager (s'ils tournent)
+[INFO] Arrêt Docker Mosquitto
+[+] down 2/2
+ ✔ Container dalybms-mosquitto   Removed                                   0.6s
+ ✔ Network daly-bms-rust_default Removed                                   0.2s
+[ OK ] Ports 1883/9001 libres
+[INFO] Démarrage mosquitto-broker.service
+[ OK ] mosquitto-broker actif
+[INFO] [8/9] Test pub/sub local
+[ OK ] Pub/sub local OK
+[INFO] État des bridges (5s d'écoute)
+      $SYS/broker/bridge/pi5-to-nanopi/state 1
+      $SYS/broker/bridge/nanopi-to-pi5/state 1
+[INFO] Trafic NanoPi -> Pi5 (sample 3s sur N/c0619ab9929a/#)
+[ OK ] Bridge INGRESS reçoit du NanoPi (119 msg/3s)
+[INFO] [9/9] Redémarrage daly-bms + energy-manager
+===== État final =====
+  mosquitto-broker       active
+  daly-bms               active
+  energy-manager         active
+[ OK ] Aucun conteneur mosquitto actif
+[ OK ] Migration appliquée.
+```
+
+### Validation post-migration
+
+| Indicateur | État |
+|------------|------|
+| `mosquitto.conf` déployé (`/etc/mosquitto/mosquitto.conf`) | ✅ |
+| Syntaxe Mosquitto 2.0.21 valide | ✅ |
+| `verify-no-loop.sh` installé `/usr/local/bin/` | ✅ |
+| Aucun chevauchement IN/OUT (13 OUT, 5 IN, intersection vide) | ✅ |
+| 3 unités systemd installées + `mosquitto-broker` enable | ✅ |
+| `Config.toml` déployé `/etc/daly-bms/config.toml` (backup horodaté) | ✅ |
+| `dalybms-mosquitto` Docker arrêté + réseau supprimé | ✅ |
+| Ports 1883/9001 libérés puis re-bindés par natif | ✅ |
+| `mosquitto-broker.service` actif | ✅ |
+| Pub/sub local 127.0.0.1 fonctionnel | ✅ |
+| Bridge EGRESS `pi5-to-nanopi` état = 1 | ✅ |
+| Bridge INGRESS `nanopi-to-pi5` état = 1 | ✅ |
+| Trafic NanoPi reçu : **119 messages en 3s** sur `N/c0619ab9929a/#` | ✅ |
+| `daly-bms.service` actif après bascule | ✅ |
+| `energy-manager.service` actif après bascule | ✅ |
+| Aucun conteneur `mosquitto` résiduel | ✅ |
+
+### Backups conservés (à supprimer après 7j de stabilité confirmée)
+
+```
+/etc/mosquitto/mosquitto.conf.bak.20260512_182350
+/etc/daly-bms/config.toml.bak.20260512_182350
+```
+
+### Étapes restantes (post-stabilité 24h)
+
+Voir §16 — Nettoyage post-migration :
+- Archiver `docker-compose.infra.yml` et `docker/mosquitto/`
+- Réécrire les targets `make up/down/logs/ps` en wrappers systemctl
+- Mettre à jour `CLAUDE.md` (architecture + commandes rapides)
 
 ---
 
