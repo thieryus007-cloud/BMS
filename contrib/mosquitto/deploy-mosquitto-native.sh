@@ -112,16 +112,32 @@ ok "/etc/mosquitto/mosquitto.conf déployé"
 # =============================================================================
 # Étape 2 — Vérification syntaxe
 # =============================================================================
+# Mosquitto 2.0 n'a pas d'option dédiée -t. On démarre brièvement en tant
+# qu'utilisateur mosquitto : une erreur de config est émise AVANT le bind
+# des ports. Un "Address already in use" est attendu si Docker tient encore
+# les ports — la config est alors validée.
 log "[2/9] Vérification syntaxe mosquitto.conf"
-if sudo -u mosquitto mosquitto -c /etc/mosquitto/mosquitto.conf -t; then
-    ok "Syntaxe OK"
-else
-    err "Syntaxe invalide — rollback"
+VALIDATE_OUT="$(mktemp)"
+sudo -u mosquitto timeout 2 mosquitto -c /etc/mosquitto/mosquitto.conf \
+    >"$VALIDATE_OUT" 2>&1 || true
+
+if grep -qE "Unknown configuration variable|Error found at|Invalid (value|bridge|listener)" "$VALIDATE_OUT"; then
+    err "Syntaxe invalide :"
+    sed 's/^/      /' "$VALIDATE_OUT" >&2
+    rm -f "$VALIDATE_OUT"
     if [ -f "/etc/mosquitto/mosquitto.conf.bak.${TIMESTAMP}" ]; then
         sudo cp -a "/etc/mosquitto/mosquitto.conf.bak.${TIMESTAMP}" /etc/mosquitto/mosquitto.conf
+        warn "Rollback vers backup ${TIMESTAMP}"
     fi
     exit 1
 fi
+
+if grep -qiE "Address already in use|Error: Unable to (bind|create)" "$VALIDATE_OUT"; then
+    ok "Syntaxe OK (port 1883/9001 occupé par Docker — attendu avant bascule)"
+else
+    ok "Syntaxe OK"
+fi
+rm -f "$VALIDATE_OUT"
 
 # =============================================================================
 # Étape 3 — verify-no-loop.sh
