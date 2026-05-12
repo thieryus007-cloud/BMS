@@ -357,9 +357,9 @@ daly-bms-shelly/rpc
 
 ---
 
-## 6. Sauvegarde de l'état actuel
+## 6. Sauvegarde de l'état actuel   ✅ OK Fait
 
-### 6.1 Sauvegarder la config Docker actuelle
+### 6.1 Sauvegarder la config Docker actuelle   ✅ OK Fait
 
 ```bash
 cd ~/Daly-BMS-Rust
@@ -371,9 +371,6 @@ cp docker/mosquitto/config/mosquitto.conf \
 # Sauvegarder les données retained (messages persistés)
 docker exec dalybms-mosquitto cat /mosquitto/data/mosquitto.db \
    > /tmp/mosquitto-retained-backup.db 2>/dev/null || true
-
-# Noter les variables d'environnement Docker
-cat .env | grep -i mosquitto > /tmp/mosquitto-env-backup.txt 2>/dev/null || true
 
 # Sauvegarder la config TOML actuelle
 cp Config.toml Config.toml.bak.$(date +%Y%m%d_%H%M%S)
