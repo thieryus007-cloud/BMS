@@ -267,7 +267,7 @@ After=network-online.target mosquitto.service   # ← mosquitto.service INEXISTA
 
 ---
 
-## 5. Prérequis et préparation
+## 5. Prérequis et préparation   ✅ OK Fait
 
 ### 5.1 Sur la machine de développement
 
