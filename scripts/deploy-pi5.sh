@@ -29,15 +29,16 @@ step "Déploiement Config.toml → /etc/daly-bms/config.toml…"
 sudo cp Config.toml /etc/daly-bms/config.toml
 info "Config.toml déployée"
 
-# ── 4. Répertoire VictoriaMetrics ────────────────────────────────────────────
-VM_DIR="/var/lib/victoria-metrics"
+# ── 4. Répertoire VictoriaMetrics (NVMe) ─────────────────────────────────────
+VM_DIR="/mnt/nvme/victoria-metrics"
 # Récupère l'utilisateur qui exécute le service (ExecStart user, pas root)
 SERVICE_USER=$(systemctl show victoriametrics --property=User --value 2>/dev/null)
 SERVICE_USER="${SERVICE_USER:-victoriametrics}"
-step "Vérification répertoire VictoriaMetrics (${VM_DIR}) → owner=${SERVICE_USER}…"
+step "Vérification NVMe monté et répertoire VictoriaMetrics (${VM_DIR}) → owner=${SERVICE_USER}…"
+mountpoint -q /mnt/nvme || { warn "/mnt/nvme non monté — vérifier /etc/fstab et relancer"; }
 sudo mkdir -p "${VM_DIR}"
 sudo chown "${SERVICE_USER}:${SERVICE_USER}" "${VM_DIR}"
-info "Répertoire VictoriaMetrics OK (owner=${SERVICE_USER})"
+info "Répertoire VictoriaMetrics OK sur NVMe (owner=${SERVICE_USER})"
 
 # ── 5. Déploiement daly-bms-server ───────────────────────────────────────────
 step "Déploiement daly-bms-server…"
