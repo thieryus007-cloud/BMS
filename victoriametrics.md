@@ -22,7 +22,7 @@ User=victoriametrics
 Group=victoriametrics
 ExecStart=/usr/local/bin/victoria-metrics-prod \
   -storageDataPath=/mnt/nvme/victoria-metrics \
-  -retentionPeriod=2y \
+  -retentionPeriod=5y \
   -httpListenAddr=:8428 \
   -selfScrapeInterval=0 \
   -maxLabelsPerTimeseries=30 \
@@ -47,7 +47,7 @@ WantedBy=multi-user.target
 | **Logs systemd** | `journalctl -u victoriametrics` | Logs en mémoire/journal systemd (pas de fichier log dédié) |
 
 > **Disque NVMe** : `/dev/nvme0n1p1` (238 Go) monté sur `/mnt/nvme`.
-> Rétention configurée à **2 ans** — capacité largement suffisante (~1–5 Mo/jour pour ~200 séries).
+> Rétention configurée à **5 ans** — capacité largement suffisante (~1–5 Mo/jour pour ~200 séries).
 
 ---
 
@@ -170,4 +170,4 @@ sudo mount -a
 journalctl -u victoriametrics                 ←  LOGS
 ```
 
-VictoriaMetrics suit une philosophie **"binaire unique + flags CLI"** — pas de fichiers de config complexes, ce qui le rend très adapté à un environnement léger comme votre Pi 5.
+VictoriaMetrics suit une philosophie **"binaire unique + flags CLI"** — pas de fichiers de config complexes, ce qui le rend très adapté à un environnement léger comme Pi 5.
