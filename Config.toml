@@ -133,7 +133,7 @@ republish_sec = 25
 # Capteurs de température extérieure (com.victronenergy.temperature.{n})
 # =============================================================================
 # Topic MQTT source : santuario/heat/{n}/venus
-# Payload attendu (publié par Node-RED depuis Open-Meteo) :
+# Payload attendu (publié par energy-manager depuis Open-Meteo) :
 #   { "Temperature": 15.3, "TemperatureType": 4, "Humidity": 65.0, "Pressure": 101.3 }
 #
 # TemperatureType : 0=battery 1=fridge 2=generic 3=Room 4=Outdoor 5=WaterHeater 6=Freezer
