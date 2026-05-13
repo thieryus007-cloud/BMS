@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: 'Daly-BMS PV'
+    orgId: 1
+    folder: 'PV Solaire'
+    folderUid: pv-solaire
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 60
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
