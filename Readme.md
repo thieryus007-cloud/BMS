@@ -6,8 +6,8 @@ Remplacement total de la stack Python/FastAPI **et** des flows Node-RED par **Ru
 `energy-manager` + `dbus-mqtt-venus`).
 
 > Dashboard intégré **SSR Rust** (Askama + ECharts) — aucun npm.
-> Infrastructure Docker **inchangée** (Mosquitto, VictoriaMetrics ).
-> Déploiement ultra-léger : **un seul binaire statique** (~12–18 Mo).
+> Broker MQTT **natif systemd** (`mosquitto-broker.service`), VictoriaMetrics en binaire natif.
+> Déploiement ultra-léger : **un seul binaire statique** (~12–18 Mo). Aucun Docker requis.
 > Compatible **Windows** (testé) et **Linux/aarch64** (Raspberry Pi).
 
 ---
@@ -182,8 +182,7 @@ Daly-BMS-Rust/
 ├── Cargo.lock
 ├── Config.toml                ← Configuration principale (TOML)
 ├── Makefile                   ← Commandes build/test/deploy
-├── docker-compose.infra.yml   ← Infra Mosquitto (broker MQTT)
-├── .env.docker                ← Template variables d'environnement (à copier en .env)
+├── contrib/mosquitto/mosquitto.conf ← Config broker MQTT natif (deploy → /etc/mosquitto/)
 ├── .gitignore
 │
 ├── crates/
@@ -243,8 +242,6 @@ Daly-BMS-Rust/
 │   ├── victoriametrics-scrape.yml← Config scrape Prometheus pour VM
 │   ├── install-systemd.sh        ← Script d'installation systemd
 │   └── uninstall-systemd.sh      ← Script de désinstallation
-├── docker/
-│   └── mosquitto/config/mosquitto.conf
 ├── docs/                         ← Guides détaillés (energy-manager, ATS, Venus, etc.)
 └── nanoPi/                       ← Config dbus-mqtt-venus (Venus OS)
     ├── config-nanopi.toml        ← Config production dbus-mqtt-venus
@@ -256,18 +253,17 @@ Daly-BMS-Rust/
 
 ### Estimation mémoire
 
-#### Pi5 (master — Docker).  mesure réelle: 20%
+#### Pi5 (master — tout natif systemd).  mesure réelle: 20%
 
 | Service                    | RAM minimale | RAM confortable |
 |----------------------------|-------------|-----------------|
 | daly-bms-server (Rust)     | ~25 MB      | ~50 MB          |
 | energy-manager (Rust)      | ~30 MB      | ~100 MB (LimitMemoryMax=100M) |
-| Mosquitto                  | ~12 MB      | ~20 MB          |
+| mosquitto-broker (natif)   | ~8 MB       | ~15 MB          |
 | VictoriaMetrics 2.x (Go)   | ~150 MB     | ~350 MB         |
 | OS Raspberry Pi OS Lite    | ~150 MB     | ~200 MB         |
-| Docker Engine + overhead   | ~100 MB     | ~150 MB         |
 | Marge tampon / cache       | ~200 MB     | ~400 MB         |
-| **TOTAL**                  | **~667 MB** | **~1270 MB**    |
+| **TOTAL**                  | **~563 MB** | **~1115 MB**    |
 
 #### NanoPi Neo3 (Venus OS — services Rust statiques)
 
@@ -284,8 +280,7 @@ Daly-BMS-Rust/
 | Composant | Version | Usage |
 |-----------|---------|-------|
 | Rust      | 1.80+   | Compilation |
-| Docker    | 24+     | Infra MQTT |
-| Docker Compose v2 | — | `make up` |
+| Mosquitto 2.x | natif apt | Broker MQTT (`mosquitto-broker.service`) |
 | cross     | dernière | Cross-compilation ARM (optionnel) |
 
 > Le dashboard est **SSR (Askama + ECharts)** — Node.js/npm ne sont plus nécessaires.
@@ -307,12 +302,13 @@ Daly-BMS-Rust/
 
 ## Démarrage rapide
 
-### Infrastructure Docker (broker MQTT)
+### Broker MQTT (mosquitto-broker.service)
 
 ```bash
-cp .env.docker .env            # adapter les tokens et mots de passe
-make up                        # Mosquitto:1883
-make ps                        # vérifier l'état des containers
+# Vérifier que le broker est actif
+systemctl status mosquitto-broker
+# Logs
+journalctl -u mosquitto-broker -f
 ```
 
 ### Configuration
@@ -341,10 +337,10 @@ make install        # copie le binaire + installe daly-bms.service
 journalctl -u daly-bms -f
 ```
 
-### Infrastructure broker MQTT
+### Broker MQTT
 
 ```bash
-make up   # démarre Mosquitto via docker-compose.infra.yml
+systemctl status mosquitto-broker   # vérifier l'état
 ```
 
 ---
@@ -415,13 +411,6 @@ Le dashboard est **embarqué dans le binaire** (SSR Askama + ECharts). Aucun npm
 ## Commandes Make
 
 ```bash
-make up            # Démarrer Docker (infra seule)
-make down          # Arrêter Docker
-make restart       # Redémarrer les containers
-make ps            # État des containers
-make logs          # Logs de tous les containers (follow)
-make reset         # Arrêter + supprimer volumes + redémarrer (reset complet)
-
 make build              # Compiler (release, local)
 make build-arm          # Cross-compiler daly-bms-server pour aarch64 (Pi5)
 make build-arm-debug    # Build aarch64 avec symboles (profile release-debug)
@@ -459,35 +448,13 @@ make doc                # cargo doc (workspace, --open)
 
 ## Gestion des logs et rétention des données
 
-### Logs Docker (rotation automatique)
-
-Tous les containers utilisent le driver `json-file` avec rotation automatique :
-
-| Service | Max taille | Fichiers |
-|---------|-----------|---------|
-| dalybms-server | 20 Mo | 5 fichiers |
-| Mosquitto | 10 Mo | 3 fichiers |
-| VictoriaMetrics | 10 Mo | 3 fichiers |
-| energy-manager | 5 Mo | 3 fichiers |
-
-```bash
-# Voir les logs en temps réel
-make logs
-
-# Logs d'un service spécifique
-docker logs dalybms-server -f --tail 100
-docker logs dalybms-VictoriaMetrics -f --tail 100
-docker logs dalybms-mosquitto -f --tail 100
-
-# Taille des fichiers log Docker
-du -sh /var/lib/docker/containers/*/
-```
-
-### Logs systemd (déploiement sans Docker)
+### Logs systemd
 
 ```bash
 # Logs en temps réel
 journalctl -u daly-bms -f
+journalctl -u energy-manager -f
+journalctl -u mosquitto-broker -f
 
 # Logs depuis une date
 journalctl -u daly-bms --since "2026-03-17 00:00:00"
@@ -507,26 +474,19 @@ sudo journalctl --vacuum-size=100M
 
 ### Rétention des données VictoriaMetrics
 
-Par défaut : **30 jours** (720h), configurable dans `.env` :
-
-```bash
-# Dans .env
-DOCKER_VictoriaMetrics_INIT_RETENTION=720h    # 30 jours (défaut)
-# DOCKER_VictoriaMetrics_INIT_RETENTION=2160h  # 90 jours
-# DOCKER_VictoriaMetrics_INIT_RETENTION=0      # Infini (déconseillé sur SD/eMMC)
-```
+Par défaut : **30 jours** (720h), configurable via le flag de démarrage `--retentionPeriod` de VictoriaMetrics.
 
 ### Nettoyage complet (reset usine)
 
 ```bash
-# Arrêter tout + supprimer tous les volumes (DONNÉES PERDUES)
-make reset
+# Arrêter tout
+sudo systemctl stop daly-bms energy-manager mosquitto-broker
 
-# Nettoyer les images Docker inutilisées
-docker system prune -f
+# Supprimer données VictoriaMetrics et broker (DONNÉES PERDUES)
+sudo rm -rf /var/lib/victoria-metrics-data /var/lib/mosquitto/mosquitto.db
 
-# Libérer l'espace disque Docker (images + caches)
-docker system prune -a --volumes
+# Redémarrer
+sudo systemctl start mosquitto-broker energy-manager daly-bms
 ```
 
 > **Note RPi/eMMC** : Sur Raspberry Pi avec carte SD ou eMMC, surveiller l'espace disque.
@@ -599,9 +559,9 @@ sudo usermod -aG dialout $USER  # si permission refusée
 # Logs service systemd
 journalctl -u daly-bms -f
 
-# Logs Docker
-make logs
-docker logs dalybms-server -f --tail 100
+# Logs services
+journalctl -u daly-bms -f
+journalctl -u mosquitto-broker -f
 
 # Test API
 curl http://localhost:8080/api/v1/system/status | jq
@@ -612,12 +572,11 @@ wscat -c ws://localhost:8080/ws/bms/stream
 # Niveau de logs augmenté
 RUST_LOG=debug daly-bms-server
 
-# Vérifier état containers
-make ps
-docker compose -f docker-compose.infra.yml ps
+# Vérifier état services
+systemctl status daly-bms mosquitto-broker energy-manager
 
 # Redémarrer Mosquitto
-docker compose -f docker-compose.infra.yml restart mosquitto
+sudo systemctl restart mosquitto-broker
 ```
 
 ---
@@ -660,7 +619,7 @@ Il affiche pour chaque BMS :
 
 ### Phase 1 — Infrastructure & Intégration ✅
 
-- [x] Infrastructure Mosquitto (Docker)
+- [x] Infrastructure Mosquitto (natif systemd depuis mai 2026, anciennement Docker)
 - [x] Auto-détection port série et adresses BMS
 - [x] Dashboard SSR intégré (Askama + ECharts, sans npm)
 - [x] MQTT publish_interval_sec réduit à 1s (temps réel)
@@ -671,7 +630,7 @@ Il affiche pour chaque BMS :
 
 - [x] RPi5 CM opérationnel — données BMS 0x01 et 0x02 confirmées dans VictoriaMetrics
 - [x] Correction adresses BMS (0x28/0x29 → 0x01/0x02)
-- [x] Rotation logs Docker configurée + rétention VictoriaMetrics 30j
+- [x] Rotation logs systemd configurée + rétention VictoriaMetrics 30j
 - [ ] Validation commandes d'écriture (MOS, SOC, reset) sur hardware réel
 - [ ] Tests intégration 24h stabilité
 
@@ -688,7 +647,7 @@ Il affiche pour chaque BMS :
 ### Phase 4 — Migration & Consolidation 🚧 ✅
 
 - [x] Renommer le crate `daly-bms-venus` → `dbus-mqtt-venus` dans le workspace Rust ✅
-- [ ] Migration flows energy-manager du NanoPi vers le Pi5 (docker-compose.infra.yml) ✅
+- [x] Migration energy-manager du NanoPi vers le Pi5 (service systemd natif) ✅
 - [ ] Nettoyage NanoPi : services Python retirés, seul `dbus-mqtt-venus` reste
 - [ ] Validation stabilité 24h post-migration energy-manager
 
