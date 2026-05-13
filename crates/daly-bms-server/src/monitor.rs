@@ -18,9 +18,9 @@ use tokio::process::Command;
 use tokio::time::interval;
 use tracing::{info, warn};
 
-/// Services réseau à sonder : (label, host, port, conteneur_docker_pour_restart).
+/// Services réseau à sonder : (label, host, port, service_systemd_à_redémarrer).
 const TCP_SERVICES: &[(&str, &str, u16, Option<&str>)] = &[
-    ("mosquitto",      "127.0.0.1",     1883, Some("mosquitto")),
+    ("mosquitto",      "127.0.0.1",     1883, Some("mosquitto-broker")),
     ("energy-manager", "127.0.0.1",     8081, None),
     ("venus-mqtt",     "192.168.1.120", 1883, None),
 ];
@@ -96,28 +96,28 @@ async fn collect_snapshot(_state: &AppState, net_rx_bps: u64, net_tx_bps: u64) -
         } else if em_status.is_empty() { "unknown".to_string() } else { em_status },
     });
 
-    let mosquitto_systemd = check_systemd_service("mosquitto").await == "active";
+    let mosquitto_systemd = check_systemd_service("mosquitto-broker").await == "active";
     services.push(ServiceStatus {
-        name:   "mosquitto".to_string(),
+        name:   "mosquitto-broker".to_string(),
         active: mosquitto_systemd || tcp_probe("127.0.0.1", 1883).await,
         status: if mosquitto_systemd { "active".to_string() } else { "inactive".to_string() },
     });
 
     // ── Sondes TCP ───────────────────────────────────────────────────────────
-    for &(name, host, port, docker_name) in TCP_SERVICES {
+    for &(name, host, port, svc_to_restart) in TCP_SERVICES {
         let reachable = tcp_probe(host, port).await;
 
         if !reachable {
-            if let Some(cname) = docker_name {
-                if restart_docker_container(cname).await {
-                    let msg = format!("Redémarré conteneur Docker: {}", cname);
+            if let Some(svc) = svc_to_restart {
+                if restart_systemd_service(svc).await {
+                    let msg = format!("Redémarré service systemd: {}", svc);
                     info!("{}", msg);
                     auto_actions.push(msg);
                     network_services.push(ServiceStatus {
                         name: name.to_string(), active: false, status: "restarted".to_string(),
                     });
                 } else {
-                    warn!("Échec redémarrage conteneur Docker: {}", cname);
+                    warn!("Échec redémarrage service systemd: {}", svc);
                     network_services.push(ServiceStatus {
                         name: name.to_string(), active: false, status: "down".to_string(),
                     });
@@ -313,13 +313,6 @@ async fn check_systemd_service(name: &str) -> String {
     match Command::new("systemctl").args(["is-active", name]).output().await {
         Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         Err(_) => "unknown".to_string(),
-    }
-}
-
-async fn restart_docker_container(name: &str) -> bool {
-    match Command::new("docker").args(["restart", name]).output().await {
-        Ok(out) => out.status.success(),
-        Err(_)  => false,
     }
 }
 
@@ -530,8 +523,11 @@ pub fn spawn_all(state: AppState) {
     });
 }
 
+/// Redémarre une unité systemd. Nécessite une règle polkit autorisant
+/// l'utilisateur `dalybms` à gérer l'unité concernée (voir
+/// `contrib/polkit/50-dalybms-systemd-restart.rules`).
 async fn restart_systemd_service(name: &str) -> bool {
-    match Command::new("sudo").args(["systemctl", "restart", name]).output().await {
+    match Command::new("systemctl").args(["restart", name]).output().await {
         Ok(out) => {
             if !out.status.success() {
                 warn!("systemctl restart {} → stderr: {}",
