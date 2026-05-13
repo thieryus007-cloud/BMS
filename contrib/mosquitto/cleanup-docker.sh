@@ -60,17 +60,17 @@ fi
 ok "mosquitto-broker.service actif"
 
 # Port 1883 bien tenu par le natif ?
-if command -v ss >/dev/null && ss -tlnp 2>/dev/null | grep -q ':1883 .*mosquitto'; then
-    ok "Port 1883 tenu par mosquitto natif"
+if command -v ss >/dev/null && ss -tlnp 2>/dev/null | grep -q ':1883'; then
+    ok "Port 1883 en écoute (mosquitto natif actif)"
 else
-    warn "Impossible de confirmer que le port 1883 est tenu par mosquitto natif"
+    warn "Impossible de confirmer que le port 1883 est ouvert"
     confirm "Continuer quand même ?" || { warn "Abandon"; exit 0; }
 fi
 
 # ----- Plan -----
 echo
 echo "${BOLD}===== Plan de nettoyage Docker =====${NC}"
-echo " 1. Arrêter + supprimer le conteneur dalybms-mosquitto"
+echo " 1. Arrêter + supprimer les conteneurs dalybms-mosquitto et dalybms-venus-keepalive"
 echo " 2. Supprimer les volumes mosquitto-data et mosquitto-log"
 echo " 3. Supprimer l'image eclipse-mosquitto:*"
 if [ "$PURGE_DAEMON" -eq 1 ]; then
@@ -80,16 +80,18 @@ fi
 echo
 confirm "Démarrer ?" || { warn "Abandon"; exit 0; }
 
-# ----- 1. Conteneur -----
+# ----- 1. Conteneurs -----
 if command -v docker >/dev/null; then
-    log "[1/3] Conteneur dalybms-mosquitto"
-    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'dalybms-mosquitto'; then
-        docker stop dalybms-mosquitto >/dev/null 2>&1 || true
-        docker rm   dalybms-mosquitto >/dev/null 2>&1 || true
-        ok "Conteneur supprimé"
-    else
-        ok "Aucun conteneur dalybms-mosquitto"
-    fi
+    log "[1/3] Conteneurs Docker DalyBMS"
+    for cname in dalybms-mosquitto dalybms-venus-keepalive; do
+        if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$cname"; then
+            docker stop "$cname" >/dev/null 2>&1 || true
+            docker rm   "$cname" >/dev/null 2>&1 || true
+            ok "Conteneur $cname supprimé"
+        else
+            ok "Aucun conteneur $cname"
+        fi
+    done
 
     # Tentative compose si le YAML est encore là (compat ancienne checkout)
     if [ -f docker-compose.infra.yml ]; then
