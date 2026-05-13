@@ -106,7 +106,6 @@ step "Mise à jour APT et installation des dépendances…"
 $SUDO apt-get update -qq
 $SUDO apt-get install -y -qq \
     apt-transport-https \
-    software-properties-common \
     wget \
     curl \
     gnupg \
