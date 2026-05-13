@@ -1090,10 +1090,10 @@ curl -H "Authorization: Bearer ${API_KEY}"   "${GRAFANA_URL}/render/d/${DASHBOAR
 
 ```
 ┌─────────────────┐     MQTT      ┌─────────────────┐
-│  Victron GX     │──────────────→│   Node-RED      │
-│  (MQTT Broker)  │               │   (Calcul AC+DC)│
+│  Victron GX     │──────────────→│   Pi5 compute   │
+│  (MQTT Broker)  │               │   (AC, DC...).  │
 └─────────────────┘               └────────┬────────┘
-                                           │ HTTP POST
+                                           │ 
                                            ↓
 ┌─────────────────┐               ┌─────────────────┐
 │   Grafana       │←──────────────│ VictoriaMetrics │
