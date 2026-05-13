@@ -1,0 +1,25 @@
+// Autorise l'utilisateur `dalybms` à redémarrer les services
+// systemd que `daly-bms-server` surveille et relance automatiquement
+// depuis `crates/daly-bms-server/src/monitor.rs` (fonction
+// `restart_systemd_service`, sondes TCP + watchdog).
+//
+// Unités couvertes :
+//   - mosquitto-broker.service  (broker MQTT natif, sondé port 1883)
+//   - energy-manager.service    (sondé port 8081 par le watchdog)
+//
+// Installation :
+//   sudo cp 50-dalybms-systemd-restart.rules /etc/polkit-1/rules.d/
+//   sudo systemctl restart polkit
+//
+// Vérification (en tant que dalybms) :
+//   sudo -u dalybms systemctl restart mosquitto-broker
+polkit.addRule(function(action, subject) {
+    if (action.id != "org.freedesktop.systemd1.manage-units") return;
+    if (subject.user != "dalybms") return;
+
+    var unit = action.lookup("unit");
+    if (unit == "mosquitto-broker.service" ||
+        unit == "energy-manager.service") {
+        return polkit.Result.YES;
+    }
+});
