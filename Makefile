@@ -2,7 +2,6 @@
 # DalyBMS — Rust Edition — Makefile (Optimisé Pi5)
 # =============================================================================
 # Usage :
-# make up → démarrer l'infra Docker (Mosquitto uniquement)
 # make build → compiler en release (x86_64)
 # make build-arm → compiler pour aarch64 (Raspberry Pi CM5 / NanoPi) [OPTIMISÉ]
 # make build-arm-debug → compiler avec symboles pour profiling (perf/flamegraph)
@@ -38,30 +37,17 @@ CROSS_LINKER_MUSL := aarch64-linux-musl-gcc
 CROSS_LINKER_ARMV7 := arm-linux-gnueabihf-gcc
 
 # =============================================================================
-# Infrastructure Docker (Mosquitto uniquement — Tsink est embarqué dans daly-bms-server)
+# Broker MQTT — Mosquitto natif sur Pi5 (remplace Docker)
 # =============================================================================
-
-.PHONY: up down restart logs reset ps
-
-up:
-	docker compose -f docker-compose.infra.yml up -d
-	@echo "✓ Infra démarrée — Mosquitto MQTT:1883"
-
-down:
-	docker compose -f docker-compose.infra.yml down
-
-restart:
-	docker compose -f docker-compose.infra.yml restart
-
-logs:
-	docker compose -f docker-compose.infra.yml logs -f
-
-reset:
-	docker compose -f docker-compose.infra.yml down -v
-	@echo "⚠ Volumes Mosquitto supprimés (MQTT retained perdu)"
-
-ps:
-	docker compose -f docker-compose.infra.yml ps
+# Service systemd : mosquitto-broker.service
+# Config          : /etc/mosquitto/mosquitto.conf (source : contrib/mosquitto/)
+# Bascule Docker → natif : contrib/mosquitto/deploy-mosquitto-native.sh
+# Nettoyage post-bascule : contrib/mosquitto/cleanup-docker.sh
+#
+# Commandes utiles :
+#   sudo systemctl {start,stop,restart,status} mosquitto-broker
+#   journalctl -u mosquitto-broker -f
+#   sudo /usr/local/bin/verify-no-loop.sh   # vérifie l'absence de boucle bridge
 
 # =============================================================================
 # Vérification des dépendances cross-compilation
@@ -280,8 +266,7 @@ BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
 
 # sync : utiliser sur Pi5 à la place de git pull
 # Écrase les fichiers locaux sans créer de commits.
-# Corrige automatiquement les fichiers créés avec owner root par Docker
-# (ex: docker/mosquitto/config/mosquitto.conf) avant le reset.
+# Corrige aussi tout fichier accidentellement détenu par root avant reset.
 .PHONY: sync
 sync:
 	git fetch origin $(BRANCH)
@@ -366,11 +351,9 @@ help:
 	@echo ""
 	@echo "DalyBMS Rust Edition — Commandes disponibles :"
 	@echo ""
-	@echo " Infrastructure Docker :"
-	@echo "  make up              Démarrer Mosquitto"
-	@echo "  make down            Arrêter l'infra"
-	@echo "  make logs            Voir les logs Docker"
-	@echo "  make ps              État des containers"
+	@echo " Broker MQTT (Mosquitto natif systemd, plus de Docker) :"
+	@echo "  sudo systemctl status mosquitto-broker"
+	@echo "  journalctl -u mosquitto-broker -f"
 	@echo ""
 	@echo " Compilation :"
 	@echo "  make build           Compiler pour l'architecture locale"

@@ -189,7 +189,7 @@ sudo systemctl start daly-bms
 
 **Problème** : après reboot Pi5, `pvinv_baseline` est perdue → TodaysYield repart à 0.
 
-**Solution** : MQTT retained sur `santuario/persist/pvinv_baseline` (Mosquitto persistence=true + volume Docker). energy-manager restaure automatiquement au démarrage via le topic retained.
+**Solution** : MQTT retained sur `santuario/persist/pvinv_baseline` (Mosquitto natif `persistence true` + `/var/lib/mosquitto/mosquitto.db`). energy-manager restaure automatiquement au démarrage via le topic retained.
 
 **Vérification** :
 ```bash
@@ -216,10 +216,9 @@ return null;
 
 ```bash
 # Pi5 — état global
-systemctl status daly-bms
+systemctl status daly-bms mosquitto-broker energy-manager
 journalctl -u daly-bms --since "1 hour ago" | grep -E "ERROR|WARN"
-docker compose ps
-docker compose logs --since 1h | grep -i error
+journalctl -u mosquitto-broker --since "1 hour ago" | grep -iE "error|warn"
 
 # NanoPi — état Venus bridge
 ssh root@192.168.1.120 "svstat /service/dbus-mqtt-venus"
