@@ -4,7 +4,40 @@ Guide complet d'installation de Grafana sur Raspberry Pi 5 avec dashboard de com
 
 ---
 
-## 🖥️ Installation Grafana sur Raspberry Pi 5 (ARM64)
+## 🚀 Installation Automatique (recommandée)
+
+Un script d'installation idempotent gère **l'intégralité** de la mise en place :
+dépôt APT, paquet Grafana, provisioning de la datasource VictoriaMetrics et du
+dashboard PV, ouverture UFW, healthcheck.
+
+```bash
+# Depuis ~/Daly-BMS-Rust sur le Pi5
+bash scripts/setup-grafana.sh
+
+# Options utiles
+bash scripts/setup-grafana.sh --admin-pwd='ChangeMe!2026'   # mot de passe initial
+bash scripts/setup-grafana.sh --port=8081                   # port custom
+bash scripts/setup-grafana.sh --renderer                    # + image renderer (PDF)
+bash scripts/setup-grafana.sh --vm-url=http://10.0.0.5:8428 # VM distant
+sudo bash scripts/setup-grafana.sh --uninstall              # désinstallation
+```
+
+Le script déploie :
+
+| Élément | Chemin |
+|---------|--------|
+| Datasource (auto) | `/etc/grafana/provisioning/datasources/victoriametrics.yaml` |
+| Provider dashboards | `/etc/grafana/provisioning/dashboards/daly-bms.yaml` |
+| Dashboard PV | `/var/lib/grafana/dashboards/pv-solar-5y.json` |
+| Sources | `contrib/grafana/` (versionné dans le repo) |
+
+**Aucun import manuel à faire** — au premier démarrage Grafana, la datasource
+`VictoriaMetrics` et le dashboard *PV Solaire - Monitoring & Comparaison 5 Ans*
+(dossier *PV Solaire*) sont créés automatiquement.
+
+---
+
+## 🖥️ Installation Manuelle (étape par étape)
 
 ### 1. Prérequis
 
@@ -1074,15 +1107,28 @@ curl -H "Authorization: Bearer ${API_KEY}"   "${GRAFANA_URL}/render/d/${DASHBOAR
 
 ## 🔧 Requêtes PromQL Utiles
 
+> ⚠️ **Métriques réelles écrites par le projet** (voir `crates/daly-bms-server/src/vm_client.rs`):
+> - `solar_total_w` — gauge, puissance PV totale instantanée (W)
+> - `dc_pv_power_w` — gauge, somme MPPT côté DC (W)
+> - `pvinv_power_w` — gauge, micro-onduleurs ET112 côté AC (W)
+> - `solar_yield_kwh` — compteur journalier remis à 0 chaque jour (kWh)
+>
+> `increase()` ne s'applique **PAS** aux gauges. Pour l'énergie, utilisez
+> `solar_yield_kwh` (compteur journalier) ou les fonctions VictoriaMetrics
+> `integrate()` / `sum_over_time()` sur la puissance.
+
 | Objectif | Requête |
 |----------|---------|
-| **Production totale année** | `sum(increase(total_solar_power[1y]))` |
-| **Production année précédente** | `sum(increase(total_solar_power[1y] offset 1y))` |
-| **Variation annuelle (%)** | `((sum(increase(total_solar_power[1y])) - sum(increase(total_solar_power[1y] offset 1y))) / sum(increase(total_solar_power[1y] offset 1y))) * 100` |
-| **Production mensuelle** | `sum(increase(total_solar_power[30d]))` |
-| **Production hier** | `sum(increase(total_solar_power[1d] offset 1d))` |
-| **Puissance moyenne journée** | `avg_over_time(total_solar_power[1d])` |
-| **Pic de puissance** | `max_over_time(total_solar_power[1d])` |
+| **Puissance totale instantanée** | `solar_total_w` |
+| **Production aujourd'hui** | `max_over_time(solar_yield_kwh[24h])` |
+| **Production hier** | `max_over_time(solar_yield_kwh[24h] offset 24h)` |
+| **Variation J / J-1 (%)** | `((max_over_time(solar_yield_kwh[24h]) - max_over_time(solar_yield_kwh[24h] offset 24h)) / max_over_time(solar_yield_kwh[24h] offset 24h)) * 100` |
+| **Production cumulée 30 j** | `sum_over_time(max_over_time(solar_yield_kwh[1d])[30d:1d])` |
+| **Production cumulée 1 an** | `sum_over_time(max_over_time(solar_yield_kwh[1d])[365d:1d])` |
+| **Comparaison année N vs N-1** | `max_over_time(solar_yield_kwh[1d] offset 365d)` |
+| **Puissance moyenne 1 h** | `avg_over_time(solar_total_w[1h])` |
+| **Pic de puissance du jour** | `max_over_time(solar_total_w[24h])` |
+| **Énergie via intégration (VM)** | `integrate(solar_total_w[1d]) / 3600` (Wh) |
 
 ---
 
