@@ -73,7 +73,7 @@ com.victronenergy.acload (when used as consumer to measure an acload)
 
 | Machine | IP | Rôle |
 |---|---|---|
-| Pi5 (Raspberry Pi 5) | 192.168.1.141 | Docker : Mosquitto, energy-manager |
+| Pi5 (Raspberry Pi 5) | 192.168.1.141 | systemd : mosquitto-broker, daly-bms-server, energy-manager |
 | NanoPi Neo3 | 192.168.1.120 | Venus OS, service Rust dbus-mqtt-venus, D-Bus |
 
 ---
@@ -170,7 +170,7 @@ entre les publications et le device disparaît du VRM.
 
 ## Configuration Mosquitto bridge (Pi5)
 
-Fichier : `docker/mosquitto/config/mosquitto.conf`
+Fichier : `contrib/mosquitto/mosquitto.conf` (déployé vers `/etc/mosquitto/mosquitto.conf`)
 
 ### Direction NanoPi → Pi5 (données publiées par le Rust)
 ```
@@ -302,12 +302,13 @@ ssh root@192.168.1.120 "svc -d /data/etc/sv/dbus-mqtt-venus && \
                         svc -u /data/etc/sv/dbus-mqtt-venus"
 ```
 
-### Étape 5 — Déployer mosquitto.conf si modifié (Pi5 Docker)
+### Étape 5 — Déployer mosquitto.conf si modifié (Pi5)
 
 ```bash
 cd ~/Daly-BMS-Rust
-git pull origin claude/migrate-energy-manager-pi5-91idx
-docker compose restart mosquitto
+make sync
+sudo cp contrib/mosquitto/mosquitto.conf /etc/mosquitto/mosquitto.conf
+sudo systemctl restart mosquitto-broker
 ```
 
 ### Étape 6 — Mettre à jour les flux energy-manager si modifiés
@@ -830,9 +831,8 @@ Le service cible est actif et verrouille le binaire. Faire `svc -d` avant le `sc
 ### git pull échoue (local changes)
 
 ```bash
-# Si fichier appartient à un autre utilisateur (ex: mosquitto Docker)
-sudo chown $(whoami):$(whoami) docker/mosquitto/config/
-sudo chown $(whoami):$(whoami) docker/mosquitto/config/mosquitto.conf
+# Si fichier appartient à root (ex: config déployée via sudo)
+sudo chown $(whoami):$(whoami) contrib/mosquitto/mosquitto.conf
 ```
 
 ### Architecture mismatch (binaire invalide)
@@ -840,11 +840,14 @@ sudo chown $(whoami):$(whoami) docker/mosquitto/config/mosquitto.conf
 NanoPi = ARMv7 32-bit. Le binaire Pi5 (aarch64) ne fonctionne pas.
 Toujours compiler avec `--target armv7-unknown-linux-gnueabihf`.
 
-### Onglet energy-manager vide après docker compose down/up
+### energy-manager ne démarre pas après redémarrage
 
-Les volumes energy-manager sont persistants. Si les flux disparaissent :
-1. Vérifier `docker volume ls | grep energy-manager`
-2. Réimporter depuis `flux-energy-manager/*.json`
+```bash
+systemctl status energy-manager
+journalctl -u energy-manager -n 30
+# Vérifier que Config.toml est présent :
+ls /etc/daly-bms/config.toml
+```
 
 
 ### annexe: Victron switch parameters

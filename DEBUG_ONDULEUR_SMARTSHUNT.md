@@ -11,15 +11,15 @@ Exécuter chaque commande **dans l'ordre exact** sur Pi5, noter les résultats.
 ```bash
 # Sur Pi5 — État des services
 systemctl status daly-bms | head -20
-docker ps | grep mosquitto
+systemctl is-active mosquitto-broker
 ```
 
 **Résultat attendu:**
 - daly-bms: `active (running)`
-- mosquitto: container running
+- mosquitto-broker: `active`
 
 **Si NOK:** 
-- Redémarrer: `sudo systemctl restart daly-bms && docker restart mosquitto`
+- Redémarrer: `sudo systemctl restart daly-bms && sudo systemctl restart mosquitto-broker`
 
 ---
 
@@ -47,8 +47,8 @@ journalctl -u daly-bms -n 30 --no-pager
 
 ```bash
 # Sur Pi5 — Vérifier que Mosquitto écoute
-netstat -tlnp | grep 1883
-docker exec mosquitto mosquitto_sub -h localhost -p 1883 -t '$SYS/#' -C 1
+ss -tlnp | grep 1883
+mosquitto_sub -h 127.0.0.1 -p 1883 -t '$SYS/#' -C 1
 ```
 
 **Résultat attendu:**
@@ -56,7 +56,7 @@ docker exec mosquitto mosquitto_sub -h localhost -p 1883 -t '$SYS/#' -C 1
 - `$SYS` topics publiés = broker actif
 
 **Si broker down:**
-- Redémarrer: `docker restart mosquitto`
+- Redémarrer: `sudo systemctl restart mosquitto-broker`
 - Attendre 5s
 - Tester à nouveau
 
@@ -67,7 +67,7 @@ docker exec mosquitto mosquitto_sub -h localhost -p 1883 -t '$SYS/#' -C 1
 ```bash
 # Sur Pi5 — Watch tous les topics santuario pendant 30 secondes
 echo "Watching MQTT for 30 seconds..."
-timeout 30 docker exec mosquitto mosquitto_sub -h localhost -p 1883 -t 'santuario/#' -v 2>&1 | head -100
+timeout 30 mosquitto_sub -h 127.0.0.1 -p 1883 -t 'santuario/#' -v 2>&1 | head -100
 ```
 
 **Résultat attendu:**
@@ -145,7 +145,7 @@ sleep 2
 journalctl -u daly-bms -f &  # Laisser tourner en background
 
 # Dans une autre terminal, déclencher un message MQTT:
-docker exec mosquitto mosquitto_pub -h localhost -p 1883 -t 'santuario/inverter/venus' \
+mosquitto_pub -h 127.0.0.1 -p 1883 -t 'santuario/inverter/venus' \
   -m '{"Voltage": 48.2, "Current": 3.5, "Power": 168.7, "AcVoltage": 229.8, "AcCurrent": 5.6, "AcPower": 1286.0, "State": "on", "Mode": "inverter"}'
 
 # Vérifier si le handler a reçu et parsé le message
@@ -258,7 +258,7 @@ journalctl -u daly-bms -n 10
 
 ```
 □ Services tournent (BMS, Mosquitto, energy-manager)
-  Commande: systemctl status daly-bms && docker ps
+  Commande: systemctl status daly-bms mosquitto-broker energy-manager
 
 □ MQTT topics publiés
   Commande: mosquitto_sub -t 'santuario/#' -v
@@ -295,11 +295,11 @@ Cela permettra de diagnostiquer rapidement.
 ```bash
 # Redémarrer tout
 sudo systemctl restart daly-bms
-docker restart mosquitto
+sudo systemctl restart mosquitto-broker
 sleep 5
 
 # Vérifier MQTT
-timeout 10 docker exec mosquitto mosquitto_sub -h localhost -t 'santuario/#' -v
+timeout 10 mosquitto_sub -h 127.0.0.1 -t 'santuario/#' -v
 
 # Vérifier API
 for ep in inverter smartshunt mppt temperatures; do
