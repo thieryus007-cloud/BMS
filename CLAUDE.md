@@ -19,7 +19,7 @@
 | Logs BMS | `journalctl -u daly-bms -f` |
 | Compiler Pi5 | `make build-arm` |
 | Déployer binaire Pi5 | `sudo systemctl stop daly-bms && sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ && sudo systemctl start daly-bms` |
-| Docker start/stop/logs | `make up` / `make down` / `make logs` |
+| Broker MQTT (status/logs) | `systemctl status mosquitto-broker` / `journalctl -u mosquitto-broker -f` |
 | Logs energy-manager | `journalctl -u energy-manager -f` |
 | Compiler energy-manager | `make build-energy-arm` |
 | Déployer energy-manager | `sudo systemctl stop energy-manager && sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ && sudo systemctl start energy-manager` |
@@ -57,17 +57,18 @@ make build-venus-v7 && make install-venus-v7
 
 ```
 Pi5 (192.168.1.141, pi5compute)
+  mosquitto-broker (systemd, :1883 + :9001 WS)
+    └── bridge unique pi5-nanopi → 192.168.1.120:1883
   daly-bms-server (systemd, :8080)
     ├── RS485 /dev/ttyUSB0 → 2 BMS + 3 ET112 + 1 PRALRAN
     ├── REST API + WebSocket :8080
-    ├── MQTT publish → 192.168.1.120:1883
+    ├── MQTT subscribe/publish → 127.0.0.1:1883 (broker local)
     └── VictoriaMetrics → localhost:8428
   energy-manager (systemd, :8081)
-    ├── MQTT subscribe/publish → 192.168.1.120:1883
+    ├── MQTT subscribe/publish → 127.0.0.1:1883 (broker local)
     ├── Logique solaire, DEYE, chauffe-eau, charge, météo
     ├── WebSocket live events :8081/live
     └── VictoriaMetrics → localhost:8428
-  Docker: mosquitto:1883
 
 NanoPi (192.168.1.120, root)
   dbus-mqtt-venus (runit /service/dbus-mqtt-venus)
@@ -300,7 +301,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 8. Templates Askama → `make build-arm` + redéploiement après tout changement HTML.
 9. **CLAUDE.md = mémoire projet** : toute info découverte → ajouter ici + commit.
 10. Nom exact D-Bus onduleur Victron direct : `cgwacs_ttyUSB0_mb2` (pas `rs485`).
-11. `make reset` efface les volumes Docker (retained MQTT perdu) → préférer `make down && make up`.
+11. Broker MQTT = Mosquitto natif systemd (`mosquitto-broker.service`). Plus de Docker — config dans `contrib/mosquitto/mosquitto.conf`, déployée vers `/etc/mosquitto/mosquitto.conf`. Toujours valider avec `sudo /usr/local/bin/verify-no-loop.sh` après modif des topics bridge.
 12. Secrets : ne jamais committer `.env`.
 
 ---
