@@ -67,6 +67,7 @@ Cloner `AppBus` est gratuit (tous les champs sont `Arc`-backed).
 | `charge_current.rs` | Courant de charge VEBus | `IgnoreAcIn1`, PV power, consumption | MQTT `W/.../MaxChargeCurrent`, `W/.../PowerAssistEnabled` |
 | `switch_ats.rs` | ATS CHINT keepalive | aucune (timer 60s) | MQTT `santuario/switch/1/venus` |
 | `platform.rs` | Statut plateforme (backup) | aucune (timer configurable) | MQTT `santuario/platform/venus` |
+| `victron_keepalive/mod.rs` | Keepalive Venus OS (GX broker) | aucune (timer 30s) | MQTT `R/{portal_id}/keepalive` (vide) |
 
 ---
 
@@ -447,7 +448,62 @@ le temps au broker MQTT de livrer le message retained.
 
 ---
 
-## 10. Supprimer un module
+## 10. Keepalive Venus OS — `victron_keepalive`
+
+### Rôle
+
+Venus OS (Cerbo GX) publie les topics télémétriques `N/{portal_id}/...` en continu **tant qu'un client MQTT externe publie périodiquement sur `R/{portal_id}/keepalive`**. Sans ce signal, le GX cesse d'émettre après ~60 secondes, ce qui coupe toutes les données Venus OS reçues par energy-manager et daly-bms-server.
+
+Le module `logic/victron_keepalive/mod.rs` publie un message vide sur ce topic **toutes les 30 secondes**.
+
+### Configuration
+
+Le `portal_id` est l'identifiant GX Victron, visible dans VRM. Il est configuré dans `Config.toml` :
+
+```toml
+[energy_manager.victron]
+portal_id = "c0619ab9929a"   # ID Cerbo GX — ne pas modifier sans màj VRM
+```
+
+### Comportement
+
+- Topic publié : `R/c0619ab9929a/keepalive` (payload vide `""`, non retained)
+- Fréquence : 30 s (marge confortable avant le timeout de 60 s du GX)
+- Démarré au lancement d'`energy-manager` — aucune condition préalable
+- Journalisé en `DEBUG` uniquement (pas de pollution des logs en production)
+
+### Historique — suppression du conteneur Docker
+
+Avant mai 2026, ce keepalive était assuré par un conteneur Docker manuel `dalybms-venus-keepalive` (image `eclipse-mosquitto:2.0.18`, hors docker-compose) qui exécutait :
+
+```sh
+while true; do
+  mosquitto_pub -h mosquitto -p 1883 -t 'R/c0619ab9929a/keepalive' -m '' -q 0
+  sleep 55
+done
+```
+
+Ce conteneur pointait sur le hostname Docker `mosquitto` (l'ancien broker conteneurisé). Lors de la migration vers Mosquitto natif (mai 2026), il est devenu inopérant ("Unable to connect (Lookup error.)") **sans impacter le système** car le module Rust prenait déjà le relais.
+
+**Le conteneur a été supprimé définitivement** avec `cleanup-docker.sh`. Le keepalive est maintenant entièrement géré par energy-manager.
+
+### Diagnostic
+
+```bash
+# Vérifier que les topics N/ arrivent bien (signe que le keepalive fonctionne)
+mosquitto_sub -h 127.0.0.1 -p 1883 -t 'N/c0619ab9929a/#' -C 5 -v
+
+# Si rien n'arrive : vérifier que energy-manager tourne
+systemctl status energy-manager
+journalctl -u energy-manager --since "2 minutes ago" | grep -i keepalive
+
+# Forcer un keepalive manuel (test ou dépannage)
+mosquitto_pub -h 127.0.0.1 -p 1883 -t 'R/c0619ab9929a/keepalive' -m ''
+```
+
+---
+
+## 11. Supprimer un module
 
 1. Supprimer le fichier `logic/mon_module.rs`
 2. Retirer `pub mod mon_module;` dans `logic/mod.rs`
@@ -459,7 +515,7 @@ le temps au broker MQTT de livrer le message retained.
 
 ---
 
-## 11. Ajouter un nouveau publish MQTT
+## 12. Ajouter un nouveau publish MQTT
 
 **1. Déclarer le topic** dans `mqtt/topics.rs` :
 
@@ -495,7 +551,7 @@ bus.publish(MqttOutgoing::raw(publish::MON_TOPIC, "valeur", false)).await;
 
 ---
 
-## 12. Débogage
+## 13. Débogage
 
 ```bash
 # Logs en continu
@@ -518,7 +574,7 @@ websocat ws://192.168.1.141:8081/live
 
 ---
 
-## 13. Installation initiale du service (première fois)
+## 14. Installation initiale du service (première fois)
 
 ```bash
 # Depuis le repo sur Pi5 :
