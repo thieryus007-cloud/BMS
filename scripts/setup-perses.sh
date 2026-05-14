@@ -283,12 +283,32 @@ if ! $ok; then
 fi
 info "Perses répond sur ${PERSES_URL}"
 
-# ── 9. Connexion percli ───────────────────────────────────────────────────────
-step "Configuration percli (login)…"
-PERCLI_HOME="${HOME}/.perses"
-mkdir -p "${PERCLI_HOME}"
-percli login "${PERSES_URL}" 2>/dev/null && info "percli connecté à ${PERSES_URL}" || \
-    warn "percli login a échoué — les ressources sont provisionnées via fichiers"
+# ── 9. Import des ressources via percli ──────────────────────────────────────
+step "Import des ressources (percli)…"
+mkdir -p "${HOME}/.perses"
+
+if percli login "${PERSES_URL}" 2>/dev/null; then
+    info "percli connecté à ${PERSES_URL}"
+    # Import dans l'ordre : projet → datasource → dashboard
+    for res in \
+        /etc/perses/provisioning/project-default.yaml \
+        /etc/perses/provisioning/victoriametrics-datasource.yaml \
+        /etc/perses/provisioning/pv-solar-5y.yaml
+    do
+        [[ -f "$res" ]] || continue
+        name="$(basename "$res")"
+        if percli apply -f "$res" 2>/tmp/percli_err; then
+            info "  ✓ ${name}"
+        else
+            warn "  ✗ ${name} — $(cat /tmp/percli_err)"
+        fi
+    done
+    info "Vérification : percli get dashboard -p default"
+    percli get dashboard -p default 2>/dev/null || true
+else
+    warn "percli login a échoué. Ressources provisionnées via fichiers (délai ~1 min)."
+    warn "Import manuel : percli login http://localhost:${PERSES_PORT} && percli apply -f /etc/perses/provisioning/"
+fi
 
 # ── Résumé ────────────────────────────────────────────────────────────────────
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
