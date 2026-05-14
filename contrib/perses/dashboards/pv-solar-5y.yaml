@@ -654,3 +654,40 @@ spec:
             height: 10
             content:
               $ref: "#/spec/panels/annual_variation_stat"
+
+          # Ligne 34 — Irradiance vs puissance
+          - x: 0
+            y: 34
+            width: 24
+            height: 8
+            content:
+              $ref: "#/spec/panels/irradiance_timeseries"
+
+          # Ligne 42 — Batteries BMS
+          - x: 0
+            y: 42
+            width: 6
+            height: 4
+            content:
+              $ref: "#/spec/panels/bms1_soc_stat"
+
+          - x: 6
+            y: 42
+            width: 6
+            height: 4
+            content:
+              $ref: "#/spec/panels/bms2_soc_stat"
+
+          - x: 0
+            y: 46
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/bms_voltage_timeseries"
+
+          - x: 12
+            y: 46
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/bms_current_timeseries"

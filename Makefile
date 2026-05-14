@@ -257,6 +257,22 @@ install-node-exporter:
 	@echo "  → Copier contrib/victoriametrics-scrape.yml dans /etc/victoriametrics/scrape.yml"
 
 # =============================================================================
+# Perses — Dashboard monitoring (essai parallèle à Grafana)
+# =============================================================================
+
+.PHONY: perses-install perses-uninstall
+
+# Installe Perses sur le Pi5 (exécuter directement sur le Pi5)
+# Options : make perses-install PERSES_ARGS="--nvme"
+PERSES_ARGS ?= --nvme
+
+perses-install:
+	bash scripts/setup-perses.sh $(PERSES_ARGS)
+
+perses-uninstall:
+	sudo bash scripts/setup-perses.sh --uninstall
+
+# =============================================================================
 # Cross-compile + déploiement SSH vers le Pi
 # =============================================================================
 
@@ -380,6 +396,11 @@ help:
 	@echo "  make deploy-musl     Déployer binaire statique portable [musl]"
 	@echo "  make install-venus   Déployer dbus-mqtt-venus sur GX (ARM64)"
 	@echo "  make install-venus-v7 Déployer sur NanoPi (armv7)"
+	@echo ""
+	@echo " Perses (monitoring — essai parallèle à Grafana) :"
+	@echo "  make perses-install  Installer Perses sur le Pi5 (port 8090)"
+	@echo "  make perses-uninstall Désinstaller Perses"
+	@echo "  Voir docs/Perses-readme.md pour le guide complet"
 	@echo ""
 	@echo " Profiling (optimisation CPU) :"
 	@echo "  make profile-setup   Instructions pour installer perf sur Pi5"
