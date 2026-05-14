@@ -25,6 +25,22 @@
 | Déployer energy-manager | `sudo systemctl stop energy-manager && sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ && sudo systemctl start energy-manager` |
 | Appliquer Config energy-manager | `sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart energy-manager` |
 
+### Perses (Pi5, port 8090)
+
+| Quand | Commande |
+|-------|----------|
+| Installer / mettre à jour | `bash scripts/setup-perses.sh --nvme` |
+| Logs | `journalctl -u perses -f` |
+| Redémarrer | `sudo systemctl restart perses` |
+| Se connecter (percli) | `percli login http://localhost:8090` |
+| Appliquer un dashboard | `percli apply -f /etc/perses/provisioning/pv-solar-5y.yaml` |
+| Appliquer datasource | `percli apply -f /etc/perses/provisioning/victoriametrics-datasource.yaml` |
+| Lister dashboards | `percli get dashboard -p default` |
+| Désinstaller | `sudo bash scripts/setup-perses.sh --uninstall` |
+
+> Dashboard : `http://192.168.1.141:8090` — projet `default`
+> Doc complète : `docs/Perses-readme.md`
+
 ### NanoPi (`root@192.168.1.120`)
 
 | Quand | Commande |

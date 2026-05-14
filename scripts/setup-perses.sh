@@ -212,14 +212,14 @@ spec:
               method: POST
 EOF
 
-# Dashboard PV Solaire (depuis le repo)
-DASH_SRC="${PERSES_PROVISION_SRC}/dashboards/pv-solar-5y.yaml"
-if [[ -f "${DASH_SRC}" ]]; then
-    $SUDO cp "${DASH_SRC}" /etc/perses/provisioning/pv-solar-5y.yaml
-    info "Dashboard PV Solaire copié depuis contrib/"
-else
-    warn "Dashboard non trouvé dans ${DASH_SRC} — à copier manuellement"
-fi
+# Dashboards (depuis le repo)
+for dash in pv-solar-5y.yaml ess-overview.yaml; do
+    dash_src="${PERSES_PROVISION_SRC}/dashboards/${dash}"
+    if [[ -f "${dash_src}" ]]; then
+        $SUDO cp "${dash_src}" "/etc/perses/provisioning/${dash}"
+        info "Dashboard ${dash} copié"
+    fi
+done
 
 # Propriété fichiers
 $SUDO chown -R "${PERSES_USER}:${PERSES_USER}" /etc/perses "${DB_PATH}" 2>/dev/null || \
