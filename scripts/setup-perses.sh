@@ -157,8 +157,8 @@ $SUDO install -m 0755 "$PERSES_BIN" /usr/local/bin/perses
 
 info "Perses ${PERSES_VERSION} installé (/usr/local/bin/)"
 
-# Plugins (plugins-archive/) — Perses 0.50+ charge les plugins depuis le WorkingDirectory.
-# Structure dans l'archive : plugins-archive/*.tar.gz (Prometheus, StatChart, etc.)
+# Plugins (plugins-archive/) — nécessaires pour la validation des datasources/panels.
+# Déclaré explicitement via 'plugins.archive_path' dans config.yaml.
 $SUDO mkdir -p /etc/perses
 PLUGINS_SRC=$(find "$EXTRACT_DIR" -type d -name "plugins-archive" | head -1)
 if [[ -n "$PLUGINS_SRC" ]]; then
@@ -182,16 +182,21 @@ else
     warn "Flag d'écoute inconnu — Perses écoutera sur son port par défaut"
 fi
 
-# ── 3. Configuration (minimale — Perses 0.50+ gère les plugins automatiquement) ────────
+# ── 3. Configuration ──────────────────────────────────────────────────────────────
 step "Configuration Perses…"
 
 $SUDO mkdir -p "$PERSES_PROV_DIR" "${PERSES_DB_PATH}/db"
 
+# plugins.archive_path : chemin absolu vers les plugins-archive.
+# Sans cette clé, Perses signale "datasource schemas are not loaded".
 $SUDO tee /etc/perses/config.yaml > /dev/null <<PERSES_CFG
 database:
   file:
     folder: ${PERSES_DB_PATH}/db
     extension: json
+
+plugins:
+  archive_path: ${PERSES_PLUGINS_DIR}
 
 provisioning:
   interval: 1m
@@ -204,7 +209,7 @@ info "Configuration créée : /etc/perses/config.yaml"
 # ── 4. Fichiers de provisioning ───────────────────────────────────────────────
 step "Provisioning des ressources Perses…"
 
-# 4a. Projet "default" (requis avant tout dashboard)
+# 4a. Projet "default"
 $SUDO tee "${PERSES_PROV_DIR}/project-default.yaml" > /dev/null <<PROJ
 kind: Project
 metadata:
@@ -212,8 +217,7 @@ metadata:
 spec: {}
 PROJ
 
-# 4b. Datasource VictoriaMetrics
-# Plugin kind = "Prometheus" (nom du plugin dans plugins-archive/Prometheus-*.tar.gz)
+# 4b. Datasource VictoriaMetrics (kind = "Prometheus", nom du plugin)
 $SUDO tee "${PERSES_PROV_DIR}/victoriametrics-datasource.yaml" > /dev/null <<DS_CFG
 kind: GlobalDatasource
 metadata:
@@ -260,7 +264,6 @@ fi
 EXEC_CMD="/usr/local/bin/perses --config /etc/perses/config.yaml"
 [[ -n "$LISTEN_FLAG" ]] && EXEC_CMD="$EXEC_CMD $LISTEN_FLAG"
 
-# WorkingDirectory=/etc/perses : Perses charge plugins-archive/ depuis ce dossier.
 $SUDO tee /etc/systemd/system/perses.service > /dev/null <<SYSTEMD_UNIT
 [Unit]
 Description=Perses Monitoring Dashboard (essai parallèle a Grafana)
@@ -289,7 +292,7 @@ $SUDO chown -R "${SERVICE_USER}:${SERVICE_USER}" /etc/perses "$PERSES_DB_PATH" 2
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now perses
 
-info "Service perses activé (User=${SERVICE_USER}, WorkingDirectory=/etc/perses)"
+info "Service perses activé (User=${SERVICE_USER})"
 info "ExecStart: ${EXEC_CMD}"
 
 # ── 6. Pare-feu ───────────────────────────────────────────────────────────────
@@ -315,7 +318,6 @@ done
 if $STARTED; then
     info "Perses opérationnel sur http://127.0.0.1:${PERSES_PORT}"
 
-    # Créer le projet "default" via l'API si absent
     step "Création du projet \"default\" via l'API…"
     HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
         "http://127.0.0.1:${PERSES_PORT}/api/v1/projects/default" 2>/dev/null || echo "000")
@@ -333,17 +335,16 @@ if $STARTED; then
         fi
     fi
 
-    # Appliquer les ressources avec percli
     if command -v percli >/dev/null 2>&1; then
         percli login "http://localhost:${PERSES_PORT}" >/dev/null 2>&1 || true
         step "Application des ressources via percli…"
         sleep 1
-        percli apply -f "${PERSES_PROV_DIR}/victoriametrics-datasource.yaml" 2>/dev/null \
+        percli apply -f "${PERSES_PROV_DIR}/victoriametrics-datasource.yaml" \
             && info "Datasource VictoriaMetrics appliquée" \
-            || warn "percli apply datasource : erreur — relancer : percli apply -f ${PERSES_PROV_DIR}/victoriametrics-datasource.yaml"
-        percli apply -f "${PERSES_PROV_DIR}/pv-solar-5y.yaml" 2>/dev/null \
+            || warn "percli apply datasource : échec — relancer manuellement"
+        percli apply -f "${PERSES_PROV_DIR}/pv-solar-5y.yaml" \
             && info "Dashboard PV Solaire appliqué" \
-            || warn "percli apply dashboard : erreur — relancer : percli apply -f ${PERSES_PROV_DIR}/pv-solar-5y.yaml"
+            || warn "percli apply dashboard : échec — relancer manuellement"
     fi
 else
     warn "Perses ne répond pas encore"
@@ -370,7 +371,7 @@ ${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━
 $(echo -e "$GRAFANA_LINE")
   Datasource        : VictoriaMetrics → ${VM_URL} (proxy)
   Ressources        : ${PERSES_PROV_DIR}/
-  Plugins           : /etc/perses/plugins-archive/
+  Plugins           : ${PERSES_PLUGINS_DIR}/
   Données           : ${PERSES_DB_PATH}
   Service           : User=${SERVICE_USER}
 
