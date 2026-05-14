@@ -1,30 +1,17 @@
 kind: Dashboard
 metadata:
   name: pv-solar-5y
-  project: perses
-  labels:
-    category: pv
-    source: victron
+  project: default
 spec:
   display:
-    name: "☀️ PV Solaire - Monitoring & Comparaison 5 Ans"
+    name: "PV Solaire - Monitoring & Comparaison 5 Ans"
     description: "Monitoring PV Victron + Daly-BMS avec comparaison multi-années — VictoriaMetrics"
 
   duration: 7d
   refreshInterval: "30s"
 
-  datasources:
-    victoriametrics:
-      default: true
-      plugin:
-        kind: PrometheusDatasource
-        spec:
-          url: "http://127.0.0.1:8428"
-          proxy: true
-          timeInterval: "10s"
-
   panels:
-    # === Puissance Instantanée ===
+    # ── Puissance instantanée ──────────────────────────────────────────────────
     total_power_stat:
       kind: Panel
       spec:
@@ -33,16 +20,26 @@ spec:
         plugin:
           kind: StatChart
           spec:
-            value:
-              calc: "lastNotNull"
-            unit: "watt"
-            colorMode: "threshold"
+            calculation: last-number
+            format:
+              unit: watts
+            thresholds:
+              steps:
+                - color: "#73BF69"
+                  value: 0
+                - color: "#FADE2A"
+                  value: 1000
+                - color: "#F2495C"
+                  value: 3000
         queries:
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
                   query: "solar_total_w"
 
     mppt_power_stat:
@@ -53,15 +50,18 @@ spec:
         plugin:
           kind: StatChart
           spec:
-            value:
-              calc: "lastNotNull"
-            unit: "watt"
+            calculation: last-number
+            format:
+              unit: watts
         queries:
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
                   query: "dc_pv_power_w"
 
     ac_power_stat:
@@ -72,78 +72,20 @@ spec:
         plugin:
           kind: StatChart
           spec:
-            value:
-              calc: "lastNotNull"
-            unit: "watt"
+            calculation: last-number
+            format:
+              unit: watts
         queries:
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
                   query: "pvinv_power_w"
 
-    daily_yield_stat:
-      kind: Panel
-      spec:
-        display:
-          name: "Production du Jour"
-        plugin:
-          kind: StatChart
-          spec:
-            value:
-              calc: "lastNotNull"
-            unit: "kwatth"
-        queries:
-          - kind: TimeSeriesQuery
-            spec:
-              plugin:
-                kind: PrometheusTimeSeriesQuery
-                spec:
-                  query: "max_over_time(solar_yield_kwh[24h])"
-
-    power_timeseries:
-      kind: Panel
-      spec:
-        display:
-          name: "Courbe Puissance (Temps Réel)"
-        plugin:
-          kind: TimeSeriesChart
-          spec:
-            visual:
-              display: "line"
-              lineWidth: 2
-              areaOpacity: 0.15
-            yAxis:
-              format:
-                unit: "watt"
-            legend:
-              displayMode: "table"
-              placement: "right"
-        queries:
-          - kind: TimeSeriesQuery
-            spec:
-              plugin:
-                kind: PrometheusTimeSeriesQuery
-                spec:
-                  query: "solar_total_w"
-                  seriesNameFormat: "Total"
-          - kind: TimeSeriesQuery
-            spec:
-              plugin:
-                kind: PrometheusTimeSeriesQuery
-                spec:
-                  query: "dc_pv_power_w"
-                  seriesNameFormat: "MPPT (DC)"
-          - kind: TimeSeriesQuery
-            spec:
-              plugin:
-                kind: PrometheusTimeSeriesQuery
-                spec:
-                  query: "pvinv_power_w"
-                  seriesNameFormat: "Micro-onduleurs (AC)"
-
-    # === Comparaison Quotidienne ===
     today_stat:
       kind: Panel
       spec:
@@ -152,16 +94,19 @@ spec:
         plugin:
           kind: StatChart
           spec:
-            value:
-              calc: "lastNotNull"
-            unit: "kwatth"
+            calculation: last-number
+            format:
+              unit: watt-hours
         queries:
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "max_over_time(solar_yield_kwh[24h])"
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "max_over_time(solar_yield_kwh[24h]) * 1000"
 
     yesterday_stat:
       kind: Panel
@@ -171,16 +116,19 @@ spec:
         plugin:
           kind: StatChart
           spec:
-            value:
-              calc: "lastNotNull"
-            unit: "kwatth"
+            calculation: last-number
+            format:
+              unit: watt-hours
         queries:
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "max_over_time(solar_yield_kwh[24h] offset 24h)"
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "max_over_time(solar_yield_kwh[24h] offset 24h) * 1000"
 
     daily_variation_stat:
       kind: Panel
@@ -190,94 +138,375 @@ spec:
         plugin:
           kind: StatChart
           spec:
-            value:
-              calc: "lastNotNull"
-            unit: "percent"
+            calculation: last-number
+            format:
+              unit: percent
         queries:
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "((max_over_time(solar_yield_kwh[24h]) - max_over_time(solar_yield_kwh[24h] offset 24h)) / max_over_time(solar_yield_kwh[24h] offset 24h)) * 100"
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: >-
+                    (
+                      (max_over_time(solar_yield_kwh[24h])
+                       - max_over_time(solar_yield_kwh[24h] offset 24h))
+                      / clamp_min(max_over_time(solar_yield_kwh[24h] offset 24h), 0.001)
+                    ) * 100
+
+    weekly_yield_stat:
+      kind: Panel
+      spec:
+        display:
+          name: "Cette semaine (kWh)"
+        plugin:
+          kind: StatChart
+          spec:
+            calculation: last-number
+            format:
+              unit: watt-hours
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "sum_over_time(max_over_time(solar_yield_kwh[1d])[7d:1d]) * 1000"
+
+    bms1_soc_stat:
+      kind: Panel
+      spec:
+        display:
+          name: "BMS 360Ah (SOC)"
+        plugin:
+          kind: StatChart
+          spec:
+            calculation: last-number
+            format:
+              unit: percent
+            thresholds:
+              steps:
+                - color: "#F2495C"
+                  value: 0
+                - color: "#FADE2A"
+                  value: 20
+                - color: "#73BF69"
+                  value: 50
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "bms_soc_percent{id=\"1\"}"
+
+    bms2_soc_stat:
+      kind: Panel
+      spec:
+        display:
+          name: "BMS 320Ah (SOC)"
+        plugin:
+          kind: StatChart
+          spec:
+            calculation: last-number
+            format:
+              unit: percent
+            thresholds:
+              steps:
+                - color: "#F2495C"
+                  value: 0
+                - color: "#FADE2A"
+                  value: 20
+                - color: "#73BF69"
+                  value: 50
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "bms_soc_percent{id=\"2\"}"
+
+    # ── Courbes temporelles ────────────────────────────────────────────────────
+    power_timeseries:
+      kind: Panel
+      spec:
+        display:
+          name: "Puissance en temps réel"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+            visual:
+              areaOpacity: 0.1
+              lineWidth: 2
+            yAxis:
+              format:
+                unit: watts
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "solar_total_w"
+                  seriesNameFormat: "Total PV"
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "dc_pv_power_w"
+                  seriesNameFormat: "MPPT (DC)"
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "pvinv_power_w"
+                  seriesNameFormat: "Micro-onduleurs (AC)"
+
+    bms_voltage_timeseries:
+      kind: Panel
+      spec:
+        display:
+          name: "Tension Batteries"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+            visual:
+              lineWidth: 2
+            yAxis:
+              format:
+                unit: volts
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "bms_voltage_v{id=\"1\"}"
+                  seriesNameFormat: "BMS 360Ah"
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "bms_voltage_v{id=\"2\"}"
+                  seriesNameFormat: "BMS 320Ah"
+
+    bms_current_timeseries:
+      kind: Panel
+      spec:
+        display:
+          name: "Courant Batteries"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+              mode: table
+            visual:
+              lineWidth: 2
+            yAxis:
+              format:
+                unit: amperes
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "bms_current_a{id=\"1\"}"
+                  seriesNameFormat: "BMS 360Ah"
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "bms_current_a{id=\"2\"}"
+                  seriesNameFormat: "BMS 320Ah"
+
+    irradiance_stat:
+      kind: Panel
+      spec:
+        display:
+          name: "Irradiance"
+        plugin:
+          kind: StatChart
+          spec:
+            calculation: last-number
+            format:
+              unit: "W/m²"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "irradiance_w_m2"
+
+    irradiance_timeseries:
+      kind: Panel
+      spec:
+        display:
+          name: "Irradiance (historique)"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            visual:
+              lineWidth: 2
+              areaOpacity: 0.15
+            yAxis:
+              format:
+                unit: "W/m²"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "irradiance_w_m2"
+                  seriesNameFormat: "Irradiance"
 
     daily_energy_bars:
       kind: Panel
       spec:
         display:
-          name: "Production Journalière (30 derniers jours)"
+          name: "Production journalière (30 derniers jours)"
         plugin:
           kind: TimeSeriesChart
           spec:
             visual:
-              display: "bars"
-              fillOpacity: 80
+              display: bar
             yAxis:
               format:
-                unit: "kwatth"
+                unit: watt-hours
         queries:
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "max_over_time(solar_yield_kwh[1d])"
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "max_over_time(solar_yield_kwh[1d]) * 1000"
                   seriesNameFormat: "Production journalière"
 
-    # === Comparaison Annuelle 5 Ans ===
     yearly_comparison:
       kind: Panel
       spec:
         display:
-          name: "Production Journalière sur 5 Ans (Superposée)"
+          name: "Comparaison 5 Ans (production journalière superposée)"
         plugin:
           kind: TimeSeriesChart
           spec:
+            legend:
+              position: right
+              mode: table
             visual:
-              display: "line"
               lineWidth: 2
               areaOpacity: 0
             yAxis:
               format:
-                unit: "kwatth"
-            legend:
-              displayMode: "table"
-              placement: "right"
+                unit: watt-hours
         queries:
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "max_over_time(solar_yield_kwh[1d])"
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "max_over_time(solar_yield_kwh[1d]) * 1000"
                   seriesNameFormat: "Année N"
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "max_over_time(solar_yield_kwh[1d] offset 365d)"
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "max_over_time(solar_yield_kwh[1d] offset 365d) * 1000"
                   seriesNameFormat: "Année N-1"
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "max_over_time(solar_yield_kwh[1d] offset 730d)"
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "max_over_time(solar_yield_kwh[1d] offset 730d) * 1000"
                   seriesNameFormat: "Année N-2"
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "max_over_time(solar_yield_kwh[1d] offset 1095d)"
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "max_over_time(solar_yield_kwh[1d] offset 1095d) * 1000"
                   seriesNameFormat: "Année N-3"
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "max_over_time(solar_yield_kwh[1d] offset 1460d)"
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: "max_over_time(solar_yield_kwh[1d] offset 1460d) * 1000"
                   seriesNameFormat: "Année N-4"
 
     annual_variation_stat:
@@ -288,50 +517,68 @@ spec:
         plugin:
           kind: StatChart
           spec:
-            value:
-              calc: "lastNotNull"
-            unit: "percent"
+            calculation: last-number
+            format:
+              unit: percent
         queries:
           - kind: TimeSeriesQuery
             spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "((sum_over_time(max_over_time(solar_yield_kwh[1d])[365d:1d]) - sum_over_time(max_over_time(solar_yield_kwh[1d] offset 365d)[365d:1d])) / sum_over_time(max_over_time(solar_yield_kwh[1d] offset 365d)[365d:1d])) * 100"
+                  datasource:
+                    kind: GlobalDatasource
+                    name: victoriametrics
+                  query: >-
+                    (
+                      (sum_over_time(max_over_time(solar_yield_kwh[1d])[365d:1d])
+                       - sum_over_time(max_over_time(solar_yield_kwh[1d] offset 365d)[365d:1d]))
+                      / clamp_min(sum_over_time(max_over_time(solar_yield_kwh[1d] offset 365d)[365d:1d]), 0.001)
+                    ) * 100
 
-  # === Layout (Grid) ===
   layouts:
     - kind: Grid
       spec:
         items:
+          # Ligne 1 : stats puissance + SOC batteries
           - x: 0
             y: 0
-            width: 6
+            width: 4
             height: 4
             content:
               $ref: "#/spec/panels/total_power_stat"
-
-          - x: 6
+          - x: 4
             y: 0
-            width: 6
+            width: 4
             height: 4
             content:
               $ref: "#/spec/panels/mppt_power_stat"
-
-          - x: 12
+          - x: 8
             y: 0
-            width: 6
+            width: 4
             height: 4
             content:
               $ref: "#/spec/panels/ac_power_stat"
-
-          - x: 18
+          - x: 12
             y: 0
-            width: 6
+            width: 4
             height: 4
             content:
-              $ref: "#/spec/panels/daily_yield_stat"
+              $ref: "#/spec/panels/bms1_soc_stat"
+          - x: 16
+            y: 0
+            width: 4
+            height: 4
+            content:
+              $ref: "#/spec/panels/bms2_soc_stat"
+          - x: 20
+            y: 0
+            width: 4
+            height: 4
+            content:
+              $ref: "#/spec/panels/irradiance_stat"
 
+          # Ligne 2 : courbe puissance
           - x: 0
             y: 4
             width: 24
@@ -339,44 +586,71 @@ spec:
             content:
               $ref: "#/spec/panels/power_timeseries"
 
+          # Ligne 3 : stats journalières
           - x: 0
             y: 12
             width: 6
             height: 4
             content:
               $ref: "#/spec/panels/today_stat"
-
           - x: 6
             y: 12
             width: 6
             height: 4
             content:
               $ref: "#/spec/panels/yesterday_stat"
-
           - x: 12
+            y: 12
+            width: 6
+            height: 4
+            content:
+              $ref: "#/spec/panels/weekly_yield_stat"
+          - x: 18
             y: 12
             width: 6
             height: 4
             content:
               $ref: "#/spec/panels/daily_variation_stat"
 
+          # Ligne 4 : batteries tension + courant
           - x: 0
             y: 16
+            width: 12
+            height: 6
+            content:
+              $ref: "#/spec/panels/bms_voltage_timeseries"
+          - x: 12
+            y: 16
+            width: 12
+            height: 6
+            content:
+              $ref: "#/spec/panels/bms_current_timeseries"
+
+          # Ligne 5 : irradiance + barres journalières
+          - x: 0
+            y: 22
+            width: 24
+            height: 6
+            content:
+              $ref: "#/spec/panels/irradiance_timeseries"
+
+          - x: 0
+            y: 28
             width: 24
             height: 8
             content:
               $ref: "#/spec/panels/daily_energy_bars"
 
+          # Ligne 6 : comparaison 5 ans
           - x: 0
-            y: 24
-            width: 24
+            y: 36
+            width: 20
             height: 10
             content:
               $ref: "#/spec/panels/yearly_comparison"
-
-          - x: 0
-            y: 34
-            width: 12
-            height: 4
+          - x: 20
+            y: 36
+            width: 4
+            height: 10
             content:
               $ref: "#/spec/panels/annual_variation_stat"
