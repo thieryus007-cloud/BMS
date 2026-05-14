@@ -3,6 +3,8 @@
 Guide d'installation de **Perses** (alternative légère et GitOps à Grafana)
 sur Raspberry Pi 5, en **coexistence avec Grafana** pendant une phase d'essai.
 
+Testé et validé avec **Perses 0.53.1** sur Pi5 aarch64.
+
 ---
 
 ## Pourquoi Perses en parallèle ?
@@ -15,118 +17,121 @@ sur Raspberry Pi 5, en **coexistence avec Grafana** pendant une phase d'essai.
 | Maturité | Très mature | Jeune (CNCF sandbox) |
 | Export PDF | Oui (plugin) | Non (prévu) |
 
-**Stratégie** : installer Perses sur le port 8090, laisser Grafana sur 3000.
+**Stratégie** : Perses sur port 8090, Grafana reste sur 3000.
 Les deux lisent VictoriaMetrics (port 8428) sans interférence.
-Migration définitive uniquement si Perses couvre 100 % des besoins.
 
 ---
 
 ## Installation rapide
 
 ```bash
-# Depuis ~/Daly-BMS-Rust
-bash scripts/setup-perses.sh
-
-# Avec données sur NVMe
+# Depuis ~/Daly-BMS-Rust (après make sync)
 bash scripts/setup-perses.sh --nvme
 
-# Version spécifique
-bash scripts/setup-perses.sh --version=0.49.0 --nvme
-```
+# Sans NVMe
+bash scripts/setup-perses.sh
 
-Le script est idempotent : relancer = mise à jour.
-
-```bash
 # Désinstaller
 sudo bash scripts/setup-perses.sh --uninstall
 ```
 
+Le script est **idempotent** : relancer = mise à jour.
+
 ---
 
-## Installation manuelle (référence)
+## Points techniques importants (Perses 0.50+)
 
-### 1. Téléchargement du binaire ARM64
+### Archive plate
 
-```bash
-mkdir -p ~/perses && cd ~/perses
+L'archive de release `perses_X.Y.Z_linux_arm64.tar.gz` extrait ses fichiers
+**à la racine** (pas de sous-dossier). Les binaires `perses` et `percli` sont
+directement dans le répertoire d'extraction.
 
-VERSION=$(curl -sf https://api.github.com/repos/perses/perses/releases/latest \
-    | grep tag_name | cut -d '"' -f 4)
+### Plugins
 
-wget "https://github.com/perses/perses/releases/download/${VERSION}/perses_${VERSION#v}_linux_arm64.tar.gz" \
-    -O perses.tar.gz
-tar xzf perses.tar.gz
+Perses 0.50+ utilise un système de plugins. L'archive contient un dossier
+`plugins-archive/` avec des archives `.tar.gz` par plugin. Le script extrait
+chaque plugin dans `/etc/perses/plugins/<NomPlugin>/`.
 
-sudo install -m 755 perses /usr/local/bin/
-sudo install -m 755 percli /usr/local/bin/
-```
+**Auto-découverte** : Perses charge `./plugins/` relatif au `WorkingDirectory`
+du service systemd (`/etc/perses`). **Aucune clé de config n'est nécessaire.**
 
-### 2. Configuration minimale
+> ⚠️ Ne pas ajouter `plugins.archive_path` ni `plugins.path` dans `config.yaml` :
+> ces clés font crasher Perses 0.53.
 
-`/etc/perses/config.yaml` :
+### Kind du plugin Prometheus
+
+Le schéma CUE du plugin déclare `#kind: "PrometheusDatasource"` — c'est le nom
+à utiliser partout, **pas** `Prometheus` :
 
 ```yaml
-server:
-  port: 8090
-  enableUI: true
+# GlobalDatasource
+spec:
+  plugin:
+    kind: PrometheusDatasource   # ✓ correct
+    # kind: Prometheus           # ✗ → "schema not found for plugin Prometheus"
+```
 
+### config.yaml minimal
+
+```yaml
 database:
   file:
-    folder: /var/lib/perses/db
+    folder: /mnt/nvme/perses/db   # ou /var/lib/perses/db
     extension: json
 
 provisioning:
-  dashboards:
-    - folder: /etc/perses/dashboards
-  datasources:
-    - folder: /etc/perses/datasources
+  interval: 1m
+  folders:
+    - /etc/perses/provisioning
 ```
 
-Créer les dossiers :
+> ⚠️ Pas de bloc `server:` dans le config — Perses 0.50+ l'ignore ou crashe.
+> Le port est passé via le flag CLI `--web.listen-address=:8090`.
 
-```bash
-sudo mkdir -p /etc/perses/{dashboards,datasources} /var/lib/perses/db
-sudo chown -R pi5compute:pi5compute /etc/perses /var/lib/perses
-```
+### Service systemd
 
-### 3. Service systemd
-
-```bash
-sudo tee /etc/systemd/system/perses.service > /dev/null <<'EOF'
-[Unit]
-Description=Perses Monitoring Dashboard
-After=network.target
-
+```ini
 [Service]
-Type=simple
 User=pi5compute
-ExecStart=/usr/local/bin/perses --config /etc/perses/config.yaml
-Restart=always
-RestartSec=5
-LimitNOFILE=65535
-WorkingDirectory=/var/lib/perses
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=perses
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now perses
+WorkingDirectory=/etc/perses          # ← plugin auto-discovery ./plugins/
+ExecStart=/usr/local/bin/perses \
+    --config /etc/perses/config.yaml \
+    --web.listen-address=:8090
 ```
-
-### 4. Accès
-
-- URL : `http://192.168.1.141:8090`
-- Pas de login par défaut (configurable via OIDC ou basic auth si besoin)
 
 ---
 
-## Configuration Datasource VictoriaMetrics
+## Structure des fichiers
 
-Fichier `/etc/perses/datasources/victoriametrics.yaml` :
+```
+/etc/perses/
+├── config.yaml                       ← config minimale
+├── plugins/                          ← plugins extraits (auto-découverte)
+│   ├── Prometheus-0.57.1/
+│   ├── StatChart-0.12.1/
+│   └── ...
+└── provisioning/                     ← ressources auto-chargées (interval: 1m)
+    ├── project-default.yaml          ← kind: Project
+    ├── victoriametrics-datasource.yaml  ← kind: GlobalDatasource
+    └── pv-solar-5y.yaml              ← kind: Dashboard
+```
+
+Sources versionées dans le repo :
+
+```
+contrib/perses/
+├── project-default.yaml
+├── victoriametrics-datasource.yaml
+└── dashboards/
+    └── pv-solar-5y.yaml
+```
+
+---
+
+## Datasource VictoriaMetrics
+
+`contrib/perses/victoriametrics-datasource.yaml` :
 
 ```yaml
 kind: GlobalDatasource
@@ -149,48 +154,72 @@ spec:
 ```
 
 > **Mode proxy** : Perses relaie les requêtes PromQL vers VictoriaMetrics
-> côté serveur. Nécessaire pour l'accès depuis le LAN (le navigateur ne
-> peut pas atteindre `127.0.0.1:8428` directement).
+> côté serveur. Nécessaire car le navigateur (LAN) ne peut pas atteindre
+> `127.0.0.1:8428` directement.
 
-Redémarrer après modification :
+---
+
+## Import / application des ressources
+
+Le provisioning par fichier est automatique (délai jusqu'à 1 min).
+Pour un import immédiat via `percli` :
 
 ```bash
-sudo systemctl restart perses
+# Se connecter
+percli login http://localhost:8090
+
+# Appliquer dans l'ordre (projet → datasource → dashboard)
+percli apply -f /etc/perses/provisioning/project-default.yaml
+percli apply -f /etc/perses/provisioning/victoriametrics-datasource.yaml
+percli apply -f /etc/perses/provisioning/pv-solar-5y.yaml
+
+# Vérifier
+percli get project
+percli get globaldatasource
+percli get dashboard -p default
 ```
 
 ---
 
 ## Dashboard PV Solaire
 
-Le dashboard `contrib/perses/dashboards/pv-solar-5y.yaml` est automatiquement
-copié dans `/etc/perses/dashboards/` par le script d'installation.
+`contrib/perses/dashboards/pv-solar-5y.yaml` — panels inclus :
 
-Il contient :
-- Puissance instantanée (total, MPPT DC, micro-onduleurs)
-- Production journalière et hebdomadaire
-- Comparaison J / J-1
-- Comparaison annuelle sur 5 ans superposée
-- État des batteries BMS (SOC, tension, courant)
-- Irradiance solaire (capteur PRALRAN)
+| Section | Panels |
+|---------|--------|
+| Puissance instantanée | Total PV, MPPT DC, Micro-onduleurs AC, irradiance |
+| Batteries | SOC BMS 1 (360Ah), SOC BMS 2 (320Ah) |
+| Courbes | Puissance temps réel, tensions, courants, irradiance |
+| Journalier | Aujourd'hui, hier, cette semaine, variation J/J-1 |
+| Historique | Production journalière 30j (barres) |
+| Comparaison | 5 ans superposés, variation annuelle N vs N-1 |
 
-### Migration depuis Grafana (optionnel)
-
-Si tu as un dashboard Grafana existant à migrer :
-
-```bash
-# Exporter le JSON Grafana puis migrer
-percli migrate -f pv-solar-5y.json -o yaml > pv-solar-5y.yaml
-
-# Vérifier et appliquer
-percli apply -f pv-solar-5y.yaml --project default
-
-# Copier pour provisioning automatique
-sudo cp pv-solar-5y.yaml /etc/perses/dashboards/
+Chaque panel référence explicitement la datasource :
+```yaml
+datasource:
+  kind: PrometheusDatasource
+  name: victoriametrics
 ```
 
-> La migration est best-effort. Les panels Prometheus/PromQL fonctionnent
-> très bien. Certains types de panels Grafana avancés peuvent nécessiter
-> des ajustements manuels.
+### Modifier le dashboard (GitOps)
+
+```bash
+# 1. Éditer sur le poste de dev
+vim contrib/perses/dashboards/pv-solar-5y.yaml
+
+# 2. Commit + push
+git add contrib/perses/dashboards/pv-solar-5y.yaml
+git commit -m "feat(perses): ..."
+git push
+
+# 3. Sur Pi5
+make sync
+sudo cp ~/Daly-BMS-Rust/contrib/perses/dashboards/pv-solar-5y.yaml \
+    /etc/perses/provisioning/pv-solar-5y.yaml
+# Le provisioning recharge automatiquement toutes les minutes
+# OU forcer :
+percli apply -f /etc/perses/provisioning/pv-solar-5y.yaml
+```
 
 ---
 
@@ -203,18 +232,23 @@ journalctl -u perses -f
 # Status
 systemctl status perses
 
-# Relancer après modification config
-sudo systemctl restart perses
-
-# Vérifier health
+# Healthcheck
 curl http://127.0.0.1:8090/api/v1/health
 
-# Lister les ressources provisionnées
-percli get datasource
-percli get dashboard
+# Relancer
+sudo systemctl restart perses
 
-# Mise à jour (idempotent)
-bash scripts/setup-perses.sh
+# Lister les ressources
+percli get project
+percli get globaldatasource
+percli get dashboard -p default
+
+# Diagnostics plugins
+ls /etc/perses/plugins/
+ls /etc/perses/plugins/Prometheus-0.57.1/schemas/
+
+# Vérifier config générée
+cat /etc/perses/config.yaml
 ```
 
 ---
@@ -224,17 +258,16 @@ bash scripts/setup-perses.sh
 ```
 Victron GX → MQTT → Pi5 (daly-bms) → VictoriaMetrics :8428
                                              |
-                              ┌──────────────┼──────────────┐
+                              ┌──────────────┴──────────────┐
                               ▼                             ▼
                     Grafana :3000                  Perses :8090
-                    (ancien)                       (essai)
+                    (dashboards existants)          (GitOps, YAML versionné)
 ```
-
-Portes utilisées sur le Pi5 :
 
 | Service | Port |
 |---------|------|
 | daly-bms-server | 8080 |
+| energy-manager | 8081 |
 | VictoriaMetrics | 8428 |
 | Grafana | 3000 |
 | Perses | 8090 |
@@ -243,18 +276,16 @@ Portes utilisées sur le Pi5 :
 
 ## Décision de migration
 
-Après la phase d'essai, choisir l'une de ces options :
-
 **Option A — Garder Perses uniquement**
 ```bash
 sudo systemctl disable --now grafana-server
 # Libère ~130 MB RAM
 ```
 
-**Option B — Garder les deux**
+**Option B — Coexistence permanente**
 ```bash
-# Ne rien faire — coexistence stable
-# Perses pour GitOps/alerting, Grafana pour exports PDF
+# Rien à faire — les deux coexistent sans interférence
+# Perses pour GitOps, Grafana pour exports PDF
 ```
 
 **Option C — Revenir sur Grafana seul**
@@ -264,12 +295,13 @@ sudo bash scripts/setup-perses.sh --uninstall
 
 ---
 
-## Notes
+## Troubleshooting
 
-- **Rétention** : gérée côté VictoriaMetrics (`-retentionPeriod=5y`)
-- **Mise à jour Perses** : relancer `bash scripts/setup-perses.sh` (détecte
-  automatiquement la dernière version)
-- **Dashboards versionés** : modifier `contrib/perses/dashboards/*.yaml` dans
-  Git, puis `make sync` sur le Pi5 + `sudo systemctl restart perses`
-- **Export PDF** : non disponible dans Perses pour l'instant — garder Grafana
-  en parallèle si tu en as besoin
+| Symptôme | Cause | Solution |
+|----------|-------|----------|
+| `connection refused` au démarrage | Clé inconnue dans config.yaml | Vérifier qu'il n'y a pas de bloc `server:` ni `plugins.archive_path` |
+| `schema not found for plugin Prometheus` | Mauvais kind dans la datasource | Utiliser `kind: PrometheusDatasource` (pas `Prometheus`) |
+| `No datasource found for kind 'PrometheusDatasource' and name 'undefined'` | Dashboard importé depuis Grafana sans datasource | `percli apply -f /etc/perses/provisioning/victoriametrics-datasource.yaml` |
+| Dashboard vide après provisioning | Délai jusqu'à 1 min | Attendre ou `percli apply -f ...` pour forcer |
+| `install: cannot stat 'perses_X.Y.Z_linux_arm64/perses'` | Archive plate (pas de sous-dossier) | Utiliser `EXTRACT_DIR="$TMPDIR_PERSES"` directement |
+| `percli: unknown flag --server` | percli utilise un fichier de config | `percli login http://localhost:8090` d'abord |
