@@ -199,7 +199,7 @@ metadata:
 spec:
   default: true
   plugin:
-    kind: Prometheus
+    kind: PrometheusDatasource
     spec:
       proxy:
         kind: HTTPProxy
