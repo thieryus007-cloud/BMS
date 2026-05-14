@@ -71,9 +71,9 @@ for arg in "$@"; do
     esac
 done
 
-# Résolution chemin données
+# Résolution chemins
 PERSES_DB_PATH="${PERSES_DATA_PATH:-/var/lib/perses}"
-# Dossier unique pour toutes les ressources provisonnées (format Perses 0.43+)
+# Dossier unique pour toutes les ressources provisionnées (format Perses 0.43+)
 PERSES_PROV_DIR="/etc/perses/provisioning"
 
 # ── Sudo ──────────────────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ step "Configuration Perses…"
 $SUDO mkdir -p "$PERSES_PROV_DIR" "${PERSES_DB_PATH}/db"
 
 # Format provisioning Perses 0.43+ : un seul champ 'folders' (liste de dossiers).
-# Toutes les ressources (datasources, dashboards) sont dans le même dossier.
+# Toutes les ressources (Project, GlobalDatasource, Dashboard) sont dans le même dossier.
 $SUDO tee /etc/perses/config.yaml > /dev/null <<PERSES_CFG
 database:
   file:
@@ -190,11 +190,20 @@ PERSES_CFG
 
 info "Configuration créée : /etc/perses/config.yaml"
 
-# ── 4. Provisioning Datasource VictoriaMetrics ────────────────────────────────
-step "Provisioning datasource VictoriaMetrics (mode proxy LAN)…"
+# ── 4. Fichiers de provisioning ───────────────────────────────────────────────
+step "Provisioning des ressources Perses…"
 
-# Mode proxy : les requêtes PromQL passent par le serveur Perses vers VM.
-# Nécessaire pour l'accès LAN (le navigateur ne peut pas atteindre 127.0.0.1:8428).
+# 4a. Projet "default" (requis avant tout dashboard dans Perses 0.43+)
+$SUDO tee "${PERSES_PROV_DIR}/project-default.yaml" > /dev/null <<PROJ
+kind: Project
+metadata:
+  name: default
+spec: {}
+PROJ
+
+# 4b. Datasource VictoriaMetrics (mode proxy LAN)
+# Le navigateur ne peut pas atteindre 127.0.0.1:8428 depuis le LAN :
+# Perses proxifie les requêtes PromQL côté serveur.
 $SUDO tee "${PERSES_PROV_DIR}/victoriametrics-datasource.yaml" > /dev/null <<DS_CFG
 kind: GlobalDatasource
 metadata:
@@ -215,22 +224,20 @@ spec:
               method: POST
 DS_CFG
 
-info "Datasource VictoriaMetrics provisonnée dans ${PERSES_PROV_DIR}/"
-
-# ── 5. Dashboard PV Solaire ───────────────────────────────────────────────────
-step "Provisioning dashboard PV Solaire…"
-
+# 4c. Dashboard PV Solaire
 DASHBOARD_SRC="${PERSES_PROVISION_SRC}/dashboards/pv-solar-5y.yaml"
 if [[ -f "$DASHBOARD_SRC" ]]; then
     $SUDO cp "$DASHBOARD_SRC" "${PERSES_PROV_DIR}/pv-solar-5y.yaml"
-    info "Dashboard PV Solaire provisionné dans ${PERSES_PROV_DIR}/"
+    info "Dashboard PV Solaire copié dans ${PERSES_PROV_DIR}/"
 else
     warn "Dashboard non trouvé : $DASHBOARD_SRC"
-    warn "Pour migrer depuis Grafana :"
-    warn "  percli migrate -f pv-solar-5y.json -o yaml > ${PERSES_PROV_DIR}/pv-solar-5y.yaml"
+    warn "Appliquer manuellement après démarrage :"
+    warn "  percli apply -f contrib/perses/dashboards/pv-solar-5y.yaml --server http://localhost:${PERSES_PORT}"
 fi
 
-# ── 6. Service systemd ────────────────────────────────────────────────────────
+info "Ressources provisionnées dans ${PERSES_PROV_DIR}/"
+
+# ── 5. Service systemd ────────────────────────────────────────────────────────
 step "Création du service systemd perses…"
 
 # Résoudre l'utilisateur du service (pi5compute en priorité)
@@ -243,7 +250,6 @@ else
     warn "Utilisateur pi5compute non trouvé — service lancé sous $SERVICE_USER"
 fi
 
-# Construire la commande ExecStart avec le flag de port détecté
 EXEC_CMD="/usr/local/bin/perses --config /etc/perses/config.yaml"
 [[ -n "$LISTEN_FLAG" ]] && EXEC_CMD="$EXEC_CMD $LISTEN_FLAG"
 
@@ -279,7 +285,7 @@ $SUDO systemctl enable --now perses
 info "Service perses activé (User=${SERVICE_USER})"
 info "ExecStart: ${EXEC_CMD}"
 
-# ── 7. Pare-feu ───────────────────────────────────────────────────────────────
+# ── 6. Pare-feu ───────────────────────────────────────────────────────────────
 if ! $SKIP_FIREWALL && command -v ufw >/dev/null 2>&1; then
     if $SUDO ufw status 2>/dev/null | grep -q "Status: active"; then
         step "Ouverture port UFW ${PERSES_PORT}/tcp…"
@@ -288,7 +294,7 @@ if ! $SKIP_FIREWALL && command -v ufw >/dev/null 2>&1; then
     fi
 fi
 
-# ── 8. Healthcheck ────────────────────────────────────────────────────────────
+# ── 7. Healthcheck + création du projet via API ───────────────────────────────
 step "Attente du démarrage Perses (max 20s)…"
 STARTED=false
 for i in {1..10}; do
@@ -301,10 +307,45 @@ done
 
 if $STARTED; then
     info "Perses opérationnel sur http://127.0.0.1:${PERSES_PORT}"
+
+    # Créer le projet "default" via l'API si absent
+    # (le provisioning de fichier ne crée pas les projets automatiquement)
+    step "Création du projet \"default\" via l'API…"
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+        "http://127.0.0.1:${PERSES_PORT}/api/v1/projects/default" 2>/dev/null || echo "000")
+
+    if [[ "$HTTP_STATUS" == "200" ]]; then
+        info "Projet \"default\" déjà existant"
+    else
+        CREATE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "http://127.0.0.1:${PERSES_PORT}/api/v1/projects" \
+            -H 'Content-Type: application/json' \
+            -d '{"kind":"Project","metadata":{"name":"default"},"spec":{}}' 2>/dev/null || echo "000")
+        if [[ "$CREATE_STATUS" == "200" || "$CREATE_STATUS" == "201" ]]; then
+            info "Projet \"default\" créé"
+        else
+            warn "Création projet via API : status $CREATE_STATUS"
+            warn "Créer manuellement : percli create project default --server http://localhost:${PERSES_PORT}"
+        fi
+    fi
+
+    # Appliquer les ressources avec percli si disponible
+    if command -v percli >/dev/null 2>&1; then
+        step "Application des ressources via percli…"
+        sleep 1
+        percli apply -f "${PERSES_PROV_DIR}/victoriametrics-datasource.yaml" \
+            --server "http://127.0.0.1:${PERSES_PORT}" 2>/dev/null \
+            && info "Datasource VictoriaMetrics appliquée" \
+            || warn "percli apply datasource : erreur (vérifier manuellement)"
+        percli apply -f "${PERSES_PROV_DIR}/pv-solar-5y.yaml" \
+            --server "http://127.0.0.1:${PERSES_PORT}" 2>/dev/null \
+            && info "Dashboard PV Solaire appliqué" \
+            || warn "percli apply dashboard : erreur (vérifier manuellement)"
+    fi
 else
     warn "Perses ne répond pas encore"
     warn "Vérifier : journalctl -u perses -n 20"
-    warn "Déboguer   : sudo -u ${SERVICE_USER:-pi5compute} $EXEC_CMD"
+    warn "Déboguer  : sudo -u ${SERVICE_USER} $EXEC_CMD"
 fi
 
 # ── Résumé final ──────────────────────────────────────────────────────────────
