@@ -172,9 +172,6 @@ database:
     folder: ${DB_PATH}
     extension: json
 
-plugins:
-  archive_path: ${PERSES_PLUGINS_DIR}
-
 provisioning:
   interval: 1m
   folders:
