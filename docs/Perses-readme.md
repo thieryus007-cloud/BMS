@@ -1,30 +1,71 @@
-# 📊 Perses + VictoriaMetrics pour Monitoring PV Solaire
+# Perses + VictoriaMetrics — Monitoring PV Solaire
 
-Guide d'installation de **Perses** (alternative légère et GitOps à Grafana) sur Raspberry Pi 5 avec migration du dashboard PV Solaire.
+Guide d'installation de **Perses** (alternative légère et GitOps à Grafana)
+sur Raspberry Pi 5, en **coexistence avec Grafana** pendant une phase d'essai.
 
 ---
 
-## 🚀 Installation (natif - recommandée sur Pi 5)
+## Pourquoi Perses en parallèle ?
 
-Perses est très léger (écrit en Go) et idéal pour un Raspberry Pi 5.
+| Critère | Grafana | Perses |
+|---------|---------|--------|
+| RAM au repos | ~150 MB | ~20 MB |
+| Dashboards en Git | JSON peu lisible | YAML natif versionnables |
+| Dépendances | PostgreSQL ou SQLite | Fichiers JSON uniquement |
+| Maturité | Très mature | Jeune (CNCF sandbox) |
+| Export PDF | Oui (plugin) | Non (prévu) |
+
+**Stratégie** : installer Perses sur le port 8090, laisser Grafana sur 3000.
+Les deux lisent VictoriaMetrics (port 8428) sans interférence.
+Migration définitive uniquement si Perses couvre 100 % des besoins.
+
+---
+
+## Installation rapide
+
+```bash
+# Depuis ~/Daly-BMS-Rust
+bash scripts/setup-perses.sh
+
+# Avec données sur NVMe
+bash scripts/setup-perses.sh --nvme
+
+# Version spécifique
+bash scripts/setup-perses.sh --version=0.49.0 --nvme
+```
+
+Le script est idempotent : relancer = mise à jour.
+
+```bash
+# Désinstaller
+sudo bash scripts/setup-perses.sh --uninstall
+```
+
+---
+
+## Installation manuelle (référence)
 
 ### 1. Téléchargement du binaire ARM64
 
 ```bash
-# Créer un dossier dédié
 mkdir -p ~/perses && cd ~/perses
 
-# Récupérer la dernière version (remplace par la version actuelle)
-VERSION=$(curl -s https://api.github.com/repos/perses/perses/releases/latest | grep tag_name | cut -d '"' -f 4)
+VERSION=$(curl -sf https://api.github.com/repos/perses/perses/releases/latest \
+    | grep tag_name | cut -d '"' -f 4)
 
-wget https://github.com/perses/perses/releases/download/${VERSION}/perses_${VERSION#v}_linux_arm64.tar.gz
+wget "https://github.com/perses/perses/releases/download/${VERSION}/perses_${VERSION#v}_linux_arm64.tar.gz" \
+    -O perses.tar.gz
+tar xzf perses.tar.gz
 
-tar xzf perses_${VERSION#v}_linux_arm64.tar.gz
-sudo cp perses /usr/local/bin/
-sudo cp percli /usr/local/bin/
-2. Configuration minimale
-Crée le fichier /etc/perses/config.yaml :
-# /etc/perses/config.yaml
+sudo install -m 755 perses /usr/local/bin/
+sudo install -m 755 percli /usr/local/bin/
+```
+
+### 2. Configuration minimale
+
+`/etc/perses/config.yaml` :
+
+```yaml
 server:
   port: 8090
   enableUI: true
@@ -39,71 +80,196 @@ provisioning:
     - folder: /etc/perses/dashboards
   datasources:
     - folder: /etc/perses/datasources
-Crée les dossiers :
-sudo mkdir -p /etc/perses/{dashboards,datasources} /var/lib/perses/db
-sudo chown -R $USER:$USER /etc/perses /var/lib/perses
-3. Service systemd
-sudo tee /etc/systemd/system/perses.service > /dev/null <
-4. Accès
-	•	URL : http://:8080
-	•	Premier accès : pas de login par défaut (tu peux configurer l’authentification plus tard).
+```
 
-🔌 Configuration Data Source VictoriaMetrics
-Crée /etc/perses/datasources/victoriametrics.yaml :
-apiVersion: 1
-kind: Datasource
+Créer les dossiers :
+
+```bash
+sudo mkdir -p /etc/perses/{dashboards,datasources} /var/lib/perses/db
+sudo chown -R pi5compute:pi5compute /etc/perses /var/lib/perses
+```
+
+### 3. Service systemd
+
+```bash
+sudo tee /etc/systemd/system/perses.service > /dev/null <<'EOF'
+[Unit]
+Description=Perses Monitoring Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=pi5compute
+ExecStart=/usr/local/bin/perses --config /etc/perses/config.yaml
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+WorkingDirectory=/var/lib/perses
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=perses
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now perses
+```
+
+### 4. Accès
+
+- URL : `http://192.168.1.141:8090`
+- Pas de login par défaut (configurable via OIDC ou basic auth si besoin)
+
+---
+
+## Configuration Datasource VictoriaMetrics
+
+Fichier `/etc/perses/datasources/victoriametrics.yaml` :
+
+```yaml
+kind: GlobalDatasource
 metadata:
   name: victoriametrics
-  project: perses
 spec:
-  display:
-    name: VictoriaMetrics
+  default: true
   plugin:
-    kind: Prometheus
+    kind: PrometheusDatasource
     spec:
-      url: http://127.0.0.1:8428
-      proxy: true
-      timeInterval: 10s
-Redémarre Perses :
+      proxy:
+        kind: HTTPProxy
+        spec:
+          url: "http://127.0.0.1:8428"
+          allowedEndpoints:
+            - endpointPattern: "/api/v1/.*"
+              method: GET
+            - endpointPattern: "/api/v1/.*"
+              method: POST
+```
+
+> **Mode proxy** : Perses relaie les requêtes PromQL vers VictoriaMetrics
+> côté serveur. Nécessaire pour l'accès depuis le LAN (le navigateur ne
+> peut pas atteindre `127.0.0.1:8428` directement).
+
+Redémarrer après modification :
+
+```bash
+sudo systemctl restart perses
+```
+
+---
+
+## Dashboard PV Solaire
+
+Le dashboard `contrib/perses/dashboards/pv-solar-5y.yaml` est automatiquement
+copié dans `/etc/perses/dashboards/` par le script d'installation.
+
+Il contient :
+- Puissance instantanée (total, MPPT DC, micro-onduleurs)
+- Production journalière et hebdomadaire
+- Comparaison J / J-1
+- Comparaison annuelle sur 5 ans superposée
+- État des batteries BMS (SOC, tension, courant)
+- Irradiance solaire (capteur PRALRAN)
+
+### Migration depuis Grafana (optionnel)
+
+Si tu as un dashboard Grafana existant à migrer :
+
+```bash
+# Exporter le JSON Grafana puis migrer
+percli migrate -f pv-solar-5y.json -o yaml > pv-solar-5y.yaml
+
+# Vérifier et appliquer
+percli apply -f pv-solar-5y.yaml --project default
+
+# Copier pour provisioning automatique
+sudo cp pv-solar-5y.yaml /etc/perses/dashboards/
+```
+
+> La migration est best-effort. Les panels Prometheus/PromQL fonctionnent
+> très bien. Certains types de panels Grafana avancés peuvent nécessiter
+> des ajustements manuels.
+
+---
+
+## Commandes utiles
+
+```bash
+# Logs
+journalctl -u perses -f
+
+# Status
+systemctl status perses
+
+# Relancer après modification config
 sudo systemctl restart perses
 
-📈 Migration du Dashboard PV Solaire
-Méthode recommandée : via percli
-# Migration du dashboard Grafana
-percli migrate -f pv-solar-5y.json --online -o yaml > perses-pv-solar-5y.yaml
-Puis applique-le :
-percli apply -f perses-pv-solar-5y.yaml --project perses
-Alternative via UI :
-	1	Va dans Dashboards → Create → Import / Migrate.
-	2	Colle ou uploade ton JSON Grafana.
-Note : La migration est best-effort. Les panels Prometheus fonctionnent très bien ; certains styles ou panels avancés peuvent nécessiter des ajustements manuels.
-Copie le dashboard migré dans /etc/perses/dashboards/ pour du provisioning automatique.
+# Vérifier health
+curl http://127.0.0.1:8090/api/v1/health
 
-🔧 Requêtes PromQL (adaptées)
-Perses utilise le même langage PromQL / MetricsQL que Grafana.
-Utilise les métriques de ton projet (solar_total_w, solar_yield_kwh, etc.) comme dans ton dashboard Grafana.
+# Lister les ressources provisionnées
+percli get datasource
+percli get dashboard
 
-📄 Export PDF / Rapports
-Perses ne possède pas encore d’export PDF natif aussi mature que Grafana, mais tu peux :
-	1	Utiliser l’export image du navigateur.
-	2	Installer un outil externe (wkhtmltopdf, puppeteer, ou un script avec Playwright).
-	3	Ou garder Grafana en parallèle pour les exports PDF pendant la phase de test.
+# Mise à jour (idempotent)
+bash scripts/setup-perses.sh
+```
 
-📋 Architecture Recommandée
-Victron GX → MQTT → Pi5 (Daly-BMS) → VictoriaMetrics
-                                           ↓
-                                    Perses (port 8090)
-Avantages sur Pi 5 :
-	•	Empreinte mémoire beaucoup plus faible que Grafana.
-	•	Dashboards en fichiers YAML (versionnables dans Git).
-	•	Parfait pour du GitOps.
+---
 
-📝 Notes & Optimisations
-	•	Ports : Grafana (3000) + Perses (8090) peuvent tourner en parallèle sans problème.
-	•	Reverse Proxy : Utilise Nginx pour accéder via https://perses.mondomaine.local.
-	•	Mise à jour : Télécharge la nouvelle version et remplace le binaire.
-	•	Sécurité : Configure l’authentification (OIDC, basic auth) dans config.yaml pour la production.
-	•	Rétention : Gérée côté VictoriaMetrics (-retentionPeriod=5y).
-Pour tester en parallèle : Laisse Grafana actif pendant que tu valides Perses.
+## Architecture — Coexistence Grafana + Perses
 
-Guide créé pour une migration progressive Grafana → Perses sur Raspberry Pi 5 avec monitoring PV Victron + VictoriaMetrics.
+```
+Victron GX → MQTT → Pi5 (daly-bms) → VictoriaMetrics :8428
+                                             |
+                              ┌──────────────┼──────────────┐
+                              ▼                             ▼
+                    Grafana :3000                  Perses :8090
+                    (ancien)                       (essai)
+```
+
+Portes utilisées sur le Pi5 :
+
+| Service | Port |
+|---------|------|
+| daly-bms-server | 8080 |
+| VictoriaMetrics | 8428 |
+| Grafana | 3000 |
+| Perses | 8090 |
+
+---
+
+## Décision de migration
+
+Après la phase d'essai, choisir l'une de ces options :
+
+**Option A — Garder Perses uniquement**
+```bash
+sudo systemctl disable --now grafana-server
+# Libère ~130 MB RAM
+```
+
+**Option B — Garder les deux**
+```bash
+# Ne rien faire — coexistence stable
+# Perses pour GitOps/alerting, Grafana pour exports PDF
+```
+
+**Option C — Revenir sur Grafana seul**
+```bash
+sudo bash scripts/setup-perses.sh --uninstall
+```
+
+---
+
+## Notes
+
+- **Rétention** : gérée côté VictoriaMetrics (`-retentionPeriod=5y`)
+- **Mise à jour Perses** : relancer `bash scripts/setup-perses.sh` (détecte
+  automatiquement la dernière version)
+- **Dashboards versionés** : modifier `contrib/perses/dashboards/*.yaml` dans
+  Git, puis `make sync` sur le Pi5 + `sudo systemctl restart perses`
+- **Export PDF** : non disponible dans Perses pour l'instant — garder Grafana
+  en parallèle si tu en as besoin

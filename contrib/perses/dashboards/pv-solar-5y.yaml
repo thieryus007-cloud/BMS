@@ -1,30 +1,20 @@
 kind: Dashboard
 metadata:
   name: pv-solar-5y
-  project: perses
+  project: default
   labels:
     category: pv
     source: victron
 spec:
   display:
-    name: "☀️ PV Solaire - Monitoring & Comparaison 5 Ans"
+    name: "PV Solaire - Monitoring & Comparaison 5 Ans"
     description: "Monitoring PV Victron + Daly-BMS avec comparaison multi-années — VictoriaMetrics"
 
   duration: 7d
   refreshInterval: "30s"
 
-  datasources:
-    victoriametrics:
-      default: true
-      plugin:
-        kind: PrometheusDatasource
-        spec:
-          url: "http://127.0.0.1:8428"
-          proxy: true
-          timeInterval: "10s"
-
   panels:
-    # === Puissance Instantanée ===
+    # ── Puissance instantanée ────────────────────────────────────────────────
     total_power_stat:
       kind: Panel
       spec:
@@ -83,11 +73,11 @@ spec:
                 spec:
                   query: "pvinv_power_w"
 
-    daily_yield_stat:
+    weekly_yield_stat:
       kind: Panel
       spec:
         display:
-          name: "Production du Jour"
+          name: "Production 7 Jours (kWh)"
         plugin:
           kind: StatChart
           spec:
@@ -100,7 +90,7 @@ spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "max_over_time(solar_yield_kwh[24h])"
+                  query: "sum_over_time(max_over_time(solar_yield_kwh[1d])[7d:1d])"
 
     power_timeseries:
       kind: Panel
@@ -143,7 +133,7 @@ spec:
                   query: "pvinv_power_w"
                   seriesNameFormat: "Micro-onduleurs (AC)"
 
-    # === Comparaison Quotidienne ===
+    # ── Comparaison quotidienne ───────────────────────────────────────────────
     today_stat:
       kind: Panel
       spec:
@@ -199,7 +189,11 @@ spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "((max_over_time(solar_yield_kwh[24h]) - max_over_time(solar_yield_kwh[24h] offset 24h)) / max_over_time(solar_yield_kwh[24h] offset 24h)) * 100"
+                  query: |
+                    100 * (
+                      max_over_time(solar_yield_kwh[24h])
+                      - max_over_time(solar_yield_kwh[24h] offset 24h)
+                    ) / clamp_min(max_over_time(solar_yield_kwh[24h] offset 24h), 0.001)
 
     daily_energy_bars:
       kind: Panel
@@ -224,7 +218,7 @@ spec:
                   query: "max_over_time(solar_yield_kwh[1d])"
                   seriesNameFormat: "Production journalière"
 
-    # === Comparaison Annuelle 5 Ans ===
+    # ── Comparaison annuelle 5 ans ────────────────────────────────────────────
     yearly_comparison:
       kind: Panel
       spec:
@@ -297,13 +291,181 @@ spec:
               plugin:
                 kind: PrometheusTimeSeriesQuery
                 spec:
-                  query: "((sum_over_time(max_over_time(solar_yield_kwh[1d])[365d:1d]) - sum_over_time(max_over_time(solar_yield_kwh[1d] offset 365d)[365d:1d])) / sum_over_time(max_over_time(solar_yield_kwh[1d] offset 365d)[365d:1d])) * 100"
+                  query: |
+                    100 * (
+                      sum_over_time(max_over_time(solar_yield_kwh[1d])[365d:1d])
+                      - sum_over_time(max_over_time(solar_yield_kwh[1d] offset 365d)[365d:1d])
+                    ) / clamp_min(
+                      sum_over_time(max_over_time(solar_yield_kwh[1d] offset 365d)[365d:1d]),
+                      0.001
+                    )
 
-  # === Layout (Grid) ===
+    # ── Batteries BMS ─────────────────────────────────────────────────────────
+    bms1_soc_stat:
+      kind: Panel
+      spec:
+        display:
+          name: "BMS 1 — SOC (360 Ah)"
+        plugin:
+          kind: StatChart
+          spec:
+            value:
+              calc: "lastNotNull"
+            unit: "percent"
+            colorMode: "threshold"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: "bms_soc_percent{id=\"1\"}"
+
+    bms2_soc_stat:
+      kind: Panel
+      spec:
+        display:
+          name: "BMS 2 — SOC (320 Ah)"
+        plugin:
+          kind: StatChart
+          spec:
+            value:
+              calc: "lastNotNull"
+            unit: "percent"
+            colorMode: "threshold"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: "bms_soc_percent{id=\"2\"}"
+
+    bms_voltage_timeseries:
+      kind: Panel
+      spec:
+        display:
+          name: "Tension Batteries"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            visual:
+              display: "line"
+              lineWidth: 1.5
+              areaOpacity: 0.1
+            yAxis:
+              format:
+                unit: "volt"
+            legend:
+              displayMode: "table"
+              placement: "right"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: "bms_pack_voltage_v{id=\"1\"}"
+                  seriesNameFormat: "BMS 1 (360Ah)"
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: "bms_pack_voltage_v{id=\"2\"}"
+                  seriesNameFormat: "BMS 2 (320Ah)"
+
+    bms_current_timeseries:
+      kind: Panel
+      spec:
+        display:
+          name: "Courant Batteries (+ charge / - décharge)"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            visual:
+              display: "line"
+              lineWidth: 1.5
+              areaOpacity: 0.1
+            yAxis:
+              format:
+                unit: "ampere"
+            legend:
+              displayMode: "table"
+              placement: "right"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: "bms_pack_current_a{id=\"1\"}"
+                  seriesNameFormat: "BMS 1 (360Ah)"
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: "bms_pack_current_a{id=\"2\"}"
+                  seriesNameFormat: "BMS 2 (320Ah)"
+
+    # ── Irradiance ────────────────────────────────────────────────────────────
+    irradiance_stat:
+      kind: Panel
+      spec:
+        display:
+          name: "Irradiance (W/m²)"
+        plugin:
+          kind: StatChart
+          spec:
+            value:
+              calc: "lastNotNull"
+            unit: "watt"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: "irradiance_w_m2"
+
+    irradiance_timeseries:
+      kind: Panel
+      spec:
+        display:
+          name: "Irradiance vs Puissance PV"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            visual:
+              display: "line"
+              lineWidth: 1.5
+              areaOpacity: 0.1
+            legend:
+              displayMode: "table"
+              placement: "right"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: "irradiance_w_m2"
+                  seriesNameFormat: "Irradiance (W/m²)"
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: "solar_total_w / 10"
+                  seriesNameFormat: "Puissance PV / 10 (W)"
+
+  # ── Layout (Grid 24 colonnes) ─────────────────────────────────────────────
   layouts:
     - kind: Grid
       spec:
         items:
+          # Ligne 0 — Stats puissance instantanée
           - x: 0
             y: 0
             width: 6
@@ -330,8 +492,9 @@ spec:
             width: 6
             height: 4
             content:
-              $ref: "#/spec/panels/daily_yield_stat"
+              $ref: "#/spec/panels/weekly_yield_stat"
 
+          # Ligne 4 — Courbe temps réel
           - x: 0
             y: 4
             width: 24
@@ -339,6 +502,7 @@ spec:
             content:
               $ref: "#/spec/panels/power_timeseries"
 
+          # Ligne 12 — Comparaison journalière
           - x: 0
             y: 12
             width: 6
@@ -360,6 +524,14 @@ spec:
             content:
               $ref: "#/spec/panels/daily_variation_stat"
 
+          - x: 18
+            y: 12
+            width: 6
+            height: 4
+            content:
+              $ref: "#/spec/panels/irradiance_stat"
+
+          # Ligne 16 — Production journalière 30j
           - x: 0
             y: 16
             width: 24
@@ -367,16 +539,54 @@ spec:
             content:
               $ref: "#/spec/panels/daily_energy_bars"
 
+          # Ligne 24 — Comparaison 5 ans
           - x: 0
             y: 24
-            width: 24
+            width: 18
             height: 10
             content:
               $ref: "#/spec/panels/yearly_comparison"
 
-          - x: 0
-            y: 34
-            width: 12
-            height: 4
+          - x: 18
+            y: 24
+            width: 6
+            height: 10
             content:
               $ref: "#/spec/panels/annual_variation_stat"
+
+          # Ligne 34 — Irradiance vs puissance
+          - x: 0
+            y: 34
+            width: 24
+            height: 8
+            content:
+              $ref: "#/spec/panels/irradiance_timeseries"
+
+          # Ligne 42 — Batteries BMS
+          - x: 0
+            y: 42
+            width: 6
+            height: 4
+            content:
+              $ref: "#/spec/panels/bms1_soc_stat"
+
+          - x: 6
+            y: 42
+            width: 6
+            height: 4
+            content:
+              $ref: "#/spec/panels/bms2_soc_stat"
+
+          - x: 0
+            y: 46
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/bms_voltage_timeseries"
+
+          - x: 12
+            y: 46
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/bms_current_timeseries"
