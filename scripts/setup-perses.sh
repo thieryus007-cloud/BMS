@@ -121,9 +121,9 @@ trap 'rm -rf "$TMPDIR_PERSES"' EXIT
 ARCHIVE_URL="https://github.com/perses/perses/releases/download/${LATEST}/perses_${VERSION}_linux_arm64.tar.gz"
 step "Téléchargement : ${ARCHIVE_URL}"
 curl -fsSL "${ARCHIVE_URL}" -o "${TMPDIR_PERSES}/perses.tar.gz"
+# L'archive est plate (pas de sous-dossier) → extraire directement dans TMPDIR_PERSES
 tar xzf "${TMPDIR_PERSES}/perses.tar.gz" -C "${TMPDIR_PERSES}"
-
-EXTRACT_DIR="${TMPDIR_PERSES}/perses_${VERSION}_linux_arm64"
+EXTRACT_DIR="${TMPDIR_PERSES}"
 
 $SUDO install -m 0755 "${EXTRACT_DIR}/perses"  /usr/local/bin/perses
 $SUDO install -m 0755 "${EXTRACT_DIR}/percli"  /usr/local/bin/percli
