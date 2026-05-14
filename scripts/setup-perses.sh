@@ -230,27 +230,11 @@ info "Ressources de provisioning prêtes dans /etc/perses/provisioning/"
 # ── 6. Service systemd ────────────────────────────────────────────────────────
 step "Création du service systemd perses…"
 
-# ── 5. Service systemd ────────────────────────────────────────────────────────
-step "Création du service systemd perses…"
-
-if id "pi5compute" &>/dev/null; then
-    SERVICE_USER="pi5compute"
-elif [[ -n "${SUDO_USER:-}" ]] && id "${SUDO_USER}" &>/dev/null; then
-    SERVICE_USER="$SUDO_USER"
-else
-    SERVICE_USER="$(logname 2>/dev/null || echo pi)"
-    warn "Utilisateur pi5compute non trouvé — service lancé sous $SERVICE_USER"
-fi
-
-EXEC_CMD="/usr/local/bin/perses --config /etc/perses/config.yaml"
-[[ -n "$LISTEN_FLAG" ]] && EXEC_CMD="$EXEC_CMD $LISTEN_FLAG"
-
 $SUDO tee /etc/systemd/system/perses.service > /dev/null <<SYSTEMD_UNIT
 [Unit]
 Description=Perses Monitoring Dashboard
 Documentation=https://perses.dev
 After=network.target
-Wants=victoriametrics.service
 
 [Service]
 Type=simple
@@ -266,8 +250,6 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 SYSTEMD_UNIT
-
-$SUDO chown -R "${SERVICE_USER}:${SERVICE_USER}" /etc/perses "$PERSES_DB_PATH" 2>/dev/null || true
 
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now perses
