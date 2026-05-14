@@ -22,7 +22,7 @@ spec:
           spec:
             calculation: last-number
             format:
-              unit: watts
+              unit: "decimal"
             thresholds:
               steps:
                 - color: "#73BF69"
@@ -52,7 +52,7 @@ spec:
           spec:
             calculation: last-number
             format:
-              unit: watts
+              unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -74,7 +74,7 @@ spec:
           spec:
             calculation: last-number
             format:
-              unit: watts
+              unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -96,7 +96,7 @@ spec:
           spec:
             calculation: last-number
             format:
-              unit: watt-hours
+              unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -118,7 +118,7 @@ spec:
           spec:
             calculation: last-number
             format:
-              unit: watt-hours
+              unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -167,7 +167,7 @@ spec:
           spec:
             calculation: last-number
             format:
-              unit: watt-hours
+              unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -256,7 +256,7 @@ spec:
               lineWidth: 2
             yAxis:
               format:
-                unit: watts
+                unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -304,7 +304,7 @@ spec:
               lineWidth: 2
             yAxis:
               format:
-                unit: volts
+                unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -342,7 +342,7 @@ spec:
               lineWidth: 2
             yAxis:
               format:
-                unit: amperes
+                unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -375,7 +375,7 @@ spec:
           spec:
             calculation: last-number
             format:
-              unit: "W/m²"
+              unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -402,7 +402,7 @@ spec:
               areaOpacity: 0.15
             yAxis:
               format:
-                unit: "W/m²"
+                unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -427,7 +427,7 @@ spec:
               display: bar
             yAxis:
               format:
-                unit: watt-hours
+                unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
@@ -456,7 +456,7 @@ spec:
               areaOpacity: 0
             yAxis:
               format:
-                unit: watt-hours
+                unit: "decimal"
         queries:
           - kind: TimeSeriesQuery
             spec:
