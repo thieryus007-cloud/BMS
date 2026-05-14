@@ -73,6 +73,8 @@ done
 
 # Résolution chemin données
 PERSES_DB_PATH="${PERSES_DATA_PATH:-/var/lib/perses}"
+# Dossier unique pour toutes les ressources provisonnées (format Perses 0.43+)
+PERSES_PROV_DIR="/etc/perses/provisioning"
 
 # ── Sudo ──────────────────────────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
@@ -156,25 +158,24 @@ rm -rf "$EXTRACT_DIR"
 
 info "Perses ${PERSES_VERSION} installé (/usr/local/bin/)"
 
-# Afficher les flags disponibles pour déboguer si besoin
+# Détecter le flag d'écoute (varie selon la version)
 LISTEN_FLAG=""
 if perses --help 2>&1 | grep -q 'web.listen-address'; then
     LISTEN_FLAG="--web.listen-address=:${PERSES_PORT}"
-elif perses --help 2>&1 | grep -q 'addr'; then
+elif perses --help 2>&1 | grep -q '\--addr'; then
     LISTEN_FLAG="--addr=:${PERSES_PORT}"
 else
-    warn "Flag d'écoute inconnu — Perses écoutera sur son port par défaut (8080)"
+    warn "Flag d'écoute inconnu — Perses écoutera sur son port par défaut"
     warn "Vérifier 'perses --help' pour configurer le port $PERSES_PORT"
 fi
 
 # ── 3. Création de la configuration ───────────────────────────────────────────
 step "Configuration Perses…"
 
-$SUDO mkdir -p /etc/perses/dashboards /etc/perses/datasources
-$SUDO mkdir -p "${PERSES_DB_PATH}/db"
+$SUDO mkdir -p "$PERSES_PROV_DIR" "${PERSES_DB_PATH}/db"
 
-# Config minimale : le port est passé via flag CLI (--web.listen-address),
-# pas dans le fichier de config (le bloc 'server:' n'existe pas dans le schéma Perses).
+# Format provisioning Perses 0.43+ : un seul champ 'folders' (liste de dossiers).
+# Toutes les ressources (datasources, dashboards) sont dans le même dossier.
 $SUDO tee /etc/perses/config.yaml > /dev/null <<PERSES_CFG
 database:
   file:
@@ -182,10 +183,9 @@ database:
     extension: json
 
 provisioning:
-  dashboards:
-    - folder: /etc/perses/dashboards
-  datasources:
-    - folder: /etc/perses/datasources
+  interval: 1m
+  folders:
+    - ${PERSES_PROV_DIR}
 PERSES_CFG
 
 info "Configuration créée : /etc/perses/config.yaml"
@@ -194,9 +194,8 @@ info "Configuration créée : /etc/perses/config.yaml"
 step "Provisioning datasource VictoriaMetrics (mode proxy LAN)…"
 
 # Mode proxy : les requêtes PromQL passent par le serveur Perses vers VM.
-# Nécessaire pour l'accès LAN (le navigateur ne peut pas atteindre 127.0.0.1:8428
-# depuis une autre machine).
-$SUDO tee /etc/perses/datasources/victoriametrics.yaml > /dev/null <<DS_CFG
+# Nécessaire pour l'accès LAN (le navigateur ne peut pas atteindre 127.0.0.1:8428).
+$SUDO tee "${PERSES_PROV_DIR}/victoriametrics-datasource.yaml" > /dev/null <<DS_CFG
 kind: GlobalDatasource
 metadata:
   name: victoriametrics
@@ -216,19 +215,19 @@ spec:
               method: POST
 DS_CFG
 
-info "Datasource VictoriaMetrics provisionnée (${VM_URL})"
+info "Datasource VictoriaMetrics provisonnée dans ${PERSES_PROV_DIR}/"
 
 # ── 5. Dashboard PV Solaire ───────────────────────────────────────────────────
 step "Provisioning dashboard PV Solaire…"
 
 DASHBOARD_SRC="${PERSES_PROVISION_SRC}/dashboards/pv-solar-5y.yaml"
 if [[ -f "$DASHBOARD_SRC" ]]; then
-    $SUDO cp "$DASHBOARD_SRC" /etc/perses/dashboards/
-    info "Dashboard PV Solaire provisionné depuis contrib/perses/dashboards/"
+    $SUDO cp "$DASHBOARD_SRC" "${PERSES_PROV_DIR}/pv-solar-5y.yaml"
+    info "Dashboard PV Solaire provisionné dans ${PERSES_PROV_DIR}/"
 else
     warn "Dashboard non trouvé : $DASHBOARD_SRC"
     warn "Pour migrer depuis Grafana :"
-    warn "  percli migrate -f pv-solar-5y.json -o yaml > /etc/perses/dashboards/pv-solar-5y.yaml"
+    warn "  percli migrate -f pv-solar-5y.json -o yaml > ${PERSES_PROV_DIR}/pv-solar-5y.yaml"
 fi
 
 # ── 6. Service systemd ────────────────────────────────────────────────────────
@@ -244,8 +243,7 @@ else
     warn "Utilisateur pi5compute non trouvé — service lancé sous $SERVICE_USER"
 fi
 
-# Le port est passé via flag CLI car le schéma du fichier config Perses
-# ne contient pas de bloc 'server' (varie selon la version).
+# Construire la commande ExecStart avec le flag de port détecté
 EXEC_CMD="/usr/local/bin/perses --config /etc/perses/config.yaml"
 [[ -n "$LISTEN_FLAG" ]] && EXEC_CMD="$EXEC_CMD $LISTEN_FLAG"
 
@@ -272,13 +270,14 @@ SyslogIdentifier=perses
 WantedBy=multi-user.target
 SYSTEMD_UNIT
 
-# Permissions sur les données
+# Permissions
 $SUDO chown -R "${SERVICE_USER}:${SERVICE_USER}" /etc/perses "$PERSES_DB_PATH" 2>/dev/null || true
 
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now perses
 
-info "Service perses activé (User=${SERVICE_USER}, ExecStart: $EXEC_CMD)"
+info "Service perses activé (User=${SERVICE_USER})"
+info "ExecStart: ${EXEC_CMD}"
 
 # ── 7. Pare-feu ───────────────────────────────────────────────────────────────
 if ! $SKIP_FIREWALL && command -v ufw >/dev/null 2>&1; then
@@ -304,14 +303,13 @@ if $STARTED; then
     info "Perses opérationnel sur http://127.0.0.1:${PERSES_PORT}"
 else
     warn "Perses ne répond pas encore"
-    warn "Vérifier : journalctl -u perses -n 30"
-    warn "Si erreur de config : perses --help pour lister les flags disponibles"
+    warn "Vérifier : journalctl -u perses -n 20"
+    warn "Déboguer   : sudo -u ${SERVICE_USER:-pi5compute} $EXEC_CMD"
 fi
 
 # ── Résumé final ──────────────────────────────────────────────────────────────
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 
-# Détecter si Grafana tourne (mode essai parallèle)
 GRAFANA_LINE=""
 if systemctl is-active grafana-server >/dev/null 2>&1; then
     GRAFANA_PORT=$(grep -oP '(?<=http_port = )\d+' /etc/grafana/grafana.ini 2>/dev/null || echo "3000")
@@ -327,13 +325,12 @@ ${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━
   Perses (nouveau)  : http://${IP:-localhost}:${PERSES_PORT}
 $(echo -e "$GRAFANA_LINE")
   Datasource        : VictoriaMetrics → ${VM_URL} (proxy)
-  Dashboard         : PV Solaire (dans /etc/perses/dashboards/)
+  Ressources        : ${PERSES_PROV_DIR}/
   Données           : ${PERSES_DB_PATH}
   Service           : User=${SERVICE_USER}
 
   Logs              : journalctl -u perses -f
   Config            : /etc/perses/config.yaml
-  Flags binaire     : perses --help
   Mise à jour       : relancer le script (idempotent)
   Désinstaller      : sudo bash scripts/setup-perses.sh --uninstall
 
