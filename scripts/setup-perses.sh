@@ -126,7 +126,7 @@ if command -v perses >/dev/null 2>&1; then
     if [[ "$INSTALLED_VER" == "$PERSES_VERSION" ]]; then
         info "Perses $PERSES_VERSION déjà installé — passage à la configuration"
     else
-        info "Mise à jour $INSTALLED_VER → $PERSES_VERSION"
+        [[ -n "$INSTALLED_VER" ]] && info "Mise à jour $INSTALLED_VER → $PERSES_VERSION"
     fi
 fi
 
@@ -148,7 +148,7 @@ PERSES_BIN=$(find "$EXTRACT_DIR" -name "perses"  -type f ! -name "*.tar.gz" | he
 PERCLI_BIN=$(find "$EXTRACT_DIR" -name "percli"  -type f | head -1)
 
 [[ -z "$PERSES_BIN" ]] && error "Binaire 'perses' introuvable dans l'archive"
-[[ -z "$PERCLI_BIN" ]] && { warn "'percli' absent — migration Grafana manuelle uniquement"; PERCLI_BIN=""; }
+[[ -z "$PERCLI_BIN" ]] && { warn "'percli' absent de l'archive"; PERCLI_BIN=""; }
 
 $SUDO install -m 0755 "$PERSES_BIN" /usr/local/bin/perses
 [[ -n "$PERCLI_BIN" ]] && $SUDO install -m 0755 "$PERCLI_BIN" /usr/local/bin/percli
@@ -156,17 +156,26 @@ rm -rf "$EXTRACT_DIR"
 
 info "Perses ${PERSES_VERSION} installé (/usr/local/bin/)"
 
+# Afficher les flags disponibles pour déboguer si besoin
+LISTEN_FLAG=""
+if perses --help 2>&1 | grep -q 'web.listen-address'; then
+    LISTEN_FLAG="--web.listen-address=:${PERSES_PORT}"
+elif perses --help 2>&1 | grep -q 'addr'; then
+    LISTEN_FLAG="--addr=:${PERSES_PORT}"
+else
+    warn "Flag d'écoute inconnu — Perses écoutera sur son port par défaut (8080)"
+    warn "Vérifier 'perses --help' pour configurer le port $PERSES_PORT"
+fi
+
 # ── 3. Création de la configuration ───────────────────────────────────────────
 step "Configuration Perses…"
 
 $SUDO mkdir -p /etc/perses/dashboards /etc/perses/datasources
 $SUDO mkdir -p "${PERSES_DB_PATH}/db"
 
+# Config minimale : le port est passé via flag CLI (--web.listen-address),
+# pas dans le fichier de config (le bloc 'server:' n'existe pas dans le schéma Perses).
 $SUDO tee /etc/perses/config.yaml > /dev/null <<PERSES_CFG
-server:
-  port: ${PERSES_PORT}
-  enableUI: true
-
 database:
   file:
     folder: ${PERSES_DB_PATH}/db
@@ -235,6 +244,11 @@ else
     warn "Utilisateur pi5compute non trouvé — service lancé sous $SERVICE_USER"
 fi
 
+# Le port est passé via flag CLI car le schéma du fichier config Perses
+# ne contient pas de bloc 'server' (varie selon la version).
+EXEC_CMD="/usr/local/bin/perses --config /etc/perses/config.yaml"
+[[ -n "$LISTEN_FLAG" ]] && EXEC_CMD="$EXEC_CMD $LISTEN_FLAG"
+
 $SUDO tee /etc/systemd/system/perses.service > /dev/null <<SYSTEMD_UNIT
 [Unit]
 Description=Perses Monitoring Dashboard (essai parallèle a Grafana)
@@ -245,7 +259,7 @@ Wants=victoriametrics.service
 [Service]
 Type=simple
 User=${SERVICE_USER}
-ExecStart=/usr/local/bin/perses --config /etc/perses/config.yaml
+ExecStart=${EXEC_CMD}
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
@@ -264,7 +278,7 @@ $SUDO chown -R "${SERVICE_USER}:${SERVICE_USER}" /etc/perses "$PERSES_DB_PATH" 2
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now perses
 
-info "Service perses activé (User=${SERVICE_USER})"
+info "Service perses activé (User=${SERVICE_USER}, ExecStart: $EXEC_CMD)"
 
 # ── 7. Pare-feu ───────────────────────────────────────────────────────────────
 if ! $SKIP_FIREWALL && command -v ufw >/dev/null 2>&1; then
@@ -289,7 +303,9 @@ done
 if $STARTED; then
     info "Perses opérationnel sur http://127.0.0.1:${PERSES_PORT}"
 else
-    warn "Perses ne répond pas encore — vérifier : journalctl -u perses -n 30"
+    warn "Perses ne répond pas encore"
+    warn "Vérifier : journalctl -u perses -n 30"
+    warn "Si erreur de config : perses --help pour lister les flags disponibles"
 fi
 
 # ── Résumé final ──────────────────────────────────────────────────────────────
@@ -317,6 +333,7 @@ $(echo -e "$GRAFANA_LINE")
 
   Logs              : journalctl -u perses -f
   Config            : /etc/perses/config.yaml
+  Flags binaire     : perses --help
   Mise à jour       : relancer le script (idempotent)
   Désinstaller      : sudo bash scripts/setup-perses.sh --uninstall
 
