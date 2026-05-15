@@ -21,6 +21,7 @@ mod vm_client;
 mod api;
 mod bridges;
 mod dashboard;
+mod dashboards;
 mod monitor;
 
 use crate::bridges::{alerts, mqtt};

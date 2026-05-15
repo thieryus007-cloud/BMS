@@ -449,6 +449,9 @@ pub struct AppState {
     /// Client VictoriaMetrics (None si désactivé dans la config).
     pub vm: Option<Arc<VmClient>>,
 
+    /// Catalogue de panels (importés depuis docs/grafana-ess_dashboard.json au démarrage).
+    pub dashboard_catalog: crate::dashboards::Catalog,
+
     /// Timestamps de la dernière écriture VM par catégorie (epoch secondes).
     /// Throttle le débit d'écriture pour éviter de surcharger VM.
     /// Chaque source a son propre timer — ne jamais partager entre sources différentes.
@@ -525,6 +528,7 @@ impl AppState {
             shelly_client: Arc::new(tokio::sync::Mutex::new(None)),
             alert_engine,
             vm: vm.map(Arc::new),
+            dashboard_catalog: crate::dashboards::Catalog::load_default(),
             vm_last_bms_write:      Arc::new(AtomicU64::new(0)),
             vm_last_shunt_write:    Arc::new(AtomicU64::new(0)),
             vm_last_inverter_write: Arc::new(AtomicU64::new(0)),
