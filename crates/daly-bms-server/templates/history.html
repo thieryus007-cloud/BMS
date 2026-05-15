@@ -260,7 +260,25 @@
 }
 .dash-modal-row .title { flex: 1; font-weight: 600; font-size: 0.88rem; }
 .dash-modal-row .unit { font-size: 0.7rem; color: var(--muted); }
-.dash-modal-row.added { opacity: 0.45; }
+.dash-modal-row.added { background: var(--surface2); }
+.dash-modal-row.added .title { color: var(--muted); }
+.dash-modal-row .badge {
+  font-size: 0.62rem;
+  background: var(--accent2);
+  color: #fff;
+  padding: 0.08rem 0.4rem;
+  border-radius: 999px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.dash-modal-info {
+  padding: 0.55rem 1.2rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+}
 .dash-modal-foot {
   padding: 0.7rem 1.2rem;
   border-top: 1px solid var(--border);
@@ -302,6 +320,7 @@
   <div class="spacer"></div>
   <button class="dash-btn" id="btn-pdf">📄 Export PDF</button>
   <button class="dash-btn" id="btn-reset">↺ Layout d'origine</button>
+  <button class="dash-btn" id="btn-clear">🗑 Tout retirer</button>
   <button class="dash-btn dash-btn-primary" id="btn-add">+ Ajouter panel</button>
 </div>
 
@@ -328,11 +347,12 @@
 // État
 // ============================================================================
 const STATE = {
-  catalog:    [],          // tous les panels disponibles
-  layout:     [],          // panels visibles : [{id, x, y, w, h}, ...]
-  charts:     new Map(),   // panelId → ECharts instance
-  period:     '24h',
-  panelData:  new Map(),   // panelId → dernier data (pour re-render print)
+  catalog:     [],          // tous les panels disponibles
+  layout:      [],          // panels visibles : [{id, x, y, w, h}, ...]
+  charts:      new Map(),   // panelId → ECharts instance
+  period:      '24h',
+  panelData:   new Map(),   // panelId → dernier data (pour re-render print)
+  storageMode: 'local',     // 'server' (SQLite) ou 'local' (localStorage fallback)
 };
 const LS_KEY = 'dash_layout_v1';
 
@@ -356,7 +376,7 @@ const UNIT_SCALE = { kwatth: { from: 'watth', mul: 0.001 } };
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
   await loadCatalog();
-  loadLayout();
+  await loadLayout();
   bindToolbar();
   bindModal();
   await renderAll();
@@ -376,22 +396,65 @@ async function loadCatalog() {
   }
 }
 
-function loadLayout() {
+async function loadLayout() {
+  // 1. Tentative serveur (SQLite)
+  try {
+    const r = await fetch('/api/v1/dashboards/layout');
+    if (r.ok) {
+      const j = await r.json();
+      if (j.ok && Array.isArray(j.layout)) {
+        STATE.layout = j.layout;
+        STATE.storageMode = 'server';
+        return;
+      }
+      // ok=true mais layout=null → rien en base, on tombe sur le défaut
+      if (j.ok && j.layout === null) {
+        STATE.storageMode = 'server';
+        STATE.layout = defaultLayout();
+        return;
+      }
+    }
+    STATE.storageMode = 'local';
+  } catch (e) {
+    console.warn('Layout serveur indisponible, fallback localStorage', e);
+    STATE.storageMode = 'local';
+  }
+  // 2. Fallback localStorage
   const raw = localStorage.getItem(LS_KEY);
   if (raw) {
     try { STATE.layout = JSON.parse(raw); return; }
     catch (e) { /* fallthrough */ }
   }
-  // Pas de layout sauvé : on prend toutes les positions Grafana d'origine
-  STATE.layout = STATE.catalog.map(p => ({
+  STATE.layout = defaultLayout();
+}
+
+function defaultLayout() {
+  return STATE.catalog.map(p => ({
     id: p.id,
     x: p.grid_pos.x, y: p.grid_pos.y,
     w: p.grid_pos.w, h: p.grid_pos.h,
   }));
 }
 
-function saveLayout() {
-  localStorage.setItem(LS_KEY, JSON.stringify(STATE.layout));
+async function saveLayout() {
+  // Toujours sauver en local en miroir (pour les transitions hors-ligne)
+  try { localStorage.setItem(LS_KEY, JSON.stringify(STATE.layout)); } catch (e) {}
+  if (STATE.storageMode !== 'server') return;
+  try {
+    await fetch('/api/v1/dashboards/layout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ layout: STATE.layout }),
+    });
+  } catch (e) {
+    console.warn('Save layout serveur a échoué', e);
+  }
+}
+
+async function deleteServerLayout() {
+  if (STATE.storageMode !== 'server') return;
+  try { await fetch('/api/v1/dashboards/layout', { method: 'DELETE' }); }
+  catch (e) { console.warn('delete layout serveur a échoué', e); }
 }
 
 function bindToolbar() {
@@ -411,7 +474,14 @@ function bindToolbar() {
   });
   document.getElementById('btn-reset').addEventListener('click', async () => {
     localStorage.removeItem(LS_KEY);
-    loadLayout();
+    await deleteServerLayout();
+    await loadLayout();
+    await renderAll();
+  });
+  document.getElementById('btn-clear').addEventListener('click', async () => {
+    if (!confirm('Retirer tous les panels du dashboard ?')) return;
+    STATE.layout = [];
+    await saveLayout();
     await renderAll();
   });
   document.getElementById('btn-add').addEventListener('click', openModal);
@@ -665,22 +735,31 @@ function renderModalList() {
     .filter(p => !q || p.title.toLowerCase().includes(q) || p.kind.includes(q))
     .sort((a,b) => a.title.localeCompare(b.title));
   const list = document.getElementById('modal-list');
+  const allAdded = items.length > 0 && items.every(p => usedIds.has(p.id));
+  const info = allAdded
+    ? `<div class="dash-modal-info">Tous les panels sont déjà affichés. Clique sur l'un d'eux pour le <b>repositionner en bas</b>, ou utilise « 🗑 Tout retirer » dans la toolbar pour repartir d'un dashboard vide.</div>`
+    : '';
   if (items.length === 0) {
-    list.innerHTML = '<div class="dash-empty">Aucun résultat</div>';
+    list.innerHTML = info + '<div class="dash-empty">Aucun résultat</div>';
     return;
   }
-  list.innerHTML = items.map(p => `
-    <div class="dash-modal-row ${usedIds.has(p.id) ? 'added' : ''}" data-id="${escapeHtml(p.id)}">
+  list.innerHTML = info + items.map(p => `
+    <div class="dash-modal-row ${usedIds.has(p.id) ? 'added' : ''}" data-id="${escapeHtml(p.id)}" title="${usedIds.has(p.id) ? 'Cliquer pour repositionner en bas' : 'Cliquer pour ajouter'}">
       <span class="kind">${escapeHtml(p.kind)}</span>
       <span class="title">${escapeHtml(p.title)}</span>
       <span class="unit">${escapeHtml(unitLabel(p.unit))}</span>
+      ${usedIds.has(p.id) ? '<span class="badge">déjà placé</span>' : ''}
     </div>
   `).join('');
   list.querySelectorAll('.dash-modal-row').forEach(row => {
     row.addEventListener('click', () => {
       const id = row.dataset.id;
-      if (usedIds.has(id)) return;
       const panel = STATE.catalog.find(p => p.id === id);
+      if (!panel) return;
+      if (usedIds.has(id)) {
+        // Repositionne le panel existant en bas du dashboard
+        STATE.layout = STATE.layout.filter(x => x.id !== id);
+      }
       addPanelToLayout(panel);
       closeModal();
       renderAll();
