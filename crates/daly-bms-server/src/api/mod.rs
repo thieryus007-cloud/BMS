@@ -105,9 +105,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/chart/edge-history",      get(chart::get_edge_history))
         .route("/api/v1/history/energy",          get(history::get_energy_history))
 
-        // ── Dashboards (catalogue panels Grafana + data) ──────────────────────
+        // ── Dashboards (catalogue panels Grafana + data + layouts) ────────────
         .route("/api/v1/dashboards/catalog",         get(dashboards::get_catalog))
         .route("/api/v1/dashboards/panel/:id/data",  get(dashboards::get_panel_data))
+        .route(
+            "/api/v1/dashboards/layout",
+            get(dashboards::get_layout)
+                .post(dashboards::set_layout)
+                .delete(dashboards::delete_layout),
+        )
 
         // ── Tasmota ──────────────────────────────────────────────────────────
         .route("/api/v1/tasmota",                 get(tasmota::list_tasmota))

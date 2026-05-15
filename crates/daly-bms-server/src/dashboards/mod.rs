@@ -9,6 +9,7 @@
 //! - Exécution des PromQL d'un panel via `GET /api/v1/dashboards/panel/:id/data`.
 
 pub mod grafana;
+pub mod storage;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

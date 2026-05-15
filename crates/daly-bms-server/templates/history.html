@@ -347,11 +347,12 @@
 // État
 // ============================================================================
 const STATE = {
-  catalog:    [],          // tous les panels disponibles
-  layout:     [],          // panels visibles : [{id, x, y, w, h}, ...]
-  charts:     new Map(),   // panelId → ECharts instance
-  period:     '24h',
-  panelData:  new Map(),   // panelId → dernier data (pour re-render print)
+  catalog:     [],          // tous les panels disponibles
+  layout:      [],          // panels visibles : [{id, x, y, w, h}, ...]
+  charts:      new Map(),   // panelId → ECharts instance
+  period:      '24h',
+  panelData:   new Map(),   // panelId → dernier data (pour re-render print)
+  storageMode: 'local',     // 'server' (SQLite) ou 'local' (localStorage fallback)
 };
 const LS_KEY = 'dash_layout_v1';
 
@@ -375,7 +376,7 @@ const UNIT_SCALE = { kwatth: { from: 'watth', mul: 0.001 } };
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
   await loadCatalog();
-  loadLayout();
+  await loadLayout();
   bindToolbar();
   bindModal();
   await renderAll();
@@ -395,22 +396,65 @@ async function loadCatalog() {
   }
 }
 
-function loadLayout() {
+async function loadLayout() {
+  // 1. Tentative serveur (SQLite)
+  try {
+    const r = await fetch('/api/v1/dashboards/layout');
+    if (r.ok) {
+      const j = await r.json();
+      if (j.ok && Array.isArray(j.layout)) {
+        STATE.layout = j.layout;
+        STATE.storageMode = 'server';
+        return;
+      }
+      // ok=true mais layout=null → rien en base, on tombe sur le défaut
+      if (j.ok && j.layout === null) {
+        STATE.storageMode = 'server';
+        STATE.layout = defaultLayout();
+        return;
+      }
+    }
+    STATE.storageMode = 'local';
+  } catch (e) {
+    console.warn('Layout serveur indisponible, fallback localStorage', e);
+    STATE.storageMode = 'local';
+  }
+  // 2. Fallback localStorage
   const raw = localStorage.getItem(LS_KEY);
   if (raw) {
     try { STATE.layout = JSON.parse(raw); return; }
     catch (e) { /* fallthrough */ }
   }
-  // Pas de layout sauvé : on prend toutes les positions Grafana d'origine
-  STATE.layout = STATE.catalog.map(p => ({
+  STATE.layout = defaultLayout();
+}
+
+function defaultLayout() {
+  return STATE.catalog.map(p => ({
     id: p.id,
     x: p.grid_pos.x, y: p.grid_pos.y,
     w: p.grid_pos.w, h: p.grid_pos.h,
   }));
 }
 
-function saveLayout() {
-  localStorage.setItem(LS_KEY, JSON.stringify(STATE.layout));
+async function saveLayout() {
+  // Toujours sauver en local en miroir (pour les transitions hors-ligne)
+  try { localStorage.setItem(LS_KEY, JSON.stringify(STATE.layout)); } catch (e) {}
+  if (STATE.storageMode !== 'server') return;
+  try {
+    await fetch('/api/v1/dashboards/layout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ layout: STATE.layout }),
+    });
+  } catch (e) {
+    console.warn('Save layout serveur a échoué', e);
+  }
+}
+
+async function deleteServerLayout() {
+  if (STATE.storageMode !== 'server') return;
+  try { await fetch('/api/v1/dashboards/layout', { method: 'DELETE' }); }
+  catch (e) { console.warn('delete layout serveur a échoué', e); }
 }
 
 function bindToolbar() {
@@ -430,13 +474,14 @@ function bindToolbar() {
   });
   document.getElementById('btn-reset').addEventListener('click', async () => {
     localStorage.removeItem(LS_KEY);
-    loadLayout();
+    await deleteServerLayout();
+    await loadLayout();
     await renderAll();
   });
   document.getElementById('btn-clear').addEventListener('click', async () => {
     if (!confirm('Retirer tous les panels du dashboard ?')) return;
     STATE.layout = [];
-    saveLayout();
+    await saveLayout();
     await renderAll();
   });
   document.getElementById('btn-add').addEventListener('click', openModal);

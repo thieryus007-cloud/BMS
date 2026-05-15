@@ -8,6 +8,7 @@
 
 use axum::{
     extract::{Path, Query, State},
+    http::StatusCode,
     response::IntoResponse,
     Json,
 };
@@ -17,6 +18,9 @@ use serde_json::{json, Value};
 
 use crate::dashboards::{Panel, PanelKind};
 use crate::state::AppState;
+
+/// User id par défaut tant qu'il n'y a pas d'auth utilisateur.
+const DEFAULT_USER: &str = "default";
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/dashboards/catalog
@@ -227,4 +231,93 @@ fn format_legend(format: Option<&str>, labels: &serde_json::Map<String, Value>) 
 fn round4(v: f64) -> f64 {
     if v.is_nan() { return v; }
     (v * 10000.0).round() / 10000.0
+}
+
+// ---------------------------------------------------------------------------
+// Layouts persistants (SQLite)
+// ---------------------------------------------------------------------------
+
+/// GET /api/v1/dashboards/layout
+/// Retourne le layout sauvegardé pour l'utilisateur par défaut.
+/// Format : `{ "ok": true, "layout": [...] }`. Si rien en base, `layout` est `null`
+/// → le client doit utiliser le layout d'origine (positions Grafana).
+pub async fn get_layout(State(state): State<AppState>) -> impl IntoResponse {
+    let Some(storage) = &state.dashboard_storage else {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            "ok": false, "reason": "storage_unavailable"
+        })));
+    };
+    match storage.get(DEFAULT_USER) {
+        Ok(None) => (StatusCode::OK, Json(json!({"ok": true, "layout": Value::Null}))),
+        Ok(Some(json_str)) => {
+            // On renvoie le JSON déjà parsé (et on revient sur Null si parsing échoue)
+            let parsed: Value = serde_json::from_str(&json_str).unwrap_or(Value::Null);
+            (StatusCode::OK, Json(json!({"ok": true, "layout": parsed})))
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "dashboard layout get failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false, "reason": "db_error", "error": e.to_string()
+            })))
+        }
+    }
+}
+
+/// POST /api/v1/dashboards/layout
+/// Body attendu : `{ "layout": [{"id":"...","x":0,"y":0,"w":12,"h":8}, ...] }`
+/// ou directement le tableau `[...]`.
+pub async fn set_layout(
+    State(state): State<AppState>,
+    Json(body):   Json<Value>,
+) -> impl IntoResponse {
+    let Some(storage) = &state.dashboard_storage else {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            "ok": false, "reason": "storage_unavailable"
+        })));
+    };
+
+    // Accepte {"layout": [...]} ou [...] directement
+    let layout = match body.get("layout") {
+        Some(v) => v.clone(),
+        None    => body.clone(),
+    };
+    if !layout.is_array() {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "ok": false, "reason": "layout_not_array"
+        })));
+    }
+    let layout_json = layout.to_string();
+    // Limite raisonnable pour éviter qu'un client tente d'écrire des MB
+    if layout_json.len() > 256_000 {
+        return (StatusCode::PAYLOAD_TOO_LARGE, Json(json!({
+            "ok": false, "reason": "layout_too_large"
+        })));
+    }
+    match storage.set(DEFAULT_USER, &layout_json) {
+        Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))),
+        Err(e) => {
+            tracing::warn!(error = %e, "dashboard layout set failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false, "reason": "db_error", "error": e.to_string()
+            })))
+        }
+    }
+}
+
+/// DELETE /api/v1/dashboards/layout — retour à l'état d'origine côté UI.
+pub async fn delete_layout(State(state): State<AppState>) -> impl IntoResponse {
+    let Some(storage) = &state.dashboard_storage else {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            "ok": false, "reason": "storage_unavailable"
+        })));
+    };
+    match storage.delete(DEFAULT_USER) {
+        Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))),
+        Err(e) => {
+            tracing::warn!(error = %e, "dashboard layout delete failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false, "reason": "db_error", "error": e.to_string()
+            })))
+        }
+    }
 }

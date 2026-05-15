@@ -452,6 +452,9 @@ pub struct AppState {
     /// Catalogue de panels (importés depuis docs/grafana-ess_dashboard.json au démarrage).
     pub dashboard_catalog: crate::dashboards::Catalog,
 
+    /// Persistance SQLite des layouts dashboard (None si init a échoué — fallback localStorage côté UI).
+    pub dashboard_storage: Option<crate::dashboards::storage::LayoutStorage>,
+
     /// Timestamps de la dernière écriture VM par catégorie (epoch secondes).
     /// Throttle le débit d'écriture pour éviter de surcharger VM.
     /// Chaque source a son propre timer — ne jamais partager entre sources différentes.
@@ -494,6 +497,15 @@ impl AppState {
             tasmota_buffers.insert(dev.id, TasmotaRingBuffer::new(tasmota_ring_size));
         }
 
+        // Init dashboard layout storage (SQLite séparée du fichier d'alertes)
+        let dashboard_storage = {
+            let path = crate::dashboards::storage::LayoutStorage::default_path(&config.alerts.db_path);
+            match crate::dashboards::storage::LayoutStorage::open(&path) {
+                Ok(s)  => { tracing::info!(db = %path.display(), "Dashboard layout storage ouvert"); Some(s) }
+                Err(e) => { tracing::error!(error = %e, db = %path.display(), "Dashboard storage init failed — fallback localStorage côté UI"); None }
+            }
+        };
+
         Self {
             config: Arc::new(config),
             buffers: Arc::new(RwLock::new(buffers)),
@@ -529,6 +541,7 @@ impl AppState {
             alert_engine,
             vm: vm.map(Arc::new),
             dashboard_catalog: crate::dashboards::Catalog::load_default(),
+            dashboard_storage,
             vm_last_bms_write:      Arc::new(AtomicU64::new(0)),
             vm_last_shunt_write:    Arc::new(AtomicU64::new(0)),
             vm_last_inverter_write: Arc::new(AtomicU64::new(0)),
