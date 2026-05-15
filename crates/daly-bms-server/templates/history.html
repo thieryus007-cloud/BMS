@@ -1,205 +1,322 @@
 {% extends "base.html" %}
-{% block title %}Historique Énergie{% endblock %}
-{% block page_title %}📊 Historique Énergie{% endblock %}
+{% block title %}Dashboard Énergie{% endblock %}
+{% block page_title %}📊 Dashboard Énergie{% endblock %}
 {% block nav_grafana %}active{% endblock %}
 
 {% block head %}
 <style>
-.period-bar {
+/* ── Toolbar ────────────────────────────────────────────────────────────── */
+.dash-toolbar {
   display: flex;
-  gap: 0.35rem;
-  margin-bottom: 1.5rem;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
   align-items: center;
   flex-wrap: wrap;
 }
-.period-btn {
-  padding: 0.38rem 1rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
+.dash-toolbar .spacer { flex: 1; }
+.dash-period {
+  display: flex;
+  gap: 0.25rem;
   background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem;
+}
+.dash-period button {
+  padding: 0.32rem 0.85rem;
+  border: 0;
+  background: transparent;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
+  border-radius: calc(var(--radius-sm) - 2px);
   font-family: inherit;
 }
-.period-btn:hover { background: var(--surface2); color: var(--text); }
-.period-btn.active {
+.dash-period button:hover { background: var(--surface2); color: var(--text); }
+.dash-period button.active { background: var(--accent2); color: #fff; }
+.dash-btn {
+  padding: 0.42rem 0.95rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.dash-btn:hover { background: var(--surface2); }
+.dash-btn-primary {
   background: var(--accent2);
+  border-color: var(--accent2);
   color: #fff;
-  border-color: transparent;
 }
-.period-label {
-  margin-left: auto;
-  font-size: 0.7rem;
-  color: var(--muted);
-  font-style: italic;
-}
+.dash-btn-primary:hover { filter: brightness(1.1); background: var(--accent2); }
 
-.hist-grid {
+/* ── Grille (24 colonnes comme Grafana) ─────────────────────────────────── */
+.dash-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 0.75rem;
+  grid-auto-rows: 32px; /* hauteur unitaire — un "h:1" Grafana = 32px */
 }
-@media (max-width: 900px) {
-  .hist-grid { grid-template-columns: 1fr; }
-}
-
-.kpi-summary {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 0;
-  margin-bottom: 1rem;
+.dash-panel {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem 0.5rem;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-}
-@media (max-width: 900px) {
-  .kpi-summary { grid-template-columns: repeat(3, 1fr); }
-}
-@media (max-width: 480px) {
-  .kpi-summary { grid-template-columns: repeat(2, 1fr); }
-}
-.kpi-summary-cell {
-  padding: 0.75rem 1rem;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-.kpi-summary-cell:nth-child(6n) { border-right: none; }
-.kpi-sum-lbl {
-  font-size: 0.56rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--muted);
-  margin-bottom: 0.25rem;
-}
-.kpi-sum-val {
-  font-size: 1.05rem;
-  font-weight: 700;
-  font-family: 'JetBrains Mono', monospace;
-  color: var(--text);
-}
-.kpi-sum-val.solar   { color: var(--yellow); }
-.kpi-sum-val.import  { color: var(--accent); }
-.kpi-sum-val.consump { color: var(--purple); }
-.kpi-sum-val.charge  { color: var(--green); }
-.kpi-sum-val.dischrg { color: var(--orange); }
-.kpi-sum-val.export  { color: var(--cyan); }
-
-.chart-wrap {
   position: relative;
-  width: 100%;
-  height: 260px;
 }
-.chart-wrap canvas,
-.chart-wrap div[_echarts_instance_] {
-  border-radius: 0 0 var(--radius) var(--radius);
+.dash-panel.kind-row {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0.3rem 0.2rem 0.15rem;
+  border-radius: 0;
+  font-weight: 700;
+  color: var(--accent2);
+  font-size: 0.95rem;
 }
-.no-data-overlay {
-  position: absolute;
-  inset: 0;
+.dash-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.2rem;
+  min-height: 1rem;
+}
+.dash-panel-head .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-panel-head .actions { display: flex; gap: 0.2rem; opacity: 0; transition: opacity 0.15s; }
+.dash-panel:hover .dash-panel-head .actions { opacity: 1; }
+.dash-panel-head .actions button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0 0.18rem;
+  line-height: 1;
+}
+.dash-panel-head .actions button:hover { color: var(--danger); }
+.dash-panel-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.dash-panel-body.kind-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.dash-stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.dash-stat-value.lg { font-size: 2.6rem; }
+.dash-stat-value.md { font-size: 1.8rem; }
+.dash-stat-unit {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-left: 0.2rem;
+  font-weight: 500;
+}
+.dash-stat-label {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.dash-empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-direction: column;
-  gap: 0.4rem;
+  height: 100%;
   color: var(--muted);
   font-size: 0.8rem;
-  pointer-events: none;
 }
-.no-data-overlay.hidden { display: none; }
+.dash-error {
+  color: var(--danger);
+  font-size: 0.75rem;
+}
+
+/* Tables */
+.dash-table-wrap { height: 100%; overflow: auto; }
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+.dash-table th, .dash-table td {
+  padding: 0.28rem 0.45rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.dash-table th {
+  background: var(--surface2);
+  color: var(--muted);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+.dash-table td.num { text-align: right; }
+
+/* BarGauge horizontal */
+.dash-bargauge-list { display: flex; flex-direction: column; gap: 0.45rem; padding: 0.2rem 0; height: 100%; overflow: auto; }
+.dash-bargauge-item { display: flex; flex-direction: column; gap: 0.1rem; }
+.dash-bargauge-label { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); }
+.dash-bargauge-bar {
+  height: 0.55rem;
+  background: var(--surface2);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.dash-bargauge-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent2), var(--accent));
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+/* ── Modale "Ajouter panel" ─────────────────────────────────────────────── */
+.dash-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.dash-modal-backdrop.open { display: flex; }
+.dash-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: min(720px, 92vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+}
+.dash-modal-head {
+  padding: 0.85rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.dash-modal-head h2 { margin: 0; font-size: 1rem; flex: 1; }
+.dash-modal-head input {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.7rem;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+.dash-modal-body {
+  flex: 1;
+  overflow: auto;
+  padding: 0.5rem 0;
+}
+.dash-modal-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 1.2rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.dash-modal-row:hover { background: var(--surface2); }
+.dash-modal-row .kind {
+  font-size: 0.65rem;
+  background: var(--surface2);
+  color: var(--muted);
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  min-width: 4.5rem;
+  text-align: center;
+}
+.dash-modal-row .title { flex: 1; font-weight: 600; font-size: 0.88rem; }
+.dash-modal-row .unit { font-size: 0.7rem; color: var(--muted); }
+.dash-modal-row.added { opacity: 0.45; }
+.dash-modal-foot {
+  padding: 0.7rem 1.2rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* ── Print (Export PDF) ─────────────────────────────────────────────────── */
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  .sidebar, .topbar, .dash-toolbar, .dash-panel-head .actions { display: none !important; }
+  .main, .content, .page { padding: 0 !important; margin: 0 !important; }
+  .dash-panel {
+    background: #fff !important;
+    border: 1px solid #888 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+  }
+  .dash-panel.kind-row { color: #000 !important; border-bottom: 2px solid #000 !important; }
+  .dash-grid { gap: 0.4rem; }
+  .dash-stat-value { color: #000 !important; }
+  @page { margin: 1cm; size: A4 landscape; }
+}
 </style>
 {% endblock %}
 
 {% block content %}
-<!-- Period selector -->
-<div class="period-bar">
-  <button class="period-btn active" data-period="day"   onclick="selectPeriod(this)">Aujourd'hui</button>
-  <button class="period-btn"        data-period="week"  onclick="selectPeriod(this)">7 jours</button>
-  <button class="period-btn"        data-period="month" onclick="selectPeriod(this)">30 jours</button>
-  <button class="period-btn"        data-period="year"  onclick="selectPeriod(this)">1 an</button>
-  <span class="period-label" id="period-label">Chargement…</span>
+<div class="dash-toolbar">
+  <div class="dash-period" id="period-bar">
+    <button data-period="1h">1h</button>
+    <button data-period="6h">6h</button>
+    <button data-period="24h" class="active">24h</button>
+    <button data-period="7d">7j</button>
+    <button data-period="30d">30j</button>
+  </div>
+  <button class="dash-btn" id="btn-refresh">↻ Rafraîchir</button>
+  <div class="spacer"></div>
+  <button class="dash-btn" id="btn-pdf">📄 Export PDF</button>
+  <button class="dash-btn" id="btn-reset">↺ Layout d'origine</button>
+  <button class="dash-btn dash-btn-primary" id="btn-add">+ Ajouter panel</button>
 </div>
 
-<!-- KPI totaux -->
-<div class="kpi-summary" id="kpi-summary">
-  <div class="kpi-summary-cell">
-    <div class="kpi-sum-lbl">☀️ Solaire kWh</div>
-    <div class="kpi-sum-val solar" id="kpi-solar-kwh">—</div>
-  </div>
-  <div class="kpi-summary-cell">
-    <div class="kpi-sum-lbl">🔌 Importée kWh</div>
-    <div class="kpi-sum-val import" id="kpi-import-kwh">—</div>
-  </div>
-  <div class="kpi-summary-cell">
-    <div class="kpi-sum-lbl">🏠 Consommation kWh</div>
-    <div class="kpi-sum-val consump" id="kpi-consump-kwh">—</div>
-  </div>
-  <div class="kpi-summary-cell">
-    <div class="kpi-sum-lbl">📤 Exportée kWh</div>
-    <div class="kpi-sum-val export" id="kpi-export-kwh">—</div>
-  </div>
-  <div class="kpi-summary-cell">
-    <div class="kpi-sum-lbl">⬆ Charge Ah</div>
-    <div class="kpi-sum-val charge" id="kpi-charge-ah">—</div>
-  </div>
-  <div class="kpi-summary-cell" style="border-right:none">
-    <div class="kpi-sum-lbl">⬇ Décharge Ah</div>
-    <div class="kpi-sum-val dischrg" id="kpi-dischrg-ah">—</div>
-  </div>
-</div>
+<div class="dash-grid" id="dash-grid"></div>
 
-<!-- 4 graphiques -->
-<div class="hist-grid">
-  <!-- 1. kWh cumulatif -->
-  <div class="chart-card">
-    <div class="chart-hdr">
-      <span class="chart-hdr-title">Énergie kWh (cumulatif)</span>
-      <span class="chart-hdr-meta" id="meta-kwh">—</span>
+<!-- Modale "Ajouter panel" -->
+<div class="dash-modal-backdrop" id="modal-backdrop">
+  <div class="dash-modal">
+    <div class="dash-modal-head">
+      <h2>Ajouter un panel</h2>
+      <input type="text" id="modal-search" placeholder="Rechercher…" autocomplete="off" />
     </div>
-    <div class="chart-wrap">
-      <div id="chart-kwh" style="width:100%;height:100%"></div>
-      <div class="no-data-overlay" id="nd-kwh"><span>📊</span><span>Aucune donnée VictoriaMetrics</span></div>
-    </div>
-  </div>
-
-  <!-- 2. Puissance W -->
-  <div class="chart-card">
-    <div class="chart-hdr">
-      <span class="chart-hdr-title">Puissance instantanée (W)</span>
-      <span class="chart-hdr-meta" id="meta-w">—</span>
-    </div>
-    <div class="chart-wrap">
-      <div id="chart-w" style="width:100%;height:100%"></div>
-      <div class="no-data-overlay" id="nd-w"><span>📊</span><span>Aucune donnée VictoriaMetrics</span></div>
-    </div>
-  </div>
-
-  <!-- 3. Ah dérivés -->
-  <div class="chart-card">
-    <div class="chart-hdr">
-      <span class="chart-hdr-title">Énergie Ah (cumulatif, approx 48 V)</span>
-      <span class="chart-hdr-meta" id="meta-ah">—</span>
-    </div>
-    <div class="chart-wrap">
-      <div id="chart-ah" style="width:100%;height:100%"></div>
-      <div class="no-data-overlay" id="nd-ah"><span>📊</span><span>Aucune donnée VictoriaMetrics</span></div>
-    </div>
-  </div>
-
-  <!-- 4. Charge / Décharge Ah SmartShunt -->
-  <div class="chart-card">
-    <div class="chart-hdr">
-      <span class="chart-hdr-title">Charge vs Décharge Ah (SmartShunt)</span>
-      <span class="chart-hdr-meta" id="meta-shunt">—</span>
-    </div>
-    <div class="chart-wrap">
-      <div id="chart-shunt" style="width:100%;height:100%"></div>
-      <div class="no-data-overlay" id="nd-shunt"><span>📊</span><span>Aucune donnée SmartShunt</span></div>
+    <div class="dash-modal-body" id="modal-list"></div>
+    <div class="dash-modal-foot">
+      <button class="dash-btn" id="modal-close">Fermer</button>
     </div>
   </div>
 </div>
@@ -207,239 +324,420 @@
 
 {% block scripts %}
 <script>
-'use strict';
+// ============================================================================
+// État
+// ============================================================================
+const STATE = {
+  catalog:    [],          // tous les panels disponibles
+  layout:     [],          // panels visibles : [{id, x, y, w, h}, ...]
+  charts:     new Map(),   // panelId → ECharts instance
+  period:     '24h',
+  panelData:  new Map(),   // panelId → dernier data (pour re-render print)
+};
+const LS_KEY = 'dash_layout_v1';
 
-const V_NOM = 51.2;
+const PERIOD_MS = {
+  '1h':   3_600_000,
+  '6h':   21_600_000,
+  '24h':  86_400_000,
+  '7d':   7  * 86_400_000,
+  '30d':  30 * 86_400_000,
+};
 
-// ── ECharts instances ───────────────────────────────────────────────────────
-const cKwh   = echarts.init(document.getElementById('chart-kwh'),   null, { renderer: 'canvas' });
-const cW     = echarts.init(document.getElementById('chart-w'),     null, { renderer: 'canvas' });
-const cAh    = echarts.init(document.getElementById('chart-ah'),    null, { renderer: 'canvas' });
-const cShunt = echarts.init(document.getElementById('chart-shunt'), null, { renderer: 'canvas' });
+// Unités Grafana → suffixe affichable
+const UNIT_LABEL = {
+  watt: 'W', watth: 'Wh', kwatth: 'kWh', amp: 'A', volt: 'V',
+  celsius: '°C', percent: '%', hertz: 'Hz', short: '', none: '',
+};
+const UNIT_SCALE = { kwatth: { from: 'watth', mul: 0.001 } };
 
-// Resize on window change
-window.addEventListener('resize', function() {
-  cKwh.resize(); cW.resize(); cAh.resize(); cShunt.resize();
+// ============================================================================
+// Bootstrap
+// ============================================================================
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadCatalog();
+  loadLayout();
+  bindToolbar();
+  bindModal();
+  await renderAll();
+  window.addEventListener('resize', () => {
+    STATE.charts.forEach(c => c.resize());
+  });
 });
 
-// ── Thème colors (lit CSS vars) ──────────────────────────────────────────────
-function cssVar(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-function themeColors() {
-  return {
-    solar:   cssVar('--yellow')  || '#ca8a04',
-    import:  cssVar('--accent')  || '#2563eb',
-    consump: cssVar('--purple')  || '#7c3aed',
-    charge:  cssVar('--green')   || '#16a34a',
-    dischrg: cssVar('--orange')  || '#ea580c',
-    text:    cssVar('--muted')   || '#4b5563',
-    grid:    cssVar('--border')  || '#d6dce5',
-    tooltip: cssVar('--surface') || '#ffffff',
-  };
-}
-
-// ── Format timestamp → label (adapté au step de chaque période) ─────────────
-function fmtTs(ms, period) {
-  const d = new Date(ms);
-  if (period === 'day')   return d.toLocaleTimeString('fr-FR', { hour: '2-digit' }) + 'h';
-  if (period === 'week')  return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' });
-  if (period === 'month') return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-  return d.toLocaleDateString('fr-FR', { month: 'short' }); // year → Jan, Fév…
-}
-
-// ── Base option (horizontal stacked bar — bar-y-category-stack) ────────────
-function baseOpt(c, unit, period, yLabels) {
-  return {
-    animation: false,
-    backgroundColor: 'transparent',
-    grid: { left: 70, right: 35, top: 12, bottom: 40 },
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: c.tooltip,
-      borderColor: c.grid,
-      textStyle: { color: c.text, fontSize: 11 },
-      axisPointer: { type: 'shadow' },
-    },
-    xAxis: {
-      type: 'value',
-      axisLine:  { show: false },
-      axisTick:  { show: false },
-      axisLabel: { color: c.text, fontSize: 10 },
-      splitLine: { lineStyle: { color: c.grid, type: 'dashed' } },
-      name: unit,
-      nameLocation: 'end',
-      nameTextStyle: { color: c.text, fontSize: 10 },
-    },
-    yAxis: {
-      type: 'category',
-      data: yLabels,
-      inverse: true,
-      axisLine:  { lineStyle: { color: c.grid } },
-      axisTick:  { lineStyle: { color: c.grid } },
-      axisLabel: {
-        color: c.text,
-        fontSize: 9,
-        interval: Math.max(0, Math.floor(yLabels.length / 8) - 1),
-      },
-      splitLine: { show: false },
-    },
-    legend: {
-      bottom: 2,
-      textStyle: { color: c.text, fontSize: 11 },
-      itemWidth: 14, itemHeight: 8,
-    },
-  };
-}
-
-// ── Render charts ──────────────────────────────────────────────────────────
-// L'API retourne déjà des valeurs agrégées par bucket via PromQL :
-//   increase([window])     → kWh par bucket
-//   avg_over_time([window])→ W moyen par bucket
-//   max_over_time([window])→ Ah SmartShunt par bucket (remise à 0 à minuit)
-function renderCharts(data) {
-  const period = data.period || 'day';
-  const c = themeColors();
-
-  // Labels depuis les timestamps (un par bucket)
-  const tsSolar  = data.ts_solar_ms    || [];
-  const tsCharge = data.ts_charge_ms   || [];
-  const tsDischg = data.ts_discharge_ms|| [];
-  const xMain  = tsSolar.map(ms => fmtTs(ms, period));
-  const xShunt = (tsCharge.length ? tsCharge : tsDischg).map(ms => fmtTs(ms, period));
-
-  // ── 1. kWh par bucket ─────────────────────────────────────────────────────
-  const solarKwh   = data.solar_kwh_series   || [];
-  const importKwh  = data.import_kwh_series  || [];
-  const consumpKwh = data.consump_kwh_series || [];
-  const hasKwh = solarKwh.length > 0 || importKwh.length > 0 || consumpKwh.length > 0;
-
-  document.getElementById('nd-kwh').classList.toggle('hidden', hasKwh);
-  document.getElementById('meta-kwh').textContent = hasKwh
-    ? `☀ ${(data.totals?.solar_kwh||0).toFixed(2)} · 🔌 ${(data.totals?.import_kwh||0).toFixed(2)} · 🏠 ${(data.totals?.consump_kwh||0).toFixed(2)} kWh` : '—';
-
-  cKwh.setOption({
-    ...baseOpt(c, 'kWh', period, xMain),
-    series: [
-      { name: '☀️ Solaire',      type: 'bar', stack: 'energy', data: solarKwh,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
-      { name: '🔌 Importée',     type: 'bar', stack: 'energy', data: importKwh,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
-      { name: '🏠 Consommation', type: 'bar', stack: 'energy', data: consumpKwh, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
-    ],
-  }, true);
-
-  // ── 2. Puissance W (moyenne par bucket via avg_over_time) ─────────────────
-  const solarW   = data.solar_w  || [];
-  const importW  = data.import_w || [];
-  const consumpW = data.consump_w|| [];
-  const hasW = solarW.length > 0 || importW.length > 0 || consumpW.length > 0;
-
-  document.getElementById('nd-w').classList.toggle('hidden', hasW);
-  const maxW = Math.max(...(solarW.length ? solarW : [0]), ...(importW.length ? importW : [0]), ...(consumpW.length ? consumpW : [0]));
-  document.getElementById('meta-w').textContent = hasW ? `Max ${maxW.toFixed(0)} W` : '—';
-
-  cW.setOption({
-    ...baseOpt(c, 'W', period, xMain),
-    series: [
-      { name: '☀️ Solaire',      type: 'bar', stack: 'power', data: solarW,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
-      { name: '🔌 Importée',     type: 'bar', stack: 'power', data: importW,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
-      { name: '🏠 Consommation', type: 'bar', stack: 'power', data: consumpW, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
-    ],
-  }, true);
-
-  // ── 3. Ah (kWh × 1000 / V_nom) par bucket ────────────────────────────────
-  const solarAh   = solarKwh.map(v => Math.round(v * 1000 / V_NOM * 100) / 100);
-  const importAh  = importKwh.map(v => Math.round(v * 1000 / V_NOM * 100) / 100);
-  const consumpAh = consumpKwh.map(v => Math.round(v * 1000 / V_NOM * 100) / 100);
-  const hasAh = solarAh.length > 0 || importAh.length > 0 || consumpAh.length > 0;
-
-  document.getElementById('nd-ah').classList.toggle('hidden', hasAh);
-  document.getElementById('meta-ah').textContent = hasAh
-    ? `☀ ${(data.totals?.solar_kwh||0) * 1000 / V_NOM|0} · 🔌 ${(data.totals?.import_kwh||0) * 1000 / V_NOM|0} · 🏠 ${(data.totals?.consump_kwh||0) * 1000 / V_NOM|0} Ah`
-    : '—';
-
-  cAh.setOption({
-    ...baseOpt(c, 'Ah', period, xMain),
-    series: [
-      { name: '☀️ Solaire',      type: 'bar', stack: 'ah', data: solarAh,   itemStyle: { color: c.solar   }, emphasis: { focus: 'series' } },
-      { name: '🔌 Importée',     type: 'bar', stack: 'ah', data: importAh,  itemStyle: { color: c.import  }, emphasis: { focus: 'series' } },
-      { name: '🏠 Consommation', type: 'bar', stack: 'ah', data: consumpAh, itemStyle: { color: c.consump }, emphasis: { focus: 'series' } },
-    ],
-  }, true);
-
-  // ── 4. Charge / Décharge Ah SmartShunt (max_over_time par bucket) ─────────
-  const chargeAh  = data.charge_ah_series    || [];
-  const dischrgAh = data.discharge_ah_series || [];
-  const hasShunt  = chargeAh.length > 0 || dischrgAh.length > 0;
-
-  document.getElementById('nd-shunt').classList.toggle('hidden', hasShunt);
-  document.getElementById('meta-shunt').textContent = hasShunt
-    ? `⬆ ${(data.charge_ah_now||0).toFixed(1)} Ah · ⬇ ${(data.discharge_ah_now||0).toFixed(1)} Ah`
-    : '—';
-
-  cShunt.setOption({
-    ...baseOpt(c, 'Ah', period, xShunt),
-    series: [
-      { name: '⬆ Charge Ah',   type: 'bar', stack: 'shunt', data: chargeAh,  itemStyle: { color: c.charge  }, emphasis: { focus: 'series' } },
-      { name: '⬇ Décharge Ah', type: 'bar', stack: 'shunt', data: dischrgAh, itemStyle: { color: c.dischrg }, emphasis: { focus: 'series' } },
-    ],
-  }, true);
-}
-
-// ── KPI totals ──────────────────────────────────────────────────────────────
-function updateKpis(data) {
-  const t = data.totals || {};
-  document.getElementById('kpi-solar-kwh').textContent  = t.solar_kwh   != null ? t.solar_kwh.toFixed(2)  + ' kWh' : '—';
-  document.getElementById('kpi-import-kwh').textContent = t.import_kwh  != null ? t.import_kwh.toFixed(2) + ' kWh' : '—';
-  document.getElementById('kpi-consump-kwh').textContent= t.consump_kwh != null ? t.consump_kwh.toFixed(2)+ ' kWh' : '—';
-  document.getElementById('kpi-export-kwh').textContent = t.export_kwh  != null ? t.export_kwh.toFixed(2) + ' kWh' : '—';
-  document.getElementById('kpi-charge-ah').textContent  = t.charge_ah   != null ? t.charge_ah.toFixed(1)  + ' Ah'  : '—';
-  document.getElementById('kpi-dischrg-ah').textContent = t.discharge_ah!= null ? t.discharge_ah.toFixed(1)+ ' Ah' : '—';
-}
-
-// ── Load data ───────────────────────────────────────────────────────────────
-let currentPeriod = 'day';
-
-function periodLabel(p) {
-  const now = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  return { day: '24 h', week: '7 jours', month: '30 jours', year: '1 an' }[p] + ' — màj ' + now;
-}
-
-async function loadHistory(period) {
-  document.getElementById('period-label').textContent = 'Chargement…';
+async function loadCatalog() {
   try {
-    const resp = await fetch('/api/v1/history/energy?period=' + period);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const data = await resp.json();
-    if (!data.ok) {
-      document.getElementById('period-label').textContent = 'VictoriaMetrics désactivé';
-      return;
-    }
-    renderCharts(data);
-    updateKpis(data);
-    document.getElementById('period-label').textContent = periodLabel(period);
+    const r = await fetch('/api/v1/dashboards/catalog?include_rows=true');
+    const j = await r.json();
+    STATE.catalog = j.panels || [];
   } catch (e) {
-    document.getElementById('period-label').textContent = 'Erreur : ' + e.message;
+    console.error('catalog load failed', e);
+    STATE.catalog = [];
   }
 }
 
-function selectPeriod(btn) {
-  document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  currentPeriod = btn.dataset.period;
-  loadHistory(currentPeriod);
+function loadLayout() {
+  const raw = localStorage.getItem(LS_KEY);
+  if (raw) {
+    try { STATE.layout = JSON.parse(raw); return; }
+    catch (e) { /* fallthrough */ }
+  }
+  // Pas de layout sauvé : on prend toutes les positions Grafana d'origine
+  STATE.layout = STATE.catalog.map(p => ({
+    id: p.id,
+    x: p.grid_pos.x, y: p.grid_pos.y,
+    w: p.grid_pos.w, h: p.grid_pos.h,
+  }));
 }
 
-// ── Init ────────────────────────────────────────────────────────────────────
-loadHistory('day');
+function saveLayout() {
+  localStorage.setItem(LS_KEY, JSON.stringify(STATE.layout));
+}
 
-// Auto-refresh every 60s (history data changes slowly)
-setInterval(function() { loadHistory(currentPeriod); }, 60000);
+function bindToolbar() {
+  document.querySelectorAll('#period-bar button').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      document.querySelectorAll('#period-bar button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      STATE.period = btn.dataset.period;
+      await renderAll();
+    });
+  });
+  document.getElementById('btn-refresh').addEventListener('click', renderAll);
+  document.getElementById('btn-pdf').addEventListener('click', () => {
+    // ECharts en SVG s'imprime mieux mais on garde canvas — assure resize avant print
+    STATE.charts.forEach(c => c.resize());
+    setTimeout(() => window.print(), 200);
+  });
+  document.getElementById('btn-reset').addEventListener('click', async () => {
+    localStorage.removeItem(LS_KEY);
+    loadLayout();
+    await renderAll();
+  });
+  document.getElementById('btn-add').addEventListener('click', openModal);
+}
 
-// Re-render charts on theme toggle (CSS vars change)
-const _origToggle = window.toggleTheme;
-window.toggleTheme = function() {
-  _origToggle();
-  setTimeout(function() { loadHistory(currentPeriod); }, 300);
-};
+// ============================================================================
+// Rendu grille
+// ============================================================================
+async function renderAll() {
+  const grid = document.getElementById('dash-grid');
+  // Destroy anciennes instances
+  STATE.charts.forEach(c => c.dispose());
+  STATE.charts.clear();
+  grid.innerHTML = '';
+
+  // Ordre : tri par (y, x)
+  const sorted = [...STATE.layout].sort((a,b) => a.y - b.y || a.x - b.x);
+
+  for (const item of sorted) {
+    const panel = STATE.catalog.find(p => p.id === item.id);
+    if (!panel) continue;
+    const el = createPanelEl(panel, item);
+    grid.appendChild(el);
+  }
+
+  // Charge les données en parallèle (après que DOM soit en place)
+  const promises = sorted.map(item => {
+    const panel = STATE.catalog.find(p => p.id === item.id);
+    if (!panel || panel.kind === 'row') return null;
+    return fetchAndRenderPanel(panel);
+  }).filter(Boolean);
+  await Promise.allSettled(promises);
+}
+
+function createPanelEl(panel, item) {
+  const wrap = document.createElement('div');
+  wrap.className = `dash-panel kind-${panel.kind}`;
+  wrap.dataset.id = panel.id;
+  wrap.style.gridColumn = `${item.x + 1} / span ${item.w}`;
+  wrap.style.gridRow    = `${item.y + 1} / span ${Math.max(item.h, 1)}`;
+
+  if (panel.kind === 'row') {
+    wrap.innerHTML = `<div>${escapeHtml(panel.title)}</div>`;
+    return wrap;
+  }
+
+  wrap.innerHTML = `
+    <div class="dash-panel-head">
+      <span class="title">${escapeHtml(panel.title)}</span>
+      <span class="actions">
+        <button title="Retirer" data-act="remove">✕</button>
+      </span>
+    </div>
+    <div class="dash-panel-body kind-${panel.kind}">
+      <div class="dash-empty">Chargement…</div>
+    </div>
+  `;
+  wrap.querySelector('[data-act="remove"]').addEventListener('click', () => {
+    STATE.layout = STATE.layout.filter(x => x.id !== panel.id);
+    saveLayout();
+    renderAll();
+  });
+  return wrap;
+}
+
+async function fetchAndRenderPanel(panel) {
+  const to   = Date.now();
+  const from = to - PERIOD_MS[STATE.period];
+  let data;
+  try {
+    const r = await fetch(`/api/v1/dashboards/panel/${encodeURIComponent(panel.id)}/data?from=${from}&to=${to}`);
+    data = await r.json();
+  } catch (e) {
+    renderPanelError(panel, e.message); return;
+  }
+  if (!data.ok) { renderPanelError(panel, data.reason || 'erreur'); return; }
+  STATE.panelData.set(panel.id, data);
+
+  const body = document.querySelector(`.dash-panel[data-id="${cssEscape(panel.id)}"] .dash-panel-body`);
+  if (!body) return;
+
+  switch (panel.kind) {
+    case 'timeseries': renderTimeSeries(panel, body, data); break;
+    case 'barchart':   renderBarChart(panel, body, data); break;
+    case 'stat':       renderStat(panel, body, data); break;
+    case 'gauge':      renderGauge(panel, body, data); break;
+    case 'bargauge':   renderBarGauge(panel, body, data); break;
+    case 'table':      renderTable(panel, body, data); break;
+    default:           body.innerHTML = `<div class="dash-empty">type "${panel.kind}" non supporté</div>`;
+  }
+}
+
+function renderPanelError(panel, msg) {
+  const body = document.querySelector(`.dash-panel[data-id="${cssEscape(panel.id)}"] .dash-panel-body`);
+  if (body) body.innerHTML = `<div class="dash-empty dash-error">⚠ ${escapeHtml(msg)}</div>`;
+}
+
+// ============================================================================
+// Rendus par type
+// ============================================================================
+function renderTimeSeries(panel, body, data) {
+  body.innerHTML = '<div style="width:100%;height:100%"></div>';
+  const chart = echarts.init(body.firstElementChild, null, { renderer: 'canvas' });
+  const series = data.series.map(s => ({
+    name: s.legend || s.ref_id,
+    type: 'line',
+    showSymbol: false,
+    smooth: true,
+    lineStyle: { width: 1.7 },
+    areaStyle: { opacity: 0.07 },
+    data: s.ts_ms.map((t, i) => [t, scaleValue(panel.unit, s.values[i])]),
+  }));
+  chart.setOption({
+    animation: false,
+    grid: { left: 50, right: 14, top: 24, bottom: 30 },
+    legend: { type: 'scroll', top: 0, textStyle: { color: '#9aa3b2', fontSize: 10 } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, valueFormatter: v => fmtValue(panel, v) },
+    xAxis: { type: 'time', axisLabel: { color: '#9aa3b2', fontSize: 10 }, splitLine: { lineStyle: { color: '#2a3142' } } },
+    yAxis: { type: 'value', axisLabel: { color: '#9aa3b2', fontSize: 10, formatter: v => fmtValue(panel, v) }, splitLine: { lineStyle: { color: '#2a3142' } } },
+    series,
+  });
+  STATE.charts.set(panel.id, chart);
+}
+
+function renderBarChart(panel, body, data) {
+  body.innerHTML = '<div style="width:100%;height:100%"></div>';
+  const chart = echarts.init(body.firstElementChild, null, { renderer: 'canvas' });
+  // bar : on prend la dernière valeur de chaque série
+  const cats = data.series.map(s => s.legend || s.ref_id);
+  const vals = data.series.map(s => scaleValue(panel.unit, lastFinite(s.values)));
+  chart.setOption({
+    animation: false,
+    grid: { left: 50, right: 14, top: 20, bottom: 36 },
+    tooltip: { trigger: 'axis', valueFormatter: v => fmtValue(panel, v) },
+    xAxis: { type: 'category', data: cats, axisLabel: { color: '#9aa3b2', fontSize: 10, rotate: cats.length > 4 ? 20 : 0 } },
+    yAxis: { type: 'value', axisLabel: { color: '#9aa3b2', fontSize: 10, formatter: v => fmtValue(panel, v) } },
+    series: [{
+      type: 'bar',
+      data: vals,
+      itemStyle: { color: '#4f8df7', borderRadius: [3,3,0,0] },
+    }],
+  });
+  STATE.charts.set(panel.id, chart);
+}
+
+function renderStat(panel, body, data) {
+  const s = data.series[0];
+  const v = s ? lastFinite(s.values) : null;
+  if (v === null || !isFinite(v)) {
+    body.innerHTML = `<div class="dash-empty">–</div>`;
+    return;
+  }
+  const scaled = scaleValue(panel.unit, v);
+  const sizeClass = Math.abs(scaled) >= 10000 ? 'md' : 'lg';
+  body.innerHTML = `
+    <div class="dash-stat-value ${sizeClass}">
+      ${fmtNum(scaled, panel.decimals)}<span class="dash-stat-unit">${escapeHtml(unitLabel(panel.unit))}</span>
+    </div>
+    ${s.legend ? `<div class="dash-stat-label">${escapeHtml(s.legend)}</div>` : ''}
+  `;
+}
+
+function renderGauge(panel, body, data) {
+  body.innerHTML = '<div style="width:100%;height:100%"></div>';
+  const chart = echarts.init(body.firstElementChild, null, { renderer: 'canvas' });
+  const s = data.series[0];
+  const v = s ? scaleValue(panel.unit, lastFinite(s.values)) : 0;
+  const max = guessMax(panel.unit, v);
+  chart.setOption({
+    series: [{
+      type: 'gauge',
+      min: 0, max,
+      progress: { show: true, width: 12 },
+      axisLine: { lineStyle: { width: 12, color: [[1, '#2a3142']] } },
+      axisTick: { show: false },
+      splitLine: { distance: -16, length: 8, lineStyle: { color: '#5a6478' } },
+      axisLabel: { distance: 18, color: '#9aa3b2', fontSize: 9 },
+      pointer: { length: '70%', width: 4 },
+      detail: { valueAnimation: false, formatter: () => fmtNum(v, panel.decimals) + ' ' + unitLabel(panel.unit), fontSize: 14, color: '#e6e9ef' },
+      data: [{ value: v }],
+    }],
+  });
+  STATE.charts.set(panel.id, chart);
+}
+
+function renderBarGauge(panel, body, data) {
+  // Barres horizontales par série
+  const items = data.series.map(s => {
+    const v = scaleValue(panel.unit, lastFinite(s.values));
+    return { label: s.legend || s.ref_id, value: v };
+  });
+  const max = Math.max(...items.map(i => i.value).filter(isFinite), 1);
+  body.innerHTML = `
+    <div class="dash-bargauge-list">
+      ${items.map(it => `
+        <div class="dash-bargauge-item">
+          <div class="dash-bargauge-label">
+            <span>${escapeHtml(it.label)}</span>
+            <span>${fmtNum(it.value, panel.decimals)} ${escapeHtml(unitLabel(panel.unit))}</span>
+          </div>
+          <div class="dash-bargauge-bar"><div class="dash-bargauge-fill" style="width:${Math.min(100, Math.max(0, it.value/max*100))}%"></div></div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderTable(panel, body, data) {
+  const rows = data.series.map(s => ({
+    name: s.legend || s.ref_id,
+    value: scaleValue(panel.unit, lastFinite(s.values)),
+  }));
+  body.innerHTML = `
+    <div class="dash-table-wrap">
+      <table class="dash-table">
+        <thead><tr><th>Série</th><th class="num">Valeur</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="num">${fmtNum(r.value, panel.decimals)} ${escapeHtml(unitLabel(panel.unit))}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ============================================================================
+// Modale
+// ============================================================================
+function bindModal() {
+  document.getElementById('modal-close').addEventListener('click', closeModal);
+  document.getElementById('modal-backdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'modal-backdrop') closeModal();
+  });
+  document.getElementById('modal-search').addEventListener('input', renderModalList);
+}
+
+function openModal() {
+  document.getElementById('modal-search').value = '';
+  renderModalList();
+  document.getElementById('modal-backdrop').classList.add('open');
+  document.getElementById('modal-search').focus();
+}
+function closeModal() {
+  document.getElementById('modal-backdrop').classList.remove('open');
+}
+
+function renderModalList() {
+  const q = document.getElementById('modal-search').value.toLowerCase().trim();
+  const usedIds = new Set(STATE.layout.map(x => x.id));
+  const items = STATE.catalog
+    .filter(p => p.kind !== 'row')
+    .filter(p => !q || p.title.toLowerCase().includes(q) || p.kind.includes(q))
+    .sort((a,b) => a.title.localeCompare(b.title));
+  const list = document.getElementById('modal-list');
+  if (items.length === 0) {
+    list.innerHTML = '<div class="dash-empty">Aucun résultat</div>';
+    return;
+  }
+  list.innerHTML = items.map(p => `
+    <div class="dash-modal-row ${usedIds.has(p.id) ? 'added' : ''}" data-id="${escapeHtml(p.id)}">
+      <span class="kind">${escapeHtml(p.kind)}</span>
+      <span class="title">${escapeHtml(p.title)}</span>
+      <span class="unit">${escapeHtml(unitLabel(p.unit))}</span>
+    </div>
+  `).join('');
+  list.querySelectorAll('.dash-modal-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const id = row.dataset.id;
+      if (usedIds.has(id)) return;
+      const panel = STATE.catalog.find(p => p.id === id);
+      addPanelToLayout(panel);
+      closeModal();
+      renderAll();
+    });
+  });
+}
+
+function addPanelToLayout(panel) {
+  // Trouve une position libre : on prend max(y+h) actuelle + 1
+  const maxY = STATE.layout.reduce((m, it) => Math.max(m, it.y + it.h), 0);
+  STATE.layout.push({
+    id: panel.id,
+    x: 0, y: maxY,
+    w: panel.grid_pos.w || 12,
+    h: panel.grid_pos.h || 8,
+  });
+  saveLayout();
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+function lastFinite(arr) {
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (isFinite(arr[i])) return arr[i];
+  }
+  return NaN;
+}
+function scaleValue(unit, v) {
+  if (!isFinite(v)) return v;
+  const s = UNIT_SCALE[unit];
+  return s ? v * s.mul : v;
+}
+function unitLabel(u) {
+  if (!u) return '';
+  return UNIT_LABEL[u] !== undefined ? UNIT_LABEL[u] : u;
+}
+function fmtNum(v, decimals) {
+  if (!isFinite(v)) return '–';
+  const d = decimals != null ? decimals : (Math.abs(v) >= 100 ? 0 : (Math.abs(v) >= 10 ? 1 : 2));
+  return v.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function fmtValue(panel, v) {
+  return fmtNum(v, panel.decimals) + ' ' + unitLabel(panel.unit);
+}
+function guessMax(unit, v) {
+  if (unit === 'percent') return 100;
+  if (unit === 'celsius') return 100;
+  const abs = Math.abs(v) || 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(abs)));
+  return Math.ceil(abs / pow) * pow * 2;
+}
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function cssEscape(s) {
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, c => '\\' + c);
+}
 </script>
 {% endblock %}
