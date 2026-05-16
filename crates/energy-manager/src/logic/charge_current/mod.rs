@@ -67,7 +67,9 @@ async fn run(
                         }
                     } else if t == &topic_pv_power {
                         if let Some(v) = msg.victron_value::<f64>() {
-                            s.mppt_power_273_w = Some(v);
+                            // AC PV on inverter output — NOT the DC MPPT-273 measurement.
+                            // (Previously this overwrote mppt_power_273_w with an AC value.)
+                            s.ac_pv_on_output_w = Some(v);
                         }
                     } else if t == &topic_consump {
                         if let Some(v) = msg.victron_value::<f64>() {
@@ -103,7 +105,7 @@ async fn compute_and_publish(
     let s = state.read().await;
 
     let offgrid   = s.ac_ignore.map(|v| v == 1).unwrap_or(false);
-    let pv_w      = s.mppt_power_273_w.unwrap_or(0.0);
+    let pv_w      = s.ac_pv_on_output_w.unwrap_or(0.0);
     let cons_w    = s.house_power_w.unwrap_or(0.0);
     let pv_excess = (pv_w - cons_w) > cfg.pv_excess_threshold_w;
 

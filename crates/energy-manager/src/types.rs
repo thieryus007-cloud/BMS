@@ -116,6 +116,9 @@ pub struct EnergyState {
     pub pvinverter_power_w: Option<f64>, // N/.../pvinverter/32/Ac/Power
     pub solar_total_w: f64,
     pub house_power_w: Option<f64>,
+    // N/.../system/0/Ac/PvOnOutput/L1/Power — AC PV available on inverter output.
+    // Used by charge_current to decide PV-excess mode; do not confuse with mppt_power_*_w (DC).
+    pub ac_pv_on_output_w: Option<f64>,
 
     // --- MPPT detail ---
     pub mppt_273: MpptState,

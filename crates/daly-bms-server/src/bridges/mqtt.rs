@@ -620,9 +620,13 @@ async fn handle_meteo_topic(state: &AppState, json: &Value) {
             });
         }
         // Sync mppt_yield_kwh with the sum from all chargers.
+        // Distinguish "no data" (no MPPT reported yield_today_kwh) from "zero yield"
+        // (fields present but sum is 0 — e.g., immediately after midnight reset).
+        // The previous `> 0.0` guard kept yesterday's cached value across midnight.
+        let has_yield_data = new_mppts.iter().any(|m| m.yield_today_kwh.is_some());
         let total_yield: f32 = new_mppts.iter().filter_map(|m| m.yield_today_kwh).sum();
         state.on_venus_mppts_replace(new_mppts).await;
-        if total_yield > 0.0 {
+        if has_yield_data {
             *state.mppt_yield_kwh.write().await = total_yield;
         }
         return; // format v2 traité, pas de fallback nécessaire
@@ -755,15 +759,25 @@ async fn handle_heatpump_topic(state: &AppState, topic: &str, json: &Value) {
         .unwrap_or(0);
     if idx == 0 { return; }
 
-    let hp_state    = json.get("State").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    let temperature = json.get("Temperature").and_then(|v| v.as_f64()).map(|v| v as f32);
-    let target_temp = json.get("TargetTemperature").and_then(|v| v.as_f64()).map(|v| v as f32);
-    let position    = json.get("Position").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    let ac_power    = json.get("Ac").and_then(|a| a.get("Power")).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    // Read previous snapshot so missing fields in this MQTT message keep their last
+    // known value instead of fabricating a 0. The upstream device is the source of
+    // truth — when it omits a field, we must not invent data.
+    let prev = state.venus_heatpump_get(idx).await;
+
+    let hp_state    = json.get("State").and_then(|v| v.as_i64()).map(|v| v as i32)
+        .unwrap_or_else(|| prev.as_ref().map(|p| p.state).unwrap_or(0));
+    let temperature = json.get("Temperature").and_then(|v| v.as_f64()).map(|v| v as f32)
+        .or_else(|| prev.as_ref().and_then(|p| p.temperature));
+    let target_temp = json.get("TargetTemperature").and_then(|v| v.as_f64()).map(|v| v as f32)
+        .or_else(|| prev.as_ref().and_then(|p| p.target_temperature));
+    let position    = json.get("Position").and_then(|v| v.as_i64()).map(|v| v as i32)
+        .unwrap_or_else(|| prev.as_ref().map(|p| p.position).unwrap_or(0));
+    let ac_power    = json.get("Ac").and_then(|a| a.get("Power")).and_then(|v| v.as_f64()).map(|v| v as f32)
+        .unwrap_or_else(|| prev.as_ref().map(|p| p.ac_power).unwrap_or(0.0));
     let ac_energy   = json
         .get("Ac").and_then(|a| a.get("Energy"))
-        .and_then(|e| e.get("Forward")).and_then(|v| v.as_f64())
-        .unwrap_or(0.0) as f32;
+        .and_then(|e| e.get("Forward")).and_then(|v| v.as_f64()).map(|v| v as f32)
+        .unwrap_or_else(|| prev.as_ref().map(|p| p.ac_energy_forward).unwrap_or(0.0));
 
     let hp = VenusHeatpump {
         mqtt_index:          idx,
