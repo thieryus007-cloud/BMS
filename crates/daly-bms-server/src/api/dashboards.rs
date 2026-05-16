@@ -182,9 +182,12 @@ pub async fn get_panel_data(
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Une série Prometheus extraite : (labels, timestamps_ms, valeurs).
+type Series = (serde_json::Map<String, Value>, Vec<i64>, Vec<f64>);
+
 /// Extrait toutes les séries du JSON VM range_query.
 /// Retourne `Vec<(labels, ts_ms, values)>` — une entrée par série Prometheus.
-fn extract_series(result: &Value) -> Vec<(serde_json::Map<String, Value>, Vec<i64>, Vec<f64>)> {
+fn extract_series(result: &Value) -> Vec<Series> {
     let empty = vec![];
     let list = result.pointer("/data/result").and_then(|v| v.as_array()).unwrap_or(&empty);
     let mut out = Vec::with_capacity(list.len());

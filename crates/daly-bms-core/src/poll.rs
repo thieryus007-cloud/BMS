@@ -82,7 +82,7 @@ pub async fn poll_loop<F, E>(
 
         // Lire les versions firmware pour les BMS non encore mis en cache
         for device in &manager.devices {
-            if !fw_cache.contains_key(&device.address) {
+            if let std::collections::hash_map::Entry::Vacant(e) = fw_cache.entry(device.address) {
                 let sw = commands::get_firmware_sw(&manager.port, device.address)
                     .await.unwrap_or_default();
                 let hw = commands::get_firmware_hw(&manager.port, device.address)
@@ -94,7 +94,7 @@ pub async fn poll_loop<F, E>(
                         "Firmware version lu"
                     );
                 }
-                fw_cache.insert(device.address, (sw, hw));
+                e.insert((sw, hw));
             }
         }
 

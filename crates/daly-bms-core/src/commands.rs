@@ -115,7 +115,7 @@ pub async fn get_cell_voltages(
     addr: u8,
     cell_count: u8,
 ) -> Result<CellVoltages> {
-    let frame_count = (cell_count as usize + 2) / 3;
+    let frame_count = (cell_count as usize).div_ceil(3);
     let frames = port.send_command_multi(addr, DataId::CellVoltages1, frame_count).await?;
 
     let mut voltages = Vec::with_capacity(cell_count as usize);
@@ -146,7 +146,7 @@ pub async fn get_temperatures(
     addr: u8,
     sensor_count: u8,
 ) -> Result<CellTemperatures> {
-    let frame_count = (sensor_count as usize + 6) / 7;
+    let frame_count = (sensor_count as usize).div_ceil(7);
     let frames = port.send_command_multi(addr, DataId::Temperatures, frame_count).await?;
 
     let mut temperatures = Vec::with_capacity(sensor_count as usize);
@@ -363,17 +363,17 @@ pub fn parse_alarm_flags(bytes: &[u8; 7]) -> Alarms {
     // Byte 3 : [bit0]=cell_imbalance
     // Byte 5 : [bit5]=fuse_blown
     Alarms {
-        high_voltage:             ((bytes[0] >> 0) | (bytes[0] >> 2)) & 1,
+        high_voltage:             (bytes[0] | (bytes[0] >> 2)) & 1,
         low_voltage:              ((bytes[0] >> 1) | (bytes[0] >> 3)) & 1,
         low_cell_voltage:         (bytes[0] >> 1) & 1,
-        high_charge_temperature:  (bytes[1] >> 0) & 1,
+        high_charge_temperature:  bytes[1] & 1,
         low_charge_temperature:   (bytes[1] >> 1) & 1,
         high_temperature:         (bytes[1] >> 2) & 1,
         low_temperature:          (bytes[1] >> 3) & 1,
-        high_charge_current:      (bytes[2] >> 0) & 1,
+        high_charge_current:      bytes[2] & 1,
         high_discharge_current:   (bytes[2] >> 1) & 1,
-        high_current:             ((bytes[2] >> 0) | (bytes[2] >> 1)) & 1,
-        cell_imbalance:           (bytes[3] >> 0) & 1,
+        high_current:             (bytes[2] | (bytes[2] >> 1)) & 1,
+        cell_imbalance:           bytes[3] & 1,
         fuse_blown:               (bytes[5] >> 5) & 1,
         low_soc:                  0, // calculé par l'AlertEngine logiciel
     }
