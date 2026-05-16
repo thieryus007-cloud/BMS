@@ -620,9 +620,13 @@ async fn handle_meteo_topic(state: &AppState, json: &Value) {
             });
         }
         // Sync mppt_yield_kwh with the sum from all chargers.
+        // Distinguish "no data" (no MPPT reported yield_today_kwh) from "zero yield"
+        // (fields present but sum is 0 — e.g., immediately after midnight reset).
+        // The previous `> 0.0` guard kept yesterday's cached value across midnight.
+        let has_yield_data = new_mppts.iter().any(|m| m.yield_today_kwh.is_some());
         let total_yield: f32 = new_mppts.iter().filter_map(|m| m.yield_today_kwh).sum();
         state.on_venus_mppts_replace(new_mppts).await;
-        if total_yield > 0.0 {
+        if has_yield_data {
             *state.mppt_yield_kwh.write().await = total_yield;
         }
         return; // format v2 traité, pas de fallback nécessaire
