@@ -691,31 +691,63 @@ async function fetchAndRenderCustomPanel(panel) {
     renderPanelError(panel, 'aucune query définie');
     return;
   }
-  const results = await Promise.allSettled(panel.queries.map(async q => {
-    const url = `/api/v1/query_range?query=${encodeURIComponent(q.expr)}&start=${from}&end=${to}&step=${stepMs}`;
-    const r = await fetch(url);
-    const j = await r.json();
-    return { q, j };
-  }));
+  console.groupCollapsed(`[custom-panel] "${panel.title}" — ${panel.queries.length} query(s)`);
+  console.log('queries:', panel.queries);
+
+  // Exécution séquentielle (évite la surcharge de VM sur le Pi5 avec plusieurs requêtes en //)
   const series = [];
-  for (const r of results) {
-    if (r.status !== 'fulfilled') continue;
-    const { q, j } = r.value;
-    const list = (j && j.data && j.data.result) || [];
-    for (const s of list) {
-      const ts = [], vs = [];
-      for (const [tSec, sVal] of (s.values || [])) {
-        ts.push(Math.round(tSec * 1000));
-        vs.push(parseFloat(sVal));
+  const errors = [];
+  for (const q of panel.queries) {
+    if (!q.expr) { errors.push(`${q.ref_id || '?'}: expr vide`); continue; }
+    const url = `/api/v1/query_range?query=${encodeURIComponent(q.expr)}&start=${from}&end=${to}&step=${stepMs}`;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) {
+        const txt = await r.text().catch(() => '<unreadable>');
+        const msg = `HTTP ${r.status} ${r.statusText} — ${txt.slice(0, 200)}`;
+        console.warn(`[${q.ref_id}] ${q.expr} → ${msg}`);
+        errors.push(`${q.ref_id}: ${msg}`);
+        continue;
       }
-      series.push({
-        ref_id: q.ref_id || 'A',
-        legend: formatLegendCustom(q.legend, s.metric),
-        labels: s.metric || {},
-        ts_ms: ts,
-        values: vs,
-      });
+      const j = await r.json();
+      if (j.status === 'error' || j.error) {
+        const msg = j.error || j.errorType || 'erreur API';
+        console.warn(`[${q.ref_id}] ${q.expr} →`, j);
+        errors.push(`${q.ref_id}: ${msg}`);
+        continue;
+      }
+      const list = (j && j.data && j.data.result) || [];
+      console.log(`[${q.ref_id}] ${q.expr} → ${list.length} série(s)`);
+      if (list.length === 0) {
+        errors.push(`${q.ref_id}: aucune donnée (vérifier l'expression PromQL et la fenêtre temporelle)`);
+        continue;
+      }
+      for (const s of list) {
+        const ts = [], vs = [];
+        for (const [tSec, sVal] of (s.values || [])) {
+          ts.push(Math.round(tSec * 1000));
+          vs.push(parseFloat(sVal));
+        }
+        series.push({
+          ref_id: q.ref_id || 'A',
+          legend: formatLegendCustom(q.legend, s.metric) || (q.ref_id || 'A'),
+          labels: s.metric || {},
+          ts_ms: ts,
+          values: vs,
+        });
+      }
+    } catch (e) {
+      console.error(`[${q.ref_id}] ${q.expr} → exception`, e);
+      errors.push(`${q.ref_id}: ${e.message || e}`);
     }
+  }
+  console.log(`→ total ${series.length} série(s), ${errors.length} erreur(s)`);
+  if (errors.length) console.warn('Erreurs:', errors);
+  console.groupEnd();
+
+  if (series.length === 0) {
+    renderPanelError(panel, errors[0] || 'aucune donnée');
+    return;
   }
   const data = { ok: true, panel, from_ms: from, to_ms: to, step_ms: stepMs, series };
   STATE.panelData.set(panel.id, data);
