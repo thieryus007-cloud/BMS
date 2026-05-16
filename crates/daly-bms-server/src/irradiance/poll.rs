@@ -66,7 +66,7 @@ where
                 consecutive_errors += 1;
                 let msg = format!("{:#}", e);
                 // Log seulement à la 1ère erreur, puis toutes les 12 (même fréquence que Python)
-                if consecutive_errors == 1 || consecutive_errors % 12 == 0 {
+                if consecutive_errors == 1 || consecutive_errors.is_multiple_of(12) {
                     warn!(
                         addr   = format!("{:#04x}", addr),
                         errors = consecutive_errors,

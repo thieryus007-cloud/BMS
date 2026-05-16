@@ -71,7 +71,7 @@ impl Severity {
 }
 
 /// État d'une règle pour une clé (adresse BMS, rule_id).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct RuleState {
     /// Règle actuellement déclenchée (notification envoyée).
     active:         bool,
@@ -79,16 +79,6 @@ struct RuleState {
     last_notified:  Option<Instant>,
     /// Instant où la condition a commencé à être vraie (pour `min_duration`).
     pending_since:  Option<Instant>,
-}
-
-impl Default for RuleState {
-    fn default() -> Self {
-        Self {
-            active:        false,
-            last_notified: None,
-            pending_since: None,
-        }
-    }
 }
 
 /// Contexte d'évaluation passé à chaque règle.
@@ -99,6 +89,11 @@ pub struct AlertContext<'a> {
     pub shunt_current_a:  Option<f32>,
 }
 
+/// Closure type pour évaluer si une règle se déclenche : retourne la valeur si vraie.
+pub type AlertTriggerFn = Box<dyn Fn(&AlertContext) -> Option<f32> + Send + Sync>;
+/// Closure type pour évaluer si une règle se ré-arme.
+pub type AlertClearFn = Box<dyn Fn(&AlertContext) -> bool + Send + Sync>;
+
 /// Définition d'une règle d'alerte.
 pub struct AlertRule {
     pub id:           &'static str,
@@ -108,8 +103,8 @@ pub struct AlertRule {
     /// Durée minimale pendant laquelle la condition doit rester vraie avant de déclencher.
     /// `None` = déclencher immédiatement (comportement legacy).
     pub min_duration: Option<Duration>,
-    pub trigger:      Box<dyn Fn(&AlertContext) -> Option<f32> + Send + Sync>,
-    pub clear:        Box<dyn Fn(&AlertContext) -> bool + Send + Sync>,
+    pub trigger:      AlertTriggerFn,
+    pub clear:        AlertClearFn,
 }
 
 // =============================================================================
