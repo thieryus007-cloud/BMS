@@ -1,51 +1,78 @@
-**tuning VictoriaMetrics** pour diviser sa consommation RAM par 2 à 3, sans toucher à une ligne de code Rust.
+# Tuning VictoriaMetrics — Pi5 Daly-BMS
+
+Réduire l'empreinte mémoire de VictoriaMetrics **sans toucher au code Rust** ni au stockage existant.
+
+> **Baseline actuelle (à confirmer avant tuning)** : ~120 Mo RSS, légère dérive
+> à la hausse. Rétention 5 ans sur NVMe, ~50 séries actives.
+> Objectif après tuning : 60–90 Mo stable + garde-fou OOM via cgroup systemd.
 
 ---
 
-## Fichier de service systemd allégé
+## 0. Contexte projet
 
-**Fichier :** `contrib/victoriametrics.service`
+| Paramètre | Valeur prod actuelle |
+|---|---|
+| Binaire | `/usr/local/bin/victoria-metrics-prod` |
+| Storage path | `/mnt/nvme/victoria-metrics` (NVMe, monté via `mnt-nvme.mount`) |
+| User / Group | `victoriametrics` / `victoriametrics` |
+| Port HTTP | `8428` |
+| Rétention | `5y` |
+| Service systemd | `victoriametrics.service` (fichier `contrib/victoriametrics.service`) |
+| Producteurs | `daly-bms-server` (push direct) + `energy-manager` (push direct). Pas de `promscrape` (le fichier `victoriametrics-scrape.yml` a `scrape_configs: []`) |
+
+Le service existant contient déjà :
+`-retentionPeriod=5y`, `-selfScrapeInterval=0`, `-maxLabelsPerTimeseries=30`,
+`-search.maxQueryDuration=30s`, `-search.maxConcurrentRequests=4`.
+
+Ce tuning **ajoute** les flags mémoire manquants et le durcissement systemd.
+
+---
+
+## 1. Fichier service proposé
+
+**Fichier :** `contrib/victoriametrics.service` (remplacement, pas un nouveau service)
 
 ```ini
 [Unit]
-Description=VictoriaMetrics (allégé)
-After=network.target
-Wants=network.target
+Description=VictoriaMetrics Time Series Database (tuned)
+After=network-online.target mnt-nvme.mount
+Requires=mnt-nvme.mount
 
 [Service]
 Type=simple
 User=victoriametrics
 Group=victoriametrics
-WorkingDirectory=/var/lib/victoria-metrics-data
+WorkingDirectory=/mnt/nvme/victoria-metrics
 
-# Flags critiques pour réduire l'empreinte mémoire
-ExecStart=/usr/local/bin/victoria-metrics \
-    -storageDataPath=/var/lib/victoria-metrics-data \
+ExecStart=/usr/local/bin/victoria-metrics-prod \
+    -storageDataPath=/mnt/nvme/victoria-metrics \
     -retentionPeriod=5y \
-    -memory.allowedPercent=5 \
+    -httpListenAddr=:8428 \
+    -selfScrapeInterval=0 \
+    -maxLabelsPerTimeseries=30 \
+    \
+    -memory.allowedPercent=10 \
     -memory.allowedBytes=80MB \
-    -search.maxMemoryPerQuery=30MB \
+    \
     -search.maxQueryDuration=30s \
     -search.maxConcurrentRequests=4 \
-    -search.maxUniqueTimeseries=1000 \
-    -search.maxSamplesPerSeries=30000 \
+    -search.maxMemoryPerQuery=40MB \
+    -search.maxUniqueTimeseries=2000 \
+    -search.maxSamplesPerSeries=50000 \
+    \
     -storage.maxDailySeries=5000 \
-    -storage.maxHourlySeries=500 \
-    -promscrape.config=/etc/victoriametrics/scrape.yml \
-    -promscrape.maxScrapeSize=16MB \
-    -promscrape.streamParse=true \
-    -httpListenAddr=:8428
+    -storage.maxHourlySeries=500
 
-# Sécurité et limites
+# Durcissement
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/victoria-metrics-data
+ReadWritePaths=/mnt/nvme/victoria-metrics
 LimitNOFILE=65536
 LimitNPROC=4096
 
-# Limite mémoire dure (systemd cgroup)
-MemoryMax=120M
+# Garde-fou mémoire (systemd kill si dépassé)
+MemoryMax=150M
 MemorySwapMax=0
 
 Restart=on-failure
@@ -55,105 +82,163 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
+### Différences vs service actuel
+
+| Ajout | But |
+|---|---|
+| `-memory.allowedPercent=10` + `-memory.allowedBytes=80MB` | Plafonne les caches internes VM (gain RAM principal) |
+| `-search.maxMemoryPerQuery=40MB` | Une requête `/dashboard/history` "5 ans" ne peut plus saturer la RAM |
+| `-search.maxUniqueTimeseries=2000` | Marge x40 vs ~50 séries actuelles |
+| `-search.maxSamplesPerSeries=50000` | Limite par série (60s × 50000 ≈ 34 jours par requête) |
+| `-storage.maxDailySeries=5000` / `maxHourlySeries=500` | Anti-explosion accidentelle (typo de label, etc.) |
+| `MemoryMax=150M` / `MemorySwapMax=0` | systemd OOM-kill avant que ça déborde sur Rust |
+| `ProtectSystem=strict` + `ReadWritePaths=...` | Le process ne peut écrire QUE sur le NVMe |
+| `WorkingDirectory=...` | Évite les surprises de cwd |
+
+> **À noter** : `-promscrape.config=...` du draft initial est **retiré** —
+> notre `scrape_configs` est vide (push direct depuis Rust).
+> Si on ajoute un jour un exporter externe (Mosquitto, node_exporter…),
+> rajouter `-promscrape.config=/etc/victoriametrics/scrape.yml -promscrape.streamParse=true`.
+
 ---
 
-## Explication des flags
+## 2. Pourquoi les valeurs sont moins agressives que le draft initial
 
-| Flag | Valeur | Effet |
-|---|---|---|
-| `-memory.allowedPercent=5` | 5% | VM limite ses caches internes à 5% de la RAM totale |
-| `-memory.allowedBytes=80MB` | 80 Mo | Plafond absolu, plus fort que le pourcentage |
-| `-search.maxMemoryPerQuery=30MB` | 30 Mo | Empêche une requête Grafana "5 ans" de saturer la RAM |
-| `-search.maxQueryDuration=30s` | 30s | Kill les requêtes trop lentes (évite les fuites) |
-| `-search.maxConcurrentRequests=4` | 4 | Limite les requêtes parallèles (moins de buffers simultanés) |
-| `-search.maxUniqueTimeseries=1000` | 1000 | Vous avez ~50 séries, donc 1000 est très large |
-| `-storage.maxDailySeries=5000` | 5000 | Limite l'index mémoire des séries par jour |
-| `-storage.maxHourlySeries=500` | 500 | Réduit les buffers horaires |
-| `MemoryMax=120M` | 120 Mo | **Systemd tue le processus s'il dépasse** (sécurité) |
+Le draft proposait `-memory.allowedBytes=80MB` + `MemoryMax=120M`.
+Vu qu'on est **déjà à 120 Mo en régime nominal**, plafonner à 120 Mo
+garantit des kills systemd réguliers.
+
+Choix prudents :
+- `MemoryMax=150M` laisse une marge de sécurité de ~25 % au-dessus du baseline.
+- `-memory.allowedPercent=10` (au lieu de 5 %) : sur 8 Go RAM = 800 Mo théoriques,
+  donc le plafond effectif sera `-memory.allowedBytes=80MB`.
+- `maxMemoryPerQuery=40MB` (au lieu de 30) : nos requêtes 5 ans agrègent
+  beaucoup de samples, 30 Mo serait probablement trop juste.
+
+Si après 1 semaine la RSS reste < 90 Mo, on pourra durcir à `MemoryMax=120M`.
 
 ---
 
-## Script de déploiement
-
-**Fichier :** `contrib/install-vm-light.sh`
+## 3. Pré-validation (à faire AVANT déploiement)
 
 ```bash
-#!/bin/bash
-set -e
+# 1. Mesurer le baseline actuel sur 24h
+watch -n 60 'ps -o rss= -p $(pgrep -f victoria-metrics-prod) | awk "{print \$1/1024 \" Mo\"}"'
 
-echo "=== Tuning VictoriaMetrics (mode allégé) ==="
+# 2. Compter les séries réellement actives
+curl -s 'http://localhost:8428/api/v1/status/tsdb' | jq '.data.totalSeries'
 
-# 1. Créer user si absent
-if ! id -u victoriametrics &>/dev/null; then
-    sudo useradd -r -s /bin/false victoriametrics
-fi
+# 3. Lister les top requêtes lourdes (si présentes)
+curl -s 'http://localhost:8428/api/v1/status/top_queries' | jq
 
-# 2. Permissions données
-sudo mkdir -p /var/lib/victoria-metrics-data
-sudo chown -R victoriametrics:victoriametrics /var/lib/victoria-metrics-data
+# 4. Vérifier qu'aucun job promscrape n'a été ajouté entre-temps
+grep -A2 scrape_configs /etc/victoriametrics/scrape.yml 2>/dev/null || echo "pas de fichier scrape (OK)"
+```
 
-# 3. Copier le service allégé
-sudo cp contrib/victoriametrics.service /etc/systemd/system/
+Si `totalSeries > 1500` ou pic mémoire > 130 Mo observé → augmenter
+`maxUniqueTimeseries` et `MemoryMax` en conséquence avant déploiement.
+
+---
+
+## 4. Déploiement
+
+Procédure **identique au workflow standard du projet** (pas de service séparé,
+on remplace `victoriametrics.service`) :
+
+```bash
+# Depuis Pi5, après git pull
+sudo cp contrib/victoriametrics.service /etc/systemd/system/victoriametrics.service
 sudo systemctl daemon-reload
+sudo systemctl restart victoriametrics
 
-# 4. Arrêter l'ancien service si existant
-sudo systemctl stop victoriametrics 2>/dev/null || true
+# Vérifications immédiates
+sudo systemctl status victoriametrics --no-pager
+sudo journalctl -u victoriametrics -n 30 --no-pager
+curl -sf http://localhost:8428/health && echo "OK"
 
-# 5. Démarrer le service allégé
-sudo systemctl enable --now victoriametrics-light
-
-# 6. Vérification
-sleep 3
-echo ""
-echo "=== Statut ==="
-systemctl status victoriametrics-light --no-pager
-echo ""
-echo "=== RAM utilisée ==="
-ps -o pid,comm,rss -p $(pgrep -f victoria-metrics) | awk '{print $3/1024 " Mo"}'
-echo ""
-echo "=== Test endpoint ==="
-curl -s http://localhost:8428/api/v1/status/tsdb | head -c 200
-echo ""
-echo "OK. VictoriaMetrics allégé démarré."
+# RSS après stabilisation (~2 min)
+sleep 120
+ps -o pid,comm,rss -p $(pgrep -f victoria-metrics-prod) | awk 'NR>1 {print $3/1024 " Mo"}'
 ```
 
----
-
-## Résultats attendus
-
-| Métrique | Avant (défaut) | Après (tuning) |
-|---|---|---|
-| **RAM au démarrage** | ~150 Mo | ~40–60 Mo |
-| **RAM sous charge** | ~350 Mo | ~80–100 Mo |
-| **Requêtes lentes** | Possible | Limitées à 30s |
-| **Stabilité** | Standard | + sécurisée (OOM impossible) |
+> **Pas de migration de données** : `-storageDataPath` reste
+> `/mnt/nvme/victoria-metrics`, l'historique 5 ans est conservé tel quel.
 
 ---
 
-## Validation en production
-
-Après déploiement, surveillez 24h :
+## 5. Validation 24–72 h
 
 ```bash
-# RAM toutes les 10s
-watch -n 10 'ps -o pid,comm,rss,vsz -p $(pgrep -f victoria-metrics)'
+# RAM en continu
+watch -n 30 'ps -o pid,comm,rss,vsz -p $(pgrep -f victoria-metrics-prod)'
 
-# Requêtes Grafana : vérifier que les dashboards "5 ans" répondent en < 10s
-# Si une requête timeout → augmenter -search.maxMemoryPerQuery à 50MB
+# Logs systemd (chercher des "OOMKill" ou "out of memory")
+journalctl -u victoriametrics -f
 
-# Logs OOM
-journalctl -u victoriametrics-light -f
+# Vérifier que daly-bms et energy-manager n'ont pas perdu de samples
+journalctl -u daly-bms -n 200 | grep -iE 'victoria|metric|push' | tail
+journalctl -u energy-manager -n 200 | grep -iE 'victoria|metric|push' | tail
 
-# Si systemd tue VM (MemoryMax atteint) :
-# - Vérifier quelle requête Grafana cause le pic
-# - Augmenter MemoryMax à 150M temporairement
-# - Ou ajouter un recording rule pour pré-agréger les données lourdes
+# Tester un range query "5 ans" depuis le dashboard
+curl -s "http://localhost:8428/api/v1/query_range?query=bms_pack_voltage&start=$(date -d '5 years ago' +%s)&end=$(date +%s)&step=1d" \
+  -o /dev/null -w "HTTP %{http_code} en %{time_total}s\n"
+```
+
+### Seuils d'alerte
+
+| Symptôme | Action |
+|---|---|
+| systemd kill VM (OOM) une fois | Augmenter `MemoryMax` à 180M temporairement, analyser les top_queries |
+| HTTP 503 sur `/api/v1/query_range` | Augmenter `search.maxMemoryPerQuery` à 60MB |
+| Requête dashboard > 10 s | Pré-agréger via recording rules ou downsampling |
+| RSS croît linéairement après 7 j | Bug VM — repasser au service actuel et ouvrir un ticket upstream |
+
+---
+
+## 6. Rollback
+
+Le service est versionné dans git, donc rollback trivial :
+
+```bash
+git -C ~/Daly-BMS-Rust checkout HEAD~1 -- contrib/victoriametrics.service
+sudo cp contrib/victoriametrics.service /etc/systemd/system/victoriametrics.service
+sudo systemctl daemon-reload
+sudo systemctl restart victoriametrics
 ```
 
 ---
 
-## Prochaine étape
+## 7. Résultats attendus
 
-Si après 1 semaine ce tuning vous satisfait (RAM < 100 Mo, dashboards réactifs), vous pouvez **rester sur VM allégé** — c'est une solution pérenne.
+| Métrique | Baseline mesurée | Cible après tuning |
+|---|---|---|
+| **RSS au démarrage** | ~120 Mo | 50–70 Mo |
+| **RSS sous charge (5 ans range query)** | inconnu | < 110 Mo |
+| **OOM possible** | Oui (pas de cap) | Non (`MemoryMax=150M`) |
+| **Requêtes longues** | Cap 30 s (déjà actif) | Cap 30 s + 40 Mo/query |
+| **Données / rétention** | 5 ans NVMe | **Inchangé** |
 
-Si vous voulez quand même aller vers SQLite plus tard, ce tuning vous donne le **temps de développer la migration sans pression**.
+---
+
+## 8. Si insuffisant — pistes complémentaires
+
+1. **Recording rules** (`-rule.configPath`) pour pré-agréger les séries
+   les plus coûteuses du dashboard `/dashboard/history`.
+2. **Downsampling natif** (`-downsampling.period=30d:5m,1y:1h`) — réduit
+   la taille disque ET l'usage RAM des requêtes longues.
+3. **Désactiver dedup côté push** si déjà fait côté Rust
+   (`-dedup.minScrapeInterval=60s` aligné sur `scrape_interval`).
+4. Migration éventuelle vers SQLite/Parquet — hors scope, voir
+   `PROCEDURES.md` si décidé un jour.
+
+---
+
+## 9. Checklist de décision
+
+- [ ] Baseline RSS confirmée sur 24 h (cf. §3)
+- [ ] `totalSeries` < 1500 confirmé
+- [ ] Sauvegarde NVMe à jour (`/mnt/nvme/victoria-metrics`)
+- [ ] Fenêtre de maintenance prévue (restart VM = ~30 s de coupure ingestion ; les pushers Rust bufferisent)
+- [ ] Plan de rollback validé (§6)
+
+> Tant que ces 5 cases ne sont pas cochées, **ne pas déployer**.
