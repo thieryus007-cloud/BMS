@@ -94,7 +94,9 @@ pub async fn control_shelly_channel(
 
     let payload_str = rpc_payload.to_string();
     tokio::spawn(async move {
-        let _ = client.publish(&rpc_topic, QoS::AtLeastOnce, false, payload_str.as_bytes()).await;
+        if let Err(e) = client.publish(&rpc_topic, QoS::AtLeastOnce, false, payload_str.as_bytes()).await {
+            tracing::warn!("Shelly RPC publish failed on {rpc_topic}: {e}");
+        }
     });
 
     tracing::info!("[Shelly] {} ch{} → {}", shelly_id, ch, if on { "ON" } else { "OFF" });

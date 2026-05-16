@@ -178,7 +178,9 @@ pub async fn set_mppt_yield(
             let pvinv_val  = *state.pvinv_power_w.read().await;
             let total_w    = *state.solar_total_w.read().await;
             let rows = crate::vm_client::VmClient::solar_rows(total_w, dc_pv_val, pvinv_val, kwh_val);
-            let _ = vm.write_rows(rows).await;
+            if let Err(e) = vm.write_rows(rows).await {
+                tracing::warn!("VictoriaMetrics solar write failed: {e}");
+            }
         }
     }
 

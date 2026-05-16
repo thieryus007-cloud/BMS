@@ -53,8 +53,12 @@ where
         let (client, mut eventloop) = AsyncClient::new(opts, 128);
 
         // Abonnement aux deux wildcards Tasmota
-        let _ = client.subscribe("tele/+/SENSOR", QoS::AtMostOnce).await;
-        let _ = client.subscribe("stat/+/POWER",  QoS::AtMostOnce).await;
+        if let Err(e) = client.subscribe("tele/+/SENSOR", QoS::AtMostOnce).await {
+            warn!("Tasmota MQTT subscribe failed (tele/+/SENSOR): {e}");
+        }
+        if let Err(e) = client.subscribe("stat/+/POWER", QoS::AtMostOnce).await {
+            warn!("Tasmota MQTT subscribe failed (stat/+/POWER): {e}");
+        }
 
         loop {
             match eventloop.poll().await {

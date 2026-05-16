@@ -8,7 +8,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::bus::AppBus;
 use crate::config::{SolarConfig, VictronConfig};
@@ -207,7 +207,7 @@ async fn writer_task(
             .send()
             .await
         {
-            debug!("Solar API POST error: {e}");
+            warn!("Solar API POST error: {e}");
         }
 
         bus.emit_live(LiveEvent::new("solar", json!({

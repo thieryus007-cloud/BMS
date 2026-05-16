@@ -118,7 +118,9 @@ pub async fn control_tasmota(
     let cmd_str = cmd.to_string();
     let topic_clone = mqtt_topic.clone();
     tokio::spawn(async move {
-        let _ = client.publish(&topic_clone, QoS::AtLeastOnce, false, cmd_str.as_bytes()).await;
+        if let Err(e) = client.publish(&topic_clone, QoS::AtLeastOnce, false, cmd_str.as_bytes()).await {
+            tracing::warn!("Tasmota command publish failed on {topic_clone}: {e}");
+        }
     });
 
     tracing::info!(
