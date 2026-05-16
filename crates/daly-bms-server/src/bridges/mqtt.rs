@@ -525,8 +525,6 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
                         EventDevice::SmartShunt
                     } else if topic.contains("/heatpump/") {
                         EventDevice::WaterHeater
-                    } else if topic.contains("/heat/") {
-                        EventDevice::Venus
                     } else {
                         EventDevice::Venus
                     };

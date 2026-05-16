@@ -131,7 +131,7 @@ fn cleanup_old_logs(dir: &str, keep_days: u64) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().map_or(false, |e| e == "log")
+        if path.extension().is_some_and(|e| e == "log")
             || path.to_string_lossy().contains("daly-bms.log")
         {
             if let Ok(meta) = entry.metadata() {
