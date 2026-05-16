@@ -304,6 +304,43 @@
   .dash-stat-value { color: #000 !important; }
   @page { margin: 1cm; size: A4 landscape; }
 }
+
+/* ── Modale "Créer panel custom" ────────────────────────────────────────── */
+.dash-custom-modal { width: min(720px, 92vw); }
+.dash-custom-form { padding: 0.85rem 1.2rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.dash-form-row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+.dash-form-row label { font-size: 0.75rem; color: var(--muted); min-width: 5rem; }
+.dash-form-row input[type="text"],
+.dash-form-row input[type="number"],
+.dash-form-row select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.6rem;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: inherit;
+  flex: 1;
+  min-width: 8rem;
+}
+.dash-form-row input[type="number"] { max-width: 6rem; flex: 0; }
+.dash-form-section-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  margin-top: 0.4rem;
+}
+.dash-query-row { display: flex; gap: 0.4rem; align-items: center; }
+.dash-query-row input { flex: 1; }
+.dash-query-row .ref-id { max-width: 3.5rem; text-align: center; flex: 0; }
+.dash-query-row .del-btn {
+  background: transparent; border: 0; color: var(--muted);
+  font-size: 1rem; cursor: pointer; padding: 0 0.3rem;
+}
+.dash-query-row .del-btn:hover { color: var(--danger); }
+.dash-form-help { font-size: 0.72rem; color: var(--muted); }
 </style>
 {% endblock %}
 
@@ -335,7 +372,62 @@
     </div>
     <div class="dash-modal-body" id="modal-list"></div>
     <div class="dash-modal-foot">
+      <button class="dash-btn dash-btn-primary" id="modal-create-custom">+ Créer panel custom</button>
+      <div style="flex:1"></div>
       <button class="dash-btn" id="modal-close">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modale "Créer panel custom" -->
+<div class="dash-modal-backdrop" id="custom-backdrop">
+  <div class="dash-modal dash-custom-modal">
+    <div class="dash-modal-head">
+      <h2>Créer un panel custom</h2>
+    </div>
+    <div class="dash-modal-body">
+      <div class="dash-custom-form">
+        <div class="dash-form-row">
+          <label for="custom-title">Titre</label>
+          <input type="text" id="custom-title" placeholder="Mon panel" />
+        </div>
+        <div class="dash-form-row">
+          <label for="custom-kind">Type</label>
+          <select id="custom-kind">
+            <option value="timeseries">Time series (ligne)</option>
+            <option value="fisheye">Time series + loupe fisheye</option>
+            <option value="stat">Stat (valeur instantanée)</option>
+            <option value="barchart">Bar chart</option>
+            <option value="gauge">Gauge (jauge radiale)</option>
+            <option value="bargauge">Bar gauge (barres horizontales)</option>
+            <option value="table">Table</option>
+          </select>
+          <label for="custom-unit" style="min-width:auto">Unité</label>
+          <select id="custom-unit">
+            <option value="">(aucune)</option>
+            <option value="watt">Watt (W)</option>
+            <option value="kwatth">kWh</option>
+            <option value="watth">Wh</option>
+            <option value="amp">Ampère (A)</option>
+            <option value="volt">Volt (V)</option>
+            <option value="celsius">°C</option>
+            <option value="percent">%</option>
+            <option value="hertz">Hz</option>
+          </select>
+          <label for="custom-decimals" style="min-width:auto">Déc.</label>
+          <input type="number" id="custom-decimals" min="0" max="6" step="1" placeholder="auto" />
+        </div>
+        <div class="dash-form-section-title">Requêtes PromQL</div>
+        <div id="custom-queries"></div>
+        <div class="dash-form-row">
+          <button type="button" class="dash-btn" id="custom-add-query">+ Ajouter une requête</button>
+          <span class="dash-form-help">Légende : utilise <code>{% raw %}{{label}}{% endraw %}</code> pour insérer la valeur d'un label Prometheus.</span>
+        </div>
+      </div>
+    </div>
+    <div class="dash-modal-foot">
+      <button class="dash-btn" id="custom-cancel">Annuler</button>
+      <button class="dash-btn dash-btn-primary" id="custom-save">Créer panel</button>
     </div>
   </div>
 </div>
@@ -501,7 +593,7 @@ async function renderAll() {
   const sorted = [...STATE.layout].sort((a,b) => a.y - b.y || a.x - b.x);
 
   for (const item of sorted) {
-    const panel = STATE.catalog.find(p => p.id === item.id);
+    const panel = resolvePanel(item);
     if (!panel) continue;
     const el = createPanelEl(panel, item);
     grid.appendChild(el);
@@ -509,11 +601,34 @@ async function renderAll() {
 
   // Charge les données en parallèle (après que DOM soit en place)
   const promises = sorted.map(item => {
-    const panel = STATE.catalog.find(p => p.id === item.id);
+    const panel = resolvePanel(item);
     if (!panel || panel.kind === 'row') return null;
-    return fetchAndRenderPanel(panel);
+    return panel.__custom
+      ? fetchAndRenderCustomPanel(panel)
+      : fetchAndRenderPanel(panel);
   }).filter(Boolean);
   await Promise.allSettled(promises);
+}
+
+/**
+ * Retourne le `Panel` correspondant à un item du layout — soit depuis le
+ * catalogue Grafana (item.id pointe sur un panel parsé), soit construit
+ * à la volée depuis item.custom (panel défini par l'utilisateur).
+ */
+function resolvePanel(item) {
+  if (item.custom) {
+    return {
+      id:       item.id,
+      title:    item.custom.title || 'Panel custom',
+      kind:     item.custom.kind || 'timeseries',
+      unit:     item.custom.unit || '',
+      decimals: item.custom.decimals,
+      queries:  item.custom.queries || [],
+      grid_pos: { x: item.x, y: item.y, w: item.w, h: item.h },
+      __custom: true,
+    };
+  }
+  return STATE.catalog.find(p => p.id === item.id) || null;
 }
 
 function createPanelEl(panel, item) {
@@ -559,12 +674,67 @@ async function fetchAndRenderPanel(panel) {
   }
   if (!data.ok) { renderPanelError(panel, data.reason || 'erreur'); return; }
   STATE.panelData.set(panel.id, data);
+  dispatchRender(panel, data);
+}
 
+/**
+ * Custom panel : exécute les PromQL via /api/v1/query_range (endpoint généraliste)
+ * et construit un objet `data` au même format que /api/v1/dashboards/panel/:id/data.
+ */
+async function fetchAndRenderCustomPanel(panel) {
+  const to    = Date.now();
+  const from  = to - PERIOD_MS[STATE.period];
+  const span  = Math.max(1, (to - from) / 1000);
+  const step  = Math.max(1, Math.round(Math.min(86400, Math.max(5, span / 200))));
+  const stepMs = step * 1000;
+  if (!panel.queries.length) {
+    renderPanelError(panel, 'aucune query définie');
+    return;
+  }
+  const results = await Promise.allSettled(panel.queries.map(async q => {
+    const url = `/api/v1/query_range?query=${encodeURIComponent(q.expr)}&start=${from}&end=${to}&step=${stepMs}`;
+    const r = await fetch(url);
+    const j = await r.json();
+    return { q, j };
+  }));
+  const series = [];
+  for (const r of results) {
+    if (r.status !== 'fulfilled') continue;
+    const { q, j } = r.value;
+    const list = (j && j.data && j.data.result) || [];
+    for (const s of list) {
+      const ts = [], vs = [];
+      for (const [tSec, sVal] of (s.values || [])) {
+        ts.push(Math.round(tSec * 1000));
+        vs.push(parseFloat(sVal));
+      }
+      series.push({
+        ref_id: q.ref_id || 'A',
+        legend: formatLegendCustom(q.legend, s.metric),
+        labels: s.metric || {},
+        ts_ms: ts,
+        values: vs,
+      });
+    }
+  }
+  const data = { ok: true, panel, from_ms: from, to_ms: to, step_ms: stepMs, series };
+  STATE.panelData.set(panel.id, data);
+  dispatchRender(panel, data);
+}
+
+function formatLegendCustom(format, labels) {
+  if (!format) return labels.__name__ || '';
+  let out = format;
+  for (const k in labels) out = out.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), labels[k]);
+  return out;
+}
+
+function dispatchRender(panel, data) {
   const body = document.querySelector(`.dash-panel[data-id="${cssEscape(panel.id)}"] .dash-panel-body`);
   if (!body) return;
-
   switch (panel.kind) {
     case 'timeseries': renderTimeSeries(panel, body, data); break;
+    case 'fisheye':    renderTimeSeries(panel, body, data, { fisheye: true }); break;
     case 'barchart':   renderBarChart(panel, body, data); break;
     case 'stat':       renderStat(panel, body, data); break;
     case 'gauge':      renderGauge(panel, body, data); break;
@@ -582,7 +752,8 @@ function renderPanelError(panel, msg) {
 // ============================================================================
 // Rendus par type
 // ============================================================================
-function renderTimeSeries(panel, body, data) {
+function renderTimeSeries(panel, body, data, opts) {
+  opts = opts || {};
   body.innerHTML = '<div style="width:100%;height:100%"></div>';
   const chart = echarts.init(body.firstElementChild, null, { renderer: 'canvas' });
   const series = data.series.map(s => ({
@@ -594,16 +765,73 @@ function renderTimeSeries(panel, body, data) {
     areaStyle: { opacity: 0.07 },
     data: s.ts_ms.map((t, i) => [t, scaleValue(panel.unit, s.values[i])]),
   }));
+  const hasZoom = opts.zoom !== false;
   chart.setOption({
     animation: false,
-    grid: { left: 50, right: 14, top: 24, bottom: 30 },
+    grid: { left: 50, right: 14, top: 24, bottom: hasZoom ? 46 : 30 },
     legend: { type: 'scroll', top: 0, textStyle: { color: '#9aa3b2', fontSize: 10 } },
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, valueFormatter: v => fmtValue(panel, v) },
     xAxis: { type: 'time', axisLabel: { color: '#9aa3b2', fontSize: 10 }, splitLine: { lineStyle: { color: '#2a3142' } } },
     yAxis: { type: 'value', axisLabel: { color: '#9aa3b2', fontSize: 10, formatter: v => fmtValue(panel, v) }, splitLine: { lineStyle: { color: '#2a3142' } } },
+    dataZoom: hasZoom ? [
+      { type: 'inside', throttle: 50 },
+      { type: 'slider', height: 14, bottom: 4, borderColor: 'transparent',
+        backgroundColor: 'transparent',
+        fillerColor: 'rgba(79,141,247,0.15)',
+        handleStyle: { color: '#4f8df7' },
+        textStyle: { color: '#9aa3b2', fontSize: 9 } },
+    ] : undefined,
     series,
   });
+  if (opts.fisheye) attachFisheye(chart, panel, data);
   STATE.charts.set(panel.id, chart);
+}
+
+/**
+ * Effet "lens fisheye" : un cercle suit la souris et grossit visuellement
+ * la zone sous le curseur en augmentant le symbolSize des points proches.
+ * Cf. https://echarts.apache.org/examples/en/editor.html?c=line-fisheye-lens
+ */
+function attachFisheye(chart, panel, data) {
+  const RADIUS = 60;   // rayon de la loupe en pixels
+  const MAX_SYMBOL = 16;
+  // Active les symbols pour qu'on puisse les agrandir
+  const baseSeries = chart.getOption().series.map(s => ({
+    ...s, showSymbol: true, symbolSize: 0,
+  }));
+  chart.setOption({ series: baseSeries });
+
+  const zr = chart.getZr();
+  const onMove = (params) => {
+    const px = params.offsetX, py = params.offsetY;
+    // Met à jour le cercle overlay
+    chart.setOption({
+      graphic: [{
+        type: 'circle',
+        id: 'fisheye-lens',
+        shape: { cx: px, cy: py, r: RADIUS },
+        style: { fill: 'rgba(79,141,247,0.06)', stroke: 'rgba(79,141,247,0.6)', lineWidth: 1 },
+        z: 100, silent: true,
+      }],
+    });
+    // Recalcule la taille des symboles selon la distance au curseur
+    const newSeries = data.series.map((s, idx) => {
+      const sizes = s.ts_ms.map((t, i) => {
+        const pt = chart.convertToPixel({ seriesIndex: idx }, [t, scaleValue(panel.unit, s.values[i])]);
+        if (!pt) return 0;
+        const d = Math.hypot(pt[0] - px, pt[1] - py);
+        return d < RADIUS ? MAX_SYMBOL * (1 - d / RADIUS) : 0;
+      });
+      return { symbolSize: (val, p) => sizes[p.dataIndex] || 0 };
+    });
+    chart.setOption({ series: newSeries });
+  };
+  const onLeave = () => {
+    chart.setOption({ graphic: [{ id: 'fisheye-lens', $action: 'remove' }] });
+    chart.setOption({ series: data.series.map(() => ({ symbolSize: 0 })) });
+  };
+  zr.on('mousemove', onMove);
+  zr.on('mouseout', onLeave);
 }
 
 function renderBarChart(panel, body, data) {
@@ -715,6 +943,11 @@ function bindModal() {
     if (e.target.id === 'modal-backdrop') closeModal();
   });
   document.getElementById('modal-search').addEventListener('input', renderModalList);
+  document.getElementById('modal-create-custom').addEventListener('click', () => {
+    closeModal();
+    openCustomModal();
+  });
+  bindCustomModal();
 }
 
 function openModal() {
@@ -725,6 +958,81 @@ function openModal() {
 }
 function closeModal() {
   document.getElementById('modal-backdrop').classList.remove('open');
+}
+
+// ----------------------------------------------------------------------------
+// Modale "Créer panel custom"
+// ----------------------------------------------------------------------------
+function bindCustomModal() {
+  document.getElementById('custom-cancel').addEventListener('click', closeCustomModal);
+  document.getElementById('custom-backdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'custom-backdrop') closeCustomModal();
+  });
+  document.getElementById('custom-add-query').addEventListener('click', () => addQueryRow());
+  document.getElementById('custom-save').addEventListener('click', saveCustomPanel);
+}
+
+function openCustomModal() {
+  // Reset formulaire + 1 query vide par défaut
+  document.getElementById('custom-title').value = '';
+  document.getElementById('custom-kind').value = 'timeseries';
+  document.getElementById('custom-unit').value = '';
+  document.getElementById('custom-decimals').value = '';
+  document.getElementById('custom-queries').innerHTML = '';
+  addQueryRow();
+  document.getElementById('custom-backdrop').classList.add('open');
+  document.getElementById('custom-title').focus();
+}
+function closeCustomModal() {
+  document.getElementById('custom-backdrop').classList.remove('open');
+}
+
+function addQueryRow(initial) {
+  initial = initial || {};
+  const wrap = document.getElementById('custom-queries');
+  const refLetter = String.fromCharCode(65 + wrap.children.length); // A, B, C...
+  const row = document.createElement('div');
+  row.className = 'dash-query-row';
+  row.innerHTML = `
+    <input type="text" class="ref-id" value="${escapeHtml(initial.ref_id || refLetter)}" maxlength="3" />
+    <input type="text" class="expr" placeholder="Ex: bms_voltage{bms_id=&quot;0x01&quot;}" value="${escapeHtml(initial.expr || '')}" />
+    <input type="text" class="legend" placeholder="Légende (ex: BMS-1 {% raw %}{{bms_id}}{% endraw %})" value="${escapeHtml(initial.legend || '')}" />
+    <button type="button" class="del-btn" title="Retirer">✕</button>
+  `;
+  row.querySelector('.del-btn').addEventListener('click', () => {
+    if (wrap.children.length <= 1) return; // garder au moins 1 query
+    row.remove();
+  });
+  wrap.appendChild(row);
+}
+
+async function saveCustomPanel() {
+  const title    = document.getElementById('custom-title').value.trim();
+  const kind     = document.getElementById('custom-kind').value;
+  const unit     = document.getElementById('custom-unit').value;
+  const decStr   = document.getElementById('custom-decimals').value.trim();
+  const decimals = decStr === '' ? undefined : Math.max(0, Math.min(6, parseInt(decStr, 10) || 0));
+  if (!title) { alert('Titre obligatoire'); return; }
+  const rows = [...document.querySelectorAll('#custom-queries .dash-query-row')];
+  const queries = rows.map(r => ({
+    ref_id: r.querySelector('.ref-id').value.trim() || 'A',
+    expr:   r.querySelector('.expr').value.trim(),
+    legend: r.querySelector('.legend').value.trim() || undefined,
+  })).filter(q => q.expr);
+  if (queries.length === 0) { alert('Au moins une requête PromQL non-vide est requise'); return; }
+
+  const id = 'custom_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+  const maxY = STATE.layout.reduce((m, it) => Math.max(m, it.y + it.h), 0);
+  // Tailles par défaut adaptées au type
+  const defaultSize = (kind === 'timeseries' || kind === 'fisheye' || kind === 'barchart' || kind === 'table')
+    ? { w: 12, h: 8 } : { w: 6, h: 5 };
+  STATE.layout.push({
+    id, x: 0, y: maxY, w: defaultSize.w, h: defaultSize.h,
+    custom: { title, kind, unit, decimals, queries },
+  });
+  await saveLayout();
+  closeCustomModal();
+  await renderAll();
 }
 
 function renderModalList() {
