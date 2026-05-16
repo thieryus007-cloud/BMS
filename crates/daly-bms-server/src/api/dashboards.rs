@@ -8,10 +8,11 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
-    response::IntoResponse,
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
+use axum::body::Body;
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -237,28 +238,60 @@ fn round4(v: f64) -> f64 {
 // Layouts persistants (SQLite)
 // ---------------------------------------------------------------------------
 
+/// Construit une réponse JSON brute (string déjà sérialisée) avec le bon Content-Type.
+/// Évite un parse + re-serialize quand on a déjà du JSON valide en main.
+fn raw_json(status: StatusCode, body: String) -> Response {
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .unwrap_or_else(|_| Json(json!({"ok": false, "reason": "response_build_failed"})).into_response())
+}
+
+fn db_error_response(e: rusqlite::Error) -> Response {
+    tracing::warn!(error = %e, "dashboard layout db error");
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+        "ok": false, "reason": "db_error", "error": e.to_string()
+    }))).into_response()
+}
+
+fn storage_unavailable() -> Response {
+    (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+        "ok": false, "reason": "storage_unavailable"
+    }))).into_response()
+}
+
 /// GET /api/v1/dashboards/layout
 /// Retourne le layout sauvegardé pour l'utilisateur par défaut.
 /// Format : `{ "ok": true, "layout": [...] }`. Si rien en base, `layout` est `null`
 /// → le client doit utiliser le layout d'origine (positions Grafana).
-pub async fn get_layout(State(state): State<AppState>) -> impl IntoResponse {
-    let Some(storage) = &state.dashboard_storage else {
-        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
-            "ok": false, "reason": "storage_unavailable"
-        })));
+///
+/// Le contenu du champ `layout` est inséré tel quel depuis la base (sans parse) —
+/// le client le reçoit comme un tableau JSON valide. Si jamais ce qui est en base
+/// n'est pas du JSON valide, on retourne `layout: null`.
+pub async fn get_layout(State(state): State<AppState>) -> Response {
+    let Some(storage) = state.dashboard_storage.clone() else {
+        return storage_unavailable();
     };
-    match storage.get(DEFAULT_USER) {
-        Ok(None) => (StatusCode::OK, Json(json!({"ok": true, "layout": Value::Null}))),
-        Ok(Some(json_str)) => {
-            // On renvoie le JSON déjà parsé (et on revient sur Null si parsing échoue)
-            let parsed: Value = serde_json::from_str(&json_str).unwrap_or(Value::Null);
-            (StatusCode::OK, Json(json!({"ok": true, "layout": parsed})))
+    // I/O SQLite bloquant → spawn_blocking
+    let result = tokio::task::spawn_blocking(move || storage.get(DEFAULT_USER)).await;
+    match result {
+        Ok(Ok(None))          => raw_json(StatusCode::OK, r#"{"ok":true,"layout":null}"#.to_string()),
+        Ok(Ok(Some(layout_json))) => {
+            // Validation légère : on vérifie que c'est un tableau JSON valide.
+            // (Garde-fou contre une éventuelle corruption — on ne re-sérialise pas.)
+            let valid = serde_json::from_str::<serde::de::IgnoredAny>(&layout_json).is_ok();
+            if valid {
+                raw_json(StatusCode::OK, format!(r#"{{"ok":true,"layout":{}}}"#, layout_json))
+            } else {
+                tracing::warn!("dashboard layout: contenu non-JSON en base, fallback null");
+                raw_json(StatusCode::OK, r#"{"ok":true,"layout":null}"#.to_string())
+            }
         }
-        Err(e) => {
-            tracing::warn!(error = %e, "dashboard layout get failed");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
-                "ok": false, "reason": "db_error", "error": e.to_string()
-            })))
+        Ok(Err(e))  => db_error_response(e),
+        Err(join_e) => {
+            tracing::error!(error = %join_e, "spawn_blocking join error");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "reason": "task_join_failed"}))).into_response()
         }
     }
 }
@@ -269,55 +302,48 @@ pub async fn get_layout(State(state): State<AppState>) -> impl IntoResponse {
 pub async fn set_layout(
     State(state): State<AppState>,
     Json(body):   Json<Value>,
-) -> impl IntoResponse {
-    let Some(storage) = &state.dashboard_storage else {
-        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
-            "ok": false, "reason": "storage_unavailable"
-        })));
+) -> Response {
+    let Some(storage) = state.dashboard_storage.clone() else {
+        return storage_unavailable();
     };
-
-    // Accepte {"layout": [...]} ou [...] directement
     let layout = match body.get("layout") {
         Some(v) => v.clone(),
-        None    => body.clone(),
+        None    => body,
     };
     if !layout.is_array() {
         return (StatusCode::BAD_REQUEST, Json(json!({
             "ok": false, "reason": "layout_not_array"
-        })));
+        }))).into_response();
     }
     let layout_json = layout.to_string();
-    // Limite raisonnable pour éviter qu'un client tente d'écrire des MB
     if layout_json.len() > 256_000 {
         return (StatusCode::PAYLOAD_TOO_LARGE, Json(json!({
             "ok": false, "reason": "layout_too_large"
-        })));
+        }))).into_response();
     }
-    match storage.set(DEFAULT_USER, &layout_json) {
-        Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))),
-        Err(e) => {
-            tracing::warn!(error = %e, "dashboard layout set failed");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
-                "ok": false, "reason": "db_error", "error": e.to_string()
-            })))
+    let result = tokio::task::spawn_blocking(move || storage.set(DEFAULT_USER, &layout_json)).await;
+    match result {
+        Ok(Ok(()))  => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
+        Ok(Err(e))  => db_error_response(e),
+        Err(join_e) => {
+            tracing::error!(error = %join_e, "spawn_blocking join error");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "reason": "task_join_failed"}))).into_response()
         }
     }
 }
 
 /// DELETE /api/v1/dashboards/layout — retour à l'état d'origine côté UI.
-pub async fn delete_layout(State(state): State<AppState>) -> impl IntoResponse {
-    let Some(storage) = &state.dashboard_storage else {
-        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
-            "ok": false, "reason": "storage_unavailable"
-        })));
+pub async fn delete_layout(State(state): State<AppState>) -> Response {
+    let Some(storage) = state.dashboard_storage.clone() else {
+        return storage_unavailable();
     };
-    match storage.delete(DEFAULT_USER) {
-        Ok(()) => (StatusCode::OK, Json(json!({"ok": true}))),
-        Err(e) => {
-            tracing::warn!(error = %e, "dashboard layout delete failed");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
-                "ok": false, "reason": "db_error", "error": e.to_string()
-            })))
+    let result = tokio::task::spawn_blocking(move || storage.delete(DEFAULT_USER)).await;
+    match result {
+        Ok(Ok(()))  => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
+        Ok(Err(e))  => db_error_response(e),
+        Err(join_e) => {
+            tracing::error!(error = %join_e, "spawn_blocking join error");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "reason": "task_join_failed"}))).into_response()
         }
     }
 }
