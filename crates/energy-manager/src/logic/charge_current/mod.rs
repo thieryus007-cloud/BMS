@@ -6,8 +6,8 @@ mod rules;
 use chrono::Utc;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::info;
+use tokio::sync::{broadcast, RwLock};
+use tracing::{info, warn};
 
 use crate::bus::AppBus;
 use crate::config::{ChargeCurrent as ChargeCfg, VictronConfig};
@@ -53,7 +53,15 @@ async fn run(
 
     loop {
         tokio::select! {
-            Ok(msg) = rx.recv() => {
+            result = rx.recv() => {
+                let msg = match result {
+                    Ok(m) => m,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("charge_current MQTT subscriber lagged, dropped {n} message(s)");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
                 let t = &msg.topic;
                 if t != &topic_ignore && t != &topic_pv_power && t != &topic_consump {
                     continue;

@@ -13,8 +13,8 @@ mod rules;
 use chrono::{Datelike, Utc};
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tokio::sync::{broadcast, RwLock};
+use tracing::{debug, info, warn};
 
 use crate::bus::AppBus;
 use crate::config::VictronConfig;
@@ -50,7 +50,15 @@ async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState
 
     loop {
         tokio::select! {
-            Ok(msg) = rx.recv() => {
+            result = rx.recv() => {
+                let msg = match result {
+                    Ok(m) => m,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("smartshunt MQTT subscriber lagged, dropped {n} message(s)");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
                 if let Some(dirty) = handle(
                     &msg, &state, &mut rule_engine,
                     &t_voltage, &t_current, &t_power,
