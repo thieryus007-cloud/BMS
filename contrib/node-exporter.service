@@ -2,6 +2,8 @@
 Description=Prometheus Node Exporter — métriques système Pi5
 Documentation=https://prometheus.io/docs/guides/node-exporter/
 After=network.target
+# Pas de rate-limit sur les redémarrages (clé Unit, pas Service)
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -15,7 +17,6 @@ ExecStart=/usr/local/bin/node_exporter \
 
 Restart=on-failure
 RestartSec=5s
-StartLimitIntervalSec=0
 
 StandardOutput=journal
 StandardError=journal

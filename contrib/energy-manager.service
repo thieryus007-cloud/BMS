@@ -5,6 +5,8 @@ After=network-online.target mosquitto-broker.service daly-bms.service
 Wants=network-online.target
 Requires=mosquitto-broker.service
 PartOf=daly-bms.service
+# Pas de rate-limit sur les redémarrages (clé Unit, pas Service)
+StartLimitIntervalSec=0
 
 [Service]
 Type=notify
@@ -23,8 +25,6 @@ Environment=ENERGY_CONFIG=/etc/daly-bms/config.toml
 
 Restart=on-failure
 RestartSec=5s
-# Allow unlimited restarts — the service manages its own reconnection logic.
-StartLimitIntervalSec=0
 
 # Resource limits
 LimitNOFILE=65536
