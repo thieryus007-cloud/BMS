@@ -258,7 +258,7 @@ pub async fn ats_send_raw(
             let count = if frame.len() >= 6 {
                 (frame[4] as usize) * 256 + frame[5] as usize
             } else { 8 };
-            5 + (count + 7) / 8
+            5 + count.div_ceil(8)
         }
         _ => 8,
     });

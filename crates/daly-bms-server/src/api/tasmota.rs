@@ -111,12 +111,7 @@ pub async fn control_tasmota(
 
     // Lancer la boucle d'événements en background
     tokio::spawn(async move {
-        loop {
-            match eventloop.poll().await {
-                Ok(_) => continue,
-                Err(_) => break,
-            }
-        }
+        while eventloop.poll().await.is_ok() {}
     });
 
     // Publier le message de contrôle (ne pas attendre la confirmation)
