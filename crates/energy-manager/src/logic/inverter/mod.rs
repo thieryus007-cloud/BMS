@@ -2,7 +2,8 @@
 /// AC power falls back to V×I when the direct measurement topic is absent.
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
+use tracing::warn;
 
 use crate::bus::AppBus;
 use crate::config::VictronConfig;
@@ -31,8 +32,12 @@ async fn run(
     let mut rx = bus.subscribe_mqtt();
     loop {
         let msg = match rx.recv().await {
-            Ok(m)  => m,
-            Err(_) => continue,
+            Ok(m) => m,
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                warn!("inverter MQTT subscriber lagged, dropped {n} message(s)");
+                continue;
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
         };
 
         if handle(&msg, &pfx_vebus, &pfx_system, &state).await {

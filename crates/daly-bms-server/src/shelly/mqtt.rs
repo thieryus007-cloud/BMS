@@ -74,14 +74,18 @@ where
 
         // Abonnement aux topics status de chaque device configuré + réponses RPC
         let rpc_response_topic = format!("{}/rpc", RPC_SRC);
-        let _ = client.subscribe(&rpc_response_topic, QoS::AtMostOnce).await;
+        if let Err(e) = client.subscribe(&rpc_response_topic, QoS::AtMostOnce).await {
+            warn!("Shelly MQTT subscribe failed ({rpc_response_topic}): {e}");
+        }
         for dev in &devices {
             let t0 = format!("{}/status/switch:0", dev.shelly_id);
             let t1 = format!("{}/status/switch:1", dev.shelly_id);
             let ti = format!("{}/info", dev.shelly_id);
-            let _ = client.subscribe(&t0, QoS::AtMostOnce).await;
-            let _ = client.subscribe(&t1, QoS::AtMostOnce).await;
-            let _ = client.subscribe(&ti, QoS::AtMostOnce).await;
+            for topic in [&t0, &t1, &ti] {
+                if let Err(e) = client.subscribe(topic, QoS::AtMostOnce).await {
+                    warn!("Shelly MQTT subscribe failed ({topic}): {e}");
+                }
+            }
         }
 
         // Tâche de polling périodique (30 s) via RPC Switch.GetStatus.

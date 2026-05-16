@@ -2,8 +2,8 @@
 /// Parses stat/{id}/POWER and tele/{id}/SENSOR.
 use serde::Deserialize;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::debug;
+use tokio::sync::{broadcast, RwLock};
+use tracing::{debug, warn};
 
 use crate::bus::AppBus;
 use crate::config::VictronConfig;
@@ -50,7 +50,11 @@ async fn run(
     loop {
         let msg = match rx.recv().await {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                warn!("tasmota MQTT subscriber lagged, dropped {n} message(s)");
+                continue;
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
         };
         let t = &msg.topic;
         if t == &stat_topic {

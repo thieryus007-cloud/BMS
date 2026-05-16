@@ -373,9 +373,12 @@ async fn publish_snapshot(
 }
 
 async fn publish_str(client: &AsyncClient, topic: &str, value: &str) {
-    let _ = client
+    if let Err(e) = client
         .publish(topic, QoS::AtLeastOnce, false, value.to_string())
-        .await;
+        .await
+    {
+        warn!("MQTT publish failed on {topic}: {e}");
+    }
 }
 
 /// Extrait le numéro entier d'un identifiant de cellule ("C3" → 3, "Cell3" → 3).
