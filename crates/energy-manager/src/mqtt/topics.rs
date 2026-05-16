@@ -33,6 +33,7 @@ pub fn all_subscriptions(portal_id: &str, vebus: u32, mppt1: u32, mppt2: u32, pv
         // --- System aggregates ---
         n(pid, "system/0/Dc/Battery/Soc"),
         n(pid, "system/0/Dc/Battery/Current"),
+        n(pid, "system/0/Dc/Battery/Power"),
         n(pid, "system/0/Dc/Battery/State"),
         n(pid, "system/0/Dc/Battery/TimeToGo"),
         n(pid, "system/0/Dc/Pv/Power"),

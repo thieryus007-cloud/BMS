@@ -98,14 +98,16 @@ async fn handle(
 
     let is_sys_soc     = t.ends_with("Battery/Soc")     && t.contains("/system/0/");
     let is_sys_current = t.ends_with("Battery/Current")  && t.contains("/system/0/");
+    let is_sys_power   = t.ends_with("Battery/Power")    && t.contains("/system/0/");
     let is_sys_state   = t.ends_with("Battery/State")    && t.contains("/system/0/");
     let is_sys_ttg     = t.ends_with("Battery/TimeToGo") && t.contains("/system/0/");
     let is_vebus_v     = t.ends_with("/Dc/0/Voltage")    && t.contains("/vebus/");
     // NOTE: vebus/Dc/0/Power is intentionally NOT used as a fallback for battery_power_w.
     // The VEBus DC power measures only what flows through the Multiplus inverter,
     // which is a different physical quantity from the net battery power measured
-    // by the SmartShunt at the battery terminals. It is captured into dc_power_w
-    // by the `inverter` module instead.
+    // at the battery terminals. It is captured into dc_power_w by the `inverter` module.
+    // Canonical battery power = system/0/Dc/Battery/Power (handled via is_sys_power below) —
+    // identical to what VRM displays as "System - Battery Power".
 
     let is_charged    = t.ends_with("/History/ChargedEnergy")    && t.contains("/battery/");
     let is_discharged = t.ends_with("/History/DischargedEnergy") && t.contains("/battery/");
@@ -118,7 +120,7 @@ async fn handle(
         || t == t_soc || t == t_ttg || t == t_state;
     let is_shunt = is_shunt_direct || is_charged || is_discharged;
 
-    if !is_shunt && !is_sys_soc && !is_sys_current && !is_sys_state
+    if !is_shunt && !is_sys_soc && !is_sys_current && !is_sys_power && !is_sys_state
         && !is_sys_ttg && !is_vebus_v {
         return None;
     }
@@ -204,6 +206,11 @@ async fn handle(
             integrate_ah(&mut s, v, now);
             s.battery_current_a = Some(v);
         }
+    } else if is_sys_power && !shunt_fresh {
+        // system/0/Dc/Battery/Power — agrégat système Victron, identique au signal
+        // affiché par VRM "System - Battery Power". Source de vérité quand le
+        // SmartShunt direct n'est pas disponible (installation BMS seule sans shunt).
+        if let Some(v) = msg.victron_value::<f64>() { s.battery_power_w = Some(v); }
     } else if is_sys_state && !shunt_fresh {
         if let Some(v) = msg.victron_value::<i64>() { s.battery_state = Some(v); }
     } else if is_sys_ttg && !shunt_fresh {
