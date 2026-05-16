@@ -27,19 +27,8 @@
 
 ### Perses (Pi5, port 8090)
 
-| Quand | Commande |
-|-------|----------|
-| Installer / mettre à jour | `bash scripts/setup-perses.sh --nvme` |
-| Logs | `journalctl -u perses -f` |
-| Redémarrer | `sudo systemctl restart perses` |
-| Se connecter (percli) | `percli login http://localhost:8090` |
-| Appliquer un dashboard | `percli apply -f /etc/perses/provisioning/pv-solar-5y.yaml` |
-| Appliquer datasource | `percli apply -f /etc/perses/provisioning/victoriametrics-datasource.yaml` |
-| Lister dashboards | `percli get dashboard -p default` |
-| Désinstaller | `sudo bash scripts/setup-perses.sh --uninstall` |
-
-> Dashboard : `http://192.168.1.141:8090` — projet `default`
-> Doc complète : `docs/Perses-readme.md`
+> ⚠️ Perses a été remplacé par le dashboard custom interne (`/dashboard/history`).
+> Tous les fichiers et scripts d'installation ont été retirés.
 
 ### NanoPi (`root@192.168.1.120`)
 
