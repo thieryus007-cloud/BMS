@@ -19,7 +19,7 @@
 ### Pourquoi SQLite ?
 | Critère | VictoriaMetrics | SQLite |
 |---|---|---|
-| RAM | 150–350 Mo | ~3 Mo |
+| RAM | 150 Mo | ~3 Mo |
 | Empreinte disque | Binaire Go + données | Fichier unique + index |
 | Grafana | Plugin natif Prometheus | Plugin `frser-sqlite-datasource` |
 | Agrégations SQL | PromQL | SQL natif (`GROUP BY strftime`) |
@@ -504,12 +504,11 @@ std::fs::set_permissions(db_path, std::fs::Permissions::from_mode(0o664))?;
 
 | Service | Avant (VM) | Après (SQLite) |
 |---|---|---|
-| daly-bms-server | ~25 Mo | ~28 Mo (+3 Mo SQLite) |
-| VictoriaMetrics | **~150–350 Mo** | **0** (supprimé) |
-| Grafana | ~80 Mo | ~80 Mo |
-| **Total économisé** | | **~150–350 Mo** |
+| daly-bms-server | ~27 Mo | ~30 Mo (+3 Mo SQLite) |
+| VictoriaMetrics | **~150 Mo** | **0** (supprimé) |
+| **Total économisé** | | **~150 Mo** |
 
-**RAM totale Pi5** : ~600 Mo au lieu de ~900 Mo (sur 4 Go disponibles).
+**RAM totale Pi5** : ~450 Mo au lieu de ~600 Mo (sur 4 Go disponibles).
 
 ---
 
