@@ -7,9 +7,9 @@ mod rules;
 use chrono::{DateTime, Utc};
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tokio::time::{interval, sleep, Duration};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::bus::AppBus;
 use crate::config::{DeyeConfig, VictronConfig};
@@ -122,7 +122,15 @@ async fn run(
 
     loop {
         tokio::select! {
-            Ok(msg) = rx.recv() => {
+            result = rx.recv() => {
+                let msg = match result {
+                    Ok(m) => m,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("deye_command MQTT subscriber lagged, dropped {n} message(s)");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
                 let t = &msg.topic;
 
                 if *t == t_freq {

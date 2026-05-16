@@ -6,7 +6,7 @@ mod rules;
 use chrono::Datelike;
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, warn};
 
@@ -70,7 +70,15 @@ async fn mqtt_task(
 
     loop {
         tokio::select! {
-            Ok(msg) = rx.recv() => {
+            result = rx.recv() => {
+                let msg = match result {
+                    Ok(m) => m,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("solar_power MQTT subscriber lagged, dropped {n} message(s)");
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
         let t = &msg.topic;
 
         let mut publish_baseline: Option<(i32, f64)> = None;
