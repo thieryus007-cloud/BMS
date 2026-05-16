@@ -93,7 +93,11 @@ async fn handle(
     let is_sys_state   = t.ends_with("Battery/State")    && t.contains("/system/0/");
     let is_sys_ttg     = t.ends_with("Battery/TimeToGo") && t.contains("/system/0/");
     let is_vebus_v     = t.ends_with("/Dc/0/Voltage")    && t.contains("/vebus/");
-    let is_vebus_pw    = t.ends_with("/Dc/0/Power")      && t.contains("/vebus/");
+    // NOTE: vebus/Dc/0/Power is intentionally NOT used as a fallback for battery_power_w.
+    // The VEBus DC power measures only what flows through the Multiplus inverter,
+    // which is a different physical quantity from the net battery power measured
+    // by the SmartShunt at the battery terminals. It is captured into dc_power_w
+    // by the `inverter` module instead.
 
     let is_charged    = t.ends_with("/History/ChargedEnergy")    && t.contains("/battery/");
     let is_discharged = t.ends_with("/History/DischargedEnergy") && t.contains("/battery/");
@@ -102,17 +106,29 @@ async fn handle(
         info!("SmartShunt energy counter topic: {t}");
     }
 
-    let is_shunt = t == t_voltage || t == t_current || t == t_power
-        || t == t_soc || t == t_ttg || t == t_state
-        || is_charged || is_discharged;
+    let is_shunt_direct = t == t_voltage || t == t_current || t == t_power
+        || t == t_soc || t == t_ttg || t == t_state;
+    let is_shunt = is_shunt_direct || is_charged || is_discharged;
 
     if !is_shunt && !is_sys_soc && !is_sys_current && !is_sys_state
-        && !is_sys_ttg && !is_vebus_v && !is_vebus_pw {
+        && !is_sys_ttg && !is_vebus_v {
         return None;
     }
 
     let mut s = state.write().await;
     let now = Utc::now();
+
+    // Fallbacks (vebus / system aggregates) only apply when no direct SmartShunt
+    // topic has been received recently. STALE_AFTER bounds how long we keep
+    // trusting cached shunt values before falling back.
+    const STALE_AFTER: chrono::Duration = chrono::Duration::seconds(10);
+    let shunt_fresh = s.shunt_last_seen_ts
+        .map(|ts| now.signed_duration_since(ts) < STALE_AFTER)
+        .unwrap_or(false);
+
+    if is_shunt_direct {
+        s.shunt_last_seen_ts = Some(now);
+    }
 
     if t == t_voltage {
         if let Some(v) = msg.victron_value::<f64>() { s.battery_voltage_v = Some(v); }
@@ -173,21 +189,23 @@ async fn handle(
                    s.shunt_discharged_today_kwh);
         }
 
-    } else if is_sys_soc {
+    } else if is_sys_soc && !shunt_fresh {
         if let Some(v) = msg.victron_value::<f64>() { s.soc_pct = Some(v); }
-    } else if is_sys_current {
+    } else if is_sys_current && !shunt_fresh {
         if let Some(v) = msg.victron_value::<f64>() {
             integrate_ah(&mut s, v, now);
             s.battery_current_a = Some(v);
         }
-    } else if is_sys_state {
+    } else if is_sys_state && !shunt_fresh {
         if let Some(v) = msg.victron_value::<i64>() { s.battery_state = Some(v); }
-    } else if is_sys_ttg {
+    } else if is_sys_ttg && !shunt_fresh {
         if let Some(v) = msg.victron_value::<i64>() { s.time_to_go_sec = Some(v); }
-    } else if is_vebus_v {
+    } else if is_vebus_v && !shunt_fresh {
         if let Some(v) = msg.victron_value::<f64>() { s.battery_voltage_v = Some(v); }
-    } else if is_vebus_pw {
-        if let Some(v) = msg.victron_value::<f64>() { s.battery_power_w = Some(v); }
+    } else {
+        // Topic matched the filter but a fresher shunt value already holds the field.
+        // Suppress the publish_state trigger to avoid republishing unchanged data.
+        return Some(false);
     }
 
     Some(true)

@@ -128,6 +128,10 @@ pub struct EnergyState {
     pub battery_power_w: Option<f64>,
     pub battery_state: Option<i64>,
     pub time_to_go_sec: Option<i64>,
+    // Timestamp of the last direct SmartShunt topic (battery/{shunt}/Dc/0/*, /Soc, /TimeToGo, /State).
+    // Used to gate fallbacks from VEBus / system aggregates: while shunt data is fresh,
+    // those secondary sources must not overwrite the authoritative shunt values.
+    pub shunt_last_seen_ts: Option<DateTime<Utc>>,
 
     // --- Grid / AC ---
     pub ac_ignore: Option<i64>,         // IgnoreAcIn1: 0=grid, 1=off-grid
