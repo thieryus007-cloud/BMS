@@ -228,7 +228,7 @@ check:
 # Installation (systemd)
 # =============================================================================
 
-.PHONY: install uninstall install-z8run install-node-exporter
+.PHONY: install uninstall install-z8run uninstall-node-exporter
 
 install: build
 	sudo bash contrib/install-systemd.sh
@@ -239,22 +239,15 @@ uninstall:
 install-z8run:
 	sudo bash contrib/install-z8run.sh
 
-# Installe node_exporter (ARM64) sur le Pi5 pour métriques système → VictoriaMetrics
-# Usage : make install-node-exporter  (à exécuter depuis le Pi5)
-NODE_EXPORTER_VERSION ?= 1.8.2
-NODE_EXPORTER_ARCH    ?= arm64
-install-node-exporter:
-	@echo "Téléchargement node_exporter $(NODE_EXPORTER_VERSION) ($(NODE_EXPORTER_ARCH))..."
-	curl -fsSL "https://github.com/prometheus/node_exporter/releases/download/v$(NODE_EXPORTER_VERSION)/node_exporter-$(NODE_EXPORTER_VERSION).linux-$(NODE_EXPORTER_ARCH).tar.gz" \
-		| tar -xz --strip-components=1 -C /tmp node_exporter-$(NODE_EXPORTER_VERSION).linux-$(NODE_EXPORTER_ARCH)/node_exporter
-	sudo install -m 755 /tmp/node_exporter /usr/local/bin/node_exporter
-	sudo cp contrib/node-exporter.service /etc/systemd/system/node-exporter.service
+# Désinstalle node_exporter du Pi5 (retiré du projet — les métriques OS sont
+# désormais collectées directement par monitor.rs dans daly-bms-server).
+# Usage : make uninstall-node-exporter  (à exécuter depuis le Pi5)
+uninstall-node-exporter:
+	-sudo systemctl disable --now node-exporter 2>/dev/null
+	-sudo rm -f /etc/systemd/system/node-exporter.service
+	-sudo rm -f /usr/local/bin/node_exporter
 	sudo systemctl daemon-reload
-	sudo systemctl enable --now node-exporter
-	sudo systemctl status node-exporter --no-pager -l
-	@echo "✓ node_exporter installé — métriques sur http://localhost:9100/metrics"
-	@echo "  → Configurer VictoriaMetrics pour scraper ce endpoint."
-	@echo "  → Copier contrib/victoriametrics-scrape.yml dans /etc/victoriametrics/scrape.yml"
+	@echo "✓ node_exporter désinstallé. Pense à retirer le job 'node' de /etc/victoriametrics/scrape.yml"
 
 # =============================================================================
 # Perses — Dashboard monitoring (essai parallèle à Grafana)

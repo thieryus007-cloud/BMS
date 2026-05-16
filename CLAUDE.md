@@ -132,7 +132,6 @@ crates/energy-manager/rules/            ← règles `.grl` (rust-rule-engine) :
 crates/dbus-mqtt-venus/src/             ← bridge MQTT→D-Bus NanoPi
 contrib/daly-bms.service                ← unité systemd daly-bms-server
 contrib/energy-manager.service          ← unité systemd energy-manager
-contrib/node-exporter.service           ← unité systemd Prometheus node_exporter
 ```
 
 **IMPORTANT** : Le service lit `/etc/daly-bms/config.toml`, PAS `~/Daly-BMS-Rust/Config.toml`.
