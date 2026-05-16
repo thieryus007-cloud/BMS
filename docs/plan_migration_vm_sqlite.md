@@ -1,7 +1,7 @@
 # Plan de migration : VictoriaMetrics → SQLite
 
 > **Projet** : Daly-BMS-Rust  
-> **Objectif** : Remplacer VictoriaMetrics (~150–350 Mo RAM) par SQLite (~3 Mo RAM) tout en conservant 5 ans d'historique et la compatibilité Grafana.  
+> **Objectif** : Remplacer VictoriaMetrics (~150 Mo RAM) par SQLite (~3 Mo RAM) tout en conservant 5 ans d'historique et la compatibilité Grafana.  
 > **Stockage** : NVMe 256 Go dédié (`/mnt/nvme`)  
 > **Date** : Mai 2026
 
