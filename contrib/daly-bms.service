@@ -3,6 +3,8 @@ Description=DalyBMS Server — Rust RS485 BMS monitor
 Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
 After=network.target mosquitto-broker.service
 Wants=network.target mosquitto-broker.service
+# Pas de rate-limit sur les redémarrages (clé Unit, pas Service)
+StartLimitIntervalSec=0
 
 [Service]
 Type=notify
@@ -22,7 +24,6 @@ ExecStart=/usr/local/bin/daly-bms-server
 # Redémarrage automatique en cas de crash
 Restart=on-failure
 RestartSec=5s
-StartLimitIntervalSec=0
 
 # Accès au port série RS485 (/dev/ttyUSB* ou /dev/ttyACM*)
 SupplementaryGroups=dialout
