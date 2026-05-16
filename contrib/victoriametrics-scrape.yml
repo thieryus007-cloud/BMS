@@ -1,30 +1,21 @@
 # Configuration de scrape pour VictoriaMetrics (vmagent ou VM intégré).
 #
+# Note : node_exporter a été retiré du projet — les métriques système
+# sont désormais collectées directement par monitor.rs dans daly-bms-server
+# (pi5_cpu_percent, pi5_load_1min, pi5_disk_percent, pi5_memory_percent).
+#
+# Ce fichier ne contient plus que la configuration globale ; ajouter ici
+# d'éventuels nouveaux jobs de scrape externes (Mosquitto exporter,
+# Victron exporter, etc.).
+#
 # Déploiement sur Pi5 :
 #   sudo cp contrib/victoriametrics-scrape.yml /etc/victoriametrics/scrape.yml
 #
 # Puis redémarrer VictoriaMetrics avec :
 #   -promscrape.config=/etc/victoriametrics/scrape.yml
-#
-# OU via vmagent :
-#   vmagent -promscrape.config=/etc/victoriametrics/scrape.yml \
-#           -remoteWrite.url=http://127.0.0.1:8428/api/v1/write
 
 global:
   scrape_interval: 60s
   scrape_timeout:  10s
 
-scrape_configs:
-  # ── node_exporter — métriques OS complètes ────────────────────────────────
-  - job_name: "node"
-    static_configs:
-      - targets: ["127.0.0.1:9100"]
-    # Métriques clés pour diagnostiquer un freeze Pi5 :
-    # - node_cpu_seconds_total        → charge CPU par core
-    # - node_memory_MemAvailable_bytes → mémoire disponible
-    # - node_disk_io_time_seconds_total → saturation I/O disque (SD card !)
-    # - node_load1 / node_load5       → charge système
-    # - node_filesystem_avail_bytes   → espace disque
-    # - node_network_receive_bytes_total → I/O réseau
-    # - node_thermal_zone_temp        → température CPU (throttling)
-    # - node_systemd_unit_state       → état des services systemd
+scrape_configs: []

@@ -238,7 +238,6 @@ Daly-BMS-Rust/
 ├── contrib/
 │   ├── daly-bms.service          ← Unité systemd daly-bms-server
 │   ├── energy-manager.service    ← Unité systemd energy-manager
-│   ├── node-exporter.service     ← Unité systemd Prometheus node_exporter
 │   ├── victoriametrics-scrape.yml← Config scrape Prometheus pour VM
 │   ├── install-systemd.sh        ← Script d'installation systemd
 │   └── uninstall-systemd.sh      ← Script de désinstallation
@@ -439,7 +438,7 @@ make deploy-musl        # Idem en build musl
 make sync               # `git pull` côté Pi5 (executé sur la cible)
 make install            # Installer daly-bms-server systemd
 make uninstall          # Désinstaller daly-bms-server systemd
-make install-node-exporter  # Installer Prometheus node_exporter
+make uninstall-node-exporter  # Retirer Prometheus node_exporter du Pi5 (déprécié)
 make profile-setup/-start/-stop  # Profiling perf/flamegraph
 make doc                # cargo doc (workspace, --open)
 ```
