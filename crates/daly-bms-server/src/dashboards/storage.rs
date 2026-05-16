@@ -5,13 +5,23 @@
 
 use rusqlite::{Connection, params, OptionalExtension};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use chrono::Utc;
 
 /// Storage clonable (Arc<Mutex>) pour les layouts dashboard.
 #[derive(Clone)]
 pub struct LayoutStorage {
     conn: Arc<Mutex<Connection>>,
+}
+
+/// Récupère le lock du mutex en gérant le cas du mutex empoisonné.
+/// Plutôt que paniquer (.unwrap()), on récupère la guard depuis l'erreur
+/// — l'état SQLite reste consistant car rusqlite a son propre verrouillage interne.
+fn lock_conn(m: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
+    m.lock().unwrap_or_else(|poisoned| {
+        tracing::warn!("dashboard storage: mutex poisoned, récupération de la guard");
+        poisoned.into_inner()
+    })
 }
 
 impl LayoutStorage {
@@ -40,7 +50,7 @@ impl LayoutStorage {
 
     /// Récupère le layout JSON brut pour un user. None si aucun layout sauvé.
     pub fn get(&self, user_id: &str) -> rusqlite::Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn(&self.conn);
         conn.query_row(
             "SELECT layout_json FROM dashboard_layouts WHERE user_id = ?1",
             params![user_id],
@@ -51,7 +61,7 @@ impl LayoutStorage {
     /// Écrit (upsert) le layout JSON pour un user. Le contenu n'est pas validé ici —
     /// l'appelant garantit que c'est du JSON.
     pub fn set(&self, user_id: &str, layout_json: &str) -> rusqlite::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn(&self.conn);
         let now = Utc::now().timestamp();
         conn.execute(
             "INSERT INTO dashboard_layouts (user_id, layout_json, updated_at)
@@ -66,7 +76,7 @@ impl LayoutStorage {
 
     /// Supprime le layout d'un user (retour à l'état par défaut côté UI).
     pub fn delete(&self, user_id: &str) -> rusqlite::Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn(&self.conn);
         conn.execute(
             "DELETE FROM dashboard_layouts WHERE user_id = ?1",
             params![user_id],
@@ -76,14 +86,14 @@ impl LayoutStorage {
 }
 
 fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
+    // Pas d'index sur updated_at : aucune requête actuelle ne le filtre/trie
+    // et un index coûte sur chaque write.
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS dashboard_layouts (
             user_id     TEXT PRIMARY KEY,
             layout_json TEXT NOT NULL,
             updated_at  INTEGER NOT NULL
-         );
-         CREATE INDEX IF NOT EXISTS idx_dashboard_layouts_updated
-            ON dashboard_layouts(updated_at);"
+         );"
     )
 }
 
