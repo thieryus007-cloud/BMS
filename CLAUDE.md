@@ -307,6 +307,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 10. Nom exact D-Bus onduleur Victron direct : `cgwacs_ttyUSB0_mb2` (pas `rs485`).
 11. Broker MQTT = Mosquitto natif systemd (`mosquitto-broker.service`). Plus de Docker — config dans `contrib/mosquitto/mosquitto.conf`, déployée vers `/etc/mosquitto/mosquitto.conf`. Toujours valider avec `sudo /usr/local/bin/verify-no-loop.sh` après modif des topics bridge.
 12. Secrets : ne jamais committer `.env`.
+13. **Source de vérité métrique** : les valeurs mesurées par Victron (D-Bus/MQTT) et lues sur RS485 sont **prioritaires sur tout calcul dérivé**. Ne jamais remplacer une mesure firmware par un V×I recalculé, ni écraser un champ direct par un agrégat système. Les sommes (`solar_total = mppt+pvinv`) sont OK car ce sont des agrégats explicites, pas des recalculs d'une valeur déjà disponible.
 
 ---
 
