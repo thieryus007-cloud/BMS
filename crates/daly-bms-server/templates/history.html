@@ -755,9 +755,24 @@ async function fetchAndRenderCustomPanel(panel) {
 }
 
 function formatLegendCustom(format, labels) {
-  if (!format) return labels.__name__ || '';
+  labels = labels || {};
+  // Cas 1 : pas de legendFormat fourni → on construit une légende lisible
+  // façon Grafana par défaut : `metric_name{label1="val1", label2="val2"}`
+  // en excluant le label interne __name__ (déjà devant les accolades).
+  if (!format) {
+    const name = labels.__name__ || '';
+    const others = Object.keys(labels)
+      .filter(k => k !== '__name__')
+      .map(k => `${k}="${labels[k]}"`)
+      .join(', ');
+    if (others) return name ? `${name}{${others}}` : `{${others}}`;
+    return name;
+  }
+  // Cas 2 : substitution des placeholders style Grafana (double accolades label)
   let out = format;
-  for (const k in labels) out = out.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), labels[k]);
+  for (const k in labels) {
+    out = out.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), labels[k]);
+  }
   return out;
 }
 
