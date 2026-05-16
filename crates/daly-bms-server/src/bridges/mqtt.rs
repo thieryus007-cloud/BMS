@@ -755,15 +755,25 @@ async fn handle_heatpump_topic(state: &AppState, topic: &str, json: &Value) {
         .unwrap_or(0);
     if idx == 0 { return; }
 
-    let hp_state    = json.get("State").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    let temperature = json.get("Temperature").and_then(|v| v.as_f64()).map(|v| v as f32);
-    let target_temp = json.get("TargetTemperature").and_then(|v| v.as_f64()).map(|v| v as f32);
-    let position    = json.get("Position").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    let ac_power    = json.get("Ac").and_then(|a| a.get("Power")).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    // Read previous snapshot so missing fields in this MQTT message keep their last
+    // known value instead of fabricating a 0. The upstream device is the source of
+    // truth — when it omits a field, we must not invent data.
+    let prev = state.venus_heatpump_get(idx).await;
+
+    let hp_state    = json.get("State").and_then(|v| v.as_i64()).map(|v| v as i32)
+        .unwrap_or_else(|| prev.as_ref().map(|p| p.state).unwrap_or(0));
+    let temperature = json.get("Temperature").and_then(|v| v.as_f64()).map(|v| v as f32)
+        .or_else(|| prev.as_ref().and_then(|p| p.temperature));
+    let target_temp = json.get("TargetTemperature").and_then(|v| v.as_f64()).map(|v| v as f32)
+        .or_else(|| prev.as_ref().and_then(|p| p.target_temperature));
+    let position    = json.get("Position").and_then(|v| v.as_i64()).map(|v| v as i32)
+        .unwrap_or_else(|| prev.as_ref().map(|p| p.position).unwrap_or(0));
+    let ac_power    = json.get("Ac").and_then(|a| a.get("Power")).and_then(|v| v.as_f64()).map(|v| v as f32)
+        .unwrap_or_else(|| prev.as_ref().map(|p| p.ac_power).unwrap_or(0.0));
     let ac_energy   = json
         .get("Ac").and_then(|a| a.get("Energy"))
-        .and_then(|e| e.get("Forward")).and_then(|v| v.as_f64())
-        .unwrap_or(0.0) as f32;
+        .and_then(|e| e.get("Forward")).and_then(|v| v.as_f64()).map(|v| v as f32)
+        .unwrap_or_else(|| prev.as_ref().map(|p| p.ac_energy_forward).unwrap_or(0.0));
 
     let hp = VenusHeatpump {
         mqtt_index:          idx,
