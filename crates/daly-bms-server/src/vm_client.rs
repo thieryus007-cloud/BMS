@@ -3,6 +3,7 @@
 //! Écriture : Prometheus text format → POST /api/v1/import/prometheus
 //! Lecture  : API PromQL standard   → GET /api/v1/query[_range]
 
+use std::fmt::Write as _;
 use std::time::Duration;
 use reqwest::Client;
 use serde_json::Value;
@@ -48,16 +49,23 @@ impl VmRow {
     }
 
     /// Sérialise en Prometheus text format — timestamp en millisecondes (requis par /api/v1/import/prometheus).
-    fn to_line(&self) -> String {
-        if self.labels.is_empty() {
-            format!("{} {} {}", self.metric, self.value, self.timestamp_ms)
-        } else {
-            let labels_str = self.labels.iter()
-                .map(|(k, v)| format!("{}=\"{}\"", k, v))
-                .collect::<Vec<_>>()
-                .join(",");
-            format!("{}{{{}}} {} {}", self.metric, labels_str, self.value, self.timestamp_ms)
+    /// Écrit directement dans un buffer pré-alloué pour éviter les allocations intermédiaires
+    /// (sur le chemin chaud write_rows : ~100s/sec en production).
+    fn write_line(&self, buf: &mut String) {
+        buf.push_str(&self.metric);
+        if !self.labels.is_empty() {
+            buf.push('{');
+            for (i, (k, v)) in self.labels.iter().enumerate() {
+                if i > 0 { buf.push(','); }
+                buf.push_str(k);
+                buf.push_str("=\"");
+                buf.push_str(v);
+                buf.push('"');
+            }
+            buf.push('}');
         }
+        // write! sur &mut String est infaillible (jamais Err).
+        let _ = write!(buf, " {} {}", self.value, self.timestamp_ms);
     }
 }
 
@@ -93,7 +101,13 @@ impl VmClient {
         if rows.is_empty() {
             return Ok(());
         }
-        let body = rows.iter().map(|r| r.to_line()).collect::<Vec<_>>().join("\n");
+        // Estime ~80 octets/ligne (nom métrique + labels + valeur + timestamp).
+        // Une seule allocation pour le buffer entier au lieu de N+1 allocations.
+        let mut body = String::with_capacity(rows.len() * 80);
+        for (i, row) in rows.iter().enumerate() {
+            if i > 0 { body.push('\n'); }
+            row.write_line(&mut body);
+        }
         let resp = self.http
             .post(format!("{}/api/v1/import/prometheus", self.base_url))
             .header("Content-Type", "text/plain")
@@ -229,7 +243,7 @@ impl VmClient {
 
     pub fn smartshunt_rows(shunt: &VenusSmartShunt) -> Vec<VmRow> {
         let ts   = shunt.timestamp.timestamp_millis();
-        let mut rows = Vec::new();
+        let mut rows = Vec::with_capacity(8);
 
         macro_rules! push_opt {
             ($metric:expr, $opt:expr) => {
@@ -270,7 +284,7 @@ impl VmClient {
 
     pub fn inverter_rows(inv: &VenusInverter) -> Vec<VmRow> {
         let ts   = inv.timestamp.timestamp_millis();
-        let mut rows = Vec::new();
+        let mut rows = Vec::with_capacity(8);
 
         macro_rules! push_opt {
             ($metric:expr, $opt:expr) => {
@@ -300,7 +314,7 @@ impl VmClient {
         let ts       = mppt.timestamp.timestamp_millis();
         let instance = mppt.instance.to_string();
         let inst     = instance.as_str();
-        let mut rows = Vec::new();
+        let mut rows = Vec::with_capacity(5);
 
         macro_rules! push_opt {
             ($metric:expr, $opt:expr) => {
@@ -328,7 +342,7 @@ impl VmClient {
         let ts       = temp.timestamp.timestamp_millis();
         let instance = temp.instance.to_string();
         let inst     = instance.as_str();
-        let mut rows = Vec::new();
+        let mut rows = Vec::with_capacity(2);
 
         if let Some(t) = temp.temp_c {
             rows.push(VmRow::with_labels(
@@ -354,7 +368,7 @@ impl VmClient {
         let ts  = hp.timestamp.timestamp_millis();
         let idx = hp.mqtt_index.to_string();
         let i   = idx.as_str();
-        let mut rows = Vec::new();
+        let mut rows = Vec::with_capacity(5);
 
         rows.push(VmRow::with_labels(
             "venus_heatpump_state",
@@ -463,7 +477,7 @@ impl VmClient {
         let id   = snap.id.to_string();
         let id_s = id.as_str();
 
-        let mut rows = Vec::new();
+        let mut rows = Vec::with_capacity(10); // 5 metrics × 2 channels
 
         for (ch_str, ch) in [("0", &snap.channel_0), ("1", &snap.channel_1)] {
             macro_rules! row {
