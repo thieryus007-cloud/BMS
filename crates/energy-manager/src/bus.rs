@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use crate::types::{LiveEvent, MqttIncoming, MqttOutgoing};
 
@@ -11,8 +12,10 @@ const RULE_RELOAD_CAPACITY: usize = 16;
 /// Clone it freely — each field is Arc-backed.
 #[derive(Clone)]
 pub struct AppBus {
-    /// Broadcast of all incoming MQTT messages → all logic tasks subscribe
-    pub mqtt_in:     broadcast::Sender<MqttIncoming>,
+    /// Broadcast of all incoming MQTT messages → all logic tasks subscribe.
+    /// Wrapped in Arc so fan-out to N subscribers is N ref-count bumps
+    /// instead of N full clones of the topic String + Bytes payload.
+    pub mqtt_in:     broadcast::Sender<Arc<MqttIncoming>>,
     /// MPSC → MQTT publisher task
     pub mqtt_out:    mpsc::Sender<MqttOutgoing>,
     /// Broadcast → live WebSocket clients
@@ -37,7 +40,7 @@ impl AppBus {
         (bus, rxs)
     }
 
-    pub fn subscribe_mqtt(&self) -> broadcast::Receiver<MqttIncoming> {
+    pub fn subscribe_mqtt(&self) -> broadcast::Receiver<Arc<MqttIncoming>> {
         self.mqtt_in.subscribe()
     }
 

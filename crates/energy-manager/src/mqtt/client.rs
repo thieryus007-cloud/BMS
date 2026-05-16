@@ -60,11 +60,11 @@ pub async fn spawn(
                 }
                 Ok(Event::Incoming(Packet::Publish(p))) if subscribed => {
                     debug!("MQTT rx: {}", p.topic);
-                    let msg = crate::types::MqttIncoming {
+                    let msg = std::sync::Arc::new(crate::types::MqttIncoming {
                         topic: p.topic.to_string(),
                         payload: p.payload.clone(),
                         retain: p.retain,
-                    };
+                    });
                     // Ignore lagged receivers (they'll re-catch up)
                     let _ = bus.mqtt_in.send(msg);
                 }
