@@ -22,6 +22,7 @@
 pub mod agg;
 pub mod encoding;
 pub mod labels;
+pub mod promql;
 pub mod reader;
 pub mod tables;
 pub mod tiering;
@@ -383,6 +384,85 @@ mod tests {
             let again = compact_raw_to_hourly(&store.inner.db, cutoff).unwrap();
             assert_eq!(again.buckets_written, 0);
             assert_eq!(again.points_purged, 0);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_smoke_selectors_agg_and_increase() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // bms_v{bms_id=1} : 10 pts à 1.0..1.9
+            // bms_v{bms_id=2} : 10 pts à 2.0..2.9
+            // energy_wh        : monotone, 0..100 par pas de 10 → increase = 100
+            for i in 0..10_i64 {
+                let ts = 100_000 + i * 1_000;
+                writer
+                    .write(Sample::new("bms_v", ts, 1.0 + i as f64 / 10.0).with_label("bms_id", "1"))
+                    .await
+                    .unwrap();
+                writer
+                    .write(Sample::new("bms_v", ts, 2.0 + i as f64 / 10.0).with_label("bms_id", "2"))
+                    .await
+                    .unwrap();
+                writer
+                    .write(Sample::new("energy_wh", ts, i as f64 * 10.0))
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+
+            // Selector simple → 2 séries
+            let expr = parse_and_validate("bms_v").unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert_eq!(v.len(), 2);
+
+            // Selector matché par label → 1 série, valeur = 1.9
+            let expr = parse_and_validate(r#"bms_v{bms_id="1"}"#).unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 1.9).abs() < 1e-9);
+
+            // Agg max(bms_v) → 1 série, valeur = 2.9 (max sur les 2 BMS)
+            let expr = parse_and_validate("max(bms_v)").unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 2.9).abs() < 1e-9);
+
+            // Binary scalar / vec : bms_v / 10 → 2 séries, valeurs 0.19 et 0.29
+            let expr = parse_and_validate("bms_v / 10").unwrap();
+            let mut v = ev.eval_instant(&expr, 109_000).unwrap();
+            v.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 0.19).abs() < 1e-9);
+            assert!((v[1].value - 0.29).abs() < 1e-9);
+
+            // increase(energy_wh[10s]) → 90 (de 0 à 90 sur la fenêtre)
+            let expr = parse_and_validate("increase(energy_wh[10s])").unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 90.0).abs() < 1e-9, "got {}", v[0].value);
+
+            // Range query : bms_v de 100s à 109s par pas de 3s → 4 points par série
+            let expr = parse_and_validate("bms_v").unwrap();
+            let series = ev.eval_range(&expr, 100_000, 109_000, 3_000).unwrap();
+            assert_eq!(series.len(), 2);
+            for s in &series {
+                assert_eq!(s.samples.len(), 4, "labels = {:?}", s.labels);
+            }
         }
         let _ = std::fs::remove_file(&path);
     }
