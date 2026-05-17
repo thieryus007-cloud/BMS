@@ -142,4 +142,28 @@ mod tests {
         assert!(panels.iter().any(|p| p.kind == PanelKind::Stat));
         assert!(panels.iter().any(|p| p.kind == PanelKind::TimeSeries));
     }
+
+    #[test]
+    fn parse_solar_pv_dashboard() {
+        const SRC: &str = include_str!("../../../../docs/grafana-solar_pv_dashboard.json");
+        let panels = parse_dashboard(SRC).expect("parse échoué");
+        // 11 panels attendus (IDs 1001..=1011)
+        assert_eq!(panels.len(), 11, "nombre de panels Solar PV inattendu");
+        // IDs disjoints du dashboard ess (qui va de 1 à 106)
+        for p in &panels {
+            let id: u32 = p.id.parse().expect("id non numérique");
+            assert!(id >= 1000, "id {} entre en collision avec ess_dashboard", id);
+        }
+        // Au moins un timeseries, un bargauge, un gauge
+        assert!(panels.iter().any(|p| p.kind == PanelKind::TimeSeries));
+        assert!(panels.iter().any(|p| p.kind == PanelKind::BarGauge));
+        assert!(panels.iter().any(|p| p.kind == PanelKind::Gauge));
+        // Chaque panel doit avoir au moins une query non-vide
+        for p in &panels {
+            assert!(!p.queries.is_empty(), "panel {} sans query", p.id);
+            for q in &p.queries {
+                assert!(!q.expr.is_empty(), "panel {} query vide", p.id);
+            }
+        }
+    }
 }
