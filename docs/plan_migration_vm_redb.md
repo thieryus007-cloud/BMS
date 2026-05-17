@@ -12,6 +12,91 @@
 
 ---
 
+## 0. État d'avancement & démarrage de session
+
+> Cette section est **maintenue à jour à chaque session de travail**. Elle sert
+> de point d'entrée pour reprendre la migration sans avoir à relire les 800
+> lignes qui suivent. **Toujours la mettre à jour avant de fermer une session.**
+
+### 0.1 Statut actuel — Mai 2026
+
+| Phase | Avancement |
+|---|---|
+| Plan rédigé et validé | ✅ document complet (15 sections + comparatif v2) |
+| Décision SQLite vs redb | ⏸️ **non tranchée** — recommandation §15 = redb ; à confirmer avant Phase 0 |
+| Audit PromQL exhaustif | ✅ cf. §6.5 ci-dessous (81 expressions, 7 fonctions, 1 subquery) |
+| Crate `metrics-store` | ❌ pas démarrée |
+| Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré |
+| Shim PromQL → redb | ❌ pas démarré |
+| Dual-write VM+redb | ❌ pas démarré |
+| Bascule Grafana | ❌ pas démarrée |
+| Retrait VictoriaMetrics | ❌ pas démarré |
+| **Volume actuel data dir** | `/mnt/nvme/victoria-metrics` (à mesurer en début de session : `du -sh`) |
+
+### 0.2 Ce qui a changé dans le code depuis la rédaction (impacte le plan)
+
+Aucun changement sur les producteurs (`vm_client.rs`, `energy-manager`) ni
+sur les consommateurs (`api/history.rs`, `api/dashboards.rs`). Les évolutions
+récentes ne touchent **que** le frontend dashboard, mais elles **étendent la
+surface PromQL** à transpiler :
+
+1. **`docs/grafana-solar_pv_dashboard.json`** (commit `08f23c7`, 11 panels
+   IDs 1001–1011) — ajoute des expressions `increase(...[24h|30d|1h|1d])`
+   avec arithmétique vectorielle `(a - b) / a * 100`. **À couvrir par le
+   transpileur dès Phase 2.** Détail §6.5.
+2. **Onglets `/dashboard/history`** (commit `d9580fd`) — refactor frontend
+   uniquement (clé `tab_id` ajoutée au storage `dashboards.db` SQLite).
+   **Aucun impact sur le plan redb** : la base `dashboards.db` (rusqlite)
+   reste en place, c'est uniquement `metrics.db`/VictoriaMetrics qui migre.
+3. **Catalog multi-sources** (`Catalog::load_default` charge 2 fichiers JSON)
+   — le shim doit servir les exprs des deux dashboards sans distinction.
+
+### 0.3 Kit de démarrage pour une nouvelle session
+
+Quand tu ouvres une session pour cette migration, fais dans l'ordre :
+
+```bash
+# 1. Vérifier la branche active
+git status && git branch --show-current
+
+# 2. Lire ces fichiers DANS CET ORDRE
+#    a. CLAUDE.md                              (contexte projet, ~3 min)
+#    b. docs/plan_migration_vm_redb.md §0..§3  (état + archi, ~10 min)
+#    c. docs/plan_migration_vm_redb.md §6.5    (audit PromQL exhaustif)
+#    d. Pour la phase visée : §4 (schéma), §5 (crate), §10 (bascule)
+
+# 3. Examiner le code existant qu'on remplace
+#    - crates/daly-bms-server/src/vm_client.rs                  (producteur principal)
+#    - crates/daly-bms-server/src/api/history.rs                (consommateur, 159 l)
+#    - crates/daly-bms-server/src/api/dashboards.rs:get_panel_data  (consommateur)
+#    - crates/daly-bms-server/src/metrics.rs                    (ingest endpoint actuel ?)
+
+# 4. Vérifier l'état réel sur Pi5 (volume, RSS VM, lag)
+ssh pi5 'du -sh /mnt/nvme/victoria-metrics && \
+         systemctl status victoria-metrics --no-pager | head -20 && \
+         curl -s http://localhost:8428/api/v1/status/tsdb | head -50'
+
+# 5. Mettre à jour §0.1 (statut) à la fin de la session
+```
+
+**Branche de travail recommandée** : `claude/migration-vm-redb-<jour>` —
+**ne pas réutiliser** `claude/detailed-migration-plan-BJxVd` (cette dernière
+contient les ajouts Solar PV et doit rester focalisée dessus).
+
+### 0.4 Décisions à prendre EN PREMIER lors de la prochaine session
+
+1. **SQLite v2 ou redb ?** — relire §15 + §16 et trancher avant tout code.
+   Tant que ce n'est pas tranché, la crate `metrics-store` ne peut pas
+   commencer (interface publique identique mais implémentation différente).
+2. **Migration historique** : import VM → nouveau backend, ou archive tar
+   et démarrage à neuf ? Cf. §16-3. Recommandation tactique : **archive tar
+   uniquement** — l'historique fin n'a de valeur que sur 30–90 j, on
+   conserve un dump VM accessible *read-only* via un script ad hoc.
+3. **Subquery panel 43** (§6.5) : la supporter dans le transpileur ou
+   réécrire le panel en deux requêtes côté JS ? Recommandation : réécriture.
+
+---
+
 ## 1. Pourquoi évaluer redb ?
 
 ### 1.1 Comparaison synthétique vs SQLite (le candidat du plan v2)
@@ -486,6 +571,111 @@ Comme en v2, on rejette explicitement les fonctions PromQL non utilisées
  "errorType":"bad_data"}
 ```
 
+### 6.5 Catalogue PromQL audité (golden set Mai 2026)
+
+> Audit exhaustif des **81 expressions** présentes dans les 2 catalogues
+> dashboard embarqués (`docs/grafana-ess_dashboard.json` 70 exprs +
+> `docs/grafana-solar_pv_dashboard.json` 11 exprs). Le shim **doit
+> couvrir 100 % de cette liste** avant la bascule Phase 3. Reproduire l'audit :
+>
+> ```bash
+> python3 -c "
+> import json, re
+> for path in ['docs/grafana-ess_dashboard.json','docs/grafana-solar_pv_dashboard.json']:
+>     d = json.load(open(path))
+>     def w(ps):
+>         for p in ps:
+>             for t in p.get('targets',[]):
+>                 e = t.get('expr','').strip()
+>                 if e: print(path.split('/')[-1], p['id'], e)
+>             if p.get('panels'): w(p['panels'])
+>     w(d.get('panels',[]))
+> "
+> ```
+
+**Fonctions PromQL utilisées** (7 au total) :
+
+| Fonction | Occurrences | Plan d'exécution redb |
+|---|---|---|
+| `increase(m[w])` | la plupart des kWh | `last_raw - first_raw` sur fenêtre (raw) ou `Σ(bucket.last - bucket.first)` (compacté) |
+| `avg_over_time(m[w])` | quelques cas (panel 43, …) | scan + moyenne par fenêtre glissante |
+| `clamp_min(m, k)` / `clamp_max(m, k)` | panel 43 | wrapper trivial sur l'itérateur de valeurs |
+| `abs(m)` | panel 43 | wrapper trivial |
+| `max(...)` / `sum(...)` | quelques agrégats instantanés | aggregator existant §5.5 |
+
+**Fenêtres** : `[1h]`, `[24h]`, `[1d]`, `[30d]` uniquement. Aucune fenêtre
+exotique (`[5m]`, `[7d]`, etc.) dans le golden set actuel — si un futur
+panel en introduit, mettre à jour le test `golden_promql_coverage`.
+
+**Opérateurs binaires** : `+`, `-`, `*`, `/`. Toujours entre :
+- vecteur ⊗ scalaire (ex: `m / 1000`) — simple map sur les valeurs ;
+- vecteur ⊗ vecteur **alignés** (ex: `(yield - exported) / yield`) — join
+  par timestamp aligné sur `step_ms` puis op point-à-point.
+
+**Pas** d'opérateur de comparaison (`>`, `<=`), pas de `bool` modifier,
+pas de `unless`/`and`/`or` ensemblistes.
+
+**Subqueries** : une seule occurrence — `[24h:1m]` dans le panel 43
+(`grafana-ess_dashboard.json`, calcul du proxy de cyclage batterie) :
+
+```promql
+(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m]))
+ + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m])))
+ * 24 / 680 * 100
+```
+
+**Décision recommandée** : ne pas implémenter de support subquery générique.
+Soit (a) réécrire le panel 43 en deux requêtes côté JS additionnées dans
+ECharts, soit (b) ajouter un cas spécial `[Xh:Ym]` qui pré-bucketize en
+mémoire avant la fonction `*_over_time`. La complexité de (b) (~1 j) est
+disproportionnée pour un panel. **Retenir (a).**
+
+**Offset, label_replace, label_join, vector(), scalar()** : aucune
+occurrence — rejetés sans implémentation.
+
+**Métriques référencées** (25 noms distincts) — toutes produites par
+`vm_client.rs` ou `energy-manager` aujourd'hui :
+
+```
+solar_total_w
+dc_pv_power_w                 pvinv_power_w
+venus_shunt_power_w           venus_shunt_current_a         venus_shunt_soc_percent
+venus_mppt_power_w            venus_mppt_yield_today_kwh    venus_mppt_max_power_today_w
+venus_inverter_ac_output_power_w   venus_inverter_voltage_v
+venus_heatpump_power_w        venus_heatpump_temp_c         venus_temp_c
+et112_power_w                 et112_voltage_v               et112_frequency_hz
+et112_energy_import_wh        et112_energy_export_wh
+bms_v                         bms_soc                       bms_current
+bms_temp_max                  bms_cell_delta_mv             bms_id (label)
+ats_a                         irradiance_w
+```
+
+**Test de non-régression à ajouter dans la crate `metrics-store`** :
+
+```rust
+// crates/metrics-store/tests/golden_promql.rs
+#[test]
+fn golden_promql_coverage() {
+    // Parse les 2 dashboards JSON et vérifie que toutes les exprs sont
+    // acceptées par le transpileur (compile, pas forcément exécutable
+    // sans data). Échoue à l'ajout d'une expr non supportée.
+    let ess = include_str!("../../../docs/grafana-ess_dashboard.json");
+    let pv  = include_str!("../../../docs/grafana-solar_pv_dashboard.json");
+    let mut failed = vec![];
+    for src in [ess, pv] {
+        for expr in extract_exprs(src) {
+            if let Err(e) = transpile(&expr) {
+                failed.push((expr.clone(), e.to_string()));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "exprs non transpilables: {:#?}", failed);
+}
+```
+
+Ce test fige la couverture et fait échouer la CI si quelqu'un ajoute une
+fonction PromQL non encore supportée dans un dashboard JSON.
+
 ---
 
 ## 7. Endpoint d'ingestion (compat `energy-manager`)
@@ -805,8 +995,24 @@ Le binaire `metrics-cli` (~1 jour de dev) compense largement.
 4. **Outil `metrics-cli` exposé en lecture seule** ou avec opérations
    destructives (compact, purge) ? Recommandation : lecture seule par défaut,
    flag `--admin` pour les écritures.
+5. **Panel 43 (subquery `[24h:1m]`)** : réécrire en deux requêtes côté JS
+   ou supporter la subquery dans le transpileur ? Cf. §6.5 — recommandation
+   = réécriture (~30 min) vs implémentation générique (~1 j).
+6. **Solar PV `increase` à large fenêtre** (`[30d]`) : assurer qu'à 5s de
+   step raw, un range scan sur 30 j de raw (~518 400 points/série) reste
+   sous 100 ms. Sinon : forcer le tier `daily` même pour `[30d]`. À
+   benchmarker dès la Phase 2.
 
 ---
 
 *Document complémentaire à `plan_migration_vm_sqlite_v2.md`. Les deux plans
 sont alternatifs (pas additifs). Le choix se fait avant Phase 0.*
+
+---
+
+## 17. Changelog du document
+
+| Date | Auteur | Changement |
+|---|---|---|
+| Mai 2026 | initial | Rédaction complète §1–§16 (commit `e4b8360`) |
+| Mai 2026 | session Solar PV | Ajout §0 (état & démarrage), §6.5 (catalogue PromQL audité), §16-5/6 (décisions Solar PV) suite aux commits `08f23c7` (dashboard Solar PV) et `d9580fd` (onglets dashboard) qui élargissent la surface PromQL à transpiler. Aucun changement structurel sur §1–§15. |
