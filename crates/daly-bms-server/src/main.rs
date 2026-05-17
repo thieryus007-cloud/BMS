@@ -169,6 +169,7 @@ async fn main() -> anyhow::Result<()> {
                 logging:     config::LoggingConfig::default(),
                 mqtt:        config::MqttConfig::default(),
                 victoriametrics: config::VmConfig::default(),
+                metrics_store: config::MetricsStoreConfig::default(),
                 alerts:      config::AlertsConfig::default(),
                 read_only:   config::ReadOnlyConfig::default(),
                 bms:         Vec::new(),
@@ -279,10 +280,55 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    // ── metrics-store redb (dual-write Phase 1, `plan_migration_vm_redb.md`) ──
+    let metrics_store = if config.metrics_store.enabled {
+        let opts = metrics_store::Options {
+            cache_bytes: config.metrics_store.cache_mb * 1024 * 1024,
+            writer_queue_depth: config.metrics_store.queue_depth,
+            writer: metrics_store::WriterConfig::default(),
+        };
+        match metrics_store::MetricsStore::open(
+            std::path::Path::new(&config.metrics_store.db_path),
+            opts,
+        ) {
+            Ok(s) => {
+                info!(
+                    db_path = %config.metrics_store.db_path,
+                    "metrics-store ouvert (dual-write activé)"
+                );
+                if config.metrics_store.maintenance_interval_hours > 0 {
+                    let policy = metrics_store::TierPolicy {
+                        raw_retention_days: config.metrics_store.raw_retention_days,
+                        hourly_retention_days: config.metrics_store.hourly_retention_days,
+                        daily_retention_days: config.metrics_store.daily_retention_days,
+                    };
+                    let _ = s.spawn_maintenance(
+                        policy,
+                        config.metrics_store.maintenance_interval_hours,
+                    );
+                    info!(
+                        interval_h = config.metrics_store.maintenance_interval_hours,
+                        "metrics-store: maintenance tiered planifiée"
+                    );
+                }
+                Some(s)
+            }
+            Err(e) => {
+                warn!("metrics-store ouverture échouée : {e} — dual-write désactivé");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // ── VictoriaMetrics (client HTTP stockage time-series) ────────────────────
     let vm_handle = if config.victoriametrics.enabled {
         match vm_client::VmClient::new(&config.victoriametrics) {
-            Ok(h) => {
+            Ok(mut h) => {
+                if let Some(s) = &metrics_store {
+                    h = h.with_metrics_store(s.writer());
+                }
                 info!("VictoriaMetrics activé — url '{}'", config.victoriametrics.url);
                 Some(h)
             }

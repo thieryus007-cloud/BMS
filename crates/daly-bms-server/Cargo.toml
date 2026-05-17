@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 rs485-bus     = { workspace = true }
 daly-bms-core = { path = "../daly-bms-core" }
+metrics-store = { workspace = true }
 
 tokio          = { workspace = true }
 tokio-serial   = { workspace = true }

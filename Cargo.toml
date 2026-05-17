@@ -27,6 +27,7 @@ repository  = "https://github.com/thieryus007-cloud/Daly-BMS-Rust"
 
 # ── Crates internes ────────────────────────────────────────────────────────────
 rs485-bus     = { path = "crates/rs485-bus" }
+metrics-store = { path = "crates/metrics-store" }
 
 # ── Async runtime ─────────────────────────────────────────────────────────────
 tokio         = { version = "1",    features = ["full"] }

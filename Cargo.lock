@@ -800,6 +800,7 @@ dependencies = [
  "daly-bms-core",
  "futures",
  "lettre",
+ "metrics-store",
  "reqwest",
  "rs485-bus",
  "rumqttc",

@@ -413,6 +413,25 @@ url = "http://127.0.0.1:8428"
 timeout_secs = 10
 
 
+# =============================================================================
+# Backend TSDB redb (dual-write avec VictoriaMetrics, Phase 1 migration)
+# Cf. docs/plan_migration_vm_redb.md
+# Désactivé tant que la migration n'est pas en Phase 1 — VM reste seul.
+# =============================================================================
+[metrics_store]
+enabled = false
+db_path = "/mnt/nvme/daly-bms/metrics.redb"
+# Cache pages redb en MiB (défaut 64).
+cache_mb = 64
+# Profondeur de la queue mpsc entre producteurs et writer.
+queue_depth = 10000
+# Intervalle de la passe de compaction tiered (heures, 0 = désactivé).
+maintenance_interval_hours = 6
+raw_retention_days = 30
+hourly_retention_days = 365
+daily_retention_days = 1825   # 5 ans
+
+
 [alerts]
 # Chemin de la base SQLite pour journal des alertes.
 # Laisser vide pour désactiver complètement les alertes.
