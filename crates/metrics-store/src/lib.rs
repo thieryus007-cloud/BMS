@@ -24,6 +24,7 @@ pub mod encoding;
 pub mod labels;
 pub mod reader;
 pub mod tables;
+pub mod tiering;
 pub mod writer;
 
 use std::path::Path;
@@ -155,10 +156,25 @@ impl MetricsStore {
     }
 
     /// Démarre la tâche de maintenance (compaction raw→hourly→daily).
-    /// Stub — l'implémentation arrivera avec le module `tiering.rs` (ticket 0.5b).
-    pub fn spawn_maintenance(&self, _policy: TierPolicy) -> JoinHandle<()> {
-        tokio::spawn(async move {
-            tracing::warn!("metrics-store: spawn_maintenance pas encore implémenté");
+    /// `interval_hours` contrôle la fréquence (défaut recommandé : 6 h ⇒
+    /// 4 passes par jour). Cf. plan §9.1.
+    pub fn spawn_maintenance(&self, policy: TierPolicy, interval_hours: u64) -> JoinHandle<()> {
+        tiering::spawn_maintenance(self.inner.db.clone(), policy, interval_hours)
+    }
+
+    /// Lance une seule passe de compaction synchrone (utilisée par
+    /// `metrics-cli compact` et les tests).
+    pub fn compact_now(&self, policy: &TierPolicy) -> Result<tiering::CompactionStats> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis() as i64;
+        let cutoff_raw = now - policy.raw_retention_days as i64 * tiering::DAILY_MS;
+        let cutoff_hourly = now - policy.hourly_retention_days as i64 * tiering::DAILY_MS;
+        let s1 = tiering::compact_raw_to_hourly(&self.inner.db, cutoff_raw)?;
+        let s2 = tiering::compact_hourly_to_daily(&self.inner.db, cutoff_hourly)?;
+        Ok(tiering::CompactionStats {
+            buckets_written: s1.buckets_written + s2.buckets_written,
+            points_purged: s1.points_purged + s2.points_purged,
         })
     }
 }
@@ -269,6 +285,104 @@ mod tests {
             // Bornes : un range vide doit retourner None pour Avg.
             let nothing = agg_over_range(&reader, id_bms_v_1, 5000, 6000, AggOp::Avg).unwrap();
             assert!(nothing.is_none());
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tiering_raw_to_hourly_to_daily() {
+        use crate::tiering::{compact_hourly_to_daily, compact_raw_to_hourly, DAILY_MS};
+
+        let path = tmp_db_path("tier");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 30, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // 3 jours de samples : un point toutes les 10 minutes (144 par
+            // jour) sur la série `power`. Toutes les valeurs sont = 100.0
+            // donc on peut prédire trivialement les agrégats finaux.
+            let day_ms = DAILY_MS;
+            let step_ms = 10 * 60 * 1000_i64; // 10 minutes
+            let t0 = 1_700_000_000_000_i64; // ancre arbitraire alignée jour
+            let t0 = t0 - t0 % day_ms;
+            for d in 0..3 {
+                for i in 0..(day_ms / step_ms) {
+                    let ts = t0 + d * day_ms + i * step_ms;
+                    writer
+                        .write(Sample::new("power", ts, 100.0))
+                        .await
+                        .unwrap();
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            let reader = store.reader();
+            let series_id = reader.lookup_series_id("power", "{}").unwrap().unwrap();
+            let raw_before = reader
+                .query_range_raw(series_id, t0, t0 + 3 * day_ms)
+                .unwrap();
+            assert_eq!(raw_before.len(), 3 * 144);
+
+            // Phase 1 : compact tous les raws → hourly (cutoff dans le futur).
+            let cutoff = t0 + 3 * day_ms + 1;
+            let stats = compact_raw_to_hourly(&store.inner.db, cutoff).unwrap();
+            assert_eq!(stats.buckets_written, 3 * 24); // 24 buckets/jour × 3 j
+            assert_eq!(stats.points_purged, 3 * 144);
+
+            // Les raws doivent être vides après purge
+            let raw_after = reader
+                .query_range_raw(series_id, t0, t0 + 3 * day_ms)
+                .unwrap();
+            assert_eq!(raw_after.len(), 0);
+
+            // Les hourlies doivent contenir 72 buckets de 6 points chacun
+            // (60 min / 10 min = 6).
+            let hourly = reader
+                .query_range_buckets(series_id, t0, t0 + 3 * day_ms, Tier::Hourly)
+                .unwrap();
+            assert_eq!(hourly.len(), 3 * 24);
+            for (_, bucket) in &hourly {
+                assert_eq!(bucket.cnt, 6);
+                assert!((bucket.avg - 100.0).abs() < 1e-9);
+                assert_eq!(bucket.min, 100.0);
+                assert_eq!(bucket.max, 100.0);
+                assert!((bucket.sum - 600.0).abs() < 1e-9);
+            }
+
+            // Phase 2 : compact hourlies plus vieux que la fin du jour 2 → daily.
+            let cutoff_daily = t0 + 2 * day_ms; // tout jour 0 et jour 1 → daily
+            let stats2 = compact_hourly_to_daily(&store.inner.db, cutoff_daily).unwrap();
+            assert_eq!(stats2.buckets_written, 2); // 2 jours
+            assert_eq!(stats2.points_purged, 2 * 24); // 48 hourlies purgés
+
+            // Reste : seul le jour 2 doit encore avoir 24 hourlies.
+            let hourly_left = reader
+                .query_range_buckets(series_id, t0, t0 + 3 * day_ms, Tier::Hourly)
+                .unwrap();
+            assert_eq!(hourly_left.len(), 24);
+
+            // Daily : 2 buckets, 144 points cumulés chacun (24 hourlies × 6).
+            let daily = reader
+                .query_range_buckets(series_id, t0, t0 + 2 * day_ms, Tier::Daily)
+                .unwrap();
+            assert_eq!(daily.len(), 2);
+            for (_, bucket) in &daily {
+                assert_eq!(bucket.cnt, 144);
+                assert!((bucket.avg - 100.0).abs() < 1e-9);
+                assert_eq!(bucket.min, 100.0);
+                assert_eq!(bucket.max, 100.0);
+                assert!((bucket.sum - 14_400.0).abs() < 1e-9);
+            }
+
+            // Idempotence : refaire la compaction ne doit rien re-écrire.
+            let again = compact_raw_to_hourly(&store.inner.db, cutoff).unwrap();
+            assert_eq!(again.buckets_written, 0);
+            assert_eq!(again.points_purged, 0);
         }
         let _ = std::fs::remove_file(&path);
     }
