@@ -5,6 +5,7 @@
 
 use std::fmt::Write as _;
 use std::time::Duration;
+use metrics_store::writer::{Sample, Writer as MetricsWriter};
 use reqwest::Client;
 use serde_json::Value;
 use tracing::{info, warn};
@@ -48,6 +49,17 @@ impl VmRow {
         }
     }
 
+    /// Convertit en `metrics_store::writer::Sample` pour le dual-write redb
+    /// (Phase 1, `docs/plan_migration_vm_redb.md`). Non destructif côté VM.
+    fn to_sample(&self) -> Sample {
+        Sample {
+            metric: self.metric.clone(),
+            labels: self.labels.iter().cloned().collect(),
+            ts_ms: self.timestamp_ms,
+            value: self.value,
+        }
+    }
+
     /// Sérialise en Prometheus text format — timestamp en millisecondes (requis par /api/v1/import/prometheus).
     /// Écrit directement dans un buffer pré-alloué pour éviter les allocations intermédiaires
     /// (sur le chemin chaud write_rows : ~100s/sec en production).
@@ -78,6 +90,9 @@ impl VmRow {
 pub struct VmClient {
     http:     Client,
     base_url: String,
+    /// Dual-write Phase 1 — fan-out best-effort vers redb. `None` tant que
+    /// la section `[metrics_store]` n'est pas activée dans Config.toml.
+    metrics_store: Option<MetricsWriter>,
 }
 
 impl VmClient {
@@ -89,7 +104,16 @@ impl VmClient {
         Ok(Self {
             http,
             base_url: config.url.trim_end_matches('/').to_string(),
+            metrics_store: None,
         })
+    }
+
+    /// Branche un writer `metrics-store` pour le dual-write Phase 1.
+    /// À appeler après `new()`, depuis `main.rs`.
+    pub fn with_metrics_store(mut self, writer: MetricsWriter) -> Self {
+        info!("dual-write metrics-store activé (Phase 1 migration redb)");
+        self.metrics_store = Some(writer);
+        self
     }
 
     // -------------------------------------------------------------------------
@@ -97,10 +121,27 @@ impl VmClient {
     // -------------------------------------------------------------------------
 
     /// Écrit un batch de métriques dans VictoriaMetrics (non-bloquant).
+    /// Si `metrics_store` est branché, fan-oute aussi vers redb (best-effort —
+    /// les erreurs ne font jamais échouer l'écriture VM).
     pub async fn write_rows(&self, rows: Vec<VmRow>) -> anyhow::Result<()> {
         if rows.is_empty() {
             return Ok(());
         }
+
+        // Dual-write redb — try_write non bloquant pour ne jamais pénaliser
+        // le chemin chaud VM. Une queue pleine ⇒ drop du sample + log debug.
+        if let Some(w) = &self.metrics_store {
+            let mut dropped = 0_usize;
+            for row in &rows {
+                if w.try_write(row.to_sample()).is_err() {
+                    dropped += 1;
+                }
+            }
+            if dropped > 0 {
+                warn!(dropped, total = rows.len(), "metrics-store: queue pleine, samples perdus");
+            }
+        }
+
         // Estime ~80 octets/ligne (nom métrique + labels + valeur + timestamp).
         // Une seule allocation pour le buffer entier au lieu de N+1 allocations.
         let mut body = String::with_capacity(rows.len() * 80);

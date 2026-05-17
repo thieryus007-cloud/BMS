@@ -28,10 +28,10 @@
 | Purge cardinalité (code) | ✅ label `pid` retiré + agrégation par nom (commit `7e37e7e`) |
 | Purge cardinalité (fantômes en base) | ✅ exécutée 17 mai 2026 : 277 → 209 séries, 0 série avec `pid` (cf. §0.1.2) |
 | Audit PromQL exhaustif | ✅ cf. §6.5 ci-dessous (81 expressions, 7 fonctions, 1 subquery) |
-| Crate `metrics-store` | ❌ pas démarrée |
-| Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré |
-| Shim PromQL → redb | ❌ pas démarré |
-| Dual-write VM+redb | ❌ pas démarré |
+| Crate `metrics-store` | ✅ Phase 0 complète (cf. branche `claude/migration-vm-redb-kqUG8`) |
+| Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré (parser `prom_text` prêt, reste handler HTTP) |
+| Shim PromQL → redb | ✅ parse+validate+exec, golden test 81/81 (panel 43 rejet explicite) |
+| Dual-write VM+redb | ⚠️ **code prêt** dans `daly-bms-server`, **à activer** dans Config.toml + déployer Pi5 (cf. §0.5) |
 | Bascule Grafana | ❌ pas démarrée |
 | Retrait VictoriaMetrics | ❌ pas démarré |
 | **Volume actuel data dir** | `/mnt/nvme/victoria-metrics` (à mesurer en début de session : `du -sh`) |
@@ -245,6 +245,48 @@ ssh pi5 'du -sh /mnt/nvme/victoria-metrics && \
 **Branche de travail recommandée** : `claude/migration-vm-redb-<jour>` —
 **ne pas réutiliser** `claude/detailed-migration-plan-BJxVd` (cette dernière
 contient les ajouts Solar PV et doit rester focalisée dessus).
+
+### 0.5 État d'avancement du code (Mai 2026 — fin Phase 0)
+
+Branche : `claude/migration-vm-redb-kqUG8`. 6 commits, 35 tests verts
+(`cargo test -p metrics-store`), workspace `cargo check` OK.
+
+| Ticket | Livrable | Commit |
+|---|---|---|
+| 0.3 | Squelette crate `metrics-store` (Cargo.toml + module skeleton) | `e48d922` |
+| 0.4-0.5a | `writer.rs` (thread dédié batché 4 fsync/s, cache LRU series_id), `reader.rs` (query_range_raw / query_range_buckets / list_series), `agg.rs` (Avg/Min/Max/Sum/Count/First/Last) | `ecd8d56` |
+| 0.5b | `tiering.rs` : `compact_raw_to_hourly`, `compact_hourly_to_daily`, `spawn_maintenance` périodique, `AggBucketBuilder` chainable raw→hourly→daily | `672972b` |
+| 0.6 | `promql/` : parser via `promql-parser 0.9`, `validate` (whitelist §6.5), `exec::Evaluator` (selector + binops + aggrégations + range fns + tier auto §6.3) + golden test `tests/golden_promql.rs` 81/81 (panel 43 marqué `KNOWN_UNSUPPORTED_PANELS`) | `addf22f` |
+| 0.7 | `prom_text.rs` : parser format Prometheus exposition (commentaires, échappements, virgule terminale, `+inf`/`-inf`/`nan`, lignes en erreur tracées) | `74058e3` |
+| 0.8 | Benches criterion `insert_batch_raw` + `range_scan_raw` ; ~150 Kelem/s insert + ~13 Melem/s scan sur x86 dev | `7e51678` |
+| Phase 1 (code) | `daly-bms-server` : section `[metrics_store]` dans `AppConfig`, hook dual-write dans `VmClient::write_rows` (try_write best-effort), init `MetricsStore` + `spawn_maintenance` dans `main.rs`, ligne `[metrics_store]` ajoutée à `Config.toml` (défaut `enabled = false`) | (commit en cours) |
+
+**Versions notables** : `redb = "4.1"` (bump 2.2 → 4.1 demandé), pas
+de dépendance C, pure-Rust 100 %.
+
+**Reste à faire pour la Phase 1 ops** (intervention humaine Pi5) :
+```bash
+# 1. Activer le dual-write dans Config.toml
+sed -i 's/^enabled = false$/enabled = true/' Config.toml  # section [metrics_store]
+
+# 2. Déployer (cf. §0 du CLAUDE.md)
+make sync
+make build-arm
+sudo systemctl stop daly-bms
+sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/
+sudo cp Config.toml /etc/daly-bms/config.toml
+mkdir -p /mnt/nvme/daly-bms      # s'assurer que db_path est writable
+sudo systemctl start daly-bms
+
+# 3. Observer (≥ 24 h)
+journalctl -u daly-bms -f | grep -i 'metrics-store\|dual-write'
+du -sh /mnt/nvme/daly-bms/metrics.redb   # doit croître
+# Pas d'erreurs "queue pleine" en régime nominal.
+```
+
+À noter : la **migration historique** des 48 Mo de VictoriaMetrics
+(décision §0.4-2 : import script) reste à scripter. Elle peut se faire
+en parallèle du dual-write — pas de blocage.
 
 ### 0.4 Décisions prises (17 mai 2026)
 

@@ -41,6 +41,11 @@ pub struct AppConfig {
     #[serde(default)]
     pub victoriametrics: VmConfig,
 
+    /// Backend TSDB local redb (dual-write avec VictoriaMetrics).
+    /// Cf. `docs/plan_migration_vm_redb.md`. Désactivé par défaut.
+    #[serde(default)]
+    pub metrics_store: MetricsStoreConfig,
+
     #[serde(default)]
     pub alerts: AlertsConfig,
 
@@ -430,6 +435,65 @@ impl Default for VmConfig {
             enabled:      false,
             url:          "http://127.0.0.1:8428".to_string(),
             timeout_secs: 10,
+        }
+    }
+}
+
+/// Section `[metrics_store]` — dual-write redb pour la migration §10
+/// (plan_migration_vm_redb.md). Une fois `enabled = true` :
+/// - la base redb est ouverte au démarrage à `db_path` ;
+/// - les samples écrits via `VmClient::write_rows` sont fan-outés vers
+///   le writer batché (`try_write`, non bloquant) ;
+/// - la tâche de maintenance (compaction raw→hourly→daily) tourne
+///   selon `maintenance_interval_hours`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MetricsStoreConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Chemin du fichier redb (créé s'il n'existe pas).
+    #[serde(default = "default_metrics_db_path")]
+    pub db_path: String,
+    /// Taille du cache redb en MiB (défaut 64).
+    #[serde(default = "default_metrics_cache_mb")]
+    pub cache_mb: usize,
+    /// Profondeur de la queue mpsc entre producteurs et writer (défaut
+    /// 10 000 ⇒ ~13 min de prod à 12 samples/s).
+    #[serde(default = "default_metrics_queue_depth")]
+    pub queue_depth: usize,
+    /// Intervalle de la passe de compaction tiered en heures (défaut 6 ⇒
+    /// 4 passes/jour). 0 = désactivé.
+    #[serde(default = "default_metrics_maintenance_hours")]
+    pub maintenance_interval_hours: u64,
+    /// Rétention raw (jours).
+    #[serde(default = "default_metrics_raw_days")]
+    pub raw_retention_days: u32,
+    /// Rétention hourly (jours).
+    #[serde(default = "default_metrics_hourly_days")]
+    pub hourly_retention_days: u32,
+    /// Rétention daily (jours).
+    #[serde(default = "default_metrics_daily_days")]
+    pub daily_retention_days: u32,
+}
+
+fn default_metrics_db_path() -> String { "/mnt/nvme/daly-bms/metrics.redb".into() }
+fn default_metrics_cache_mb() -> usize { 64 }
+fn default_metrics_queue_depth() -> usize { 10_000 }
+fn default_metrics_maintenance_hours() -> u64 { 6 }
+fn default_metrics_raw_days() -> u32 { 30 }
+fn default_metrics_hourly_days() -> u32 { 365 }
+fn default_metrics_daily_days() -> u32 { 5 * 365 }
+
+impl Default for MetricsStoreConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            db_path: default_metrics_db_path(),
+            cache_mb: default_metrics_cache_mb(),
+            queue_depth: default_metrics_queue_depth(),
+            maintenance_interval_hours: default_metrics_maintenance_hours(),
+            raw_retention_days: default_metrics_raw_days(),
+            hourly_retention_days: default_metrics_hourly_days(),
+            daily_retention_days: default_metrics_daily_days(),
         }
     }
 }
