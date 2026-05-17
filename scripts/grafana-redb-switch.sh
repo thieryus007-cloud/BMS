@@ -97,6 +97,64 @@ latest_backup_dir() {
     ls -1dt "$BACKUP_ROOT"/* 2>/dev/null | head -1
 }
 
+# Idempotent : positionne `default_backend = "redb"` dans la section
+# [metrics_store] de la config TOML. Trois cas :
+# - ligne déjà à "redb" : no-op
+# - ligne présente avec autre valeur : in-place replace
+# - ligne absente : insertion juste après l'en-tête [metrics_store]
+set_default_backend_redb() {
+    local file="$1"
+    if grep -qE '^default_backend[[:space:]]*=[[:space:]]*"redb"' "$file"; then
+        return 0
+    fi
+    if grep -qE '^default_backend[[:space:]]*=' "$file"; then
+        sed -i -E 's/^(default_backend[[:space:]]*=[[:space:]]*).*$/\1"redb"/' "$file"
+    else
+        if ! grep -qE '^\[metrics_store\]' "$file"; then
+            die "Section [metrics_store] absente de $file — ouvrir le fichier et l'ajouter manuellement avant de relancer"
+        fi
+        # Insertion juste après l'en-tête de section.
+        sed -i '/^\[metrics_store\]/a default_backend = "redb"' "$file"
+    fi
+}
+
+# Idempotent : positionne l'URL de la datasource Grafana sur :8080.
+# Tolérant aux variations d'indentation et de port d'origine.
+set_grafana_url_redb() {
+    local file="$1"
+    if grep -qE '^[[:space:]]+url:[[:space:]]+http://127\.0\.0\.1:8080' "$file"; then
+        return 0
+    fi
+    # Replace n'importe quel http://127.0.0.1:<port> par :8080
+    sed -i -E 's|(url:[[:space:]]+http://127\.0\.0\.1):[0-9]+|\1:8080|' "$file"
+}
+
+# Idempotent : repasse `default_backend` à "vm" (ou retire la ligne si on
+# veut le comportement strict "originel"). Pour le rollback on garde la
+# ligne mais on la rebascule à "vm" — c'est le comportement attendu après
+# un switch suivi d'un rollback.
+set_default_backend_vm() {
+    local file="$1"
+    if grep -qE '^default_backend[[:space:]]*=[[:space:]]*"vm"' "$file"; then
+        return 0
+    fi
+    if grep -qE '^default_backend[[:space:]]*=' "$file"; then
+        sed -i -E 's/^(default_backend[[:space:]]*=[[:space:]]*).*$/\1"vm"/' "$file"
+    else
+        if grep -qE '^\[metrics_store\]' "$file"; then
+            sed -i '/^\[metrics_store\]/a default_backend = "vm"' "$file"
+        fi
+    fi
+}
+
+set_grafana_url_vm() {
+    local file="$1"
+    if grep -qE '^[[:space:]]+url:[[:space:]]+http://127\.0\.0\.1:8428' "$file"; then
+        return 0
+    fi
+    sed -i -E 's|(url:[[:space:]]+http://127\.0\.0\.1):[0-9]+|\1:8428|' "$file"
+}
+
 # ── sous-commandes ───────────────────────────────────────────────────────────
 
 cmd_status() {
@@ -183,14 +241,14 @@ cmd_switch() {
     ok "Backup créé"
 
     log "Pivot serveur : default_backend → \"redb\""
-    sed -i 's/^default_backend = "vm"$/default_backend = "redb"/' "$DALYBMS_CONF"
-    grep -q '^default_backend = "redb"' "$DALYBMS_CONF" || \
-        die "Modification de $DALYBMS_CONF a échoué"
+    set_default_backend_redb "$DALYBMS_CONF"
+    grep -q '^default_backend[[:space:]]*=[[:space:]]*"redb"' "$DALYBMS_CONF" || \
+        die "Modification de $DALYBMS_CONF a échoué (ligne default_backend introuvable)"
     ok "/etc/daly-bms/config.toml mis à jour"
 
     log "Pivot Grafana : datasource url → http://127.0.0.1:8080"
-    sed -i 's|url: http://127.0.0.1:8428|url: http://127.0.0.1:8080|' "$GRAFANA_DS"
-    grep -q 'url: http://127.0.0.1:8080' "$GRAFANA_DS" || \
+    set_grafana_url_redb "$GRAFANA_DS"
+    grep -q 'url:[[:space:]]\+http://127.0.0.1:8080' "$GRAFANA_DS" || \
         die "Modification de $GRAFANA_DS a échoué (URL inchangée ?)"
     ok "$GRAFANA_DS mis à jour"
 
