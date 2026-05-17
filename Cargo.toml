@@ -9,6 +9,7 @@ members = [
     "crates/daly-bms-server",
     "crates/dbus-mqtt-venus",
     "crates/energy-manager",
+    "crates/metrics-store",
 ]
 
 [workspace.package]
