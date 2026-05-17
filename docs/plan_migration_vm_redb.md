@@ -31,10 +31,10 @@
 | Crate `metrics-store` | ✅ Phase 0 complète (cf. branche `claude/migration-vm-redb-kqUG8`) |
 | Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré (parser `prom_text` prêt, reste handler HTTP) |
 | Shim PromQL → redb | ✅ parse+validate+exec, golden test 81/81 (panel 43 rejet explicite) |
-| Dual-write VM+redb | ✅ déployé Pi5 (17 mai 2026, 191 séries dual-écrites, parité valeur confirmée par diff côte-à-côte) |
+| Dual-write VM+redb | ✅ déployé Pi5 (17 mai 2026, 204 séries dual-écrites, parité valeur confirmée par diff côte-à-côte) |
 | Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré (parser `prom_text` prêt, reste handler HTTP) |
-| Bascule Grafana | ⚠️ **code prêt** (dispatch `default_backend = "vm"`/`"redb"` + provisioning YAML) — à activer en mettant `default_backend = "redb"` dans `/etc/daly-bms/config.toml` et en faisant pointer Grafana sur la nouvelle datasource (cf. §0.6) |
-| Retrait VictoriaMetrics | ❌ pas démarré |
+| Bascule Grafana | ⚠️ **script livré** (`scripts/grafana-redb-switch.sh switch`) — exécuté 17 mai soir, validation visuelle des dashboards à faire en J0 |
+| Retrait VictoriaMetrics | ❌ planifié J7+ (cf. §0.7) |
 | **Volume actuel data dir** | `/mnt/nvme/victoria-metrics` (à mesurer en début de session : `du -sh`) |
 
 #### 0.1.1 État réel mesuré sur Pi5 prod (Mai 2026)
@@ -289,7 +289,7 @@ du -sh /mnt/nvme/daly-bms/metrics.redb   # doit croître
 (décision §0.4-2 : import script) reste à scripter. Elle peut se faire
 en parallèle du dual-write — pas de blocage.
 
-### 0.6 Bascule Grafana (Phase 3, code livré 17 mai 2026)
+### 0.6 Bascule Grafana (Phase 3, code + script livrés 17 mai 2026)
 
 Le serveur expose les endpoints Prometheus standard avec un **dispatch
 dynamique** piloté par `[metrics_store].default_backend` :
@@ -304,39 +304,160 @@ dynamique** piloté par `[metrics_store].default_backend` :
 | `GET /-/healthy` | (toujours redb) | shim |
 | `GET /api/v1/redb/*` | (toujours redb) | shim — utile pour parité diff |
 
-Procédure de bascule (réversible — `default_backend = "vm"` rétablit l'état
-antérieur sans toucher au reste) :
+**Bascule automatisée via `scripts/grafana-redb-switch.sh`** (commit
+`8d7e718`). Le script change l'URL de la datasource existante
+(uid=`victoriametrics`) de `:8428` → `:8080`, donc **aucun dashboard ni
+alerte n'a besoin d'être modifié** (l'UID reste le même, les 5 alertes
+Grafana suivent automatiquement). Backup horodaté auto sous
+`/var/backups/migration-redb/`. Health-checks à chaque étape. Idempotent.
 
 ```bash
-# 1. Sur le repo (idempotent), confirmer la nouvelle datasource :
-ls contrib/grafana/provisioning/datasources/daly-metrics.yaml
-# (créée par le commit Phase 3 — uid=daly-metrics, isDefault=false)
-
-# 2. Sur Pi5 : déployer le code Phase 3
-make sync && make build-arm
-sudo systemctl stop daly-bms
-sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/
-
-# 3. Toggle dans /etc/daly-bms/config.toml :
-sudo sed -i 's/^default_backend = "vm"$/default_backend = "redb"/' /etc/daly-bms/config.toml
-sudo systemctl start daly-bms
-
-# 4. Sanity : redb sert maintenant /api/v1/query
-curl -s "http://127.0.0.1:8080/api/v1/query?query=up" | jq .
-
-# 5. Côté Grafana : si datasource provisioning utilisée
-sudo cp contrib/grafana/provisioning/datasources/daly-metrics.yaml \
-        /etc/grafana/provisioning/datasources/
-# Modifier daly-metrics.yaml pour `isDefault: true` ET
-# victoriametrics.yaml pour `isDefault: false`, puis :
-sudo systemctl restart grafana-server
-# Sinon (UI manuelle) : Grafana > Connections > Data sources > VictoriaMetrics
-# → désactiver "Default" ; ajouter "Daly Metrics (redb)" → activer "Default".
+sudo scripts/grafana-redb-switch.sh status     # voir l'état avant/après
+sudo scripts/grafana-redb-switch.sh switch     # bascule (≈ 15 s)
+sudo scripts/grafana-redb-switch.sh rollback   # restauration (≈ 15 s)
 ```
 
-Rollback : remettre `default_backend = "vm"` + restart daly-bms ; tous les
-dashboards reprennent immédiatement leurs réponses depuis VM (qui reste
-alimenté tant que le dual-write Phase 1 tourne).
+Rollback inverse instantané — VM reste alimenté tant que le dual-write
+Phase 1 tourne.
+
+### 0.7 Roadmap restante (à exécuter dans l'ordre)
+
+> **État au 17 mai 2026 (soir)** : code des Phases 0-3 livré (10 commits
+> sur `claude/migration-vm-redb-kqUG8`, mergés). Dual-write actif en prod
+> depuis ~3 h, 191 → 204 séries en redb, parité valeur confirmée par
+> diff curl côte-à-côte. Bascule Grafana lancée via le script ; sortie
+> tronquée pendant l'observation initiale — à reprendre en J0 ci-dessous.
+
+#### J0 (lendemain matin) — Validation bascule Grafana
+
+```bash
+# 1. État réel de la bascule (script ou vérif manuelle)
+sudo scripts/grafana-redb-switch.sh status
+# Doit afficher :
+#   default_backend = redb
+#   url = http://127.0.0.1:8080
+#   daly-bms /-/healthy OK (200)
+
+# Si état partiel (backend pivoté mais Grafana pas restart, ou inverse) :
+sudo scripts/grafana-redb-switch.sh switch    # idempotent, complète
+
+# 2. Sanity Grafana UI — ouvrir 2 dashboards critiques et vérifier
+#    qu'au moins 1 panel charge ses données :
+#      - ESS overview (BMS + ET112 + Venus)
+#      - Solar PV (panels 1001-1011, increase() sur 24h/30d)
+#    Si "No data" sur 1 panel → noter l'expression PromQL et l'erreur.
+
+# 3. Latence visuelle : zoomer 30 j sur Solar PV. Si chargement > 5 s,
+#    la sélection automatique tier (§6.3) ne fait peut-être pas son boulot.
+#    À vérifier dans les logs.
+```
+
+Critères de bascule réussie :
+- `/api/v1/query?query=up` → `status: success` (et pas d'erreur PromQL)
+- Tous les panels qui chargeaient avec VM chargent aussi avec redb
+- Les 5 alertes Grafana restent à l'état `OK` (pas de faux positif)
+- 0 ligne `ERROR daly_bms_server::api::redb` dans le journal des 12 h
+
+#### J1-J2 — Observation 24-48 h
+
+```bash
+# Erreurs shim PromQL
+journalctl -u daly-bms --since "12 hours ago" --no-pager \
+  | grep -iE 'PromQl|parse error|unsupported' | head -30
+
+# Croissance base redb (linéaire ~10 Mo/an attendu, voir §0.1.1)
+du -sh /mnt/nvme/daly-bms/metrics.redb
+ls -la /mnt/nvme/daly-bms/metrics.redb       # mtime doit être < 1 min
+
+# Latence redb : si on a un dashboard très large
+journalctl -u daly-bms --since "1 hour ago" --no-pager \
+  | grep -E 'api::redb' | head -20
+
+# Performances tokio
+curl -s http://127.0.0.1:8080/api/v1/query?query=tokio_task_mean_poll_us | jq .
+```
+
+#### J2-J3 — Migration historique VM → redb (optionnel, §0.4-2)
+
+48 Mo de VM à importer dans redb. Décision §0.4-2 = **import script** plutôt
+qu'archive tar. À implémenter dans un commit séparé :
+
+```bash
+# 1. Export VM en format Prometheus exposition (texte)
+curl -s 'http://127.0.0.1:8428/api/v1/export?match[]={__name__!=""}' \
+  -o /tmp/vm-export.json
+
+# 2. Conversion JSON-stream → format prom_text via outil à écrire
+#    crates/metrics-store/src/bin/import-vm.rs :
+#      - parse JSON ligne par ligne (chaque ligne = série + values[])
+#      - pour chaque (ts, value), construit un Sample et appelle writer.write()
+#      - log progress every 100k samples
+# 3. Lancer en mode offline (daly-bms arrêté) pour éviter contention writer
+sudo systemctl stop daly-bms
+target/aarch64-unknown-linux-gnu/release/import-vm \
+  --vm-export /tmp/vm-export.json \
+  --db /mnt/nvme/daly-bms/metrics.redb
+sudo systemctl start daly-bms
+```
+
+Pas bloquant pour Phase 4 — si l'historique 30 j ≤ raw retention suffit
+visuellement, on peut sauter cette étape.
+
+#### J7+ — Phase 4 : retrait VictoriaMetrics
+
+**Critères go** (à valider avant) :
+- 7 jours consécutifs en mode `default_backend = "redb"` sans incident
+- 0 dashboard cassé, 0 alerte fausse-positive
+- Taille redb prédictible (< 200 Mo après 30 j)
+
+```bash
+# 1. Arrêt VM
+sudo systemctl stop victoriametrics
+sudo systemctl disable victoriametrics
+sudo rm /etc/systemd/system/victoriametrics.service
+sudo systemctl daemon-reload
+
+# 2. Archive read-only des 48 Mo de données VM (rollback ultime possible
+#    pendant 30 j avant suppression définitive)
+sudo mv /mnt/nvme/victoria-metrics /mnt/nvme/victoria-metrics.archive-$(date +%Y%m%d)
+sudo chmod -R a-w /mnt/nvme/victoria-metrics.archive-*
+
+# 3. RSS gagné (~135 Mo attendu, cf. §0.1.3)
+free -h
+```
+
+#### Post-Phase 4 — Cleanup code (un dernier commit)
+
+Tâches à faire dans un commit `chore(migration): retrait code VM
+post-Phase 4` :
+
+1. **`crates/daly-bms-server/src/vm_client.rs`** : supprimer
+   `VmClient::query_instant_json` et `VmClient::query_range_json` (le
+   client est maintenant write-only).
+2. **`crates/daly-bms-server/src/api/promql.rs`** : retirer le dispatch
+   (toutes les routes vont à redb). Supprimer `use_redb()`.
+3. **`crates/daly-bms-server/src/config.rs`** : retirer le champ
+   `default_backend` et la fonction `default_metrics_query_backend()`.
+   Garder `victoriametrics: VmConfig` pour le write-path (qui devient
+   un dead code à supprimer en parallèle si on retire complètement
+   l'écriture VM aussi — sinon laisser pour compatibilité dual-write
+   pendant une période transitoire).
+4. **`Config.toml`** : retirer la section `[victoriametrics]` et
+   `default_backend = "vm"` de `[metrics_store]`.
+5. **`CLAUDE.md`** : retirer les commandes `systemctl status
+   victoriametrics`, `journalctl -u victoriametrics`, `curl
+   http://localhost:8428/api/v1/status/tsdb` qui n'ont plus de sens.
+6. **`crates/energy-manager`** : si energy-manager utilise un client VM
+   pour les écritures, retirer aussi (sinon laisser tel quel — il
+   continue à écrire VM, qui est l'archive lecture seule).
+7. **`contrib/grafana/provisioning/datasources/victoriametrics.yaml`** :
+   supprimer (la datasource `daly-metrics.yaml` reste).
+
+Bénéfice attendu Phase 4+cleanup :
+- ~135 Mo RSS libérés
+- Suppression d'un binaire C cross-compilé du déploiement
+- Surface de code mainteneur réduite (-~500 lignes vm_client.rs +
+  promql.rs)
 
 ### 0.4 Décisions prises (17 mai 2026)
 
