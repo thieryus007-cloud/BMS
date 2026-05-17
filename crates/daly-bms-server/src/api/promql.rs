@@ -18,7 +18,7 @@ use axum::{
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
+    Form, Json,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -95,12 +95,24 @@ pub async fn query_instant(
     State(state): State<AppState>,
     Query(params): Query<InstantQueryParams>,
 ) -> Response {
+    handle_query_instant(state, params).await
+}
+
+/// `POST /api/v1/query` — Variante POST utilisée par Grafana
+/// (Prometheus datasource avec `httpMethod: POST`). Les paramètres
+/// arrivent dans le body `application/x-www-form-urlencoded`.
+pub async fn query_instant_post(
+    State(state): State<AppState>,
+    Form(params): Form<InstantQueryParams>,
+) -> Response {
+    handle_query_instant(state, params).await
+}
+
+async fn handle_query_instant(state: AppState, params: InstantQueryParams) -> Response {
     if use_redb(&state) {
         let p = redb_api::InstantParams { query: params.query, time: params.time };
         return redb_api::run_query_instant(&state, &p).await;
     }
-
-    // Backend VM (historique)
     let vm = match state.vm.as_ref() {
         Some(v) => v,
         None => return vm_unavailable().into_response(),
@@ -117,6 +129,18 @@ pub async fn query_range(
     State(state): State<AppState>,
     Query(params): Query<RangeQueryParams>,
 ) -> Response {
+    handle_query_range(state, params).await
+}
+
+/// `POST /api/v1/query_range` — variante POST (Grafana POST mode).
+pub async fn query_range_post(
+    State(state): State<AppState>,
+    Form(params): Form<RangeQueryParams>,
+) -> Response {
+    handle_query_range(state, params).await
+}
+
+async fn handle_query_range(state: AppState, params: RangeQueryParams) -> Response {
     if use_redb(&state) {
         let p = redb_api::RangeParams {
             query: params.query,
@@ -126,8 +150,6 @@ pub async fn query_range(
         };
         return redb_api::run_query_range(&state, &p).await;
     }
-
-    // Backend VM (historique) — validations conservées à l'identique
     let vm = match state.vm.as_ref() {
         Some(v) => v,
         None => return vm_unavailable().into_response(),

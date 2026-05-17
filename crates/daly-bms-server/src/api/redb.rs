@@ -19,7 +19,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
+    Form, Json,
 };
 use metrics_store::promql::{parse_and_validate, Evaluator, InstantSample, PromQlError, RangeSeries};
 use serde::Deserialize;
@@ -95,6 +95,15 @@ pub async fn query_instant(
     run_query_instant(&state, &params).await
 }
 
+/// Variante POST : Grafana (Prometheus datasource) envoie les paramètres
+/// dans le body application/x-www-form-urlencoded quand `httpMethod: POST`.
+pub async fn query_instant_post(
+    State(state): State<AppState>,
+    Form(params): Form<InstantParams>,
+) -> Response {
+    run_query_instant(&state, &params).await
+}
+
 /// Logique pure (sans extracteurs Axum) — appelable depuis le dispatcher
 /// `api/promql.rs` quand `default_backend = "redb"`.
 pub async fn run_query_instant(state: &AppState, params: &InstantParams) -> Response {
@@ -143,6 +152,13 @@ pub struct RangeParams {
 pub async fn query_range(
     State(state): State<AppState>,
     Query(params): Query<RangeParams>,
+) -> Response {
+    run_query_range(&state, &params).await
+}
+
+pub async fn query_range_post(
+    State(state): State<AppState>,
+    Form(params): Form<RangeParams>,
 ) -> Response {
     run_query_range(&state, &params).await
 }
