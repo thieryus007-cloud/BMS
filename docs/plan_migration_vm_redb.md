@@ -25,7 +25,7 @@
 | Plan rédigé et validé | ✅ document complet (15 sections + comparatif v2) |
 | Décision SQLite vs redb | ✅ **redb retenu** (17 mai 2026, cf. §0.4) |
 | Décision migration historique | ✅ **import script** depuis VM (volume tractable 48 Mo) |
-| Purge cardinalité (code) | ✅ label `pid` retiré + agrégation par nom (commit `<purge>`) |
+| Purge cardinalité (code) | ✅ label `pid` retiré + agrégation par nom (commit `7e37e7e`) |
 | Purge cardinalité (fantômes en base) | ⏳ à exécuter sur Pi5 après déploiement (cf. §0.1.2) |
 | Audit PromQL exhaustif | ✅ cf. §6.5 ci-dessous (81 expressions, 7 fonctions, 1 subquery) |
 | Crate `metrics-store` | ❌ pas démarrée |
