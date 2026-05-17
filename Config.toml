@@ -430,6 +430,11 @@ maintenance_interval_hours = 6
 raw_retention_days = 30
 hourly_retention_days = 365
 daily_retention_days = 1825   # 5 ans
+# Backend par défaut pour les routes Grafana-facing /api/v1/query[_range],
+# /api/v1/labels. Valeurs : "vm" (proxy VictoriaMetrics, historique) ou
+# "redb" (shim PromQL local). Les routes /api/v1/redb/* restent toujours
+# redb-backed quelle que soit cette valeur.
+default_backend = "vm"
 
 
 [alerts]

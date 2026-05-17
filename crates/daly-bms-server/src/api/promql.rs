@@ -1,8 +1,18 @@
-//! Endpoints PromQL compatibles Prometheus HTTP API.
+//! Endpoints PromQL Prometheus-compat avec **dispatch dynamique** entre
+//! VictoriaMetrics (proxy HTTP historique) et `metrics-store` (shim PromQL
+//! local redb).
 //!
-//! Proxy vers VictoriaMetrics — la réponse JSON est retournée telle quelle.
+//! Le choix de backend est piloté par `[metrics_store].default_backend` :
+//! - `"vm"` (défaut, comportement historique) — proxy vers VM
+//! - `"redb"` — utilise `metrics_store::promql::Evaluator`
+//!
+//! Les routes explicites `/api/v1/redb/*` (cf. `api::redb`) restent toujours
+//! redb-backed indépendamment de ce flag (utile pour debug / parité).
+//!
+//! Routes exposées :
 //!   GET /api/v1/query        — requête instantanée
 //!   GET /api/v1/query_range  — requête sur plage temporelle
+//!   GET /api/v1/labels       — liste métriques (autocomplete frontend)
 
 use axum::{
     extract::{Query, State},
@@ -11,12 +21,13 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 
+use crate::api::redb as redb_api;
 use crate::state::AppState;
 
 // =============================================================================
-// Paramètres de requête
+// Paramètres de requête (alignés avec api::redb pour la cohérence)
 // =============================================================================
 
 #[derive(Deserialize)]
@@ -71,59 +82,89 @@ fn vm_error(e: anyhow::Error) -> ApiError {
     }
 }
 
+fn use_redb(state: &AppState) -> bool {
+    state.config.metrics_store.default_backend.eq_ignore_ascii_case("redb")
+}
+
 // =============================================================================
 // Handlers
 // =============================================================================
 
 /// `GET /api/v1/query` — Requête PromQL instantanée.
-///
-/// Exemple : `/api/v1/query?query=bms_voltage{bms_id="0x01"}&time=1700000000000`
 pub async fn query_instant(
     State(state): State<AppState>,
     Query(params): Query<InstantQueryParams>,
-) -> Result<Json<Value>, ApiError> {
-    let vm = state.vm.as_ref().ok_or_else(vm_unavailable)?;
+) -> Response {
+    if use_redb(&state) {
+        let p = redb_api::InstantParams { query: params.query, time: params.time };
+        return redb_api::run_query_instant(&state, &p).await;
+    }
 
+    // Backend VM (historique)
+    let vm = match state.vm.as_ref() {
+        Some(v) => v,
+        None => return vm_unavailable().into_response(),
+    };
     let time_ms = params.time.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
-
-    vm.query_instant_json(&params.query, time_ms)
-        .await
-        .map(Json)
-        .map_err(vm_error)
+    match vm.query_instant_json(&params.query, time_ms).await {
+        Ok(json) => Json(json).into_response(),
+        Err(e) => vm_error(e).into_response(),
+    }
 }
 
 /// `GET /api/v1/query_range` — Requête PromQL sur plage temporelle.
-///
-/// Exemple : `/api/v1/query_range?query=bms_soc{bms_id="0x01"}&start=1700000000000&end=1700086400000&step=60000`
 pub async fn query_range(
     State(state): State<AppState>,
     Query(params): Query<RangeQueryParams>,
-) -> Result<Json<Value>, ApiError> {
-    let vm = state.vm.as_ref().ok_or_else(vm_unavailable)?;
+) -> Response {
+    if use_redb(&state) {
+        let p = redb_api::RangeParams {
+            query: params.query,
+            start: params.start,
+            end:   params.end,
+            step:  params.step,
+        };
+        return redb_api::run_query_range(&state, &p).await;
+    }
 
+    // Backend VM (historique) — validations conservées à l'identique
+    let vm = match state.vm.as_ref() {
+        Some(v) => v,
+        None => return vm_unavailable().into_response(),
+    };
     if params.start > params.end {
-        return Err(ApiError {
+        return ApiError {
             status:     "error".into(),
             error:      "start must be before end".into(),
             error_type: Some("bad_data".into()),
-        });
+        }
+        .into_response();
     }
     if params.step <= 0 {
-        return Err(ApiError {
+        return ApiError {
             status:     "error".into(),
             error:      "step must be positive".into(),
             error_type: Some("bad_data".into()),
-        });
+        }
+        .into_response();
     }
-
-    vm.query_range_json(&params.query, params.start, params.end, params.step)
+    match vm
+        .query_range_json(&params.query, params.start, params.end, params.step)
         .await
-        .map(Json)
-        .map_err(vm_error)
+    {
+        Ok(json) => Json(json).into_response(),
+        Err(e) => vm_error(e).into_response(),
+    }
 }
 
-/// `GET /api/v1/labels` — Liste des métriques connues (pour autocomplete frontend).
-pub async fn list_metrics(State(state): State<AppState>) -> Json<Value> {
+/// `GET /api/v1/labels` — Liste des métriques connues.
+///
+/// Backend redb : scan dynamique de `series_meta`.
+/// Backend VM   : liste statique conservée (compat frontend).
+pub async fn list_metrics(State(state): State<AppState>) -> Response {
+    if use_redb(&state) {
+        return redb_api::run_list_labels(&state).await;
+    }
     Json(json!({
         "status": "success",
         "data": if state.vm.is_some() {
@@ -142,4 +183,5 @@ pub async fn list_metrics(State(state): State<AppState>) -> Json<Value> {
             vec![]
         }
     }))
+    .into_response()
 }

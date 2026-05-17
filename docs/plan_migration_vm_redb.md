@@ -31,8 +31,9 @@
 | Crate `metrics-store` | ✅ Phase 0 complète (cf. branche `claude/migration-vm-redb-kqUG8`) |
 | Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré (parser `prom_text` prêt, reste handler HTTP) |
 | Shim PromQL → redb | ✅ parse+validate+exec, golden test 81/81 (panel 43 rejet explicite) |
-| Dual-write VM+redb | ⚠️ **code prêt** dans `daly-bms-server`, **à activer** dans Config.toml + déployer Pi5 (cf. §0.5) |
-| Bascule Grafana | ❌ pas démarrée |
+| Dual-write VM+redb | ✅ déployé Pi5 (17 mai 2026, 191 séries dual-écrites, parité valeur confirmée par diff côte-à-côte) |
+| Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré (parser `prom_text` prêt, reste handler HTTP) |
+| Bascule Grafana | ⚠️ **code prêt** (dispatch `default_backend = "vm"`/`"redb"` + provisioning YAML) — à activer en mettant `default_backend = "redb"` dans `/etc/daly-bms/config.toml` et en faisant pointer Grafana sur la nouvelle datasource (cf. §0.6) |
 | Retrait VictoriaMetrics | ❌ pas démarré |
 | **Volume actuel data dir** | `/mnt/nvme/victoria-metrics` (à mesurer en début de session : `du -sh`) |
 
@@ -287,6 +288,55 @@ du -sh /mnt/nvme/daly-bms/metrics.redb   # doit croître
 À noter : la **migration historique** des 48 Mo de VictoriaMetrics
 (décision §0.4-2 : import script) reste à scripter. Elle peut se faire
 en parallèle du dual-write — pas de blocage.
+
+### 0.6 Bascule Grafana (Phase 3, code livré 17 mai 2026)
+
+Le serveur expose les endpoints Prometheus standard avec un **dispatch
+dynamique** piloté par `[metrics_store].default_backend` :
+
+| Route | `default_backend = "vm"` | `default_backend = "redb"` |
+|---|---|---|
+| `GET /api/v1/query` | proxy VictoriaMetrics | shim PromQL redb |
+| `GET /api/v1/query_range` | proxy VictoriaMetrics | shim PromQL redb |
+| `GET /api/v1/labels` | liste statique | scan dynamique `series_meta` |
+| `GET /api/v1/series` | (toujours redb) | shim |
+| `GET /api/v1/label/:name/values` | (toujours redb) | shim |
+| `GET /-/healthy` | (toujours redb) | shim |
+| `GET /api/v1/redb/*` | (toujours redb) | shim — utile pour parité diff |
+
+Procédure de bascule (réversible — `default_backend = "vm"` rétablit l'état
+antérieur sans toucher au reste) :
+
+```bash
+# 1. Sur le repo (idempotent), confirmer la nouvelle datasource :
+ls contrib/grafana/provisioning/datasources/daly-metrics.yaml
+# (créée par le commit Phase 3 — uid=daly-metrics, isDefault=false)
+
+# 2. Sur Pi5 : déployer le code Phase 3
+make sync && make build-arm
+sudo systemctl stop daly-bms
+sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/
+
+# 3. Toggle dans /etc/daly-bms/config.toml :
+sudo sed -i 's/^default_backend = "vm"$/default_backend = "redb"/' /etc/daly-bms/config.toml
+sudo systemctl start daly-bms
+
+# 4. Sanity : redb sert maintenant /api/v1/query
+curl -s "http://127.0.0.1:8080/api/v1/query?query=up" | jq .
+
+# 5. Côté Grafana : si datasource provisioning utilisée
+sudo cp contrib/grafana/provisioning/datasources/daly-metrics.yaml \
+        /etc/grafana/provisioning/datasources/
+# Modifier daly-metrics.yaml pour `isDefault: true` ET
+# victoriametrics.yaml pour `isDefault: false`, puis :
+sudo systemctl restart grafana-server
+# Sinon (UI manuelle) : Grafana > Connections > Data sources > VictoriaMetrics
+# → désactiver "Default" ; ajouter "Daly Metrics (redb)" → activer "Default".
+```
+
+Rollback : remettre `default_backend = "vm"` + restart daly-bms ; tous les
+dashboards reprennent immédiatement leurs réponses depuis VM (qui reste
+alimenté tant que le dual-write Phase 1 tourne).
 
 ### 0.4 Décisions prises (17 mai 2026)
 

@@ -92,6 +92,12 @@ pub async fn query_instant(
     State(state): State<AppState>,
     Query(params): Query<InstantParams>,
 ) -> Response {
+    run_query_instant(&state, &params).await
+}
+
+/// Logique pure (sans extracteurs Axum) — appelable depuis le dispatcher
+/// `api/promql.rs` quand `default_backend = "redb"`.
+pub async fn run_query_instant(state: &AppState, params: &InstantParams) -> Response {
     let Some(store) = state.metrics_store.clone() else {
         return not_configured();
     };
@@ -138,6 +144,10 @@ pub async fn query_range(
     State(state): State<AppState>,
     Query(params): Query<RangeParams>,
 ) -> Response {
+    run_query_range(&state, &params).await
+}
+
+pub async fn run_query_range(state: &AppState, params: &RangeParams) -> Response {
     let Some(store) = state.metrics_store.clone() else {
         return not_configured();
     };
@@ -174,6 +184,10 @@ pub async fn query_range(
 // =============================================================================
 
 pub async fn list_series(State(state): State<AppState>) -> Response {
+    run_list_series(&state).await
+}
+
+pub async fn run_list_series(state: &AppState) -> Response {
     let Some(store) = state.metrics_store.clone() else {
         return not_configured();
     };
@@ -199,6 +213,10 @@ pub async fn list_series(State(state): State<AppState>) -> Response {
 // =============================================================================
 
 pub async fn list_labels(State(state): State<AppState>) -> Response {
+    run_list_labels(&state).await
+}
+
+pub async fn run_list_labels(state: &AppState) -> Response {
     let Some(store) = state.metrics_store.clone() else {
         return not_configured();
     };
@@ -225,6 +243,10 @@ pub async fn list_labels(State(state): State<AppState>) -> Response {
 // =============================================================================
 
 pub async fn label_values(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    run_label_values(&state, &name).await
+}
+
+pub async fn run_label_values(state: &AppState, name: &str) -> Response {
     let Some(store) = state.metrics_store.clone() else {
         return not_configured();
     };
@@ -240,7 +262,7 @@ pub async fn label_values(State(state): State<AppState>, Path(name): Path<String
             continue;
         }
         if let Ok(m) = serde_json::from_str::<serde_json::Map<String, Value>>(&meta.labels_json) {
-            if let Some(Value::String(v)) = m.get(&name) {
+            if let Some(Value::String(v)) = m.get(name) {
                 values.insert(v.clone());
             }
         }
