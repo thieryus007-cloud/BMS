@@ -90,11 +90,6 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Construit un catalogue vide (fallback si parsing échoue).
-    pub fn empty() -> Self {
-        Self { panels: Arc::new(Vec::new()) }
-    }
-
     /// Charge tous les dashboards Grafana embarqués dans le binaire.
     /// Les fichiers sont inclus au build via `include_str!` puis concaténés.
     /// Les IDs de chaque fichier doivent rester disjoints (cf. en-tête de chaque JSON).

@@ -35,6 +35,29 @@
 }
 .dash-period button:hover { background: var(--surface2); color: var(--text); }
 .dash-period button.active { background: var(--accent2); color: #fff; }
+/* ── Onglets (tabs) — chaque onglet a son propre layout sauvegardé ─────── */
+.dash-tabs {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem;
+}
+.dash-tabs button {
+  padding: 0.32rem 0.85rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: calc(var(--radius-sm) - 2px);
+  font-family: inherit;
+  white-space: nowrap;
+}
+.dash-tabs button:hover { background: var(--surface2); color: var(--text); }
+.dash-tabs button.active { background: var(--accent); color: #fff; }
 .dash-btn {
   padding: 0.42rem 0.95rem;
   border-radius: var(--radius-sm);
@@ -346,6 +369,10 @@
 
 {% block content %}
 <div class="dash-toolbar">
+  <div class="dash-tabs" id="tab-bar">
+    <button data-tab="default"  class="active">📊 Personnalisé</button>
+    <button data-tab="solar_pv">☀️ Solar PV</button>
+  </div>
   <div class="dash-period" id="period-bar">
     <button data-period="1h">1h</button>
     <button data-period="6h">6h</button>
@@ -445,8 +472,15 @@ const STATE = {
   period:      '24h',
   panelData:   new Map(),   // panelId → dernier data (pour re-render print)
   storageMode: 'local',     // 'server' (SQLite) ou 'local' (localStorage fallback)
+  tab:         'default',   // onglet actif ('default' | 'solar_pv' | ...)
 };
-const LS_KEY = 'dash_layout_v1';
+
+// IDs des panels Solar PV importés depuis Grafana Labs (cf. docs/grafana-solar_pv_dashboard.json).
+// Servent à construire le layout par défaut de l'onglet "solar_pv".
+const SOLAR_PV_IDS = ['1001','1002','1003','1004','1005','1006','1007','1008','1009','1010','1011'];
+
+// Clé localStorage par onglet (fallback hors-ligne).
+function lsKey(tab) { return 'dash_layout_v1__' + tab; }
 
 const PERIOD_MS = {
   '1h':   3_600_000,
@@ -489,9 +523,10 @@ async function loadCatalog() {
 }
 
 async function loadLayout() {
-  // 1. Tentative serveur (SQLite)
+  // 1. Tentative serveur (SQLite) — `tab` est passé en query param.
+  const qs = '?tab=' + encodeURIComponent(STATE.tab);
   try {
-    const r = await fetch('/api/v1/dashboards/layout');
+    const r = await fetch('/api/v1/dashboards/layout' + qs);
     if (r.ok) {
       const j = await r.json();
       if (j.ok && Array.isArray(j.layout)) {
@@ -499,7 +534,7 @@ async function loadLayout() {
         STATE.storageMode = 'server';
         return;
       }
-      // ok=true mais layout=null → rien en base, on tombe sur le défaut
+      // ok=true mais layout=null → rien en base, on tombe sur le défaut de l'onglet
       if (j.ok && j.layout === null) {
         STATE.storageMode = 'server';
         STATE.layout = defaultLayout();
@@ -511,8 +546,8 @@ async function loadLayout() {
     console.warn('Layout serveur indisponible, fallback localStorage', e);
     STATE.storageMode = 'local';
   }
-  // 2. Fallback localStorage
-  const raw = localStorage.getItem(LS_KEY);
+  // 2. Fallback localStorage — clé spécifique à l'onglet.
+  const raw = localStorage.getItem(lsKey(STATE.tab));
   if (raw) {
     try { STATE.layout = JSON.parse(raw); return; }
     catch (e) { /* fallthrough */ }
@@ -520,20 +555,36 @@ async function loadLayout() {
   STATE.layout = defaultLayout();
 }
 
+/// Layout par défaut spécifique à l'onglet actif.
+/// - `default` : tous les panels du catalog (sauf ceux de l'onglet solar_pv).
+/// - `solar_pv` : uniquement les 11 panels Solar PV, dans leur gridPos d'origine.
 function defaultLayout() {
-  return STATE.catalog.map(p => ({
-    id: p.id,
-    x: p.grid_pos.x, y: p.grid_pos.y,
-    w: p.grid_pos.w, h: p.grid_pos.h,
-  }));
+  if (STATE.tab === 'solar_pv') {
+    return STATE.catalog
+      .filter(p => SOLAR_PV_IDS.includes(p.id))
+      .map(p => ({
+        id: p.id,
+        x: p.grid_pos.x, y: p.grid_pos.y,
+        w: p.grid_pos.w, h: p.grid_pos.h,
+      }));
+  }
+  // Onglet "default" : tout SAUF les panels Solar PV (ils ont leur propre onglet).
+  return STATE.catalog
+    .filter(p => !SOLAR_PV_IDS.includes(p.id))
+    .map(p => ({
+      id: p.id,
+      x: p.grid_pos.x, y: p.grid_pos.y,
+      w: p.grid_pos.w, h: p.grid_pos.h,
+    }));
 }
 
 async function saveLayout() {
   // Toujours sauver en local en miroir (pour les transitions hors-ligne)
-  try { localStorage.setItem(LS_KEY, JSON.stringify(STATE.layout)); } catch (e) {}
+  try { localStorage.setItem(lsKey(STATE.tab), JSON.stringify(STATE.layout)); } catch (e) {}
   if (STATE.storageMode !== 'server') return;
+  const qs = '?tab=' + encodeURIComponent(STATE.tab);
   try {
-    await fetch('/api/v1/dashboards/layout', {
+    await fetch('/api/v1/dashboards/layout' + qs, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ layout: STATE.layout }),
@@ -544,12 +595,27 @@ async function saveLayout() {
 }
 
 async function deleteServerLayout() {
+  // Reset = retirer le layout courant en base + miroir local de l'onglet actif.
+  try { localStorage.removeItem(lsKey(STATE.tab)); } catch (e) {}
   if (STATE.storageMode !== 'server') return;
-  try { await fetch('/api/v1/dashboards/layout', { method: 'DELETE' }); }
+  const qs = '?tab=' + encodeURIComponent(STATE.tab);
+  try { await fetch('/api/v1/dashboards/layout' + qs, { method: 'DELETE' }); }
   catch (e) { console.warn('delete layout serveur a échoué', e); }
 }
 
 function bindToolbar() {
+  // Onglets : chaque tab a son propre layout sauvegardé côté serveur.
+  document.querySelectorAll('#tab-bar button').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const newTab = btn.dataset.tab;
+      if (newTab === STATE.tab) return;
+      document.querySelectorAll('#tab-bar button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      STATE.tab = newTab;
+      await loadLayout();
+      await renderAll();
+    });
+  });
   document.querySelectorAll('#period-bar button').forEach(btn => {
     btn.addEventListener('click', async () => {
       document.querySelectorAll('#period-bar button').forEach(b => b.classList.remove('active'));
@@ -565,13 +631,12 @@ function bindToolbar() {
     setTimeout(() => window.print(), 200);
   });
   document.getElementById('btn-reset').addEventListener('click', async () => {
-    localStorage.removeItem(LS_KEY);
-    await deleteServerLayout();
+    await deleteServerLayout();    // efface aussi le miroir localStorage de l'onglet
     await loadLayout();
     await renderAll();
   });
   document.getElementById('btn-clear').addEventListener('click', async () => {
-    if (!confirm('Retirer tous les panels du dashboard ?')) return;
+    if (!confirm("Retirer tous les panels de l'onglet courant ?")) return;
     STATE.layout = [];
     await saveLayout();
     await renderAll();
