@@ -441,23 +441,31 @@ fn build_monitor_vm_rows(snap: &MonitorSnapshot, ts_ms: i64) -> Vec<VmRow> {
     if let Some(temp) = snap.cpu_temp_c {
         rows.push(VmRow::new("pi5_cpu_temp_c", temp as f64, ts_ms));
     }
-    // Top processus (CPU > 0.1%) — utile pour identifier le coupable lors d'un freeze
+    // Top processus (CPU > 0.1 %) — agrégés par nom pour éviter la cardinalité
+    // éphémère du `pid` (chaque rustc/cargo qui démarre créait une nouvelle série
+    // qui survivait 5 ans dans la rétention VM). On somme cpu_percent et mem_rss_mb
+    // sur tous les processus du même nom dans le snapshot courant.
+    let mut by_name: std::collections::HashMap<&str, (f32, f32)> = std::collections::HashMap::new();
     for proc in &snap.processes {
         if proc.cpu_percent > 0.1 {
-            let pid = proc.pid.to_string();
-            rows.push(VmRow::with_labels(
-                "pi5_process_cpu_percent",
-                vec![("process", proc.name.as_str()), ("pid", pid.as_str())],
-                proc.cpu_percent as f64,
-                ts_ms,
-            ));
-            rows.push(VmRow::with_labels(
-                "pi5_process_mem_mb",
-                vec![("process", proc.name.as_str()), ("pid", pid.as_str())],
-                proc.mem_rss_mb as f64,
-                ts_ms,
-            ));
+            let entry = by_name.entry(proc.name.as_str()).or_insert((0.0, 0.0));
+            entry.0 += proc.cpu_percent;
+            entry.1 += proc.mem_rss_mb;
         }
+    }
+    for (name, (cpu, mem)) in by_name {
+        rows.push(VmRow::with_labels(
+            "pi5_process_cpu_percent",
+            vec![("process", name)],
+            cpu as f64,
+            ts_ms,
+        ));
+        rows.push(VmRow::with_labels(
+            "pi5_process_mem_mb",
+            vec![("process", name)],
+            mem as f64,
+            ts_ms,
+        ));
     }
     rows
 }
