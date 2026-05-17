@@ -17,6 +17,13 @@ pub struct Reader {
 }
 
 impl Reader {
+    /// Construit un Reader à partir d'une base redb existante — utilisé par
+    /// les benches et `metrics-cli`. Le chemin normal reste
+    /// `MetricsStore::reader()`.
+    pub fn from_db(db: Arc<Database>) -> Self {
+        Self { db }
+    }
+
     /// Expose une transaction de lecture pour les usages avancés (ex: tests
     /// qui inspectent plusieurs tables dans le même snapshot).
     pub fn begin_read(&self) -> Result<redb::ReadTransaction> {
