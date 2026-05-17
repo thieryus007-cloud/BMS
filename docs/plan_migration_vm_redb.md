@@ -87,13 +87,13 @@ contient les ajouts Solar PV et doit rester focalisée dessus).
 
 1. **SQLite v2 ou redb ?** — relire §15 + §16 et trancher avant tout code.
    Tant que ce n'est pas tranché, la crate `metrics-store` ne peut pas
-   commencer (interface publique identique mais implémentation différente).
+   commencer (interface publique identique mais implémentation différente).**Decision: redb .**
 2. **Migration historique** : import VM → nouveau backend, ou archive tar
    et démarrage à neuf ? Cf. §16-3. Recommandation tactique : **archive tar
    uniquement** — l'historique fin n'a de valeur que sur 30–90 j, on
-   conserve un dump VM accessible *read-only* via un script ad hoc.
+   conserve un dump VM accessible *read-only* via un script ad hoc. **Decision: migration si possible sinon lecture via script a supprimer apres 30 jours.**
 3. **Subquery panel 43** (§6.5) : la supporter dans le transpileur ou
-   réécrire le panel en deux requêtes côté JS ? Recommandation : réécriture.
+   réécrire le panel en deux requêtes côté JS ? Recommandation : réécriture. **Decision: réécriture.**
 
 ---
 
@@ -942,7 +942,7 @@ Identique à plan v2 §12 sauf :
 
 ---
 
-## 15. Comparaison finale : SQLite (v2) vs redb (ce document)
+## 15. Comparaison finale : SQLite (v2) vs redb (ce document) **Decision: redb .**
 
 | Axe | SQLite v2 | redb | Verdict |
 |---|---|---|---|
@@ -964,7 +964,7 @@ Identique à plan v2 §12 sauf :
 - **Si l'équipe valorise la facilité d'ops, le debug avec des outils standards,
   et la possibilité de requêtes SQL ad hoc** → **SQLite (plan v2)**.
 - **Si l'équipe valorise la pureté Rust, le poids minimal sur disque et binaire,
-  et accepte d'investir dans un `metrics-cli` maison** → **redb (ce plan)**.
+  et accepte d'investir dans un `metrics-cli` maison** → **redb (ce plan)**.     **Decision: redb .**
 
 Dans le contexte exact de Daly-BMS-Rust (Pi5 4 Go, NVMe 256 Go, équipe
 réduite, peu d'analyses SQL ad hoc — toutes les requêtes passent déjà par
@@ -986,22 +986,22 @@ Le binaire `metrics-cli` (~1 jour de dev) compense largement.
 
 1. **Coexistence `redb` + `rusqlite`** : on garde `rusqlite` pour `alerts.db`
    et `dashboard_storage` ? Recommandation : oui — ce sont des données
-   relationnelles avec jointures occasionnelles, leur cas d'usage est différent.
+   relationnelles avec jointures occasionnelles, leur cas d'usage est différent.**Decision: OUI .**
 2. **Version `redb`** : pin strict `=2.2.x` ou range `^2.2` ? Recommandation :
-   pin strict en prod, range en dev.
+   pin strict en prod, range en dev. **Decision: pin strict en prod .**
 3. **Migration historique** : import VM → redb via le script Python du plan
    v2 §9, ou simple archive `tar` de `/mnt/nvme/victoria-metrics` ? Même
-   compromis que v2.
+   compromis que v2. **Decision: migration si possible .**
 4. **Outil `metrics-cli` exposé en lecture seule** ou avec opérations
    destructives (compact, purge) ? Recommandation : lecture seule par défaut,
-   flag `--admin` pour les écritures.
+   flag `--admin` pour les écritures. **Decision: suivre la recommendation .**
 5. **Panel 43 (subquery `[24h:1m]`)** : réécrire en deux requêtes côté JS
    ou supporter la subquery dans le transpileur ? Cf. §6.5 — recommandation
-   = réécriture (~30 min) vs implémentation générique (~1 j).
+   = réécriture (~30 min) vs implémentation générique (~1 j).**Decision: suivre la recommendation .**
 6. **Solar PV `increase` à large fenêtre** (`[30d]`) : assurer qu'à 5s de
    step raw, un range scan sur 30 j de raw (~518 400 points/série) reste
    sous 100 ms. Sinon : forcer le tier `daily` même pour `[30d]`. À
-   benchmarker dès la Phase 2.
+   benchmarker dès la Phase 2. **Decision: suivre la recommendation .**
 
 ---
 
