@@ -126,11 +126,20 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/shelly/:id/status",                  get(shelly::get_shelly_status))
         .route("/api/v1/shelly/:id/channel/:ch/control",     post(shelly::control_shelly_channel))
         // ── PromQL (historique Tsink) ─────────────────────────────────────────
+        // ── PromQL Grafana-facing — dispatch vm/redb selon
+        //    `[metrics_store].default_backend` (cf. api/promql.rs) ─────────
         .route("/api/v1/query",          get(promql::query_instant))
         .route("/api/v1/query_range",    get(promql::query_range))
         .route("/api/v1/labels",         get(promql::list_metrics))
 
-        // ── Endpoints redb (Phase 2 migration, cf. plan §10) ───────────────
+        // ── Endpoints Prometheus complémentaires §8.2 (toujours redb) ─────
+        //    /api/v1/series, /api/v1/label/:n/values, /-/healthy n'existaient
+        //    pas côté VM proxy ; servis directement par le shim redb.
+        .route("/api/v1/series",                      get(redb::list_series))
+        .route("/api/v1/label/:name/values",          get(redb::label_values))
+        .route("/-/healthy",                          get(redb::healthy))
+
+        // ── Endpoints redb explicites (debug, parité côte-à-côte) ──────────
         .route("/api/v1/redb/query",                  get(redb::query_instant))
         .route("/api/v1/redb/query_range",            get(redb::query_range))
         .route("/api/v1/redb/series",                 get(redb::list_series))
