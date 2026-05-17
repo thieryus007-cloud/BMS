@@ -449,6 +449,11 @@ pub struct AppState {
     /// Client VictoriaMetrics (None si désactivé dans la config).
     pub vm: Option<Arc<VmClient>>,
 
+    /// Backend TSDB redb (None si désactivé). Permet aux endpoints
+    /// `/api/v1/redb/*` d'interroger directement la base locale via le
+    /// shim PromQL (`metrics-store::promql`). Cf. plan Phase 2.
+    pub metrics_store: Option<Arc<metrics_store::MetricsStore>>,
+
     /// Catalogue de panels (importés depuis docs/grafana-ess_dashboard.json au démarrage).
     pub dashboard_catalog: crate::dashboards::Catalog,
 
@@ -473,7 +478,13 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(config: AppConfig, log_buffer: LogBuffer, vm: Option<VmClient>, alert_engine: Option<Arc<AlertEngine>>) -> Self {
+    pub fn new(
+        config: AppConfig,
+        log_buffer: LogBuffer,
+        vm: Option<VmClient>,
+        alert_engine: Option<Arc<AlertEngine>>,
+        metrics_store: Option<Arc<metrics_store::MetricsStore>>,
+    ) -> Self {
         let (ws_tx, _) = broadcast::channel(WS_BROADCAST_CAPACITY);
         let addresses = config.bms_addresses();
         let ring_size = config.serial.ring_buffer_size;
@@ -540,6 +551,7 @@ impl AppState {
             shelly_client: Arc::new(tokio::sync::Mutex::new(None)),
             alert_engine,
             vm: vm.map(Arc::new),
+            metrics_store,
             dashboard_catalog: crate::dashboards::Catalog::load_default(),
             dashboard_storage,
             vm_last_bms_write:      Arc::new(AtomicU64::new(0)),
