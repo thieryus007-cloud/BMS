@@ -25,7 +25,8 @@
 | Plan rédigé et validé | ✅ document complet (15 sections + comparatif v2) |
 | Décision SQLite vs redb | ✅ **redb retenu** (17 mai 2026, cf. §0.4) |
 | Décision migration historique | ✅ **import script** depuis VM (volume tractable 48 Mo) |
-| Purge cardinalité (label `pid`) | ⏳ à faire avant Phase 1 (cf. §0.1.2) |
+| Purge cardinalité (code) | ✅ label `pid` retiré + agrégation par nom (commit `7e37e7e`) |
+| Purge cardinalité (fantômes en base) | ⏳ à exécuter sur Pi5 après déploiement (cf. §0.1.2) |
 | Audit PromQL exhaustif | ✅ cf. §6.5 ci-dessous (81 expressions, 7 fonctions, 1 subquery) |
 | Crate `metrics-store` | ❌ pas démarrée |
 | Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré |
@@ -122,16 +123,38 @@ sélection `cpu > 0.1%` (trop bas — un pic momentané suffit à créer la sér
    REST `/api/v1/system/top-processes` qui lit `/proc/*/stat` à la demande.
    Aucune série stockée, mais pas d'historique au moment du freeze (perte).
 
-**Plan d'action retenu** : option 1 (3 j avant Phase 0 redb).
-- Modifier `monitor.rs:449/455` et `monitoring.rs:107/111` pour retirer
-  `pid` du tuple de labels.
-- Purger les séries fantômes existantes via
-  `curl -X POST http://localhost:8428/api/v1/admin/tsdb/delete_series?match[]=pi5_process_cpu_percent`
-  et équivalents. À faire **avant** la migration historique pour que redb
-  ne reçoive pas ces 92 séries inutiles.
+**Action faite (17 mai 2026)** : option 1 implémentée.
+- `daly-bms-server/src/monitor.rs:444-471` — label `pid` retiré, agrégation
+  par nom via `HashMap<&str, (f32 cpu, f32 mem)>` qui somme tous les
+  processus du même nom dans le snapshot courant.
+- `energy-manager/src/monitoring.rs:104-122` — même logique sur le tuple
+  `(cpu, mem, name, pid)` produit par `collect_processes()`.
+- Compilation OK, zéro warning.
 
-Effet attendu post-purge : ~277 → ~185 séries actives, **−33 %** de
-cardinalité, base de départ saine pour redb.
+**Action restante (à exécuter sur Pi5 après déploiement)** : purger les
+séries fantômes existantes en base VM.
+
+```bash
+# 1. Déployer le nouveau code (daly-bms-server + energy-manager)
+ssh pi5 'cd Daly-BMS-Rust && make sync && make build-arm && make build-energy-arm \
+  && sudo systemctl stop daly-bms energy-manager \
+  && sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ \
+  && sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ \
+  && sudo systemctl start daly-bms energy-manager'
+
+# 2. Purger les séries fantômes (PIDs morts) - les nouvelles écritures
+#    sans pid reprendront immédiatement avec la cardinalité bornée
+ssh pi5 'for m in pi5_process_cpu_percent pi5_process_mem_mb \
+                  em_process_cpu_percent em_process_mem_mb; do
+  curl -s -X POST "http://localhost:8428/api/v1/admin/tsdb/delete_series?match\[\]=$m"
+done'
+
+# 3. Vérification : la cardinalité doit être tombée
+ssh pi5 'curl -s http://localhost:8428/api/v1/status/tsdb | jq .data.totalSeries'
+```
+
+Effet attendu post-purge : **~277 → ~185 séries actives** (−33 %), base
+de départ saine pour la migration redb.
 
 #### 0.1.3 Service VictoriaMetrics — identifié 17 mai 2026
 
