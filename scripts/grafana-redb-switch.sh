@@ -58,17 +58,27 @@ require_files() {
 }
 
 # Retourne la valeur courante de `default_backend` côté daly-bms-server.
+# Robuste à un pipefail si grep ne match pas (retourne string vide).
 current_backend() {
-    grep -E '^default_backend[[:space:]]*=' "$DALYBMS_CONF" 2>/dev/null \
-        | sed -E 's/.*=\s*"?([^"]+)"?\s*/\1/' \
-        | head -1
+    local line value
+    line=$(grep -E '^default_backend[[:space:]]*=' "$DALYBMS_CONF" 2>/dev/null | head -1 || true)
+    if [[ -z "$line" ]]; then
+        echo ""
+        return 0
+    fi
+    value=$(echo "$line" | sed -E 's/.*=[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/')
+    echo "$value"
 }
 
 # Retourne l'URL courante côté datasource Grafana.
 current_grafana_url() {
-    grep -E '^[[:space:]]+url:' "$GRAFANA_DS" 2>/dev/null \
-        | head -1 \
-        | sed -E 's/.*url:[[:space:]]+//'
+    local line
+    line=$(grep -E '^[[:space:]]+url:' "$GRAFANA_DS" 2>/dev/null | head -1 || true)
+    if [[ -z "$line" ]]; then
+        echo ""
+        return 0
+    fi
+    echo "$line" | sed -E 's/.*url:[[:space:]]+//'
 }
 
 health_check() {
@@ -91,37 +101,58 @@ latest_backup_dir() {
 
 cmd_status() {
     require_files
+    # On désactive errexit ici : `status` doit afficher TOUT l'état même si
+    # certaines vérifs retournent non-zero (service down, backup absent…).
+    set +e
     echo "$(c_bold "État de la migration redb")"
     echo
     echo "  daly-bms-server :"
-    local backend; backend=$(current_backend)
+    local backend
+    backend=$(current_backend)
     if [[ "$backend" == "redb" ]]; then
         echo "    default_backend = $(c_green redb)"
     elif [[ "$backend" == "vm" ]]; then
         echo "    default_backend = $(c_yel vm) (comportement historique)"
+    elif [[ -z "$backend" ]]; then
+        echo "    default_backend = $(c_red "absent du fichier") — section [metrics_store] incomplète ?"
     else
-        echo "    default_backend = $(c_red "${backend:-absent}") — config inattendue"
+        echo "    default_backend = $(c_red "$backend") — valeur inattendue"
     fi
     echo
     echo "  Grafana datasource (uid=victoriametrics) :"
-    echo "    url = $(current_grafana_url)"
+    local url
+    url=$(current_grafana_url)
+    if [[ -n "$url" ]]; then
+        if [[ "$url" == *":8080"* ]]; then
+            echo "    url = $(c_green "$url") (dispatch via daly-bms-server)"
+        elif [[ "$url" == *":8428"* ]]; then
+            echo "    url = $(c_yel "$url") (VictoriaMetrics direct, comportement historique)"
+        else
+            echo "    url = $url"
+        fi
+    else
+        echo "    url = $(c_red "absente") — datasource mal formée ?"
+    fi
     echo
     echo "  Services :"
-    systemctl is-active daly-bms.service     | sed 's/^/    daly-bms       : /'
-    systemctl is-active grafana-server.service | sed 's/^/    grafana-server : /'
-    systemctl is-active victoriametrics.service 2>/dev/null | sed 's/^/    victoriametrics: /'
+    printf "    daly-bms       : %s\n" "$(systemctl is-active daly-bms.service 2>/dev/null || echo unknown)"
+    printf "    grafana-server : %s\n" "$(systemctl is-active grafana-server.service 2>/dev/null || echo unknown)"
+    printf "    victoriametrics: %s\n" "$(systemctl is-active victoriametrics.service 2>/dev/null || echo absent)"
     echo
     echo "  Health-checks :"
     health_check "/-/healthy        " "$DALYBMS_URL_HEALTHY"   || true
     health_check "/api/v1/query?up  " "$DALYBMS_URL_QUERY"     || true
     health_check "Grafana /api/health" "$GRAFANA_URL"          || true
     echo
-    local last; last=$(latest_backup_dir || true)
-    if [[ -n "${last:-}" ]]; then
+    local last
+    last=$(latest_backup_dir)
+    if [[ -n "$last" ]]; then
         echo "  Dernier backup : $last"
     else
         echo "  Aucun backup trouvé sous $BACKUP_ROOT"
     fi
+    # Restaure errexit pour la suite éventuelle.
+    set -e
 }
 
 cmd_switch() {
