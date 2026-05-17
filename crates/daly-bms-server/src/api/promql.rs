@@ -23,28 +23,30 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::api::redb as redb_api;
+use crate::api::redb::{self as redb_api, deser_step_ms, deser_time_ms, deser_time_ms_opt};
 use crate::state::AppState;
 
 // =============================================================================
 // Paramètres de requête (alignés avec api::redb pour la cohérence)
+// Acceptent secondes float (Prometheus standard, Grafana) ET ms int (interne).
 // =============================================================================
 
 #[derive(Deserialize)]
 pub struct InstantQueryParams {
     pub query: String,
-    /// Timestamp d'évaluation en millisecondes (défaut : maintenant)
+    /// Timestamp en secondes float (Prom std) OU millisecondes int (interne).
+    #[serde(default, deserialize_with = "deser_time_ms_opt")]
     pub time: Option<i64>,
 }
 
 #[derive(Deserialize)]
 pub struct RangeQueryParams {
     pub query: String,
-    /// Début de plage en millisecondes
+    #[serde(deserialize_with = "deser_time_ms")]
     pub start: i64,
-    /// Fin de plage en millisecondes
+    #[serde(deserialize_with = "deser_time_ms")]
     pub end: i64,
-    /// Pas en millisecondes
+    #[serde(deserialize_with = "deser_step_ms")]
     pub step: i64,
 }
 

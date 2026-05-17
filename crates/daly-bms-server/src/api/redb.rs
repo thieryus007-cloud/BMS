@@ -22,7 +22,7 @@ use axum::{
     Form, Json,
 };
 use metrics_store::promql::{parse_and_validate, Evaluator, InstantSample, PromQlError, RangeSeries};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 
 use crate::state::AppState;
@@ -83,8 +83,12 @@ fn val_str(v: f64) -> String {
 #[derive(Deserialize)]
 pub struct InstantParams {
     pub query: String,
-    /// Timestamp en millisecondes (défaut : maintenant). Prometheus standard
-    /// accepte des secondes mais notre frontend pousse déjà en ms — on garde.
+    /// Timestamp d'évaluation. Accepte plusieurs formats (cf. `deser_time_ms`) :
+    /// - Unix secondes (float, ex: "1700000000.123") — format Prometheus standard
+    /// - Unix millisecondes (int, ex: "1700000000123") — notre frontend interne
+    /// - RFC3339 (ex: "2026-05-17T19:00:00Z") — fallback Prometheus
+    /// Défaut : maintenant si absent.
+    #[serde(default, deserialize_with = "deser_time_ms_opt")]
     pub time: Option<i64>,
 }
 
@@ -144,9 +148,109 @@ pub async fn run_query_instant(state: &AppState, params: &InstantParams) -> Resp
 #[derive(Deserialize)]
 pub struct RangeParams {
     pub query: String,
-    pub start: i64, // ms
-    pub end: i64,   // ms
-    pub step: i64,  // ms
+    /// Début de plage — secondes float OU millisecondes int (cf. `deser_time_ms`).
+    #[serde(deserialize_with = "deser_time_ms")]
+    pub start: i64,
+    /// Fin de plage — secondes float OU millisecondes int.
+    #[serde(deserialize_with = "deser_time_ms")]
+    pub end: i64,
+    /// Pas — secondes float OU millisecondes int OU duration "60s" / "5m" / "1h".
+    #[serde(deserialize_with = "deser_step_ms")]
+    pub step: i64,
+}
+
+// ── Deserializers tolérants aux formats Prometheus (s) et internes (ms) ──────
+
+fn time_str_to_ms(s: &str) -> Option<i64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // RFC3339 fallback
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Some(dt.timestamp_millis());
+    }
+    // Numérique (int ou float)
+    let f: f64 = s.parse().ok()?;
+    if f.abs() >= 1e12 {
+        Some(f as i64) // déjà en ms
+    } else {
+        Some((f * 1000.0).round() as i64) // secondes → ms
+    }
+}
+
+/// Détecte automatiquement secondes vs millisecondes par magnitude.
+/// Une valeur >= 1e12 est traitée comme ms, sinon comme secondes (Prometheus).
+/// Accepte aussi les strings RFC3339 ("2026-05-17T19:00:00Z").
+pub fn deser_time_ms<'de, D>(d: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v: Value = Value::deserialize(d)?;
+    let s = match &v {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        other => return Err(serde::de::Error::custom(format!("time value invalide: {other}"))),
+    };
+    time_str_to_ms(&s)
+        .ok_or_else(|| serde::de::Error::custom(format!("time value non parsable: {s}")))
+}
+
+pub fn deser_time_ms_opt<'de, D>(d: D) -> Result<Option<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v: Option<Value> = Option::deserialize(d)?;
+    match v {
+        None => Ok(None),
+        Some(Value::String(s)) if s.is_empty() => Ok(None),
+        Some(Value::String(s)) => Ok(time_str_to_ms(&s)),
+        Some(Value::Number(n)) => Ok(time_str_to_ms(&n.to_string())),
+        Some(other) => Err(serde::de::Error::custom(format!("time value invalide: {other}"))),
+    }
+}
+
+/// Step accepte les mêmes formats que time, plus les durations Prometheus
+/// (`30s`, `5m`, `1h`, `1d`, `1w`). Retourne le step en millisecondes.
+pub fn deser_step_ms<'de, D>(d: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v: Value = Value::deserialize(d)?;
+    let s = match &v {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        other => return Err(serde::de::Error::custom(format!("step value invalide: {other}"))),
+    };
+    parse_step_to_ms(s.trim())
+        .ok_or_else(|| serde::de::Error::custom(format!("step value non parsable: {s}")))
+}
+
+fn parse_step_to_ms(s: &str) -> Option<i64> {
+    // Duration Prometheus : ms, s, m, h, d, w
+    if let Some(rest) = s.strip_suffix("ms") {
+        return rest.parse::<i64>().ok();
+    }
+    let suffixes: &[(&str, i64)] = &[
+        ("s", 1_000),
+        ("m", 60 * 1_000),
+        ("h", 60 * 60 * 1_000),
+        ("d", 24 * 60 * 60 * 1_000),
+        ("w", 7 * 24 * 60 * 60 * 1_000),
+    ];
+    for (suf, mult) in suffixes {
+        if let Some(rest) = s.strip_suffix(suf) {
+            let n: f64 = rest.parse().ok()?;
+            return Some((n * (*mult as f64)).round() as i64);
+        }
+    }
+    // Pas de suffixe → numérique (secondes float ou ms int)
+    let f: f64 = s.parse().ok()?;
+    if f.abs() >= 1e9 {
+        Some(f as i64) // déjà en ms (step de plusieurs jours)
+    } else {
+        Some((f * 1000.0).round() as i64) // secondes → ms
+    }
 }
 
 pub async fn query_range(
