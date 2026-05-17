@@ -343,7 +343,14 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // ── État partagé ───────────────────────────────────────────────────────────
-    let state = AppState::new(config.clone(), log_buffer, vm_handle, alert_engine.clone());
+    let metrics_store_arc = metrics_store.as_ref().map(|s| std::sync::Arc::new(s.clone()));
+    let state = AppState::new(
+        config.clone(),
+        log_buffer,
+        vm_handle,
+        alert_engine.clone(),
+        metrics_store_arc,
+    );
 
     // ── Bridges en arrière-plan ─────────────────────────────────────────────────
 
