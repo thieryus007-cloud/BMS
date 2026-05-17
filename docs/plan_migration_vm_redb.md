@@ -23,7 +23,7 @@
 | Phase | Avancement |
 |---|---|
 | Plan rédigé et validé | ✅ document complet (15 sections + comparatif v2) |
-| Décision SQLite vs redb | ⏸️ **non tranchée** — recommandation §15 = redb ; à confirmer avant Phase 0 |
+| Décision SQLite vs redb | ⏸️ **non tranchée** — recommandation §15 = redb ; à confirmer avant Phase 0 | **Decision: redb  .**
 | Audit PromQL exhaustif | ✅ cf. §6.5 ci-dessous (81 expressions, 7 fonctions, 1 subquery) |
 | Crate `metrics-store` | ❌ pas démarrée |
 | Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré |
