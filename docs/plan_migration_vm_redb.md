@@ -33,6 +33,84 @@
 | Retrait VictoriaMetrics | ❌ pas démarré |
 | **Volume actuel data dir** | `/mnt/nvme/victoria-metrics` (à mesurer en début de session : `du -sh`) |
 
+#### 0.1.1 État réel mesuré sur Pi5 prod (Mai 2026)
+
+Première mesure de référence, **session du 17 mai 2026** — à comparer aux
+projections initiales pour calibrer le plan :
+
+| Mesure | Projection initiale du plan | Réel Pi5 prod | Écart |
+|---|---|---|---|
+| `du -sh /mnt/nvme/victoria-metrics` | (non mesuré) | **48 Mo** | — |
+| Total séries (`totalSeries`) | ~10 000 hypothétique (R8) | **277** | ÷36 |
+| Total label-value pairs | (non mesuré) | **715** | — |
+| Noms de métriques distincts | 25 (audit dashboards) + interne | **96** (`__name__` distinct) | x4 vs golden set |
+| Cardinalité top : `bms_cell_voltage` | — | **32** (2 BMS × 16 cell) | OK |
+| Cardinalité top : `pi5_process_cpu/mem` | — | **24** chacune | dette : voir §0.1.2 |
+| Cardinalité top : `em_process_cpu/mem` | — | **22** chacune | dette : voir §0.1.2 |
+
+Source : `curl http://localhost:8428/api/v1/status/tsdb`. **Service systemd
+`victoria-metrics.service` introuvable** — VictoriaMetrics tourne sur le Pi5
+mais sous un autre nom d'unit (à identifier — cf. §0.1.3).
+
+**Conséquences à prendre en compte avant Phase 0** :
+
+1. **Gain disque redb devient anecdotique** : §14 projetait 1,2 Go redb vs
+   3 Go VM. La base actuelle ne fait que 48 Mo et croît à ~10 Mo/an
+   (extrapolation linéaire — à valider avec un 2ᵉ point de mesure dans 1 mois).
+   Projection 5 ans réaliste : **~250–300 Mo**, pas 3 Go. Le poids des
+   binaires/RSS devient le critère dominant, pas le disque.
+2. **Risque R8 (cardinalité) déclassé** : 277 séries actuelles, marge x36
+   avant le seuil 10 000 hypothétique. Le LRU sur `series_cache` reste
+   pertinent mais n'est plus une priorité.
+3. **L'argument principal pro-redb se déplace** : "gain disque ×5" devient
+   secondaire. Les arguments qui restent **forts** : (a) suppression
+   dépendance C cross-compile aarch64, (b) suppression RSS VictoriaMetrics
+   (~120–150 Mo soit ~50 % de la RAM totale des services), (c) design forcé
+   via shim PromQL = propreté du code et test golden §6.5.
+4. **Migration historique** simplifiée : 48 Mo de VM peuvent être convertis
+   en quelques minutes (cf. §0.4-2 ⇒ option "import script" redevient
+   tractable vs "archive tar"). À reconsidérer.
+
+#### 0.1.2 Métriques internes qui dominent la cardinalité (audit Mai 2026)
+
+Top 5 par nombre de séries : `bms_cell_voltage` (32), `pi5_process_cpu_percent`
+(24), `pi5_process_mem_mb` (24), `em_process_cpu_percent` (22),
+`em_process_mem_mb` (22). Les 4 derniers représentent **92 séries soit
+33 %** du total et **proviennent du monitoring interne** (un point par
+processus enfant). À investiguer :
+
+- Sont-elles toutes utiles ? Si seul l'agrégat parent compte, on peut
+  réduire à 4 séries (`pi5_process_cpu_percent{role="server"}`,
+  `…{role="manager"}`) sans perte fonctionnelle.
+- L'idéal serait de purger ces séries internes au moment de la bascule
+  pour démarrer redb avec une base saine (~185 séries).
+
+**Action** : créer une tâche follow-up "auditer monitoring.rs" — pas
+bloquant pour la migration, mais à faire avant Phase 1.
+
+#### 0.1.3 Identifier le bon nom de service VictoriaMetrics
+
+`systemctl status victoria-metrics.service` retourne "could not be found".
+La commande à essayer dans la prochaine session :
+
+```bash
+# Tester les noms possibles
+for n in vmsingle victoriametrics vm-single victoria-metrics-prod \
+         victoriaMetrics vmagent vm-server; do
+  systemctl status "$n" --no-pager 2>&1 | head -2
+done
+
+# Sinon, retrouver le process et remonter à l'unit
+ps aux | grep -i victoria | grep -v grep
+sudo systemctl list-units --type=service --all | grep -i 'victoria\|vmsingle\|vm-'
+
+# Vérifier si lancé hors systemd (binaire direct, screen, supervisord)
+sudo ss -ltnp 'sport = :8428'
+```
+
+Une fois identifié, **mettre à jour `CLAUDE.md` §0 (commandes rapides)**
+avec le nom correct — gain d'une session pour tous les futurs travaux.
+
 ### 0.2 Ce qui a changé dans le code depuis la rédaction (impacte le plan)
 
 Aucun changement sur les producteurs (`vm_client.rs`, `energy-manager`) ni
@@ -309,20 +387,39 @@ pub struct AggBucket {
 
 ### 4.3 Volumétrie projetée
 
-Identique au plan v2 §3.5 en lignes (~42 M points raw + 700 k hourly + 146 k
-daily), mais en **bytes** :
+> ⚠️ **Cette section a été recalibrée avec les chiffres réels mesurés
+> sur Pi5 prod (cf. §0.1.1).** La projection initiale supposait ~200 séries
+> et un taux de poll continu — la réalité est 277 séries dont 92 internes
+> potentiellement purgeables, et 48 Mo après plusieurs mois d'exploitation.
 
-| Table | Bytes / entrée | Total sur la rétention |
+**Projection initiale (hypothèse théorique, ~42 M points raw)** :
+
+| Table | Bytes / entrée | Total théorique |
 |---|---|---|
-| `metrics_raw` | 12 (clé) + 8 (f64) + overhead B-tree ≈ 28 octets | 41 M × 28 = **~1,1 Go** |
-| `metrics_hourly` | 12 + 40 + overhead ≈ 60 octets | 700 k × 60 = **42 Mo** |
-| `metrics_daily` | 12 + 40 + overhead ≈ 60 octets | 146 k × 60 = **9 Mo** |
+| `metrics_raw` | 12 (clé) + 8 (f64) + overhead B-tree ≈ 28 octets | 41 M × 28 = ~1,1 Go |
+| `metrics_hourly` | 12 + 40 + overhead ≈ 60 octets | 700 k × 60 = 42 Mo |
+| `metrics_daily` | 12 + 40 + overhead ≈ 60 octets | 146 k × 60 = 9 Mo |
 | `series_by_key` + `series_meta` | ~300 octets × 200 séries max | ~60 Ko |
-| **Total** | | **~1,2 Go** |
+| **Total théorique** | | **~1,2 Go** |
 
-> SQLite (plan v2) estimait 5–8 Go pour les mêmes lignes — la différence vient
-> de l'overhead par ligne (SQLite stocke des entêtes B-tree + row IDs + types
-> dynamiques, redb stocke des bytes nus). **redb est ~5× plus compact ici.**
+**Projection réaliste (calibrée Mai 2026)** :
+
+| Mesure | Valeur |
+|---|---|
+| VM actuel (`du -sh /mnt/nvme/victoria-metrics`) | **48 Mo** |
+| Croissance estimée (à confirmer par 2ᵉ point) | ~10 Mo / an |
+| Projection VM 5 ans | **~100–150 Mo** |
+| Ratio densité redb vs VM observé sur d'autres workloads | ×0,8 à ×1,2 |
+| **Projection redb 5 ans** | **~80–180 Mo** |
+
+> SQLite (plan v2) reste plus volumineux par ligne, projection ~400–600 Mo
+> sur la même base réelle. **L'argument "redb est 5× plus compact" tient
+> en pourcentage mais en valeur absolue on parle de quelques dizaines de
+> Mo** — sur un NVMe de 256 Go, ce n'est plus un critère décisionnel.
+
+L'arbitrage redb vs SQLite se fait donc sur les **autres axes** : compilation
+(redb gagne — pas de dep C), maturité (SQLite gagne), outillage ops (SQLite
+gagne — `sqlite3` CLI). Cf. §15 pour le récap.
 
 ### 4.4 Configuration du `Database`
 
@@ -934,11 +1031,16 @@ Identique à plan v2 §12 sauf :
 | `energy-manager` | ~25 Mo | ~25 Mo | ~25 Mo |
 | `grafana-server` | ~80 Mo | ~80 Mo | ~80 Mo |
 | **Total RSS** | **~252 Mo** | **~135 Mo** (−117 Mo) | **~133 Mo** (−119 Mo) |
-| Empreinte fichier données (5 ans) | ~3 Go (VM) | ~5–8 Go (SQLite) | **~1,2 Go (redb)** |
+| Empreinte fichier données (5 ans, projection théorique) | ~3 Go (VM) | ~5–8 Go (SQLite) | ~1,2 Go (redb) |
+| **Empreinte fichier données (5 ans, recalibrée Mai 2026 ⇒ cf §4.3)** | **~100–150 Mo (VM)** | **~400–600 Mo** | **~80–180 Mo** |
 | Binaire daly-bms-server | baseline | +1,5 Mo (libsqlite3 statique) | **+0,25 Mo (redb crate)** |
 
-> **Conclusion bench** : sur ce projet, redb est ~5× plus dense sur disque et
-> ~1 Mo plus léger en binaire, pour une RAM quasi-identique à SQLite.
+> **Conclusion bench mise à jour** : sur ce projet, redb reste ~3–5× plus
+> dense sur disque que SQLite et ~1 Mo plus léger en binaire. La RAM est
+> quasi-identique. **Mais en valeur absolue, sur la base réelle mesurée
+> (48 Mo aujourd'hui), l'écart disque devient anecdotique** — le gain RAM
+> de ~120 Mo (suppression de `victoria-metrics`) est désormais le seul
+> argument quantitativement fort, indépendamment du backend choisi.
 
 ---
 
@@ -1016,3 +1118,4 @@ sont alternatifs (pas additifs). Le choix se fait avant Phase 0.*
 |---|---|---|
 | Mai 2026 | initial | Rédaction complète §1–§16 (commit `e4b8360`) |
 | Mai 2026 | session Solar PV | Ajout §0 (état & démarrage), §6.5 (catalogue PromQL audité), §16-5/6 (décisions Solar PV) suite aux commits `08f23c7` (dashboard Solar PV) et `d9580fd` (onglets dashboard) qui élargissent la surface PromQL à transpiler. Aucun changement structurel sur §1–§15. |
+| 17 mai 2026 | calibrage Pi5 prod | Ajout §0.1.1/0.1.2/0.1.3 (chiffres réels mesurés : 48 Mo VM, 277 séries dont 92 internes potentiellement purgeables, service systemd à identifier). Recalibrage §4.3 et §14 : projection 5 ans descend de 1,2 Go théorique à 80–180 Mo réaliste. Conséquence majeure : le gain disque redb cesse d'être un argument décisif (~quelques dizaines de Mo en valeur absolue) ; reste fort le gain RAM (−120 Mo) et la suppression de la dep C cross-compile aarch64. |
