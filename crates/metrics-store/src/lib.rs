@@ -22,6 +22,7 @@
 pub mod agg;
 pub mod encoding;
 pub mod labels;
+pub mod prom_text;
 pub mod promql;
 pub mod reader;
 pub mod tables;
