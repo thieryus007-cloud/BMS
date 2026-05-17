@@ -20,6 +20,8 @@
 | Compiler Pi5 | `make build-arm` |
 | Déployer binaire Pi5 | `sudo systemctl stop daly-bms && sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ && sudo systemctl start daly-bms` |
 | Broker MQTT (status/logs) | `systemctl status mosquitto-broker` / `journalctl -u mosquitto-broker -f` |
+| VictoriaMetrics (status/logs) | `systemctl status victoriametrics` / `journalctl -u victoriametrics -f` |
+| TSDB stats VM (cardinalité) | `curl -s http://localhost:8428/api/v1/status/tsdb \| jq` |
 | Logs energy-manager | `journalctl -u energy-manager -f` |
 | Compiler energy-manager | `make build-energy-arm` |
 | Déployer energy-manager | `sudo systemctl stop energy-manager && sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ && sudo systemctl start energy-manager` |

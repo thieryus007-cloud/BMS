@@ -23,7 +23,9 @@
 | Phase | Avancement |
 |---|---|
 | Plan rédigé et validé | ✅ document complet (15 sections + comparatif v2) |
-| Décision SQLite vs redb | ⏸️ **non tranchée** — recommandation §15 = redb ; à confirmer avant Phase 0 |
+| Décision SQLite vs redb | ✅ **redb retenu** (17 mai 2026, cf. §0.4) |
+| Décision migration historique | ✅ **import script** depuis VM (volume tractable 48 Mo) |
+| Purge cardinalité (label `pid`) | ⏳ à faire avant Phase 1 (cf. §0.1.2) |
 | Audit PromQL exhaustif | ✅ cf. §6.5 ci-dessous (81 expressions, 7 fonctions, 1 subquery) |
 | Crate `metrics-store` | ❌ pas démarrée |
 | Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré |
@@ -77,39 +79,85 @@ Top 5 par nombre de séries : `bms_cell_voltage` (32), `pi5_process_cpu_percent`
 (24), `pi5_process_mem_mb` (24), `em_process_cpu_percent` (22),
 `em_process_mem_mb` (22). Les 4 derniers représentent **92 séries soit
 33 %** du total et **proviennent du monitoring interne** (un point par
-processus enfant). À investiguer :
+processus enfant).
 
-- Sont-elles toutes utiles ? Si seul l'agrégat parent compte, on peut
-  réduire à 4 séries (`pi5_process_cpu_percent{role="server"}`,
-  `…{role="manager"}`) sans perte fonctionnelle.
-- L'idéal serait de purger ces séries internes au moment de la bascule
-  pour démarrer redb avec une base saine (~185 séries).
+**Audit code (17 mai 2026)** — 4 producteurs, 0 consommateur :
 
-**Action** : créer une tâche follow-up "auditer monitoring.rs" — pas
-bloquant pour la migration, mais à faire avant Phase 1.
+| Métrique | Fichier producteur | Consommateur (dashboard / alerte / API) |
+|---|---|---|
+| `pi5_process_cpu_percent{process,pid}` | `crates/daly-bms-server/src/monitor.rs:449` | **aucun** |
+| `pi5_process_mem_mb{process,pid}` | `crates/daly-bms-server/src/monitor.rs:455` | **aucun** |
+| `em_process_cpu_percent{process,pid}` | `crates/energy-manager/src/monitoring.rs:107` | **aucun** |
+| `em_process_mem_mb{process,pid}` | `crates/energy-manager/src/monitoring.rs:111` | **aucun** |
 
-#### 0.1.3 Identifier le bon nom de service VictoriaMetrics
+`grep -rn "pi5_process\|em_process"` retourne uniquement les 4 sites de
+production. Aucune lecture ailleurs dans le code, aucun dashboard JSON,
+aucune alerte. **Le seul cas d'usage déclaré dans le commentaire
+`monitor.rs:444` est "identifier le coupable lors d'un freeze"** —
+investigation manuelle ad hoc.
 
-`systemctl status victoria-metrics.service` retourne "could not be found".
-La commande à essayer dans la prochaine session :
+**Diagnostic root-cause cardinalité** — la stat
+`seriesCountByLabelValuePair` du Pi5 prod montre :
 
-```bash
-# Tester les noms possibles
-for n in vmsingle victoriametrics vm-single victoria-metrics-prod \
-         victoriaMetrics vmagent vm-server; do
-  systemctl status "$n" --no-pager 2>&1 | head -2
-done
-
-# Sinon, retrouver le process et remonter à l'unit
-ps aux | grep -i victoria | grep -v grep
-sudo systemctl list-units --type=service --all | grep -i 'victoria\|vmsingle\|vm-'
-
-# Vérifier si lancé hors systemd (binaire direct, screen, supervisord)
-sudo ss -ltnp 'sport = :8428'
+```
+process=cargo  → 16 séries actives en base
+process=rustc  → 16 séries actives en base
 ```
 
-Une fois identifié, **mettre à jour `CLAUDE.md` §0 (commandes rapides)**
-avec le nom correct — gain d'une session pour tous les futurs travaux.
+Ce sont des **PIDs de compilateurs Rust éphémères**. Chaque
+`make build-arm` lance `cargo` + N×`rustc`, qui meurent en quelques minutes
+mais dont les séries restent 5 ans (rétention VM). La label `pid` rend
+chaque processus unique → cardinalité non-bornée dans le temps. Seuil de
+sélection `cpu > 0.1%` (trop bas — un pic momentané suffit à créer la série).
+
+**Trois options de remédiation, par effort croissant** :
+
+1. **Retirer le label `pid`** (1 ligne de code par site, 4 sites au total).
+   Résultat : 1 série par nom de process, plus de fantômes. Perte d'info
+   marginale (rare d'avoir besoin de distinguer 2 processus du même nom).
+   **Recommandé.**
+2. **Augmenter le seuil** de 0.1 % à 5 % CPU sustained sur 3 mesures.
+   Élimine les pics momentanés (gzip, ls, ssh-keygen). Plus complexe (état).
+3. **Retirer complètement** ces 4 métriques de VM et exposer un endpoint
+   REST `/api/v1/system/top-processes` qui lit `/proc/*/stat` à la demande.
+   Aucune série stockée, mais pas d'historique au moment du freeze (perte).
+
+**Plan d'action retenu** : option 1 (3 j avant Phase 0 redb).
+- Modifier `monitor.rs:449/455` et `monitoring.rs:107/111` pour retirer
+  `pid` du tuple de labels.
+- Purger les séries fantômes existantes via
+  `curl -X POST http://localhost:8428/api/v1/admin/tsdb/delete_series?match[]=pi5_process_cpu_percent`
+  et équivalents. À faire **avant** la migration historique pour que redb
+  ne reçoive pas ces 92 séries inutiles.
+
+Effet attendu post-purge : ~277 → ~185 séries actives, **−33 %** de
+cardinalité, base de départ saine pour redb.
+
+#### 0.1.3 Service VictoriaMetrics — identifié 17 mai 2026
+
+| Élément | Valeur |
+|---|---|
+| Unit systemd | **`victoriametrics.service`** (sans tiret) |
+| Fichier unit | `/etc/systemd/system/victoriametrics.service` |
+| Binaire | `/usr/local/bin/victoria-metrics-prod` |
+| User | `victoriametrics` (apparaît tronqué `victori+` dans `ps`) |
+| RSS mesuré (Mai 2026) | **135 Mo** (aligné avec estimation §14 : 120–150 Mo) |
+| Listen | `0.0.0.0:8428` |
+| Uptime au moment du diag | 19 h continues, état `active (running)` |
+| Args clés | `-storageDataPath=/mnt/nvme/victoria-metrics`, `-retentionPeriod=5y`, `-maxLabelsPerTimeseries=30`, `-search.maxQueryDuration=30s`, `-search.maxConcurrentRequests=4`, `-selfScrapeInterval=0` (= self-scrape désactivé, important pour la migration : pas de métriques internes VM à reproduire côté redb) |
+
+`CLAUDE.md` §0 mis à jour avec les commandes correctes
+(`systemctl status victoriametrics`, etc.).
+
+Pour la phase 4 (retrait VM), la séquence sera :
+```bash
+sudo systemctl stop victoriametrics
+sudo systemctl disable victoriametrics
+sudo rm /etc/systemd/system/victoriametrics.service
+sudo systemctl daemon-reload
+# /mnt/nvme/victoria-metrics conservé read-only comme archive froide
+sudo mv /mnt/nvme/victoria-metrics /mnt/nvme/victoria-metrics.archive
+```
 
 ### 0.2 Ce qui a changé dans le code depuis la rédaction (impacte le plan)
 
@@ -161,17 +209,22 @@ ssh pi5 'du -sh /mnt/nvme/victoria-metrics && \
 **ne pas réutiliser** `claude/detailed-migration-plan-BJxVd` (cette dernière
 contient les ajouts Solar PV et doit rester focalisée dessus).
 
-### 0.4 Décisions à prendre EN PREMIER lors de la prochaine session
+### 0.4 Décisions prises (17 mai 2026)
 
-1. **SQLite v2 ou redb ?** — relire §15 + §16 et trancher avant tout code.
-   Tant que ce n'est pas tranché, la crate `metrics-store` ne peut pas
-   commencer (interface publique identique mais implémentation différente).
-2. **Migration historique** : import VM → nouveau backend, ou archive tar
-   et démarrage à neuf ? Cf. §16-3. Recommandation tactique : **archive tar
-   uniquement** — l'historique fin n'a de valeur que sur 30–90 j, on
-   conserve un dump VM accessible *read-only* via un script ad hoc.
-3. **Subquery panel 43** (§6.5) : la supporter dans le transpileur ou
-   réécrire le panel en deux requêtes côté JS ? Recommandation : réécriture.
+1. ✅ **Backend = redb** (pure Rust). Décision actée après calibrage §0.1.1
+   qui a fait tomber l'argument disque. Critères retenus : suppression
+   dépendance C cross-compile aarch64 (gain CI), gain RAM 120 Mo via
+   retrait de VictoriaMetrics (commun aux deux backends), design forcé
+   via shim PromQL.
+2. ✅ **Migration historique** = **import script** (et non archive tar).
+   Le volume mesuré (48 Mo) rend la conversion tractable en quelques
+   minutes via `curl /api/v1/export` + parser. L'archive tar VM reste
+   conservée comme sauvegarde froide.
+3. **Subquery panel 43** (§6.5) : à trancher quand on attaquera le
+   transpileur. Recommandation tenue : réécriture en deux requêtes JS.
+4. ✅ **Purge cardinalité avant bascule** (§0.1.2) : retirer le label
+   `pid` des 4 métriques de top-processus + delete_series sur les
+   fantômes. À faire avant Phase 1 dual-write.
 
 ---
 
@@ -1119,3 +1172,4 @@ sont alternatifs (pas additifs). Le choix se fait avant Phase 0.*
 | Mai 2026 | initial | Rédaction complète §1–§16 (commit `e4b8360`) |
 | Mai 2026 | session Solar PV | Ajout §0 (état & démarrage), §6.5 (catalogue PromQL audité), §16-5/6 (décisions Solar PV) suite aux commits `08f23c7` (dashboard Solar PV) et `d9580fd` (onglets dashboard) qui élargissent la surface PromQL à transpiler. Aucun changement structurel sur §1–§15. |
 | 17 mai 2026 | calibrage Pi5 prod | Ajout §0.1.1/0.1.2/0.1.3 (chiffres réels mesurés : 48 Mo VM, 277 séries dont 92 internes potentiellement purgeables, service systemd à identifier). Recalibrage §4.3 et §14 : projection 5 ans descend de 1,2 Go théorique à 80–180 Mo réaliste. Conséquence majeure : le gain disque redb cesse d'être un argument décisif (~quelques dizaines de Mo en valeur absolue) ; reste fort le gain RAM (−120 Mo) et la suppression de la dep C cross-compile aarch64. |
+| 17 mai 2026 | décisions actées | §0.4 : redb retenu (pure Rust), migration historique = import script (volume tractable), purge label `pid` avant Phase 1. §0.1.2 enrichie d'un audit code complet (4 producteurs / 0 consommateur des métriques top-process, root-cause cardinalité = label `pid` éphémère sur compilateurs Rust). §0.1.3 finalisée : service identifié `victoriametrics.service` (binaire `victoria-metrics-prod`, RSS 135 Mo, retention 5y). `CLAUDE.md` §0 mis à jour avec les commandes VM. |
