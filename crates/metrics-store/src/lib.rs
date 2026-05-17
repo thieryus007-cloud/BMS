@@ -6,36 +6,50 @@
 //!
 //! - §4 schéma de tables et encodage des clés
 //! - §5 API publique (`MetricsStore`, `Writer`, `Reader`)
+//! - §6 transpileur PromQL (à venir)
+//! - §9 tiering raw→hourly→daily (à venir)
 //! - §10 plan de bascule en 4 phases
 //!
-//! État : **squelette** (Phase 0.3). Le writer batché (§5.3), le reader
-//! (§5.4) et les agrégats (§5.5) seront ajoutés dans les tickets suivants.
+//! État Phase 0 :
+//! - 0.3 squelette crate ✅
+//! - 0.4 writer batché ✅
+//! - 0.5a reader query_range + agrégats ✅
+//! - 0.5b tiering — à venir
+//! - 0.6 PromQL — à venir
+//! - 0.7 prom_text — à venir
+//! - 0.8 benches — à venir
 
+pub mod agg;
 pub mod encoding;
+pub mod labels;
 pub mod reader;
 pub mod tables;
+pub mod tiering;
 pub mod writer;
 
 use std::path::Path;
 use std::sync::Arc;
+use std::thread;
 
 use anyhow::Result;
 use redb::{Builder, Database};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+pub use agg::{agg_over_range, AggOp};
 pub use reader::Reader;
 pub use tables::{AggBucket, SeriesMeta, Tier};
-pub use writer::{Sample, Writer};
+pub use writer::{Sample, Writer, WriterConfig};
 
-/// Options d'ouverture. La sémantique exacte des champs sera affinée quand le
-/// writer batché et la maintenance seront branchés.
+/// Options d'ouverture.
 #[derive(Debug, Clone)]
 pub struct Options {
     /// Taille du cache de pages redb (défaut 64 MiB, cf. §4.4).
     pub cache_bytes: usize,
-    /// Profondeur de la queue mpsc entre producteurs et writer_loop.
+    /// Profondeur de la queue mpsc entre producteurs et writer.
     pub writer_queue_depth: usize,
+    /// Configuration du batching writer.
+    pub writer: WriterConfig,
 }
 
 impl Default for Options {
@@ -43,6 +57,7 @@ impl Default for Options {
         Self {
             cache_bytes: 64 * 1024 * 1024,
             writer_queue_depth: 10_000,
+            writer: WriterConfig::default(),
         }
     }
 }
@@ -65,14 +80,36 @@ impl Default for TierPolicy {
     }
 }
 
+struct Inner {
+    db: Arc<Database>,
+    writer_tx: parking_lot::Mutex<Option<mpsc::Sender<Sample>>>,
+    writer_handle: parking_lot::Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        // 1. Ferme le canal en libérant le `Sender` (les `Writer` clones
+        //    encore vivants côté caller maintiennent le canal ouvert ; on
+        //    documente que le store doit être dropé en dernier).
+        self.writer_tx.lock().take();
+        // 2. Attend la fin du thread writer pour relâcher le lock redb
+        //    avant le `Drop` de `Arc<Database>`. Sans ce join, une
+        //    réouverture immédiate de la base échouerait avec "Database
+        //    already open".
+        if let Some(h) = self.writer_handle.lock().take() {
+            let _ = h.join();
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct MetricsStore {
-    db: Arc<Database>,
-    writer_tx: mpsc::Sender<Sample>,
+    inner: Arc<Inner>,
 }
 
 impl MetricsStore {
-    /// Ouvre (ou crée) la base et initialise toutes les tables.
+    /// Ouvre (ou crée) la base, initialise toutes les tables et démarre le
+    /// thread writer.
     pub fn open(db_path: &Path, opts: Options) -> Result<Self> {
         let db = Builder::new()
             .set_cache_size(opts.cache_bytes)
@@ -91,25 +128,53 @@ impl MetricsStore {
             tx.commit()?;
         }
 
-        // Queue pour le writer_loop (encore à implémenter, cf. §5.3).
-        let (writer_tx, _writer_rx) = mpsc::channel::<Sample>(opts.writer_queue_depth);
+        let (writer_tx, writer_rx) = mpsc::channel::<Sample>(opts.writer_queue_depth);
+        let writer_handle = writer::spawn(db.clone(), writer_rx, opts.writer);
 
-        Ok(Self { db, writer_tx })
+        Ok(Self {
+            inner: Arc::new(Inner {
+                db,
+                writer_tx: parking_lot::Mutex::new(Some(writer_tx)),
+                writer_handle: parking_lot::Mutex::new(Some(writer_handle)),
+            }),
+        })
     }
 
     pub fn writer(&self) -> Writer {
-        Writer { tx: self.writer_tx.clone() }
+        let tx = self
+            .inner
+            .writer_tx
+            .lock()
+            .as_ref()
+            .expect("writer channel encore ouvert tant que MetricsStore est vivant")
+            .clone();
+        Writer { tx }
     }
 
     pub fn reader(&self) -> Reader {
-        Reader { db: self.db.clone() }
+        Reader { db: self.inner.db.clone() }
     }
 
     /// Démarre la tâche de maintenance (compaction raw→hourly→daily).
-    /// Stub — l'implémentation arrivera avec le module `tiering.rs` (Phase 0.5).
-    pub fn spawn_maintenance(&self, _policy: TierPolicy) -> JoinHandle<()> {
-        tokio::spawn(async move {
-            tracing::warn!("metrics-store: spawn_maintenance pas encore implémenté");
+    /// `interval_hours` contrôle la fréquence (défaut recommandé : 6 h ⇒
+    /// 4 passes par jour). Cf. plan §9.1.
+    pub fn spawn_maintenance(&self, policy: TierPolicy, interval_hours: u64) -> JoinHandle<()> {
+        tiering::spawn_maintenance(self.inner.db.clone(), policy, interval_hours)
+    }
+
+    /// Lance une seule passe de compaction synchrone (utilisée par
+    /// `metrics-cli compact` et les tests).
+    pub fn compact_now(&self, policy: &TierPolicy) -> Result<tiering::CompactionStats> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis() as i64;
+        let cutoff_raw = now - policy.raw_retention_days as i64 * tiering::DAILY_MS;
+        let cutoff_hourly = now - policy.hourly_retention_days as i64 * tiering::DAILY_MS;
+        let s1 = tiering::compact_raw_to_hourly(&self.inner.db, cutoff_raw)?;
+        let s2 = tiering::compact_hourly_to_daily(&self.inner.db, cutoff_hourly)?;
+        Ok(tiering::CompactionStats {
+            buckets_written: s1.buckets_written + s2.buckets_written,
+            points_purged: s1.points_purged + s2.points_purged,
         })
     }
 }
@@ -117,6 +182,7 @@ impl MetricsStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn tmp_db_path(name: &str) -> std::path::PathBuf {
         let mut p = std::env::temp_dir();
@@ -144,6 +210,214 @@ mod tests {
         rtx.open_table(tables::TABLE_SERIES_META).expect("series_meta");
         rtx.open_table(tables::TABLE_META).expect("meta");
         drop(rtx);
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+        let _ = path;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn round_trip_write_then_read() {
+        let path = tmp_db_path("rt");
+        let _ = std::fs::remove_file(&path);
+
+        // Bloc imbriqué : garantit que `writer` et `reader` sont droppés
+        // AVANT `store` (ordre naturel inverse-déclaration), donc tous les
+        // `Sender` sont fermés au moment où `Inner::drop` rejoint le thread.
+        {
+            let opts = Options {
+                writer: WriterConfig {
+                    batch_max: 4,
+                    flush_ms: 50,
+                    poll_idle_ms: 2,
+                },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // Trois séries : bms_v{bms_id=1}, bms_v{bms_id=2}, bms_soc{bms_id=1}.
+            for ts in 1000..1010 {
+                writer
+                    .write(Sample::new("bms_v", ts, ts as f64 * 0.01).with_label("bms_id", "1"))
+                    .await
+                    .unwrap();
+                writer
+                    .write(Sample::new("bms_v", ts, ts as f64 * 0.02).with_label("bms_id", "2"))
+                    .await
+                    .unwrap();
+                writer
+                    .write(Sample::new("bms_soc", ts, 50.0).with_label("bms_id", "1"))
+                    .await
+                    .unwrap();
+            }
+
+            // Attend la persistance (≤ 2 flush windows).
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            let reader = store.reader();
+            let series = reader.list_series().unwrap();
+            assert_eq!(series.len(), 3, "3 séries distinctes attendues, got: {series:?}");
+
+            let id_bms_v_1 = reader
+                .lookup_series_id("bms_v", r#"{"bms_id":"1"}"#)
+                .unwrap()
+                .expect("bms_v{bms_id=1} doit exister");
+            let pts = reader.query_range_raw(id_bms_v_1, 1000, 1009).unwrap();
+            assert_eq!(pts.len(), 10);
+            assert_eq!(pts.first().unwrap().0, 1000);
+            assert_eq!(pts.last().unwrap().0, 1009);
+            assert!((pts.first().unwrap().1 - 10.00).abs() < 1e-9);
+
+            // Agrégats
+            let avg = agg_over_range(&reader, id_bms_v_1, 1000, 1009, AggOp::Avg)
+                .unwrap()
+                .unwrap();
+            assert!((avg - 10.045).abs() < 1e-6, "avg = {avg}");
+            let min = agg_over_range(&reader, id_bms_v_1, 1000, 1009, AggOp::Min)
+                .unwrap()
+                .unwrap();
+            let max = agg_over_range(&reader, id_bms_v_1, 1000, 1009, AggOp::Max)
+                .unwrap()
+                .unwrap();
+            assert!((min - 10.0).abs() < 1e-9);
+            assert!((max - 10.09).abs() < 1e-6);
+
+            // Bornes : un range vide doit retourner None pour Avg.
+            let nothing = agg_over_range(&reader, id_bms_v_1, 5000, 6000, AggOp::Avg).unwrap();
+            assert!(nothing.is_none());
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn tiering_raw_to_hourly_to_daily() {
+        use crate::tiering::{compact_hourly_to_daily, compact_raw_to_hourly, DAILY_MS};
+
+        let path = tmp_db_path("tier");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 30, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // 3 jours de samples : un point toutes les 10 minutes (144 par
+            // jour) sur la série `power`. Toutes les valeurs sont = 100.0
+            // donc on peut prédire trivialement les agrégats finaux.
+            let day_ms = DAILY_MS;
+            let step_ms = 10 * 60 * 1000_i64; // 10 minutes
+            let t0 = 1_700_000_000_000_i64; // ancre arbitraire alignée jour
+            let t0 = t0 - t0 % day_ms;
+            for d in 0..3 {
+                for i in 0..(day_ms / step_ms) {
+                    let ts = t0 + d * day_ms + i * step_ms;
+                    writer
+                        .write(Sample::new("power", ts, 100.0))
+                        .await
+                        .unwrap();
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            let reader = store.reader();
+            let series_id = reader.lookup_series_id("power", "{}").unwrap().unwrap();
+            let raw_before = reader
+                .query_range_raw(series_id, t0, t0 + 3 * day_ms)
+                .unwrap();
+            assert_eq!(raw_before.len(), 3 * 144);
+
+            // Phase 1 : compact tous les raws → hourly (cutoff dans le futur).
+            let cutoff = t0 + 3 * day_ms + 1;
+            let stats = compact_raw_to_hourly(&store.inner.db, cutoff).unwrap();
+            assert_eq!(stats.buckets_written, 3 * 24); // 24 buckets/jour × 3 j
+            assert_eq!(stats.points_purged, 3 * 144);
+
+            // Les raws doivent être vides après purge
+            let raw_after = reader
+                .query_range_raw(series_id, t0, t0 + 3 * day_ms)
+                .unwrap();
+            assert_eq!(raw_after.len(), 0);
+
+            // Les hourlies doivent contenir 72 buckets de 6 points chacun
+            // (60 min / 10 min = 6).
+            let hourly = reader
+                .query_range_buckets(series_id, t0, t0 + 3 * day_ms, Tier::Hourly)
+                .unwrap();
+            assert_eq!(hourly.len(), 3 * 24);
+            for (_, bucket) in &hourly {
+                assert_eq!(bucket.cnt, 6);
+                assert!((bucket.avg - 100.0).abs() < 1e-9);
+                assert_eq!(bucket.min, 100.0);
+                assert_eq!(bucket.max, 100.0);
+                assert!((bucket.sum - 600.0).abs() < 1e-9);
+            }
+
+            // Phase 2 : compact hourlies plus vieux que la fin du jour 2 → daily.
+            let cutoff_daily = t0 + 2 * day_ms; // tout jour 0 et jour 1 → daily
+            let stats2 = compact_hourly_to_daily(&store.inner.db, cutoff_daily).unwrap();
+            assert_eq!(stats2.buckets_written, 2); // 2 jours
+            assert_eq!(stats2.points_purged, 2 * 24); // 48 hourlies purgés
+
+            // Reste : seul le jour 2 doit encore avoir 24 hourlies.
+            let hourly_left = reader
+                .query_range_buckets(series_id, t0, t0 + 3 * day_ms, Tier::Hourly)
+                .unwrap();
+            assert_eq!(hourly_left.len(), 24);
+
+            // Daily : 2 buckets, 144 points cumulés chacun (24 hourlies × 6).
+            let daily = reader
+                .query_range_buckets(series_id, t0, t0 + 2 * day_ms, Tier::Daily)
+                .unwrap();
+            assert_eq!(daily.len(), 2);
+            for (_, bucket) in &daily {
+                assert_eq!(bucket.cnt, 144);
+                assert!((bucket.avg - 100.0).abs() < 1e-9);
+                assert_eq!(bucket.min, 100.0);
+                assert_eq!(bucket.max, 100.0);
+                assert!((bucket.sum - 14_400.0).abs() < 1e-9);
+            }
+
+            // Idempotence : refaire la compaction ne doit rien re-écrire.
+            let again = compact_raw_to_hourly(&store.inner.db, cutoff).unwrap();
+            assert_eq!(again.buckets_written, 0);
+            assert_eq!(again.points_purged, 0);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn writer_persists_next_series_id_across_reopen() {
+        let path = tmp_db_path("reopen");
+        let _ = std::fs::remove_file(&path);
+
+        let opts = Options {
+            writer: WriterConfig { batch_max: 1, flush_ms: 20, poll_idle_ms: 2 },
+            ..Options::default()
+        };
+
+        // Phase 1 : crée 2 séries
+        {
+            let store = MetricsStore::open(&path, opts.clone()).unwrap();
+            let w = store.writer();
+            w.write(Sample::new("a", 1, 1.0)).await.unwrap();
+            w.write(Sample::new("b", 1, 2.0)).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            assert_eq!(store.reader().list_series().unwrap().len(), 2);
+        }
+
+        // Phase 2 : rouvre, ajoute "c" → doit recevoir series_id=3, pas =1
+        {
+            let store = MetricsStore::open(&path, opts).unwrap();
+            let w = store.writer();
+            w.write(Sample::new("c", 1, 3.0)).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let reader = store.reader();
+            assert_eq!(reader.list_series().unwrap().len(), 3);
+            let id_c = reader.lookup_series_id("c", "{}").unwrap().unwrap();
+            assert!(id_c >= 3, "id_c={id_c} doit être ≥ 3 (pas de réutilisation)");
+        }
 
         let _ = std::fs::remove_file(&path);
     }
