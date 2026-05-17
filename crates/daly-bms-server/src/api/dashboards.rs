@@ -23,6 +23,40 @@ use crate::state::AppState;
 /// User id par défaut tant qu'il n'y a pas d'auth utilisateur.
 const DEFAULT_USER: &str = "default";
 
+/// Onglet (tab) par défaut quand le client n'en précise pas.
+const DEFAULT_TAB: &str = "default";
+
+/// Compose la clé de stockage (user, tab) → `user_id` SQLite.
+/// Format : `<user>:<tab>` (rétro-compat : `default:default` est mappé à `default` tout court
+/// pour ne pas casser les layouts existants en base avant l'introduction des onglets).
+fn storage_key(tab: &str) -> String {
+    if tab == DEFAULT_TAB { DEFAULT_USER.to_string() }
+    else { format!("{}:{}", DEFAULT_USER, tab) }
+}
+
+/// Valide un identifiant d'onglet : 1..=32 caractères, [a-z0-9_-]. Tout autre
+/// caractère est rejeté pour éviter toute injection ou abus du fichier SQLite.
+fn validate_tab(tab: &str) -> Result<&str, &'static str> {
+    if tab.is_empty() || tab.len() > 32 { return Err("tab length 1..=32"); }
+    if !tab.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-')) {
+        return Err("tab must match [a-z0-9_-]+");
+    }
+    Ok(tab)
+}
+
+#[derive(Deserialize, Default)]
+pub struct TabQuery {
+    #[serde(default)]
+    pub tab: Option<String>,
+}
+
+impl TabQuery {
+    fn resolve(&self) -> Result<String, &'static str> {
+        let raw = self.tab.as_deref().unwrap_or(DEFAULT_TAB);
+        Ok(storage_key(validate_tab(raw)?))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/v1/dashboards/catalog
 // ---------------------------------------------------------------------------
@@ -272,12 +306,19 @@ fn storage_unavailable() -> Response {
 /// Le contenu du champ `layout` est inséré tel quel depuis la base (sans parse) —
 /// le client le reçoit comme un tableau JSON valide. Si jamais ce qui est en base
 /// n'est pas du JSON valide, on retourne `layout: null`.
-pub async fn get_layout(State(state): State<AppState>) -> Response {
+pub async fn get_layout(
+    State(state): State<AppState>,
+    Query(tq):    Query<TabQuery>,
+) -> Response {
     let Some(storage) = state.dashboard_storage.clone() else {
         return storage_unavailable();
     };
+    let key = match tq.resolve() {
+        Ok(k)  => k,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({"ok":false,"reason":e}))).into_response(),
+    };
     // I/O SQLite bloquant → spawn_blocking
-    let result = tokio::task::spawn_blocking(move || storage.get(DEFAULT_USER)).await;
+    let result = tokio::task::spawn_blocking(move || storage.get(&key)).await;
     match result {
         Ok(Ok(None))          => raw_json(StatusCode::OK, r#"{"ok":true,"layout":null}"#.to_string()),
         Ok(Ok(Some(layout_json))) => {
@@ -304,10 +345,15 @@ pub async fn get_layout(State(state): State<AppState>) -> Response {
 /// ou directement le tableau `[...]`.
 pub async fn set_layout(
     State(state): State<AppState>,
+    Query(tq):    Query<TabQuery>,
     Json(body):   Json<Value>,
 ) -> Response {
     let Some(storage) = state.dashboard_storage.clone() else {
         return storage_unavailable();
+    };
+    let key = match tq.resolve() {
+        Ok(k)  => k,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({"ok":false,"reason":e}))).into_response(),
     };
     let layout = match body.get("layout") {
         Some(v) => v.clone(),
@@ -324,7 +370,7 @@ pub async fn set_layout(
             "ok": false, "reason": "layout_too_large"
         }))).into_response();
     }
-    let result = tokio::task::spawn_blocking(move || storage.set(DEFAULT_USER, &layout_json)).await;
+    let result = tokio::task::spawn_blocking(move || storage.set(&key, &layout_json)).await;
     match result {
         Ok(Ok(()))  => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
         Ok(Err(e))  => db_error_response(e),
@@ -336,11 +382,18 @@ pub async fn set_layout(
 }
 
 /// DELETE /api/v1/dashboards/layout — retour à l'état d'origine côté UI.
-pub async fn delete_layout(State(state): State<AppState>) -> Response {
+pub async fn delete_layout(
+    State(state): State<AppState>,
+    Query(tq):    Query<TabQuery>,
+) -> Response {
     let Some(storage) = state.dashboard_storage.clone() else {
         return storage_unavailable();
     };
-    let result = tokio::task::spawn_blocking(move || storage.delete(DEFAULT_USER)).await;
+    let key = match tq.resolve() {
+        Ok(k)  => k,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(json!({"ok":false,"reason":e}))).into_response(),
+    };
+    let result = tokio::task::spawn_blocking(move || storage.delete(&key)).await;
     match result {
         Ok(Ok(()))  => (StatusCode::OK, Json(json!({"ok": true}))).into_response(),
         Ok(Err(e))  => db_error_response(e),
@@ -348,5 +401,38 @@ pub async fn delete_layout(State(state): State<AppState>) -> Response {
             tracing::error!(error = %join_e, "spawn_blocking join error");
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "reason": "task_join_failed"}))).into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tab_tests {
+    use super::*;
+
+    #[test]
+    fn validate_tab_accepts_valid() {
+        assert!(validate_tab("default").is_ok());
+        assert!(validate_tab("solar_pv").is_ok());
+        assert!(validate_tab("abc-123").is_ok());
+        assert!(validate_tab("a").is_ok());
+        assert!(validate_tab(&"a".repeat(32)).is_ok());
+    }
+
+    #[test]
+    fn validate_tab_rejects_invalid() {
+        assert!(validate_tab("").is_err());
+        assert!(validate_tab(&"a".repeat(33)).is_err());
+        assert!(validate_tab("Default").is_err());          // majuscule
+        assert!(validate_tab("../foo").is_err());            // path traversal
+        assert!(validate_tab("a b").is_err());               // espace
+        assert!(validate_tab("a:b").is_err());               // ':'
+        assert!(validate_tab("a'b").is_err());               // quote SQL
+    }
+
+    #[test]
+    fn storage_key_keeps_default_user_for_default_tab() {
+        // Rétro-compat : layouts existants en base sous "default" ne doivent pas être perdus.
+        assert_eq!(storage_key("default"), "default");
+        assert_eq!(storage_key("solar_pv"), "default:solar_pv");
+        assert_eq!(storage_key("custom-1"), "default:custom-1");
     }
 }
