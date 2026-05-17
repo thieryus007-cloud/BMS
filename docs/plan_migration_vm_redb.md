@@ -26,7 +26,7 @@
 | Décision SQLite vs redb | ✅ **redb retenu** (17 mai 2026, cf. §0.4) |
 | Décision migration historique | ✅ **import script** depuis VM (volume tractable 48 Mo) |
 | Purge cardinalité (code) | ✅ label `pid` retiré + agrégation par nom (commit `7e37e7e`) |
-| Purge cardinalité (fantômes en base) | ⏳ à exécuter sur Pi5 après déploiement (cf. §0.1.2) |
+| Purge cardinalité (fantômes en base) | ✅ exécutée 17 mai 2026 : 277 → 209 séries, 0 série avec `pid` (cf. §0.1.2) |
 | Audit PromQL exhaustif | ✅ cf. §6.5 ci-dessous (81 expressions, 7 fonctions, 1 subquery) |
 | Crate `metrics-store` | ❌ pas démarrée |
 | Endpoint `/api/v1/metrics/ingest` | ❌ pas démarré |
@@ -44,7 +44,7 @@ projections initiales pour calibrer le plan :
 | Mesure | Projection initiale du plan | Réel Pi5 prod | Écart |
 |---|---|---|---|
 | `du -sh /mnt/nvme/victoria-metrics` | (non mesuré) | **48 Mo** | — |
-| Total séries (`totalSeries`) | ~10 000 hypothétique (R8) | **277** | ÷36 |
+| Total séries (`totalSeries`) | ~10 000 hypothétique (R8) | **277** (avant purge §0.1.2) → **209** (après purge label `pid`) | ÷48 vs hypothèse |
 | Total label-value pairs | (non mesuré) | **715** | — |
 | Noms de métriques distincts | 25 (audit dashboards) + interne | **96** (`__name__` distinct) | x4 vs golden set |
 | Cardinalité top : `bms_cell_voltage` | — | **32** (2 BMS × 16 cell) | OK |
@@ -153,8 +153,22 @@ done'
 ssh pi5 'curl -s http://localhost:8428/api/v1/status/tsdb | jq .data.totalSeries'
 ```
 
-Effet attendu post-purge : **~277 → ~185 séries actives** (−33 %), base
-de départ saine pour la migration redb.
+**Résultat mesuré (17 mai 2026, après déploiement)** :
+
+| Métrique | Avant purge | Cible théorique | **Réel après purge** |
+|---|---|---|---|
+| `totalSeries` | 277 | 185 | **209** (−25 %) |
+| Séries portant le label `pid` | 92 | 0 | **0** ✅ |
+| Cardinalité `pi5_process_cpu_percent` | 24 (instable, fuite par PID) | — | **6** (borné, 1 par nom) |
+| Cardinalité `em_process_cpu_percent` | 22 (instable) | — | **6** (borné) |
+
+Le delta vs cible théorique (209 vs 185) vient des top-processes désormais
+**stables et bornés** : 4 métriques × ~6 noms de processus actifs = 24
+séries de top-process **non-éphémères** (vs 92 éphémères avant qui
+fuyaient à chaque `make build-arm`). Verification : la requête
+`{__name__=~"pi5_process_.+|em_process_.+",pid!=""}` retourne 0 série.
+
+**Status** : ✅ purge terminée, base prête pour la migration redb Phase 0.
 
 #### 0.1.3 Service VictoriaMetrics — identifié 17 mai 2026
 
