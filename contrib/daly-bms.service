@@ -20,11 +20,22 @@ Environment=DALY_CONFIG=/etc/daly-bms/config.toml
 Environment=RUST_LOG=info
 
 # Cap les arenas mémoire glibc à 2 (défaut = N_CPU × 8 ≈ 32 sur Pi5).
-# Sans ce cap, chaque thread tokio worker (~5 threads) alloue son propre
-# arena ~1 Mo, ce qui peut gonfler le RSS de 30-40 Mo sans bénéfice
-# réel pour notre workload (single-process, allocations en burst).
-# Cf. https://www.gnu.org/software/libc/manual/html_node/Memory-Allocation-Tunables.html
+# No-op depuis qu'on utilise jemalloc (commit 75b6b84), conservé pour
+# l'historique et au cas où on revient à glibc.
 Environment=MALLOC_ARENA_MAX=2
+
+# Tuning jemalloc (tikv-jemallocator utilise le préfixe `_RJEM_` pour
+# éviter les conflits avec d'autres jemalloc embarqués).
+# Observation prod 18 mai 2026 : un dashboard 30 jours fait grimper
+# VmPeak à 367 Mo (eval_range sur ~270 séries × 43k itérations) et
+# jemalloc retient ~55 Mo après libération avec les defaults (delay 10s
+# avant retour des pages au kernel). Configuration agressive :
+#   dirty_decay_ms:1000   — pages dirty rendues après 1 s (vs 10 s)
+#   muzzy_decay_ms:0      — pages muzzy rendues IMMÉDIATEMENT
+#   background_thread:true — un thread dédié fait le purging en arrière-plan
+# Effet : RSS retombe au baseline ~30-40 Mo après chaque burst, plus
+# de high-water mark.
+Environment=_RJEM_MALLOC_CONF=dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
 
 ExecStart=/usr/local/bin/daly-bms-server
 
