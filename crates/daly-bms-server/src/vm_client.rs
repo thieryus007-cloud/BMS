@@ -7,7 +7,6 @@ use std::fmt::Write as _;
 use std::time::Duration;
 use metrics_store::writer::{Sample, Writer as MetricsWriter};
 use reqwest::Client;
-use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::config::VmConfig;
@@ -165,47 +164,11 @@ impl VmClient {
     }
 
     // -------------------------------------------------------------------------
-    // Lecture PromQL (retourne le JSON VM directement — format Prometheus standard)
+    // Conversions snapshots → VmRow (chemin écriture uniquement)
     // -------------------------------------------------------------------------
-
-    /// Requête PromQL instantanée. `time_ms` en millisecondes → converti en secondes.
-    pub async fn query_instant_json(&self, query: &str, time_ms: i64) -> anyhow::Result<Value> {
-        let time_secs = (time_ms as f64 / 1000.0).to_string();
-        let resp = self.http
-            .get(format!("{}/api/v1/query", self.base_url))
-            .query(&[("query", query), ("time", &time_secs)])
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<Value>()
-            .await?;
-        Ok(resp)
-    }
-
-    /// Requête PromQL sur plage temporelle. Timestamps en ms → convertis en secondes.
-    pub async fn query_range_json(
-        &self,
-        query:    &str,
-        start_ms: i64,
-        end_ms:   i64,
-        step_ms:  i64,
-    ) -> anyhow::Result<Value> {
-        let start = (start_ms as f64 / 1000.0).to_string();
-        let end   = (end_ms   as f64 / 1000.0).to_string();
-        let step  = (step_ms  as f64 / 1000.0).to_string();
-        let resp = self.http
-            .get(format!("{}/api/v1/query_range", self.base_url))
-            .query(&[("query", query), ("start", &start), ("end", &end), ("step", &step)])
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<Value>()
-            .await?;
-        Ok(resp)
-    }
-
-    // -------------------------------------------------------------------------
-    // Conversions snapshots → VmRow
+    // Note Phase 5.1 : les méthodes de lecture PromQL (query_instant_json,
+    // query_range_json) ont été retirées. Toutes les lectures passent
+    // maintenant exclusivement par le shim redb (cf. api/promql.rs).
     // -------------------------------------------------------------------------
 
     pub fn bms_rows(snap: &BmsSnapshot) -> Vec<VmRow> {

@@ -473,12 +473,11 @@ pub struct MetricsStoreConfig {
     /// Rétention daily (jours).
     #[serde(default = "default_metrics_daily_days")]
     pub daily_retention_days: u32,
-    /// Backend par défaut pour les routes Grafana-facing
-    /// (`/api/v1/query`, `/api/v1/query_range`, `/api/v1/labels`).
-    /// Valeurs : `"vm"` (proxy VictoriaMetrics, comportement historique)
-    /// ou `"redb"` (shim PromQL local). Les routes explicites
-    /// `/api/v1/redb/*` restent toujours redb-backed.
+    /// Backend par défaut — kept for backward compat avec les vieux
+    /// `Config.toml` qui ont encore `default_backend = "..."`. Ignoré
+    /// depuis Phase 5 cleanup : metrics-store est la seule TSDB.
     #[serde(default = "default_metrics_query_backend")]
+    #[allow(dead_code)]
     pub default_backend: String,
 }
 
@@ -489,7 +488,7 @@ fn default_metrics_maintenance_hours() -> u64 { 6 }
 fn default_metrics_raw_days() -> u32 { 30 }
 fn default_metrics_hourly_days() -> u32 { 365 }
 fn default_metrics_daily_days() -> u32 { 5 * 365 }
-fn default_metrics_query_backend() -> String { "vm".into() }
+fn default_metrics_query_backend() -> String { "redb".into() }
 
 impl Default for MetricsStoreConfig {
     fn default() -> Self {
