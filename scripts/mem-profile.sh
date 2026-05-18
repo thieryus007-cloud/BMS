@@ -40,21 +40,28 @@ case "${1:-}" in
 # START — build léger + déploie + active profiling
 # =============================================================================
 start)
-    step "1/6 Vérification dépendance jeprof (apt install libjemalloc-dev)…"
+    step "1/7 Vérification dépendance jeprof (apt install libjemalloc-dev)…"
     if ! command -v jeprof >/dev/null 2>&1; then
-        warn "jeprof absent — installation requise pour l'analyse"
-        echo "  Installe maintenant :  sudo apt install -y libjemalloc-dev"
-        echo "  (non bloquant pour la capture, mais nécessaire au stop)"
-    else
-        info "jeprof disponible : $(jeprof --version 2>&1 | head -1)"
+        error "jeprof manquant — installe AVANT de lancer :  sudo apt install -y libjemalloc-dev"
     fi
+    info "jeprof disponible"
 
-    step "2/6 Build de la variante jeprof (release normal + flag profiling)…"
-    make build-arm-jeprof
+    step "2/7 Build avec profiling jemalloc (release normal, ~3-5 min)…"
+    make build-arm
     [[ -x "$BIN_JEPROF" ]] || error "Binaire absent : $BIN_JEPROF"
-    info "Binaire jeprof compilé"
 
-    step "3/6 Configuration systemd drop-in (env _RJEM_MALLOC_CONF)…"
+    # ── FAIL-FAST #1 : vérifier que le binaire a bien les symboles prof
+    # Sans --enable-prof, ces symboles sont absents et MALLOC_CONF=prof:true
+    # est silencieusement ignoré → on attendrait 1h pour rien.
+    if ! nm "$BIN_JEPROF" 2>/dev/null | grep -q "_rjem_prof_"; then
+        echo "----- DIAGNOSTIC -----"
+        nm "$BIN_JEPROF" 2>/dev/null | grep -c "_rjem_" || true
+        echo "----------------------"
+        error "Le binaire ne contient PAS les symboles _rjem_prof_* → jemalloc compilé sans --enable-prof. Vérifier Cargo.toml : tikv-jemallocator doit avoir features=[\"profiling\"]"
+    fi
+    info "Binaire compilé AVEC profiling jemalloc (_rjem_prof_* présents)"
+
+    step "3/7 Configuration systemd drop-in (env _RJEM_MALLOC_CONF)…"
     sudo mkdir -p "$DROPIN_DIR" "$PROF_DIR"
     sudo chown dalybms:dalybms "$PROF_DIR" 2>/dev/null || true
     sudo rm -f "$PROF_DIR"/heap.* 2>/dev/null || true
@@ -63,23 +70,23 @@ start)
     #   prof:true             — active le sous-système prof
     #   prof_active:true      — démarre l'enregistrement immédiatement
     #   prof_prefix:...       — chemin des fichiers .heap dumpés
-    #   lg_prof_sample:19     — 1 échantillon tous les 512 KB alloués
-    #                           (compromis taille/précision)
+    #   lg_prof_sample:17     — 1 échantillon tous les 128 KB alloués
+    #                           (plus de granularité pour fuite lente)
     #   prof_final:true       — dump automatique au shutdown du process
     sudo tee "$DROPIN_FILE" >/dev/null <<EOF
 [Service]
 TimeoutStopSec=60
-Environment=_RJEM_MALLOC_CONF=prof:true,prof_active:true,prof_prefix:$PROF_PREFIX,lg_prof_sample:19,prof_final:true
+Environment=_RJEM_MALLOC_CONF=prof:true,prof_active:true,prof_prefix:$PROF_PREFIX,lg_prof_sample:17,prof_final:true
 EOF
     sudo systemctl daemon-reload
     info "Drop-in en place : $DROPIN_FILE"
 
-    step "4/6 Arrêt service + déploiement binaire jeprof…"
+    step "4/7 Arrêt service + déploiement binaire…"
     sudo systemctl stop daly-bms
     sudo cp "$BIN_JEPROF" "$INSTALL_BIN"
     info "Binaire déployé"
 
-    step "5/6 Démarrage service…"
+    step "5/7 Démarrage service…"
     sudo systemctl start daly-bms
     sleep 4
     if ! systemctl is-active --quiet daly-bms; then
@@ -88,22 +95,46 @@ EOF
     fi
     info "Service actif"
 
-    step "6/6 Vérification activation du profiling…"
-    sleep 3
-    if sudo ls "$PROF_DIR" 2>/dev/null | grep -q heap; then
-        sudo ls -lh "$PROF_DIR" | head -5
-        info "Premier dump heap détecté → profiling actif"
-    else
-        warn "Pas encore de fichier heap dans $PROF_DIR — attends quelques secondes"
-        echo "       sudo ls -lh $PROF_DIR"
+    # ── FAIL-FAST #2 : aucun warning jemalloc dans les logs
+    step "6/7 Vérification absence d'erreur MALLOC_CONF…"
+    sleep 2
+    if sudo journalctl -u daly-bms --since "30 seconds ago" --no-pager 2>/dev/null | \
+         grep -iE "Invalid conf|jemalloc.*error|Bad system call"; then
+        sudo journalctl -u daly-bms --since "30 seconds ago" --no-pager
+        error "jemalloc rejette la config MALLOC_CONF — voir logs ci-dessus"
+    fi
+    info "Pas d'erreur MALLOC_CONF dans les logs"
+
+    # ── FAIL-FAST #3 : un .heap doit apparaître < 30s
+    step "7/7 Attente du premier dump heap (max 30s)…"
+    for i in $(seq 1 15); do
+        if sudo ls "$PROF_DIR"/heap.*.heap 2>/dev/null | head -1 >/dev/null; then
+            FIRST_HEAP=$(sudo ls -t "$PROF_DIR"/heap.*.heap 2>/dev/null | tail -1)
+            SIZE=$(sudo stat -c%s "$FIRST_HEAP")
+            info "Premier dump détecté après ${i}×2s : $(basename "$FIRST_HEAP") ($SIZE bytes)"
+            break
+        fi
+        sleep 2
+    done
+    if ! sudo ls "$PROF_DIR"/heap.*.heap 2>/dev/null | head -1 >/dev/null; then
+        echo "----- DIAGNOSTIC -----"
+        echo "PROF_DIR = $PROF_DIR"
+        sudo ls -la "$PROF_DIR" 2>&1 || true
+        echo "--- env du process ---"
+        PID=$(pgrep -f 'daly-bms-server$' | head -1)
+        if [[ -n "$PID" ]]; then
+            sudo cat /proc/$PID/environ 2>/dev/null | tr '\0' '\n' | grep -i MALLOC || echo "(pas de var MALLOC dans environ)"
+        fi
+        echo "----------------------"
+        error "Aucun fichier .heap après 30s → profiling pas actif. Ne pas attendre 1h en vain."
     fi
 
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  Profiling DÉMARRÉ — laisser tourner 30-60 min en mode passif${NC}"
+    echo -e "${GREEN}  Profiling VALIDÉ — laisser tourner 30-60 min en mode passif${NC}"
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo "  Surveiller que la fuite se reproduit avec le binaire jeprof :"
+    echo "  Surveiller que la fuite se reproduit (le RSS doit monter linéairement) :"
     echo "    PID=\$(pgrep -f 'daly-bms-server\$' | head -1)"
     echo "    watch -n 60 \"sudo cat /proc/\$PID/status | grep -E '^VmRSS|^RssAnon'\""
     echo ""
@@ -122,7 +153,25 @@ stop)
     step "2/6 Listing des fichiers heap capturés…"
     HEAP_FILES=$(sudo find "$PROF_DIR" -name 'heap.*.heap' 2>/dev/null | sort)
     if [[ -z "$HEAP_FILES" ]]; then
-        error "Aucun fichier .heap dans $PROF_DIR — profiling pas actif ? Voir : sudo journalctl -u daly-bms -n 50"
+        echo "----- DIAGNOSTIC -----"
+        sudo ls -la "$PROF_DIR" 2>&1 || true
+        echo "--- logs récents ---"
+        sudo journalctl -u daly-bms --since "1 hour ago" --no-pager 2>/dev/null | \
+            grep -iE "jemalloc|MALLOC_CONF|prof" | head -10 || echo "(rien)"
+        echo "----------------------"
+        echo ""
+        warn "Profiling n'a JAMAIS écrit de fichier heap pendant le run."
+        warn "→ Relancer 'bash scripts/mem-profile.sh start' qui valide maintenant"
+        warn "  l'activation du profiling AVANT de t'inviter à attendre 1h."
+        # Restaurer quand même le binaire prod pour ne pas laisser le service down
+        warn "Restauration immédiate du binaire prod…"
+        sudo rm -f "$DROPIN_FILE"
+        sudo systemctl daemon-reload
+        if [[ -x "target/aarch64-unknown-linux-gnu/release/daly-bms-server" ]]; then
+            sudo cp "target/aarch64-unknown-linux-gnu/release/daly-bms-server" "$INSTALL_BIN"
+        fi
+        sudo systemctl start daly-bms
+        error "Aucun heap capturé — voir diagnostic ci-dessus"
     fi
     COUNT=$(echo "$HEAP_FILES" | wc -l)
     info "$COUNT fichiers heap capturés"
