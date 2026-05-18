@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
-# Profiling mémoire daly-bms-server via jemalloc (--enable-prof).
+# Profiling mémoire daly-bms-server via heaptrack.
 #
 # Process en 2 commandes :
-#   bash scripts/mem-profile.sh start    # build léger + déploie + active prof
+#   bash scripts/mem-profile.sh start    # build debug + déploie + démarre heaptrack
 #   ... attendre 30-60 min en mode passif ...
-#   bash scripts/mem-profile.sh stop     # dump + arrête + analyse + restaure
+#   bash scripts/mem-profile.sh stop     # arrête + analyse + restaure binaire prod
 #
-# Beaucoup plus léger que dhat :
-# - Build identique à `make build-arm` (pas de debuginfo=2 → ~3-5 min sur Pi5)
-# - ~5% overhead runtime (vs 10x pour dhat)
-# - jemalloc déjà l'allocator de prod, on active juste --enable-prof
+# Pourquoi heaptrack et pas dhat ou jemalloc-prof :
+# - heaptrack s'intègre via LD_PRELOAD au démarrage (pas de modification code)
+# - Outil standard Debian (apt install heaptrack heaptrack-gui)
+# - Overhead modéré (~2-3x), peut tourner 1h sans saturer la RAM
+# - Détection automatique des leaks via `heaptrack_print --print-leaks`
+# - dhat-rs : OOM au link sur Pi5 (debuginfo=2 + instrumentation)
+# - jemalloc prof : feature `profiling` ne s'active pas via target-conditional dep
 #
-# Le profil heap (avec backtraces) atterrit dans ./jeprof-heap.txt.
-# Le diff entre 2 snapshots = la fuite.
+# Le binaire DOIT contenir des symboles (debuginfo) pour avoir des backtraces
+# utiles → on utilise `make build-arm-debug` (profile release-debug) qui a
+# `debug=true, strip=none`. Sans symboles, heaptrack montre juste des adresses.
 
 set -euo pipefail
 
@@ -23,235 +27,189 @@ warn()  { echo -e "${YELLOW}[!!]${NC} $*"; }
 error() { echo -e "${RED}[XX]${NC} $*" >&2; exit 1; }
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BIN_JEPROF="$REPO_DIR/target/aarch64-unknown-linux-gnu/release/daly-bms-server"
+BIN_DEBUG="$REPO_DIR/target/aarch64-unknown-linux-gnu/release-debug/daly-bms-server"
+BIN_PROD="$REPO_DIR/target/aarch64-unknown-linux-gnu/release/daly-bms-server"
 INSTALL_BIN="/usr/local/bin/daly-bms-server"
 DROPIN_DIR="/etc/systemd/system/daly-bms.service.d"
-DROPIN_FILE="$DROPIN_DIR/jeprof.conf"
-PROF_DIR="/var/lib/daly-bms/jeprof"
-PROF_PREFIX="$PROF_DIR/heap"
-OUT_TEXT="$REPO_DIR/jeprof-heap.txt"
-OUT_RAW="$REPO_DIR/jeprof-heap.raw"
+DROPIN_FILE="$DROPIN_DIR/heaptrack.conf"
+TRACE_DIR="/var/lib/daly-bms/heaptrack"
+TRACE_FILE="$TRACE_DIR/daly-bms.gz"
+OUT_LEAKS="$REPO_DIR/heaptrack-leaks.txt"
+OUT_TRACE="$REPO_DIR/heaptrack-trace.gz"
 
 cd "$REPO_DIR"
 
 case "${1:-}" in
 
 # =============================================================================
-# START — build léger + déploie + active profiling
+# START — build debug + deploy + start with heaptrack wrapper
 # =============================================================================
 start)
-    step "1/7 Vérification dépendance jeprof (apt install libjemalloc-dev)…"
-    if ! command -v jeprof >/dev/null 2>&1; then
-        error "jeprof manquant — installe AVANT de lancer :  sudo apt install -y libjemalloc-dev"
+    step "1/7 Vérification dépendance heaptrack…"
+    if ! command -v heaptrack >/dev/null 2>&1; then
+        error "heaptrack manquant — installer :  sudo apt install -y heaptrack"
     fi
-    info "jeprof disponible"
+    HEAPTRACK_BIN="$(command -v heaptrack)"
+    info "heaptrack : $HEAPTRACK_BIN ($(heaptrack --version 2>&1 | head -1))"
 
-    step "2/7 Build avec profiling jemalloc (release normal, ~3-5 min)…"
-    make build-arm
-    [[ -x "$BIN_JEPROF" ]] || error "Binaire absent : $BIN_JEPROF"
+    step "2/7 Build du binaire avec symboles (make build-arm-debug, ~3-5 min)…"
+    make build-arm-debug
+    [[ -x "$BIN_DEBUG" ]] || error "Binaire absent : $BIN_DEBUG"
 
-    # ── FAIL-FAST #1 : vérifier que le binaire a bien les symboles prof
-    # Sans --enable-prof, ces symboles sont absents et MALLOC_CONF=prof:true
-    # est silencieusement ignoré → on attendrait 1h pour rien.
-    if ! nm "$BIN_JEPROF" 2>/dev/null | grep -q "_rjem_prof_"; then
-        echo "----- DIAGNOSTIC -----"
-        nm "$BIN_JEPROF" 2>/dev/null | grep -c "_rjem_" || true
-        echo "----------------------"
-        error "Le binaire ne contient PAS les symboles _rjem_prof_* → jemalloc compilé sans --enable-prof. Vérifier Cargo.toml : tikv-jemallocator doit avoir features=[\"profiling\"]"
+    # FAIL-FAST : vérifier que les symboles sont présents (sans symboles
+    # heaptrack montre des adresses inutilisables)
+    if ! nm "$BIN_DEBUG" 2>/dev/null | head -5 | grep -q "."; then
+        error "Le binaire n'a pas de symboles — vérifier profile release-debug (debug=true, strip=none)"
     fi
-    info "Binaire compilé AVEC profiling jemalloc (_rjem_prof_* présents)"
+    SYM_COUNT=$(nm "$BIN_DEBUG" 2>/dev/null | wc -l)
+    info "Binaire compilé avec $SYM_COUNT symboles"
 
-    step "3/7 Configuration systemd drop-in (env _RJEM_MALLOC_CONF)…"
-    sudo mkdir -p "$DROPIN_DIR" "$PROF_DIR"
-    sudo chown dalybms:dalybms "$PROF_DIR" 2>/dev/null || true
-    sudo rm -f "$PROF_DIR"/heap.* 2>/dev/null || true
+    step "3/7 Préparation du dossier de trace…"
+    sudo mkdir -p "$DROPIN_DIR" "$TRACE_DIR"
+    sudo chown dalybms:dalybms "$TRACE_DIR" 2>/dev/null || true
+    sudo rm -f "$TRACE_DIR"/*.gz 2>/dev/null || true
+    info "Dir trace : $TRACE_DIR"
 
-    # Config jemalloc :
-    #   prof:true             — active le sous-système prof
-    #   prof_active:true      — démarre l'enregistrement immédiatement
-    #   prof_prefix:...       — chemin des fichiers .heap dumpés
-    #   lg_prof_sample:17     — 1 échantillon tous les 128 KB alloués
-    #                           (plus de granularité pour fuite lente)
-    #   prof_final:true       — dump automatique au shutdown du process
+    step "4/7 Configuration systemd drop-in (wrapper heaptrack)…"
+    # heaptrack -o <output> <command> : démarre command sous heaptrack
+    # qui injecte LD_PRELOAD automatiquement. Le wrapper retourne quand le
+    # process enfant termine → systemd voit le wrapper sortir et c'est OK.
     sudo tee "$DROPIN_FILE" >/dev/null <<EOF
 [Service]
 TimeoutStopSec=60
-Environment=_RJEM_MALLOC_CONF=prof:true,prof_active:true,prof_prefix:$PROF_PREFIX,lg_prof_sample:17,prof_final:true
+# Heaptrack capture les allocations et écrit dans /var/lib/daly-bms/heaptrack/
+# Le service tourne ~2-3x plus lent — DIAGNOSTIC UNIQUEMENT.
+ExecStart=
+ExecStart=$HEAPTRACK_BIN -o $TRACE_FILE $INSTALL_BIN
 EOF
     sudo systemctl daemon-reload
     info "Drop-in en place : $DROPIN_FILE"
 
-    step "4/7 Arrêt service + déploiement binaire…"
+    step "5/7 Arrêt service + déploiement binaire debug…"
     sudo systemctl stop daly-bms
-    sudo cp "$BIN_JEPROF" "$INSTALL_BIN"
-    info "Binaire déployé"
+    sudo cp "$BIN_DEBUG" "$INSTALL_BIN"
+    info "Binaire deployé"
 
-    step "5/7 Démarrage service…"
+    step "6/7 Démarrage service sous heaptrack…"
     sudo systemctl start daly-bms
-    sleep 4
+    sleep 5
     if ! systemctl is-active --quiet daly-bms; then
         sudo journalctl -u daly-bms -n 30 --no-pager
         error "Service ne démarre pas — voir logs ci-dessus"
     fi
     info "Service actif"
 
-    # ── FAIL-FAST #2 : aucun warning jemalloc dans les logs
-    step "6/7 Vérification absence d'erreur MALLOC_CONF…"
-    sleep 2
-    if sudo journalctl -u daly-bms --since "30 seconds ago" --no-pager 2>/dev/null | \
-         grep -iE "Invalid conf|jemalloc.*error|Bad system call"; then
-        sudo journalctl -u daly-bms --since "30 seconds ago" --no-pager
-        error "jemalloc rejette la config MALLOC_CONF — voir logs ci-dessus"
-    fi
-    info "Pas d'erreur MALLOC_CONF dans les logs"
-
-    # ── FAIL-FAST #3 : un .heap doit apparaître < 30s
-    step "7/7 Attente du premier dump heap (max 30s)…"
-    for i in $(seq 1 15); do
-        if sudo ls "$PROF_DIR"/heap.*.heap 2>/dev/null | head -1 >/dev/null; then
-            FIRST_HEAP=$(sudo ls -t "$PROF_DIR"/heap.*.heap 2>/dev/null | tail -1)
-            SIZE=$(sudo stat -c%s "$FIRST_HEAP")
-            info "Premier dump détecté après ${i}×2s : $(basename "$FIRST_HEAP") ($SIZE bytes)"
+    # FAIL-FAST : un fichier trace doit apparaître < 15s
+    step "7/7 Vérification de l'apparition du fichier de trace (max 15s)…"
+    for i in $(seq 1 8); do
+        if sudo ls "$TRACE_DIR"/*.gz 2>/dev/null | head -1 >/dev/null; then
+            FILE=$(sudo ls -t "$TRACE_DIR"/*.gz 2>/dev/null | head -1)
+            SIZE=$(sudo stat -c%s "$FILE")
+            info "Trace détectée après ${i}×2s : $(basename "$FILE") ($SIZE bytes)"
             break
         fi
         sleep 2
     done
-    if ! sudo ls "$PROF_DIR"/heap.*.heap 2>/dev/null | head -1 >/dev/null; then
+    if ! sudo ls "$TRACE_DIR"/*.gz 2>/dev/null | head -1 >/dev/null; then
         echo "----- DIAGNOSTIC -----"
-        echo "PROF_DIR = $PROF_DIR"
-        sudo ls -la "$PROF_DIR" 2>&1 || true
-        echo "--- env du process ---"
-        PID=$(pgrep -f 'daly-bms-server$' | head -1)
-        if [[ -n "$PID" ]]; then
-            sudo cat /proc/$PID/environ 2>/dev/null | tr '\0' '\n' | grep -i MALLOC || echo "(pas de var MALLOC dans environ)"
-        fi
+        sudo ls -la "$TRACE_DIR" 2>&1 || true
+        sudo journalctl -u daly-bms --since "30 seconds ago" --no-pager | tail -20
         echo "----------------------"
-        error "Aucun fichier .heap après 30s → profiling pas actif. Ne pas attendre 1h en vain."
+        error "Aucun fichier trace dans $TRACE_DIR après 15s"
     fi
 
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  Profiling VALIDÉ — laisser tourner 30-60 min en mode passif${NC}"
+    echo -e "${GREEN}  Heaptrack VALIDÉ — laisser tourner 30-60 min en mode passif${NC}"
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    echo "  Surveiller que la fuite se reproduit (le RSS doit monter linéairement) :"
+    echo "  Surveiller que la fuite se reproduit :"
     echo "    PID=\$(pgrep -f 'daly-bms-server\$' | head -1)"
     echo "    watch -n 60 \"sudo cat /proc/\$PID/status | grep -E '^VmRSS|^RssAnon'\""
     echo ""
-    echo "  Quand RSS a monté de 5-10 MB, lancer :"
+    echo "  Quand RSS a monté de 5-10 MB :"
     echo "    bash scripts/mem-profile.sh stop"
     ;;
 
 # =============================================================================
-# STOP — dump final, analyse, restauration binaire prod
+# STOP — stop service (flushes trace), analyze leaks, restore prod
 # =============================================================================
 stop)
-    step "1/6 Trigger d'un dump final via systemctl stop (prof_final:true)…"
+    step "1/5 Arrêt service (heaptrack flushe la trace)…"
     sudo systemctl stop daly-bms
-    info "Service arrêté → dump heap final écrit"
+    sleep 2
+    info "Service arrêté"
 
-    step "2/6 Listing des fichiers heap capturés…"
-    HEAP_FILES=$(sudo find "$PROF_DIR" -name 'heap.*.heap' 2>/dev/null | sort)
-    if [[ -z "$HEAP_FILES" ]]; then
+    step "2/5 Récupération de la trace heaptrack…"
+    TRACE_GZ=$(sudo ls -t "$TRACE_DIR"/*.gz 2>/dev/null | head -1 || true)
+    if [[ -z "$TRACE_GZ" ]]; then
         echo "----- DIAGNOSTIC -----"
-        sudo ls -la "$PROF_DIR" 2>&1 || true
-        echo "--- logs récents ---"
-        sudo journalctl -u daly-bms --since "1 hour ago" --no-pager 2>/dev/null | \
-            grep -iE "jemalloc|MALLOC_CONF|prof" | head -10 || echo "(rien)"
+        sudo ls -la "$TRACE_DIR" 2>&1 || true
         echo "----------------------"
-        echo ""
-        warn "Profiling n'a JAMAIS écrit de fichier heap pendant le run."
-        warn "→ Relancer 'bash scripts/mem-profile.sh start' qui valide maintenant"
-        warn "  l'activation du profiling AVANT de t'inviter à attendre 1h."
-        # Restaurer quand même le binaire prod pour ne pas laisser le service down
-        warn "Restauration immédiate du binaire prod…"
+        warn "Aucune trace heaptrack trouvée — restauration binaire prod"
         sudo rm -f "$DROPIN_FILE"
         sudo systemctl daemon-reload
-        if [[ -x "target/aarch64-unknown-linux-gnu/release/daly-bms-server" ]]; then
-            sudo cp "target/aarch64-unknown-linux-gnu/release/daly-bms-server" "$INSTALL_BIN"
-        fi
+        [[ -x "$BIN_PROD" ]] && sudo cp "$BIN_PROD" "$INSTALL_BIN"
         sudo systemctl start daly-bms
-        error "Aucun heap capturé — voir diagnostic ci-dessus"
+        error "Pas de trace → relancer 'mem-profile.sh start'"
     fi
-    COUNT=$(echo "$HEAP_FILES" | wc -l)
-    info "$COUNT fichiers heap capturés"
-    echo "$HEAP_FILES" | xargs sudo ls -lh
+    sudo cp "$TRACE_GZ" "$OUT_TRACE"
+    sudo chown "$USER:$USER" "$OUT_TRACE"
+    SIZE=$(du -h "$OUT_TRACE" | cut -f1)
+    info "Trace récupérée : $OUT_TRACE ($SIZE)"
 
-    step "3/6 Récupération du heap final + dépendance jeprof…"
-    LAST_HEAP=$(echo "$HEAP_FILES" | tail -1)
-    FIRST_HEAP=$(echo "$HEAP_FILES" | head -1)
-    sudo cp "$LAST_HEAP" "$OUT_RAW"
-    sudo chown "$USER:$USER" "$OUT_RAW"
-    info "Heap final récupéré : $OUT_RAW"
+    step "3/5 Analyse des leaks (heaptrack_print --print-leaks)…"
+    heaptrack_print --print-leaks "$OUT_TRACE" > "$OUT_LEAKS" 2>/dev/null || \
+        heaptrack_print "$OUT_TRACE" > "$OUT_LEAKS"
+    info "Rapport : $OUT_LEAKS"
 
-    if ! command -v jeprof >/dev/null 2>&1; then
-        warn "jeprof manquant → analyse impossible en local"
-        echo "       sudo apt install -y libjemalloc-dev"
-        echo "       puis : jeprof --text --base=$FIRST_HEAP $INSTALL_BIN $LAST_HEAP"
-    else
-        step "4/6 Génération du rapport texte (diff first → last)…"
-        if [[ "$FIRST_HEAP" == "$LAST_HEAP" ]]; then
-            warn "Un seul snapshot disponible — diff impossible, sortie absolue"
-            sudo jeprof --text --show_bytes --lines "$INSTALL_BIN" "$LAST_HEAP" > "$OUT_TEXT" 2>/dev/null || \
-                sudo jeprof --text --show_bytes "$INSTALL_BIN" "$LAST_HEAP" > "$OUT_TEXT"
-        else
-            # --base = ce qu'on soustrait du final → ne reste QUE la fuite
-            sudo jeprof --text --show_bytes --lines --base="$FIRST_HEAP" \
-                "$INSTALL_BIN" "$LAST_HEAP" > "$OUT_TEXT" 2>/dev/null || \
-            sudo jeprof --text --show_bytes --base="$FIRST_HEAP" \
-                "$INSTALL_BIN" "$LAST_HEAP" > "$OUT_TEXT"
-        fi
-        sudo chown "$USER:$USER" "$OUT_TEXT"
-        info "Rapport généré : $OUT_TEXT"
+    step "4/5 Restauration binaire prod (sans heaptrack)…"
+    if [[ ! -x "$BIN_PROD" ]]; then
+        warn "Binaire prod absent — rebuild en cours…"
+        make build-arm
     fi
-
-    step "5/6 Build + restauration du binaire prod (sans jeprof)…"
-    make build-arm
     sudo rm -f "$DROPIN_FILE"
     sudo systemctl daemon-reload
-    sudo cp "target/aarch64-unknown-linux-gnu/release/daly-bms-server" "$INSTALL_BIN"
+    sudo cp "$BIN_PROD" "$INSTALL_BIN"
     sudo systemctl start daly-bms
     sleep 3
     if systemctl is-active --quiet daly-bms; then
         info "Service prod redémarré normalement"
     else
-        warn "Service ne redémarre pas — voir : sudo journalctl -u daly-bms -n 30"
+        warn "Service ne démarre pas — voir : sudo journalctl -u daly-bms -n 30"
     fi
 
-    step "6/6 Résultats"
+    step "5/5 Top des allocations qui FUITENT"
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  Profil capturé${NC}"
+    echo -e "${GREEN}  Heaptrack analyse — Top leaks${NC}"
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    if [[ -f "$OUT_TEXT" ]]; then
-        echo "  Top 20 allocations qui FUITENT (delta first → last) :"
-        echo ""
-        head -40 "$OUT_TEXT" | sed 's/^/    /'
-        echo ""
-        echo "  Rapport complet : $OUT_TEXT"
-    fi
-    echo "  Heap brut       : $OUT_RAW"
+    # Section "MOST CALLS TO ALLOCATION FUNCTIONS" + "PEAK MEMORY CONSUMERS" +
+    # "MEMORY LEAKED" du rapport heaptrack_print
+    grep -A 40 -E "MEMORY LEAKED|PEAK MEMORY CONSUMERS" "$OUT_LEAKS" | head -100 || head -50 "$OUT_LEAKS"
     echo ""
-    echo "  Pour visualisation graphique :"
-    echo "    jeprof --web --base=$FIRST_HEAP $INSTALL_BIN $LAST_HEAP"
-    echo "    jeprof --svg --base=$FIRST_HEAP $INSTALL_BIN $LAST_HEAP > leak.svg"
+    echo "  Rapport complet : $OUT_LEAKS"
+    echo "  Trace brute     : $OUT_TRACE"
+    echo ""
+    echo "  Visualisation graphique (GUI) :"
+    echo "    sudo apt install heaptrack-gui"
+    echo "    heaptrack_gui $OUT_TRACE"
     ;;
 
 # =============================================================================
 *)
     cat <<EOF
 Usage:
-  bash scripts/mem-profile.sh start    # build léger + déploie + démarre profiling
-  bash scripts/mem-profile.sh stop     # dump + analyse + restaure binaire prod
+  bash scripts/mem-profile.sh start    # build debug + déploie + démarre heaptrack
+  bash scripts/mem-profile.sh stop     # arrête + analyse leaks + restaure prod
 
 Process complet :
-  1. bash scripts/mem-profile.sh start
-  2. Attendre 30-60 min en mode passif (vérifier que RSS monte)
-  3. bash scripts/mem-profile.sh stop
-  4. Le rapport ./jeprof-heap.txt liste les allocations qui fuitent
-
-Prérequis : sudo apt install -y libjemalloc-dev   (pour jeprof)
+  1. sudo apt install -y heaptrack   (une fois)
+  2. bash scripts/mem-profile.sh start
+  3. Attendre 30-60 min en mode passif (vérifier que RSS monte)
+  4. bash scripts/mem-profile.sh stop
+  5. Lire ./heaptrack-leaks.txt — top des leaks avec backtraces
 EOF
     exit 1
     ;;

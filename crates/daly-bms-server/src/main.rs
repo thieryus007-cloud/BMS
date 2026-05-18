@@ -29,17 +29,9 @@ mod monitor;
 // historique (+15-20 Mo par burst, non libérés). malloc_trim manuel
 // libérait 18 Mo confirmant le diagnostic. jemalloc rend les pages au
 // kernel agressivement → RSS retombe au baseline après chaque burst.
-//
-// En mode profiling heap (--features dhat-heap), on remplace jemalloc par
-// dhat::Alloc pour tracer toutes les allocations et identifier la backtrace
-// d'une fuite. Mutuellement exclusif avec jemalloc.
-#[cfg(all(not(target_env = "msvc"), not(feature = "dhat-heap")))]
+#[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
-#[cfg(feature = "dhat-heap")]
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use crate::bridges::{alerts, mqtt};
 use crate::config::AppConfig;
@@ -168,26 +160,6 @@ fn cleanup_old_logs(dir: &str, keep_days: u64) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Démarre le profiler heap dhat AVANT toute allocation. Le guard est
-    // retenu jusqu'à la fin de main() — à l'arrêt il flushe le fichier
-    // dans le chemin spécifié. Pour un arrêt propre via systemd :
-    // `sudo systemctl stop daly-bms` → SIGTERM → main retourne → guard
-    // drop → fichier écrit.
-    //
-    // Chemin déterministe via DHAT_OUTPUT (env) ou fallback /var/lib/daly-bms
-    // (StateDirectory créé par systemd, owned par user dalybms).
-    // Le défaut dhat (CWD = "/") ne fonctionnerait pas — service tourne en
-    // user dalybms non-root sans WorkingDirectory.
-    #[cfg(feature = "dhat-heap")]
-    let _dhat_profiler = {
-        let path = std::env::var("DHAT_OUTPUT")
-            .unwrap_or_else(|_| "/var/lib/daly-bms/dhat-heap.json".to_string());
-        eprintln!("[dhat] profiling actif → {}", path);
-        dhat::Profiler::builder()
-            .file_name(&path)
-            .build()
-    };
-
     let args = ServerArgs::parse();
 
     // ── Configuration ──────────────────────────────────────────────────────────
