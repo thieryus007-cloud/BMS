@@ -138,12 +138,9 @@ pub async fn get_panel_data(
         }
     };
 
-    let vm = match &state.vm {
-        Some(v) => v.clone(),
-        None => {
-            return Json(json!({"ok": false, "reason": "vm_disabled"}));
-        }
-    };
+    if state.vm.is_none() && state.metrics_store.is_none() {
+        return Json(json!({"ok": false, "reason": "no_query_backend"}));
+    }
 
     let now_ms = Utc::now().timestamp_millis();
     let to_ms   = q.to.unwrap_or(now_ms);
@@ -166,14 +163,16 @@ pub async fn get_panel_data(
         }));
     }
 
-    // Exécute toutes les queries en parallèle
+    // Exécute toutes les queries en parallèle (dispatcher VM/redb)
     let futures = panel.queries.iter().map(|q| {
-        let vm = vm.clone();
+        let state_ref = state.clone();
         let expr = q.expr.clone();
         let ref_id = q.ref_id.clone();
         let legend = q.legend.clone();
         async move {
-            let result = vm.query_range_json(&expr, from_ms, to_ms, step_ms).await;
+            let result = state_ref
+                .dispatched_query_range(&expr, from_ms, to_ms, step_ms)
+                .await;
             (ref_id, legend, expr, result)
         }
     });

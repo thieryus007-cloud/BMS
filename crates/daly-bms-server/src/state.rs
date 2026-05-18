@@ -478,6 +478,137 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Backend de lecture courant pour les routes Grafana-facing et internes.
+    pub fn query_backend(&self) -> &str {
+        if self.config.metrics_store.default_backend.eq_ignore_ascii_case("redb") {
+            "redb"
+        } else {
+            "vm"
+        }
+    }
+
+    /// Exécute une requête PromQL sur plage temporelle, dispatchée entre
+    /// VictoriaMetrics (proxy HTTP historique) et `metrics-store` (shim
+    /// PromQL local redb) selon `config.metrics_store.default_backend`.
+    /// Retourne le format JSON Prometheus standard (compatible avec tous
+    /// les callers existants qui parsaient `vm.query_range_json`).
+    pub async fn dispatched_query_range(
+        &self,
+        query: &str,
+        start_ms: i64,
+        end_ms: i64,
+        step_ms: i64,
+    ) -> anyhow::Result<serde_json::Value> {
+        if self.query_backend() == "redb" {
+            self.redb_query_range_json(query, start_ms, end_ms, step_ms)
+        } else {
+            let vm = self
+                .vm
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("VictoriaMetrics not configured"))?;
+            vm.query_range_json(query, start_ms, end_ms, step_ms).await
+        }
+    }
+
+    /// Variante instant — symétrique de [`dispatched_query_range`].
+    /// Pas de caller actuel ; sera utilisé pour simplifier `api/promql.rs`
+    /// pendant la Phase 4 cleanup.
+    #[allow(dead_code)]
+    pub async fn dispatched_query_instant(
+        &self,
+        query: &str,
+        time_ms: i64,
+    ) -> anyhow::Result<serde_json::Value> {
+        if self.query_backend() == "redb" {
+            self.redb_query_instant_json(query, time_ms)
+        } else {
+            let vm = self
+                .vm
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("VictoriaMetrics not configured"))?;
+            vm.query_instant_json(query, time_ms).await
+        }
+    }
+
+    fn redb_query_range_json(
+        &self,
+        query: &str,
+        start_ms: i64,
+        end_ms: i64,
+        step_ms: i64,
+    ) -> anyhow::Result<serde_json::Value> {
+        use metrics_store::promql::{parse_and_validate, Evaluator};
+        let store = self
+            .metrics_store
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("metrics-store backend not configured"))?;
+        let expr = parse_and_validate(query)
+            .map_err(|e| anyhow::anyhow!("PromQL: {}", e.message()))?;
+        let reader = store.reader();
+        let ev = Evaluator::new(&reader);
+        let series = ev
+            .eval_range(&expr, start_ms, end_ms, step_ms)
+            .map_err(|e| anyhow::anyhow!("PromQL exec: {}", e.message()))?;
+        let result: Vec<serde_json::Value> = series
+            .into_iter()
+            .map(|s| {
+                let values: Vec<serde_json::Value> = s
+                    .samples
+                    .into_iter()
+                    .map(|(ts, v)| serde_json::json!([ts as f64 / 1000.0, fmt_val(v)]))
+                    .collect();
+                serde_json::json!({ "metric": s.labels, "values": values })
+            })
+            .collect();
+        Ok(serde_json::json!({
+            "status": "success",
+            "data": { "resultType": "matrix", "result": result },
+        }))
+    }
+
+    #[allow(dead_code)]
+    fn redb_query_instant_json(
+        &self,
+        query: &str,
+        time_ms: i64,
+    ) -> anyhow::Result<serde_json::Value> {
+        use metrics_store::promql::{parse_and_validate, Evaluator};
+        let store = self
+            .metrics_store
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("metrics-store backend not configured"))?;
+        let expr = parse_and_validate(query)
+            .map_err(|e| anyhow::anyhow!("PromQL: {}", e.message()))?;
+        let reader = store.reader();
+        let ev = Evaluator::new(&reader);
+        let samples = ev
+            .eval_instant(&expr, time_ms)
+            .map_err(|e| anyhow::anyhow!("PromQL exec: {}", e.message()))?;
+        let result: Vec<serde_json::Value> = samples
+            .into_iter()
+            .map(|s| serde_json::json!({
+                "metric": s.labels,
+                "value": [time_ms as f64 / 1000.0, fmt_val(s.value)],
+            }))
+            .collect();
+        Ok(serde_json::json!({
+            "status": "success",
+            "data": { "resultType": "vector", "result": result },
+        }))
+    }
+}
+
+fn fmt_val(v: f64) -> String {
+    if v.is_nan() {
+        "NaN".into()
+    } else if v.is_infinite() {
+        if v > 0.0 { "+Inf".into() } else { "-Inf".into() }
+    } else {
+        v.to_string()
+    }
+}
+
+impl AppState {
     pub fn new(
         config: AppConfig,
         log_buffer: LogBuffer,
