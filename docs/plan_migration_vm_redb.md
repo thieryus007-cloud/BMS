@@ -410,6 +410,27 @@ visuellement, on peut sauter cette étape.
 - 0 dashboard cassé, 0 alerte fausse-positive
 - Taille redb prédictible (< 200 Mo après 30 j)
 
+**Avant retrait VM — migrer les routes internes** (audit 17 mai 2026) :
+Les routes ci-dessous appellent directement `vm.query_range_json(...)` /
+`vm.query_instant_json(...)` sans passer par le dispatcher `default_backend`.
+Le dashboard custom interne `/dashboard/history` les utilise — si on coupe
+VM sans les migrer, ce dashboard se casse en même temps.
+
+| Route | Fichier | Source actuelle |
+|---|---|---|
+| `GET /api/v1/chart/history` | `api/chart.rs` | `vm.query_range_json` |
+| `GET /api/v1/chart/edge-history` | `api/chart.rs` | idem |
+| `GET /api/v1/history/energy` | `api/history.rs` | idem |
+| `GET /api/v1/bms/:id/history` | `api/bms.rs` | idem |
+| `GET /api/v1/bms/:id/history/summary` | `api/bms.rs` | idem |
+| `GET /api/v1/et112/:addr/history` | `api/et112.rs` | à vérifier |
+| `GET /api/v1/tasmota/:id/history` | `api/tasmota.rs` | à vérifier |
+
+Action : un commit pré-Phase 4 qui factorise un helper
+`AppState::query_range_dispatcher(query, start, end, step) -> Value` lisant
+`config.metrics_store.default_backend`, et remplace tous les appels directs
+ci-dessus par ce helper. Permet ensuite de couper VM sans rien casser.
+
 ```bash
 # 1. Arrêt VM
 sudo systemctl stop victoriametrics

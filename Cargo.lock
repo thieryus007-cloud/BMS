@@ -1824,6 +1824,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "clap",
  "criterion",
  "parking_lot",
  "promql-parser",
