@@ -295,6 +295,8 @@ ou si un onglet navigateur reste ouvert quelque part (PC, mobile, tablette),
 il y a une **activité HTTP continue** invisible mais qui peut alimenter la
 fuite. À vérifier **AVANT** d'imputer la fuite à un "mode passif".
 
+### ce qui a été verifié: la navigation dans la page historique et le changement de l interval provoque une hausse significative de la RAM et cela reste persistant
+
 ### 11.1 — Vérifier si quelqu'un tape sur l'API pendant la mesure
 
 ```bash
