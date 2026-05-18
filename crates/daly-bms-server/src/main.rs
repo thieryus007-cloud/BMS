@@ -24,6 +24,16 @@ mod dashboard;
 mod dashboards;
 mod monitor;
 
+// Allocator jemalloc à la place de glibc malloc.
+// Cf. commit accompagnant : observation 18 mai 2026 d'une fragmentation
+// heap qui faisait croître le RSS à chaque utilisation du dashboard
+// historique (+15-20 Mo par burst, non libérés). malloc_trim manuel
+// libérait 18 Mo confirmant le diagnostic. jemalloc rend les pages au
+// kernel agressivement → RSS retombe au baseline après chaque burst.
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 use crate::bridges::{alerts, mqtt};
 use crate::config::AppConfig;
 use crate::state::{AppState, LogBuffer, LogEntry};
