@@ -19,6 +19,13 @@ Environment=DALY_CONFIG=/etc/daly-bms/config.toml
 # Niveau de log (trace, debug, info, warn, error)
 Environment=RUST_LOG=info
 
+# Cap les arenas mémoire glibc à 2 (défaut = N_CPU × 8 ≈ 32 sur Pi5).
+# Sans ce cap, chaque thread tokio worker (~5 threads) alloue son propre
+# arena ~1 Mo, ce qui peut gonfler le RSS de 30-40 Mo sans bénéfice
+# réel pour notre workload (single-process, allocations en burst).
+# Cf. https://www.gnu.org/software/libc/manual/html_node/Memory-Allocation-Tunables.html
+Environment=MALLOC_ARENA_MAX=2
+
 ExecStart=/usr/local/bin/daly-bms-server
 
 # Redémarrage automatique en cas de crash
