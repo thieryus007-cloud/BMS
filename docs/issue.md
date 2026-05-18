@@ -1,182 +1,184 @@
- Je vais examiner le code source de ce projet Rust pour identifier les fuites mémoire potentielles.
- L'URL retournée est la page HTML de GitHub. Je vais chercher les fichiers source directement
-  Je vais essayer d'accéder directement aux fichiers source du repository.  
-   Je dois examiner les modules critiques qui pourraient causer des fuites mémoire : `state.rs`, `api.rs`, `bridges/mqtt.rs`, `monitor.rs`, et le module `daly-bms-core`.    
-     Je dois examiner les modules `console.rs`, `vm_client.rs`, et le crate `daly-bms-core` pour identifier d'autres sources potentielles de fuites.    
-      Maintenant je vais examiner les fichiers API pour voir les handlers WebSocket et les routes HTTP qui pourraient accumuler des données.      
-        Je dois examiner le fichier WebSocket BMS pour voir comment les connexions sont gérées.         
-J'ai maintenant suffisamment d'informations pour analyser la fuite mémoire. Voici mon diagnostic :
+OK, croissance passive +13 Mo/heure SANS activité = **vraie fuite mémoire**, pas de la fragmentation. À fonds nouveaux dans une session fraîche. Voici le prompt :
 
 ---
 
-## 🔴 Diagnostic : Fuite mémoire dans `daly-bms-server`
+# 🐛 Investigation fuite mémoire daly-bms-server (post-Phase 5)
 
-### Cause principale identifiée : **Accumulation de tâches `tokio::spawn` orphelines**
+## Contexte projet
 
-#### Localisation : `main.rs`, lignes ~320-450
+Projet **Daly-BMS-Rust** (repo `thieryus007-cloud/Daly-BMS-Rust`, branche `claude/migration-vm-redb-kqUG8`). Serveur Rust qui :
+- Polle 2 BMS Daly + 3 compteurs ET112 + 1 capteur PRALRAN via RS485
+- Reçoit MQTT Venus/Tasmota/Shelly
+- Expose API REST/WebSocket sur :8080
+- Sert un dashboard custom HTML (`/dashboard/history`) ET fait office de datasource Prometheus pour Grafana
+- Stocke les séries temporelles dans une base **redb** locale (crate maison `metrics-store`)
+- Tourne en service systemd sur Raspberry Pi5 (aarch64, 8 Go RAM)
 
-Le problème majeur se situe dans la boucle de polling et les callbacks de snapshot. Voici le pattern problématique :
+VictoriaMetrics a été retiré récemment (Phase 5 cleanup) — `redb` est désormais la seule TSDB.
 
-```rust
-// Dans main.rs — BMS polling
-tokio::spawn(async move {
-    poll_loop(
-        manager,
-        poll_cfg,
-        move |snap| {
-            let s = state_poll.clone();
-            let addr = snap.address;
-            let name = snap.name.clone();
-            tokio::spawn(async move {   // ← 🚨 SPAWN ORPHELIN #1
-                s.record_rs485_success(addr, "BMS", &name).await;
-                s.on_snapshot(snap).await;  // ← appelle console_bus.emit() + ws_tx.send()
-            });
-        },
-        move |addr, kind, msg| {
-            let s = state_err.clone();
-            let name = bms_names.get(&addr).cloned()...;
-            tokio::spawn(async move {   // ← 🚨 SPAWN ORPHELIN #2
-                s.record_rs485_error(addr, "BMS", &name, &err_msg).await;
-            });
-        },
-    ).await;
-});
+## Stack pertinente
+- Rust 1.88, tokio multi-thread runtime
+- **jemalloc** via `tikv-jemallocator = "0.6"` avec config agressive : `MALLOC_ARENA_MAX=2` + `_RJEM_MALLOC_CONF=dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true`
+- redb 4.1 (TSDB embarquée, cache configurable via `[metrics_store].cache_mb`)
+- axum 0.7 (HTTP), reqwest, rumqttc, askama (templates)
+
+## Problème EXACT à résoudre
+
+Le RSS de `daly-bms-server` **croît passivement, sans aucune activité externe** :
+
+```
+À T+0   (boot)              : RSS =  95 Mo  RssAnon =  85 Mo  VmPeak = 423 Mo
+Après 5 bursts curl + 30 s  : RSS =  95 Mo  RssAnon =  85 Mo  VmPeak = 423 Mo (jemalloc OK)
+Après 1 h SANS activité     : RSS = 108 Mo  RssAnon =  98 Mo  VmPeak = 438 Mo
 ```
 
-**Le même pattern se répète pour ET112, PRALRAN, ATS, Tasmota, Shelly** — à chaque snapshot ou erreur, une nouvelle tâche est spawnée sans aucune limite.
+**Rate : ~13 Mo/heure sans toucher au service**. Sur 24 h = +312 Mo. C'est inacceptable pour un Pi5 de prod sur 5 ans.
 
-### Pourquoi c'est une fuite :
+Le RSS *post-burst* est stable (jemalloc rend bien les pages → c'est PAS de la fragmentation). Mais quelque chose alloue **régulièrement et de façon retenue** en arrière-plan.
 
-1. **Pas de `JoinHandle` conservé** — les `tokio::spawn` retournent des `JoinHandle` qui sont immédiatement dropées. Tokio garde la tâche en mémoire jusqu'à completion, mais sans handle, rien ne la nettoie si elle bloque.
+## Ce qui a déjà été investigué (à ne pas refaire)
 
-2. **Back-pressure nulle** — Si VM est lent ou indisponible, `vm.write_rows(rows).await` peut bloquer longtemps. Pendant ce temps, de nouvelles tâches s'accumulent dans la queue d'exécution Tokio.
+| Hypothèse | Verdict |
+|---|---|
+| Pool tokio blocking explosif | ❌ Threads = 8, stable |
+| Cascade VM writes (avant cleanup) | ✅ corrigé (VM retiré complètement) |
+| Fragmentation glibc | ✅ corrigé (jemalloc tuned) |
+| Cache redb mmap | ❌ RssFile = 10 Mo, pas le coupable |
+| Broadcast channels saturés | ❌ ring buffers fixes (ws_tx=128, console=512) |
+| Spawn orphelins tokio | ❌ tokio nettoie automatiquement |
+| `cache_mb` trop haut | À VOIR — vérifier la valeur dans `/etc/daly-bms/config.toml` |
 
-3. **`console_bus.emit()` avec broadcast saturé** — dans `console.rs` :
-   ```rust
-   pub fn emit(&self, ev: ConsoleEvent) {
-       let _ = self.tx.send(Arc::new(ev));  // ← drop silencieux si buffer plein
-   }
-   ```
-   Le `let _ =` masque les erreurs `Lagged` du broadcast. Si aucun subscriber WebSocket console n'est connecté, les 512 messages s'accumulent... mais le `Arc` des événements reste en mémoire jusqu'à ce que le channel soit drainé.
-
-4. **WebSocket BMS (`ws_tx.send`)** — dans `state.rs` :
-   ```rust
-   let _ = self.ws_tx.send(Arc::new(latest));  // ← drop silencieux si pas de subscriber
-   ```
-   Idem : si aucun client WebSocket n'est connecté, le broadcast channel de 128 slots se remplit, et les `Arc<BmsSnapshot>` (qui contiennent des `VecDeque`, des `BTreeMap`, etc.) restent en mémoire.
-
----
-
-### 🔶 Cause secondaire : `metrics_store` dual-write
-
-Dans `vm_client.rs` :
-```rust
-if let Some(w) = &self.metrics_store {
-    let mut dropped = 0_usize;
-    for row in &rows {
-        if w.try_write(row.to_sample()).is_err() {
-            dropped += 1;  // ← samples perdus mais allocations déjà faites
-        }
-    }
-}
+Variables d'env actuellement actives (confirmées par `systemctl show daly-bms -p Environment`) :
 ```
-Le `try_write` échoue si la queue est pleine, mais les `Sample` (qui clonent les strings de labels) sont alloués avant le test. Avec le polling à 1s et 10+ métriques par BMS, ça fait des milliers d'allocations string/jour.
-
----
-
-### 🔶 Cause tertiaire : `reqwest::Client` sans pool limité
-
-Dans `vm_client.rs` :
-```rust
-let http = Client::builder()
-    .timeout(Duration::from_secs(config.timeout_secs))
-    .build()?;
-```
-Pas de `.pool_max_idle_per_host()` ni de `.pool_idle_timeout()`. Si VM est instable, les connexions HTTP peuvent s'accumuler dans le pool idle de reqwest.
-
----
-
-## ✅ Plan de correction
-
-### 1. **Limiter les spawns avec un `Semaphore` ou `tokio::sync::mpsc`**
-
-Remplacer les `tokio::spawn` sauvages par un channel bounded avec un seul worker :
-
-```rust
-// Dans main.rs — remplacer les callbacks par un channel
-let (snapshot_tx, mut snapshot_rx) = tokio::sync::mpsc::channel::<BmsSnapshot>(32);
-
-tokio::spawn(async move {
-    while let Some(snap) = snapshot_rx.recv().await {
-        state.on_snapshot(snap).await;
-    }
-});
-
-// Dans le callback du poll_loop :
-move |snap| {
-    let _ = snapshot_tx.try_send(snap);  // back-pressure : drop si plein
-}
+MALLOC_ARENA_MAX=2
+_RJEM_MALLOC_CONF=dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
+RUST_LOG=info
 ```
 
-### 2. **Limiter la capacité du broadcast console**
+## Suspects sérieux à investiguer
 
-```rust
-// console.rs
-pub const CONSOLE_CAPACITY: usize = 512;  // ← réduire à 64 si pas de subscriber WS
-```
-Ou mieux : ne pas émettre si aucun subscriber (vérifier `tx.receiver_count()`).
+Activités périodiques qui pourraient retenir de la mémoire :
 
-### 3. **Limiter le broadcast WebSocket BMS**
+1. **Maintenance metrics-store** (`tiering::spawn_maintenance`) — tourne toutes les `maintenance_interval_hours = 6` heures par défaut. Le `HashMap<(u32, i64), AggBucketBuilder>` peut grossir énormément sur une base 1.2 Go avant d'être libéré. Vérifier si la fonction tient des références après finalize.
 
-```rust
-// state.rs
-const WS_BROADCAST_CAPACITY: usize = 128;  // ← réduire à 16 + vérifier receiver_count
-```
-Et dans `on_snapshot` :
-```rust
-if self.ws_tx.receiver_count() > 0 {
-    let _ = self.ws_tx.send(Arc::new(latest));
-}
-```
+2. **Writer thread metrics-store** — `writer::run` boucle infinie qui maintient `series_cache: HashMap<(String, String), u32>` qui grossit avec le temps (jamais évicté).
 
-### 4. **Limiter le pool reqwest**
+3. **Ring buffers du AppState** — `BmsRingBuffer`, `Et112RingBuffer`, `TasmotaRingBuffer` (`VecDeque` bornés mais initialisés à 0, et **grossissent** jusqu'à `ring_buffer_size` puis stable). Vérifier qu'ils sont bien bornés et qu'ils libèrent en interne.
 
-```rust
-let http = Client::builder()
-    .timeout(Duration::from_secs(config.timeout_secs))
-    .pool_max_idle_per_host(2)
-    .pool_idle_timeout(Duration::from_secs(30))
-    .build()?;
-```
+4. **LogBuffer** — collecté en RAM pour servir `/api/v1/system/logs`. Si non borné → fuite linéaire.
 
-### 5. **Éviter les allocations dans le hot path VM**
+5. **Console_bus / ws_tx broadcast** — les Arc dans le ring buffer SONT droppés quand écrasés, mais si le buffer n'est jamais drainé (aucun subscriber), il reste à 128/512 Arc volumineux en RAM.
 
-Pré-allouer le buffer Prometheus dans `VmRow` avec `String::with_capacity` (déjà fait ✓) mais aussi éviter le `.clone()` des labels dans `to_sample()` :
+6. **AlertEngine** — daemon SQLite qui pourrait accumuler des connexions ou des hash internes.
 
-```rust
-// vm_client.rs — to_sample() actuel
-fn to_sample(&self) -> Sample {
-    Sample {
-        metric: self.metric.clone(),      // ← clone inutile si on consume pas le VmRow
-        labels: self.labels.iter().cloned().collect(),  // ← clone tous les labels
-        ...
-    }
-}
-```
+7. **MQTT bridges** (`bridges::mqtt`, `bridges::tasmota::mqtt`, `bridges::shelly::mqtt`) — chacun a une reconnect loop qui pourrait fuiter.
 
----
+8. **tracing-appender / tracing-subscriber** — buffers de logs internes.
 
-## 📊 Recommandation immédiate
+## Stratégie de diagnostic suggérée
 
-Pour confirmer la fuite, lance avec :
+**Étape 1 — Profiling jemalloc en runtime**
+
+Activer les stats internes jemalloc et les dumper périodiquement :
+
 ```bash
-# Observer la croissance du nombre de tâches Tokio
-RUST_LOG=tokio=trace,daly_bms_server=info ./daly-bms-server
-
-# Ou avec tokio-metrics (déjà intégré !)
-# Voir les métriques : tokio_task_polls_total, tokio_task_mean_poll_us
+# Sur Pi5 (gdb attaché à daly-bms-server)
+sudo gdb -p $PID -batch -ex 'call (int)_rjem_malloc_stats_print(0,0,"")'
 ```
 
-Et vérifie si `tokio_task_polls_total` augmente continuellement sans se stabiliser — ce serait la confirmation que des tâches s'accumulent.
+Comparer `stats.allocated`, `stats.active`, `stats.mapped` à 2 instants espacés de 1 h. Le delta de `stats.allocated` = ce que le code Rust détient effectivement.
 
-**Le fix le plus urgent** : remplacer les 6-7 `tokio::spawn` dans les callbacks de `main.rs` par un `mpsc::channel` avec un seul worker par type de donnée (BMS, ET112, etc.). Cela éliminera la fuite principale.
+**Étape 2 — Heap profiling avec dhat**
+
+Compiler une variante de daly-bms-server avec `dhat-rs` activé :
+```toml
+[features]
+dhat-heap = ["dhat"]
+
+[dependencies]
+dhat = { version = "0.3", optional = true }
+```
+
+```rust
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+    // ...
+}
+```
+
+Laisser tourner 30 min, dumper le rapport JSON, analyser avec `dhat-viewer` ou `dh_view.html` pour identifier la backtrace allocante.
+
+**Étape 3 — Check des structures suspectes**
+
+Auditer le code de :
+- `crates/metrics-store/src/writer.rs` — la `series_cache: HashMap` est-elle bornée ?
+- `crates/metrics-store/src/tiering.rs` — `spawn_maintenance` libère-t-il tout après compaction ?
+- `crates/daly-bms-server/src/state.rs` — quels champs grossissent au cours du temps ?
+- `crates/daly-bms-server/src/state.rs` — `log_buffer: LogBuffer` — borné ?
+- `crates/daly-bms-server/src/console.rs` — broadcast 512 events × taille Arc<ConsoleEvent>
+
+**Étape 4 — Vérification par mesure**
+
+Reproduire la croissance en désactivant systématiquement chaque agent :
+1. Désactiver MQTT bridges → mesurer croissance/h
+2. Désactiver BMS polling → mesurer
+3. Désactiver writer redb → mesurer
+4. Trouver le coupable par élimination
+
+## État du repo + déploiement Pi5
+
+```bash
+# Pi5 actuel
+PID: tournant sur le binaire commit ~Phase 5.1 (md5 différent du `target/release/`)
+Config /etc/daly-bms/config.toml :
+  [metrics_store] enabled = true, cache_mb = 64, db_path = /mnt/nvme/daly-bms/metrics.redb
+  [victoriametrics] enabled = false (section présente mais ignorée par le code)
+  default_backend = "vm" (champ ignoré, allow_dead_code)
+Base redb : ~1.2 Go (importée de VM le 18 mai)
+```
+
+## Commits récents pertinents
+
+- `d5e483d` — refactor: retrait TOTAL VictoriaMetrics
+- `de33bbd` — fix: deploy-pi5.sh auto-répare [metrics_store].enabled
+- `bd254f1` — fix: MALLOC_ARENA_MAX=2 dans le unit
+- `75b6b84` — fix(perf): jemalloc à la place de glibc
+- `4d7f0df` — fix(systemd): tune jemalloc dirty_decay_ms
+
+## Objectif de la session
+
+Identifier la source précise de la fuite **+13 Mo/heure passive** et la corriger. Cible : RSS stable à ±5 Mo de la baseline sur 24 h sans activité.
+
+## Mesure de référence pour valider le fix
+
+Après chaque correction :
+```bash
+PID=$(pgrep -f 'daly-bms-server$' | head -1)
+echo "T0:"; sudo cat /proc/$PID/status | grep -E '^VmRSS|^RssAnon'
+# Attendre 1h sans rien faire
+echo "T+1h:"; sudo cat /proc/$PID/status | grep -E '^VmRSS|^RssAnon'
+```
+
+Delta RSS attendu : < 2 Mo/h.
+
+---
+
+Tu peux copier ce prompt dans une nouvelle session. Je suggère aussi de lancer en parallèle, sur Pi5, un tracker continu pour avoir des données fraîches dès le démarrage de la prochaine session :
+
+```bash
+PID=$(pgrep -f 'daly-bms-server$' | head -1)
+nohup bash -c 'while sleep 600; do
+  TS=$(date -Iseconds)
+  RSS=$(awk "/^VmRSS/ {print \$2}" /proc/'"$PID"'/status)
+  ANON=$(awk "/^RssAnon/ {print \$2}" /proc/'"$PID"'/status)
+  echo "[$TS] RSS=${RSS}kB Anon=${ANON}kB"
+done' > /tmp/rss-leak-trace.log 2>&1 &
+disown
+```
+
+→ toutes les 10 min, log la pente. Demain matin tu auras 16-20 points alignés qui confirment ou infirment la fuite linéaire.
