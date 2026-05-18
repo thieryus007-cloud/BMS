@@ -8,11 +8,11 @@ use crate::state::AppState;
 
 /// `GET /health` — Statut global du serveur.
 pub async fn health_check(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let polling    = state.polling_active.load(Ordering::Relaxed);
+    let polling = state.polling_active.load(Ordering::Relaxed);
     let ws_clients = state.ws_tx.receiver_count();
-    let vm_enabled = state.vm.is_some();
+    let backend_ready = state.is_query_backend_ready();
 
-    let overall = if vm_enabled && polling {
+    let overall = if backend_ready && polling {
         "healthy"
     } else if !polling {
         "degraded"
@@ -21,8 +21,8 @@ pub async fn health_check(State(state): State<AppState>) -> Json<serde_json::Val
     };
 
     Json(json!({
-        "status":     overall,
-        "vm_enabled": vm_enabled,
+        "status":      overall,
+        "backend":     if backend_ready { "redb" } else { "none" },
         "bms_polling": if polling { "active" } else { "inactive" },
         "ws_clients":  ws_clients,
     }))

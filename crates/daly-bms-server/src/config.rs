@@ -37,10 +37,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub mqtt: MqttConfig,
 
-    /// Client VictoriaMetrics (stockage time-series externe)
-    #[serde(default)]
-    pub victoriametrics: VmConfig,
-
     /// Backend TSDB local redb (dual-write avec VictoriaMetrics).
     /// Cf. `docs/plan_migration_vm_redb.md`. Désactivé par défaut.
     #[serde(default)]
@@ -411,30 +407,6 @@ impl MqttConfig {
             username:             None,
             password:             None,
             format:               "json".into(),
-        }
-    }
-}
-
-/// Configuration du client VictoriaMetrics.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct VmConfig {
-    /// Activer l'écriture/lecture VictoriaMetrics
-    pub enabled: bool,
-    /// URL de base de l'instance VM (ex: http://127.0.0.1:8428)
-    pub url: String,
-    /// Timeout des requêtes HTTP en secondes
-    #[serde(default = "default_vm_timeout")]
-    pub timeout_secs: u64,
-}
-
-fn default_vm_timeout() -> u64 { 10 }
-
-impl Default for VmConfig {
-    fn default() -> Self {
-        Self {
-            enabled:      false,
-            url:          "http://127.0.0.1:8428".to_string(),
-            timeout_secs: 10,
         }
     }
 }

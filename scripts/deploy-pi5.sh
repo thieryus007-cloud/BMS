@@ -11,9 +11,10 @@
 #   primaire, sert toutes les lectures via le dispatcher PromQL local
 #   (`/api/v1/query[_range]`, `/api/v1/chart/*`, `/api/v1/history/*`,
 #    `/api/v1/dashboards/*`, `/api/v1/redb/*`).
-# - VictoriaMetrics est optionnel (dual-write si encore activé dans
-#   Config.toml `[victoriametrics] enabled = true`).
-# - Le dashboard custom `/dashboard/history` passe par le dispatcher
+# - VictoriaMetrics retiré (Phase 5 cleanup). Le script désactive le
+#   service victoriametrics.service s'il tourne encore et archive le
+#   data dir.
+# - Le dashboard custom `/dashboard/history` lit aussi metrics-store
 #   donc suit le toggle `[metrics_store].default_backend`.
 
 set -euo pipefail
@@ -120,21 +121,24 @@ sudo mkdir -p "$DB_DIR"
 sudo chown "$DALY_USER:$DALY_USER" "$DB_DIR"
 info "db_path = $DB_PATH (parent owner=$DALY_USER) ✓"
 
-# ── 4. NVMe + répertoire VictoriaMetrics (optionnel, dual-write) ────────────
+# ── 4. NVMe monté ? ──────────────────────────────────────────────────────────
 mountpoint -q /mnt/nvme || warn "/mnt/nvme non monté — vérifier /etc/fstab"
 
-# VictoriaMetrics (optionnel) — initialisé seulement si activé dans Config.toml
-VM_ENABLED=$(awk '/^\[victoriametrics\]/,/^\[/' "$CONF" \
-    | grep -E '^enabled' | sed -E 's/.*=\s*(true|false).*/\1/' | head -1)
-if [[ "$VM_ENABLED" == "true" ]]; then
-    VM_DIR="/mnt/nvme/victoria-metrics"
-    VM_USER=$(systemctl show victoriametrics --property=User --value 2>/dev/null || echo victoriametrics)
-    VM_USER="${VM_USER:-victoriametrics}"
-    sudo mkdir -p "$VM_DIR"
-    sudo chown "$VM_USER:$VM_USER" "$VM_DIR" 2>/dev/null || true
-    info "Répertoire VictoriaMetrics : $VM_DIR (owner=$VM_USER) [dual-write activé]"
+# Phase 5 cleanup : VictoriaMetrics retiré du code (commit 5aa9b89+).
+# Si le service victoriametrics tourne encore sur ce Pi5, le désactiver
+# explicitement pour libérer ~135 Mo de RSS et le port :8428.
+if systemctl is-active --quiet victoriametrics 2>/dev/null; then
+    warn "victoriametrics.service est encore actif — désactivation (Phase 5 retrait)"
+    sudo systemctl stop victoriametrics
+    sudo systemctl disable victoriametrics
+    info "victoriametrics.service stoppé + disabled"
+    # /mnt/nvme/victoria-metrics conservé en lecture seule pour rollback
+    if [[ -d /mnt/nvme/victoria-metrics ]]; then
+        sudo mv /mnt/nvme/victoria-metrics /mnt/nvme/victoria-metrics.archive-$(date +%Y%m%d) 2>/dev/null || true
+        info "Data dir VM archivée (rollback possible pendant 30 j)"
+    fi
 else
-    info "VictoriaMetrics désactivé dans Config.toml (mode redb seul)"
+    info "VictoriaMetrics non installé / déjà retiré"
 fi
 
 # ── 5. systemd unit (si modifié dans le repo, redéployer) ───────────────────
@@ -159,9 +163,7 @@ info "daly-bms actif"
 
 # Inspection des logs de boot
 BOOT_LOG=$(journalctl -u daly-bms --since "30 seconds ago" --no-pager 2>/dev/null)
-echo "$BOOT_LOG" | grep -q 'metrics-store ouvert'     && info "metrics-store ouvert ✓"      || warn "metrics-store : init non détectée"
-echo "$BOOT_LOG" | grep -q 'VictoriaMetrics activé'  && info "VictoriaMetrics activé ✓"   || true
-echo "$BOOT_LOG" | grep -q 'dual-write metrics-store' && info "dual-write activé ✓"        || true
+echo "$BOOT_LOG" | grep -q 'metrics-store ouvert' && info "metrics-store ouvert ✓" || warn "metrics-store : init non détectée"
 
 # ── 7. Déploiement energy-manager ────────────────────────────────────────────
 sleep 2
