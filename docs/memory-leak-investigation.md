@@ -93,7 +93,7 @@ utile pour éviter l'appel à `latest_snapshots().await` (lock + clone Vec).
 
 | Suspect | Verdict | Preuve |
 |---------|---------|--------|
-| `metrics-store::writer::series_cache` HashMap | ❌ inactive | Aucun `Sample::new()` dans daly-bms-server → writer parqué sur rx (à reverifier DB active) |
+| `metrics-store::writer::series_cache` LruCache | ❌ inactive | Aucun `Sample::new()` dans daly-bms-server → writer parqué sur rx (à reverifier DB active). Borné à 50 000 entrées (`SERIES_CACHE_CAPACITY`) → pas de croissance illimitée même actif |
 | `BmsRingBuffer` / `Et112RingBuffer` / `TasmotaRingBuffer` | ❌ bornés | `VecDeque` avec capacité config, `pop_front()` quand plein |
 | `LogBuffer` (tracing) | ❌ borné | Cap 200, `pop_front()` dans `main.rs:84` |
 | `Rs485DeviceStats` | ❌ borné | `BTreeMap<u8, ...>` ≤ nb_devices (~6) |
@@ -111,9 +111,13 @@ utile pour éviter l'appel à `latest_snapshots().await` (lock + clone Vec).
 C'est la prochaine étape critique. Les soupçons ci-dessous étaient inactifs
 pendant nos mesures puisque DB désactivée.
 
-1. **`metrics-store::writer::series_cache: HashMap<(String, String), u32>`** :
-   non-évicté. Si la cardinalité des séries augmente (labels variables ?), la
-   HashMap grossit linéairement. À mesurer.
+1. **`metrics-store::writer::series_cache: LruCache<(String, String), u32>`** :
+   borné à **50 000 entrées** (constante `SERIES_CACHE_CAPACITY` dans
+   `crates/metrics-store/src/writer.rs`). L'éviction LRU est automatique
+   donc **pas de croissance illimitée**. Hypothèse révisée : à surveiller
+   uniquement si la cardinalité atteint le plafond (logs `evict` ou taux
+   de miss élevé) → là on saurait que c'est saturé et qu'il faut soit
+   l'agrandir soit chercher pourquoi tant de séries uniques apparaissent.
 
 2. **`metrics-store::tiering::spawn_maintenance`** : compaction périodique
    (`maintenance_interval_hours = 6h` par défaut). Pendant la compaction,
@@ -197,14 +201,31 @@ Vec/String/payloads).
 
 ### Étape 3 — Si confirmation que c'est metrics-store
 
-Désactiver temporairement les modules un par un et mesurer :
+⚠️ **Attention** : `maintenance_interval_hours = 0` **ne désactive PAS** la
+compaction — le code fait `interval_hours.max(1)` dans
+`tiering::spawn_maintenance` (`crates/metrics-store/src/tiering.rs:265`).
+Une valeur de 0 force à 1h, pas à "off". Pour vraiment désactiver la
+compaction tiered, **ne pas appeler `spawn_maintenance` du tout** : il faut
+patcher `main.rs` pour skip le `spawn_maintenance` quand un flag config est
+positionné, ou simplement le commenter sur une branche de test.
+
+Si on veut juste **diminuer la fréquence** pour observer (ex: pic toutes
+les 24h au lieu de toutes les 6h) :
 ```toml
 [metrics_store]
 enabled = true
-maintenance_interval_hours = 0  # désactive la compaction tiered
+maintenance_interval_hours = 24  # 1 passe de compaction par jour
 ```
-Puis remesurer 1h. Si la fuite disparaît → coupable identifié dans
-`tiering::spawn_maintenance` ou `writer::run`.
+
+Pour le **vrai test isolant `tiering` comme suspect**, patch temporaire sur
+branche de test dans `crates/daly-bms-server/src/main.rs` :
+```rust
+// if config.metrics_store.maintenance_interval_hours > 0 {
+//     let _ = store.spawn_maintenance(policy, config.metrics_store.maintenance_interval_hours);
+// }
+```
+Rebuild + redéploiement → 1h de mesure. Si la fuite disparaît → c'est
+`tiering`. Sinon → c'est `writer::run` ou la cache redb mmap.
 
 ---
 
@@ -232,7 +253,7 @@ Variantes : `--no-build`, `--no-validate`.
 
 - `docs/issue.md` — analyse initiale (taux +13 Mo/h avant fixes, avant DB
   désactivée) — note : les hypothèses listées datent d'avant que DB soit off
-- `crates/metrics-store/src/writer.rs` — boucle writer, series_cache HashMap
+- `crates/metrics-store/src/writer.rs` — boucle writer, `series_cache` LruCache (cap 50k)
 - `crates/metrics-store/src/tiering.rs` — `spawn_maintenance`, compactions
 - `crates/daly-bms-server/src/state.rs:386-498` — `dispatched_query_*`,
   `redb_query_*_inner` — chemins de lecture redb depuis l'API
@@ -254,8 +275,127 @@ end-to-end qu'il fonctionne sur Pi5 ARM.** Les outils suivants ont déjà
 Approches qui devraient marcher mais n'ont pas été terminées :
 - **gdb + `_rjem_malloc_stats_print`** sur binaire prod existant (cf. §7,
   pas de rebuild, juste un attach lecture-seule)
-- **Bisection par désactivation** : `maintenance_interval_hours = 0`,
-  `alerts.db_path = ""`, `tasmota.devices = []` etc. un par un
+- **Bisection par désactivation** : patch `main.rs` pour skip
+  `store.spawn_maintenance()`, vider `tasmota.devices = []`,
+  vider `alerts.db_path = ""` etc. un par un (rappel : pas de paramètre
+  numérique qui désactive complètement `maintenance_interval_hours` —
+  cf. §7.3)
 - **heaptrack `-p <PID>` attach direct** (pas via systemd wrapper) sur le
   binaire compilé avec `--profile release-debug` (debug=1 suffit pour
   backtraces line-info)
+
+---
+
+## 11. Procédure : isoler `/dashboard/history` comme suspect
+
+Le dashboard custom `/dashboard/history` (cf. `crates/daly-bms-server/src/dashboard/mod.rs:823`)
+sert aussi de **datasource type Prometheus** pour Grafana via les endpoints
+`/api/v1/query` et `/api/v1/query_range`. Si Grafana scrape en background,
+ou si un onglet navigateur reste ouvert quelque part (PC, mobile, tablette),
+il y a une **activité HTTP continue** invisible mais qui peut alimenter la
+fuite. À vérifier **AVANT** d'imputer la fuite à un "mode passif".
+
+### 11.1 — Vérifier si quelqu'un tape sur l'API pendant la mesure
+
+```bash
+# 1 min d'observation — devrait être 100% silencieux si "mode passif" réel
+sudo journalctl -u daly-bms -f --since now &
+PID_TAIL=$!
+sleep 60
+kill $PID_TAIL 2>/dev/null
+```
+
+Toute ligne `GET /api/v1/query*`, `GET /api/v1/chart/history`,
+`GET /api/v1/history/energy`, `GET /dashboard/history` ou `/ws/bms/stream`
+pendant ces 60 s = **scraper actif** → la mesure de fuite n'est pas en mode
+passif.
+
+### 11.2 — Identifier le scraper
+
+```bash
+# Connexions TCP entrantes sur :8080 (qui se connecte ?)
+PID=$(pgrep -f 'daly-bms-server$' | head -1)
+sudo ss -tnp -o state established | grep "pid=$PID" | awk '{print $4, $5}'
+
+# Si Grafana tourne sur le même Pi5 :
+systemctl is-active grafana-server 2>/dev/null
+```
+
+Suspects courants :
+- `grafana-server.service` qui scrape `/api/v1/query_range` toutes les
+  ~15-30s (intervalle de refresh des panels Grafana)
+- Onglet Firefox/Chrome resté ouvert sur `192.168.1.141:8080/dashboard/*`
+  avec auto-refresh activé (vérifier mobile + PC + tablette)
+- Script de monitoring externe (curl en cron, healthcheck Home Assistant, etc.)
+
+### 11.3 — Bloquer le trafic externe le temps de la mesure
+
+Le moyen le moins invasif : firewall temporaire qui bloque toute connexion
+entrante :8080 sauf localhost (les checks systemd internes restent OK) :
+
+```bash
+# Bloquer
+sudo iptables -I INPUT -p tcp --dport 8080 ! -s 127.0.0.1 -j DROP
+
+# Vérifier
+sudo iptables -L INPUT -n | grep 8080
+
+# Remesurer 1h avec rss-tracker.sh
+
+# Retirer la règle après la mesure
+sudo iptables -D INPUT -p tcp --dport 8080 ! -s 127.0.0.1 -j DROP
+```
+
+Alternative ciblée : stopper Grafana uniquement :
+```bash
+sudo systemctl stop grafana-server
+# ... mesure ...
+sudo systemctl start grafana-server
+```
+
+Si la fuite **disparaît ou diminue significativement** sous firewall →
+c'est bien le trafic HTTP qui alimente la fuite. Si elle persiste à
+l'identique → c'est un process interne périodique, pas le dashboard.
+
+### 11.4 — Désactivation au niveau code (si trafic externe insuffisant comme test)
+
+Si le trafic externe est bloqué (11.3) mais la fuite persiste, on peut
+désactiver purement les routes `/dashboard/history` et endpoints PromQL au
+niveau code pour exclure tout chemin d'exécution lié à l'historique. Patch
+minimal sur **branche de test uniquement** (à revert avant prod) :
+
+```rust
+// crates/daly-bms-server/src/dashboard/mod.rs:823
+// .route("/dashboard/history",           get(dashboard_history))
+
+// crates/daly-bms-server/src/api/mod.rs (lignes à identifier via grep) :
+// .route("/api/v1/query",         get(promql::query))
+// .route("/api/v1/query_range",   get(promql::query_range))
+// .route("/api/v1/chart/history", get(chart::get_chart_history))
+// .route("/api/v1/history/energy", get(history::get_energy_history))
+```
+
+Puis `make build-arm` + redéploiement. Si la fuite résiduelle disparaît
+**alors qu'aucun client externe ne sollicite ces routes** (firewall actif
+de 11.3 conservé), la cause est dans le code de la dashboard/history
+elle-même (probable : allocation de Vec<Sample>, Strings, JSON encoder
+réutilisé sans reset entre requêtes).
+
+**Important** : ne PAS committer ces commentaires sur main.
+
+### 11.5 — Vérifier les WebSocket persistants
+
+Les WS (`/ws/bms/stream`, `/ws/venus/stream`, `/ws/console`) peuvent rester
+ouverts indéfiniment côté serveur si un client est mal déconnecté (firewall
+qui drop sans RST TCP). Chaque WS connexion = un `tokio::spawn` qui détient
+un `broadcast::Receiver` → rétention dans le ring buffer.
+
+```bash
+# Nombre de TCP ESTABLISHED côté daly-bms-server (devrait baisser à ~1-2
+# après firewall actif si tous les clients sont dehors)
+PID=$(pgrep -f 'daly-bms-server$' | head -1)
+sudo ss -tnp -o state established | grep -c "pid=$PID"
+```
+
+Si ce nombre grimpe au cours du temps même sans nouveau client → fuite de
+connexions WS (peu probable mais à exclure).
