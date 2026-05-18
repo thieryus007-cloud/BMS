@@ -50,32 +50,5 @@ tokio-metrics = { workspace = true }
 # Cf. observation 18 mai : malloc_trim libère 18 Mo après une request →
 # fragmentation glibc confirmée. Switch jemalloc résoud le problème
 # sans appel manuel à trim.
-#
-# Feature `profiling` ACTIVÉE EN PERMANENCE : compile jemalloc avec
-# --enable-prof. Coût ~0% perf tant qu'on ne set pas `prof_active:true`
-# au runtime, mais permet de capturer des heap profiles à la demande
-# via `_RJEM_MALLOC_CONF=prof:true,prof_active:true,...` (cf.
-# scripts/mem-profile.sh). Évite d'avoir à rebuilder pour diagnostiquer
-# une fuite mémoire en prod.
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = { version = "0.6", features = ["profiling"] }
-
-# ── Heap profiling (diagnostic fuite mémoire) ────────────────────────────────
-# Build : cargo build --release --features dhat-heap
-#         make build-arm  →  ajouter --features dhat-heap dans la cmd
-#
-# Au démarrage, le profiler dhat remplace l'allocator jemalloc et écrit un
-# fichier `dhat-heap.json` dans CWD à l'arrêt propre du process (SIGTERM /
-# Ctrl-C). Le profil identifie les backtraces qui retiennent de la mémoire
-# — utilisé pour traquer une fuite linéaire ~140 KB/min en mode passif
-# (cf. docs/issue.md). Laisser tourner 30-60 min pour avoir un signal clair.
-#
-# Analyse : ouvrir dhat-heap.json dans https://nnethercote.github.io/dh_view/
-# (le viewer html marche en local aussi). Trier par "t-end bytes" — c'est
-# la mémoire LIVE retenue jusqu'à la fin du run = la fuite.
-[dependencies.dhat]
-version = "0.3"
-optional = true
-
-[features]
-dhat-heap = ["dep:dhat"]
+tikv-jemallocator = "0.6"

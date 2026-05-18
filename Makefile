@@ -91,7 +91,7 @@ check-musl-deps:
 # Compilation — Version optimisée
 # =============================================================================
 
-.PHONY: build build-arm build-arm-debug build-arm-dhat build-arm-jeprof build-arm-musl build-arm-v7 build-venus build-venus-arm build-venus-armv7 build-venus-v7 build-energy build-energy-arm install-energy run-energy
+.PHONY: build build-arm build-arm-debug build-arm-musl build-arm-v7 build-venus build-venus-arm build-venus-armv7 build-venus-v7 build-energy build-energy-arm install-energy run-energy
 
 VENUS_BIN := dbus-mqtt-venus
 
@@ -115,89 +115,6 @@ build-arm-debug: check-arm-deps
 	$(CARGO) build --profile release-debug --target $(TARGET_ARM) --bin $(BINARY)
 	@echo "✓ Binaire ARM avec symboles : $(ARM_DEBUG_DIR)/$(BINARY)"
 	@echo "  → Profiler sur Pi5 : sudo perf record -F 99 -g ./$(BINARY) && sudo perf report"
-
-# Build ARM64 avec profiling jemalloc — IDENTIQUE à build-arm depuis que
-# le feature `profiling` est activé en permanence sur tikv-jemallocator
-# (cf. crates/daly-bms-server/Cargo.toml). Conservé comme alias pour la
-# compat avec scripts/mem-profile.sh.
-build-arm-jeprof: build-arm
-
-# Build ARM64 avec dhat-heap pour traquer une fuite mémoire.
-# Au démarrage, dhat::Alloc remplace jemalloc et trace TOUTES les allocations.
-# À l'arrêt propre (SIGTERM/Ctrl-C), écrit le profil JSON dans :
-#   /var/lib/daly-bms/dhat-heap.json
-#   (créé par systemd StateDirectory=daly-bms, owned par user dalybms)
-# Customisable via env var DHAT_OUTPUT=/autre/chemin.json
-#
-# Procédure complète sur Pi5 :
-#   ┌─────────────────────────────────────────────────────────────────────┐
-#   │ 1. Compiler la variante diagnostic (depuis ton poste de dev) :     │
-#   │      make build-arm-dhat                                            │
-#   │                                                                     │
-#   │ 2. Pousser le code + binaire sur Pi5 (ou make sync + rebuild) :    │
-#   │      git push                                                       │
-#   │      ssh pi5compute@192.168.1.141                                   │
-#   │      cd ~/Daly-BMS-Rust && make sync && make build-arm-dhat         │
-#   │                                                                     │
-#   │ 3. Déployer le binaire (le service tournera ~10x plus lent) :      │
-#   │      ⚠️ NOTE: le profile `release-debug` sort dans release-debug/   │
-#   │         et NON dans release/ — bien utiliser le chemin correct.    │
-#   │      sudo systemctl stop daly-bms                                   │
-#   │      sudo cp target/aarch64-unknown-linux-gnu/release-debug/daly-bms-server /usr/local/bin/ │
-#   │      sudo rm -f /var/lib/daly-bms/dhat-heap.json   # clean state    │
-#   │      sudo systemctl start daly-bms                                  │
-#   │                                                                     │
-#   │ 4. Vérifier que dhat est actif :                                    │
-#   │      sudo journalctl -u daly-bms -n 5 | grep dhat                   │
-#   │      → "[dhat] profiling actif → /var/lib/daly-bms/dhat-heap.json"  │
-#   │                                                                     │
-#   │ 5. Laisser tourner 30-60 min en mode passif (pas de curl, pas de   │
-#   │    dashboard ouvert). Vérifier que le RSS grimpe comme avant via    │
-#   │    rss-tracker.sh                                                   │
-#   │                                                                     │
-#   │ 6. Arrêter PROPREMENT (SIGTERM → écriture du JSON) :                │
-#   │      sudo systemctl stop daly-bms                                   │
-#   │      # Pas de SIGKILL : `kill -9` perd les données dhat             │
-#   │                                                                     │
-#   │ 7. Vérifier que le fichier existe et le récupérer :                 │
-#   │      sudo ls -lh /var/lib/daly-bms/dhat-heap.json                   │
-#   │      sudo cp /var/lib/daly-bms/dhat-heap.json /tmp/                 │
-#   │      sudo chmod 644 /tmp/dhat-heap.json                             │
-#   │      # Depuis ton poste :                                           │
-#   │      scp pi5compute@192.168.1.141:/tmp/dhat-heap.json .             │
-#   │                                                                     │
-#   │ 8. Restaurer le binaire normal (pas de dhat en prod) :              │
-#   │      make build-arm   # rebuild en release/ optimisé (sans dhat)    │
-#   │      sudo systemctl stop daly-bms                                   │
-#   │      sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ │
-#   │      sudo systemctl start daly-bms                                  │
-#   │                                                                     │
-#   │ 9. Analyser dhat-heap.json :                                        │
-#   │      Option A : navigateur → https://nnethercote.github.io/dh_view/ │
-#   │      Option B : git clone https://github.com/nnethercote/dhat-rs    │
-#   │                 et ouvrir dhat-rs/dh_view.html en local             │
-#   │      → Trier par "t-end bytes" = mémoire LIVE retenue = la fuite    │
-#   │      → La backtrace pointe la fonction qui alloue sans libérer     │
-#   └─────────────────────────────────────────────────────────────────────┘
-#
-# ⚠️ NE PAS LAISSER EN PROD : dhat ralentit ~10x et consomme bcp de RAM.
-build-arm-dhat: check-arm-deps
-	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(CROSS_LINKER_GNU) \
-	RUSTFLAGS="$(ARM_RUSTFLAGS_DEBUG)" \
-	$(CARGO) build --profile release-debug --target $(TARGET_ARM) --bin $(BINARY) \
-		--features dhat-heap
-	@echo "✓ Binaire ARM dhat-heap : $(ARM_DEBUG_DIR)/$(BINARY)"
-	@ls -lh $(ARM_DEBUG_DIR)/$(BINARY) 2>/dev/null || true
-	@echo ""
-	@echo "  Étape suivante — déployer :"
-	@echo "    sudo systemctl stop daly-bms"
-	@echo "    sudo cp $(ARM_DEBUG_DIR)/$(BINARY) /usr/local/bin/"
-	@echo "    sudo rm -f /var/lib/daly-bms/dhat-heap.json"
-	@echo "    sudo systemctl start daly-bms"
-	@echo "    sudo journalctl -u daly-bms -n 10 | grep dhat   # vérifier activation"
-	@echo ""
-	@echo "  ⚠️ Diagnostic uniquement — ne pas laisser en prod (10x plus lent)"
-	@echo "  → Voir Makefile section build-arm-dhat pour la procédure complète"
 
 # Build ARM64 statique (musl) — plus portable, binaire autonome
 build-arm-musl: check-musl-deps
