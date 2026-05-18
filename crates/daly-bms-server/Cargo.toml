@@ -50,6 +50,12 @@ tokio-metrics = { workspace = true }
 # Cf. observation 18 mai : malloc_trim libère 18 Mo après une request →
 # fragmentation glibc confirmée. Switch jemalloc résoud le problème
 # sans appel manuel à trim.
+#
+# Feature cargo `jeprof` (cf. [features] plus bas) : propage le feature
+# `profiling` à tikv-jemallocator → jemalloc compilé avec --enable-prof.
+# Permet capture de heap profiles via _RJEM_MALLOC_CONF=prof:true,...
+# au runtime. Beaucoup plus léger que dhat (~5% overhead vs 10x),
+# pas de debuginfo=2 requis, donc rebuild rapide sur Pi5.
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
 
@@ -72,3 +78,7 @@ optional = true
 
 [features]
 dhat-heap = ["dep:dhat"]
+# Active le sous-système de profiling de jemalloc (--enable-prof).
+# Build léger (pas de debuginfo lourd). Heap profile via mallctl/env vars.
+# Voir scripts/mem-profile.sh.
+jeprof = ["tikv-jemallocator/profiling"]

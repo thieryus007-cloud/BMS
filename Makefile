@@ -91,7 +91,7 @@ check-musl-deps:
 # Compilation — Version optimisée
 # =============================================================================
 
-.PHONY: build build-arm build-arm-debug build-arm-dhat build-arm-musl build-arm-v7 build-venus build-venus-arm build-venus-armv7 build-venus-v7 build-energy build-energy-arm install-energy run-energy
+.PHONY: build build-arm build-arm-debug build-arm-dhat build-arm-jeprof build-arm-musl build-arm-v7 build-venus build-venus-arm build-venus-armv7 build-venus-v7 build-energy build-energy-arm install-energy run-energy
 
 VENUS_BIN := dbus-mqtt-venus
 
@@ -115,6 +115,20 @@ build-arm-debug: check-arm-deps
 	$(CARGO) build --profile release-debug --target $(TARGET_ARM) --bin $(BINARY)
 	@echo "✓ Binaire ARM avec symboles : $(ARM_DEBUG_DIR)/$(BINARY)"
 	@echo "  → Profiler sur Pi5 : sudo perf record -F 99 -g ./$(BINARY) && sudo perf report"
+
+# Build ARM64 avec profiling jemalloc (--enable-prof).
+# Beaucoup plus léger que dhat : pas de debuginfo=2, pas de remplacement
+# d'allocator. Build identique à build-arm + flag profiling activé sur
+# jemalloc côté C. Procédure : voir scripts/mem-profile.sh.
+build-arm-jeprof: check-arm-deps
+	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(CROSS_LINKER_GNU) \
+	RUSTFLAGS="$(ARM_RUSTFLAGS)" \
+	$(CARGO) build --release --target $(TARGET_ARM) --bin $(BINARY) \
+		--features jeprof
+	@echo "✓ Binaire ARM jeprof : $(ARM_RELEASE_DIR)/$(BINARY)"
+	@ls -lh $(ARM_RELEASE_DIR)/$(BINARY) 2>/dev/null || true
+	@echo ""
+	@echo "  Étape suivante :  bash scripts/mem-profile.sh start"
 
 # Build ARM64 avec dhat-heap pour traquer une fuite mémoire.
 # Au démarrage, dhat::Alloc remplace jemalloc et trace TOUTES les allocations.
