@@ -90,7 +90,7 @@ check-musl-deps:
 # Compilation — Version optimisée
 # =============================================================================
 
-.PHONY: build build-arm build-arm-debug build-arm-musl build-arm-v7 build-venus build-venus-arm build-venus-armv7 build-venus-v7 build-energy build-energy-arm install-energy run-energy
+.PHONY: build build-arm build-arm-debug build-arm-dhat build-arm-musl build-arm-v7 build-venus build-venus-arm build-venus-armv7 build-venus-v7 build-energy build-energy-arm install-energy run-energy
 
 VENUS_BIN := dbus-mqtt-venus
 
@@ -114,6 +114,31 @@ build-arm-debug: check-arm-deps
 	$(CARGO) build --profile release-debug --target $(TARGET_ARM) --bin $(BINARY)
 	@echo "✓ Binaire ARM avec symboles : $(ARM_RELEASE_DIR)/$(BINARY)"
 	@echo "  → Profiler sur Pi5 : sudo perf record -F 99 -g ./$(BINARY) && sudo perf report"
+
+# Build ARM64 avec dhat-heap pour traquer une fuite mémoire.
+# Au démarrage, dhat::Alloc remplace jemalloc et trace TOUTES les allocations.
+# À l'arrêt propre (SIGTERM/Ctrl-C), écrit dhat-heap.json dans le CWD.
+#
+# Usage sur Pi5 :
+#   1. make build-arm-dhat
+#   2. scp / make sync, puis sudo systemctl stop daly-bms
+#   3. sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/
+#   4. sudo systemctl start daly-bms
+#   5. laisser tourner 30-60 min en mode passif
+#   6. sudo systemctl stop daly-bms  (déclenche l'écriture dhat-heap.json)
+#   7. Récupérer dhat-heap.json depuis le CWD du service (probablement /)
+#   8. Analyser avec https://nnethercote.github.io/dh_view/
+#      → Trier par "t-end bytes" pour voir la mémoire RETENUE = la fuite
+#
+# ⚠️ NE PAS LAISSER EN PROD : dhat ralentit ~10x et consomme bcp de RAM.
+build-arm-dhat: check-arm-deps
+	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(CROSS_LINKER_GNU) \
+	RUSTFLAGS="$(ARM_RUSTFLAGS_DEBUG)" \
+	$(CARGO) build --profile release-debug --target $(TARGET_ARM) --bin $(BINARY) \
+		--features dhat-heap
+	@echo "✓ Binaire ARM dhat-heap : $(ARM_RELEASE_DIR)/$(BINARY)"
+	@echo "  ⚠️ Diagnostic uniquement — ne pas laisser en prod (10x plus lent)"
+	@echo "  → Voir Makefile section build-arm-dhat pour la procédure complète"
 
 # Build ARM64 statique (musl) — plus portable, binaire autonome
 build-arm-musl: check-musl-deps

@@ -52,3 +52,23 @@ tokio-metrics = { workspace = true }
 # sans appel manuel à trim.
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
+
+# ── Heap profiling (diagnostic fuite mémoire) ────────────────────────────────
+# Build : cargo build --release --features dhat-heap
+#         make build-arm  →  ajouter --features dhat-heap dans la cmd
+#
+# Au démarrage, le profiler dhat remplace l'allocator jemalloc et écrit un
+# fichier `dhat-heap.json` dans CWD à l'arrêt propre du process (SIGTERM /
+# Ctrl-C). Le profil identifie les backtraces qui retiennent de la mémoire
+# — utilisé pour traquer une fuite linéaire ~140 KB/min en mode passif
+# (cf. docs/issue.md). Laisser tourner 30-60 min pour avoir un signal clair.
+#
+# Analyse : ouvrir dhat-heap.json dans https://nnethercote.github.io/dh_view/
+# (le viewer html marche en local aussi). Trier par "t-end bytes" — c'est
+# la mémoire LIVE retenue jusqu'à la fin du run = la fuite.
+[dependencies.dhat]
+version = "0.3"
+optional = true
+
+[features]
+dhat-heap = ["dep:dhat"]
