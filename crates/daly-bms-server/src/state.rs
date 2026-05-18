@@ -645,19 +645,22 @@ impl AppState {
     }
     /// Enregistre un nouveau snapshot dans le ring buffer et broadcast WebSocket.
     pub async fn on_snapshot(&self, snap: BmsSnapshot) {
-        // Console diagnostic event
-        let device = if snap.address == 1 { EventDevice::Bms1 } else { EventDevice::Bms2 };
-        self.console_bus.emit(ConsoleEvent::rs485(device, &format!("BMS-{} snapshot", snap.address), json!({
-            "address": snap.address,
-            "soc": snap.soc,
-            "voltage": snap.dc.voltage,
-            "current": snap.dc.current,
-            "power": snap.dc.power,
-            "temp_max": snap.system.max_cell_temperature,
-            "cell_delta_mv": snap.system.cell_delta_mv(),
-            "charge_ok": snap.io.allow_to_charge != 0,
-            "discharge_ok": snap.io.allow_to_discharge != 0,
-        })));
+        // Console diagnostic event — seulement si quelqu'un écoute (évite de retenir
+        // un Arc<ConsoleEvent> volumineux dans le ring buffer du broadcast).
+        if self.console_bus.receiver_count() > 0 {
+            let device = if snap.address == 1 { EventDevice::Bms1 } else { EventDevice::Bms2 };
+            self.console_bus.emit(ConsoleEvent::rs485(device, &format!("BMS-{} snapshot", snap.address), json!({
+                "address": snap.address,
+                "soc": snap.soc,
+                "voltage": snap.dc.voltage,
+                "current": snap.dc.current,
+                "power": snap.dc.power,
+                "temp_max": snap.system.max_cell_temperature,
+                "cell_delta_mv": snap.system.cell_delta_mv(),
+                "charge_ok": snap.io.allow_to_charge != 0,
+                "discharge_ok": snap.io.allow_to_discharge != 0,
+            })));
+        }
         {
             let mut buffers = self.buffers.write().await;
             buffers
@@ -665,9 +668,12 @@ impl AppState {
                 .or_insert_with(|| BmsRingBuffer::new(self.config.serial.ring_buffer_size))
                 .push(snap.clone());
         }
-        // Broadcast : construire la liste de tous les derniers snapshots
-        let latest = self.latest_snapshots().await;
-        let _ = self.ws_tx.send(Arc::new(latest));
+        // Broadcast WebSocket : skip si aucun client connecté (évite d'allouer
+        // et retenir Arc<Vec<BmsSnapshot>> dans le ring du broadcast).
+        if self.ws_tx.receiver_count() > 0 {
+            let latest = self.latest_snapshots().await;
+            let _ = self.ws_tx.send(Arc::new(latest));
+        }
     }
     /// Retourne le dernier snapshot de chaque BMS.
     pub async fn latest_snapshots(&self) -> Vec<BmsSnapshot> {
@@ -696,14 +702,16 @@ impl AppState {
     }
     /// Enregistre un snapshot ET112 dans le ring buffer correspondant.
     pub async fn on_et112_snapshot(&self, snap: Et112Snapshot) {
-        self.console_bus.emit(ConsoleEvent::rs485(EventDevice::Et112, &format!("ET112-{:#04x} snapshot", snap.address), json!({
-            "address": snap.address,
-            "power_w": snap.power_w,
-            "voltage_v": snap.voltage_v,
-            "current_a": snap.current_a,
-            "energy_import_kwh": snap.energy_import_kwh(),
-            "energy_export_kwh": snap.energy_export_kwh(),
-        })));
+        if self.console_bus.receiver_count() > 0 {
+            self.console_bus.emit(ConsoleEvent::rs485(EventDevice::Et112, &format!("ET112-{:#04x} snapshot", snap.address), json!({
+                "address": snap.address,
+                "power_w": snap.power_w,
+                "voltage_v": snap.voltage_v,
+                "current_a": snap.current_a,
+                "energy_import_kwh": snap.energy_import_kwh(),
+                "energy_export_kwh": snap.energy_export_kwh(),
+            })));
+        }
         {
             let mut buffers = self.et112_buffers.write().await;
             buffers
@@ -733,10 +741,12 @@ impl AppState {
     }
     /// Enregistre la dernière mesure du capteur d'irradiance.
     pub async fn on_irradiance_snapshot(&self, snap: IrradianceSnapshot) {
-        self.console_bus.emit(ConsoleEvent::rs485(EventDevice::Irradiance, &format!("PRALRAN irradiance — {} W/m²", snap.irradiance_wm2 as i32), json!({
-            "address": snap.address,
-            "irradiance_wm2": snap.irradiance_wm2,
-        })));
+        if self.console_bus.receiver_count() > 0 {
+            self.console_bus.emit(ConsoleEvent::rs485(EventDevice::Irradiance, &format!("PRALRAN irradiance — {} W/m²", snap.irradiance_wm2 as i32), json!({
+                "address": snap.address,
+                "irradiance_wm2": snap.irradiance_wm2,
+            })));
+        }
         *self.irradiance_value.write().await = Some(snap);
     }
     /// Retourne la dernière mesure d'irradiance (None si jamais reçue).
@@ -745,15 +755,17 @@ impl AppState {
     }
     /// Enregistre un snapshot Tasmota dans le ring buffer correspondant.
     pub async fn on_tasmota_snapshot(&self, snap: TasmotaSnapshot) {
-        self.console_bus.emit(ConsoleEvent::state(EventDevice::Tasmota, &format!("Tasmota {} — {}", snap.name, if snap.power_on { "ON" } else { "OFF" }), json!({
-            "id": snap.id,
-            "name": snap.name,
-            "power_on": snap.power_on,
-            "power_w": snap.power_w,
-            "voltage_v": snap.voltage_v,
-            "current_a": snap.current_a,
-            "energy_today_kwh": snap.energy_today_kwh,
-        })));
+        if self.console_bus.receiver_count() > 0 {
+            self.console_bus.emit(ConsoleEvent::state(EventDevice::Tasmota, &format!("Tasmota {} — {}", snap.name, if snap.power_on { "ON" } else { "OFF" }), json!({
+                "id": snap.id,
+                "name": snap.name,
+                "power_on": snap.power_on,
+                "power_w": snap.power_w,
+                "voltage_v": snap.voltage_v,
+                "current_a": snap.current_a,
+                "energy_today_kwh": snap.energy_today_kwh,
+            })));
+        }
         let mut buffers = self.tasmota_buffers.write().await;
         buffers
             .entry(snap.id)
@@ -830,15 +842,17 @@ impl AppState {
             *last_ts  = Some(now);
             if let Some(v) = shunt.ah_charged_today    { *charged    = v; }
             if let Some(v) = shunt.ah_discharged_today { *discharged = v; }
-            self.console_bus.emit(ConsoleEvent::state(EventDevice::SmartShunt, "SmartShunt update", json!({
-                "soc_pct": shunt.soc_percent,
-                "voltage_v": shunt.voltage_v,
-                "current_a": shunt.current_a,
-                "power_w": shunt.power_w,
-                "state": shunt.state,
-                "ah_charged_today": shunt.ah_charged_today,
-                "ah_discharged_today": shunt.ah_discharged_today,
-            })));
+            if self.console_bus.receiver_count() > 0 {
+                self.console_bus.emit(ConsoleEvent::state(EventDevice::SmartShunt, "SmartShunt update", json!({
+                    "soc_pct": shunt.soc_percent,
+                    "voltage_v": shunt.voltage_v,
+                    "current_a": shunt.current_a,
+                    "power_w": shunt.power_w,
+                    "state": shunt.state,
+                    "ah_charged_today": shunt.ah_charged_today,
+                    "ah_discharged_today": shunt.ah_discharged_today,
+                })));
+            }
             *self.venus_smartshunt.write().await = Some(shunt);
             return;
         }
@@ -867,15 +881,17 @@ impl AppState {
         shunt.ah_charged_today    = Some(*charged);
         shunt.ah_discharged_today = Some(*discharged);
         // Console event (after values are updated)
-        self.console_bus.emit(ConsoleEvent::state(EventDevice::SmartShunt, "SmartShunt update", json!({
-            "soc_pct": shunt.soc_percent,
-            "voltage_v": shunt.voltage_v,
-            "current_a": shunt.current_a,
-            "power_w": shunt.power_w,
-            "state": shunt.state,
-            "ah_charged_today": shunt.ah_charged_today,
-            "ah_discharged_today": shunt.ah_discharged_today,
-        })));
+        if self.console_bus.receiver_count() > 0 {
+            self.console_bus.emit(ConsoleEvent::state(EventDevice::SmartShunt, "SmartShunt update", json!({
+                "soc_pct": shunt.soc_percent,
+                "voltage_v": shunt.voltage_v,
+                "current_a": shunt.current_a,
+                "power_w": shunt.power_w,
+                "state": shunt.state,
+                "ah_charged_today": shunt.ah_charged_today,
+                "ah_discharged_today": shunt.ah_discharged_today,
+            })));
+        }
         *self.venus_smartshunt.write().await = Some(shunt);
     }
     /// Retourne le SmartShunt actuel.
@@ -935,15 +951,17 @@ impl AppState {
     // ==========================================================================
     /// Enregistre le dernier snapshot ATS.
     pub async fn on_ats_snapshot(&self, snap: AtsSnapshot) {
-        self.console_bus.emit(ConsoleEvent::rs485(EventDevice::Ats, &format!("ATS CHINT — {}", snap.active_source.label()), json!({
-            "source": snap.active_source.label(),
-            "v1a": snap.v1a, "v1b": snap.v1b, "v1c": snap.v1c,
-            "v2a": snap.v2a, "v2b": snap.v2b, "v2c": snap.v2c,
-            "freq1_hz": snap.freq1_hz, "freq2_hz": snap.freq2_hz,
-            "sw1_closed": snap.sw1_closed, "sw2_closed": snap.sw2_closed,
-            "fault": snap.fault.label(),
-            "sw_mode": if snap.sw_mode { "Auto" } else { "Manuel" },
-        })));
+        if self.console_bus.receiver_count() > 0 {
+            self.console_bus.emit(ConsoleEvent::rs485(EventDevice::Ats, &format!("ATS CHINT — {}", snap.active_source.label()), json!({
+                "source": snap.active_source.label(),
+                "v1a": snap.v1a, "v1b": snap.v1b, "v1c": snap.v1c,
+                "v2a": snap.v2a, "v2b": snap.v2b, "v2c": snap.v2c,
+                "freq1_hz": snap.freq1_hz, "freq2_hz": snap.freq2_hz,
+                "sw1_closed": snap.sw1_closed, "sw2_closed": snap.sw2_closed,
+                "fault": snap.fault.label(),
+                "sw_mode": if snap.sw_mode { "Auto" } else { "Manuel" },
+            })));
+        }
         *self.ats_snapshot.write().await = Some(snap);
     }
     /// Retourne le dernier snapshot ATS (None si jamais reçu).
@@ -959,28 +977,30 @@ impl AppState {
     // ==========================================================================
     /// Enregistre le dernier snapshot Shelly et émet un événement console.
     pub async fn on_shelly_snapshot(&self, snap: ShellyEmSnapshot) {
-        self.console_bus.emit(ConsoleEvent::state(
-            EventDevice::Shelly,
-            &format!("Shelly {} — {:.0}W total", snap.name, snap.total_power_w),
-            json!({
-                "id": snap.id,
-                "name": snap.name,
-                "shelly_id": snap.shelly_id,
-                "total_power_w": snap.total_power_w,
-                "ch0": {
-                    "output": snap.channel_0.output,
-                    "power_w": snap.channel_0.power_w,
-                    "voltage_v": snap.channel_0.voltage_v,
-                    "current_a": snap.channel_0.current_a,
-                },
-                "ch1": {
-                    "output": snap.channel_1.output,
-                    "power_w": snap.channel_1.power_w,
-                    "voltage_v": snap.channel_1.voltage_v,
-                    "current_a": snap.channel_1.current_a,
-                },
-            }),
-        ));
+        if self.console_bus.receiver_count() > 0 {
+            self.console_bus.emit(ConsoleEvent::state(
+                EventDevice::Shelly,
+                &format!("Shelly {} — {:.0}W total", snap.name, snap.total_power_w),
+                json!({
+                    "id": snap.id,
+                    "name": snap.name,
+                    "shelly_id": snap.shelly_id,
+                    "total_power_w": snap.total_power_w,
+                    "ch0": {
+                        "output": snap.channel_0.output,
+                        "power_w": snap.channel_0.power_w,
+                        "voltage_v": snap.channel_0.voltage_v,
+                        "current_a": snap.channel_0.current_a,
+                    },
+                    "ch1": {
+                        "output": snap.channel_1.output,
+                        "power_w": snap.channel_1.power_w,
+                        "voltage_v": snap.channel_1.voltage_v,
+                        "current_a": snap.channel_1.current_a,
+                    },
+                }),
+            ));
+        }
         let mut map = self.shelly_latest.write().await;
         map.insert(snap.id, snap);
     }

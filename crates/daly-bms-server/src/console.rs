@@ -167,4 +167,8 @@ impl ConsoleBus {
     pub fn subscribe(&self) -> broadcast::Receiver<Arc<ConsoleEvent>> {
         self.tx.subscribe()
     }
+
+    pub fn receiver_count(&self) -> usize {
+        self.tx.receiver_count()
+    }
 }
