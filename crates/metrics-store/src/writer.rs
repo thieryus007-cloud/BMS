@@ -85,19 +85,19 @@ impl Default for WriterConfig {
 /// Handle clonable côté producteur.
 #[derive(Clone)]
 pub struct Writer {
-    pub(crate) tx: mpsc::Sender<<Sample>,
+    pub(crate) tx: mpsc::Sender<Sample>,
 }
 
 impl Writer {
-    pub async fn write(&self, sample: Sample) -> Result<(), mpsc::error::SendError<<Sample>> {
+    pub async fn write(&self, sample: Sample) -> Result<(), mpsc::error::SendError<Sample>> {
         self.tx.send(sample).await
     }
 
-    pub fn try_write(&self, sample: Sample) -> Result<(), mpsc::error::TrySendError<<Sample>> {
+    pub fn try_write(&self, sample: Sample) -> Result<(), mpsc::error::TrySendError<Sample>> {
         self.tx.try_send(sample)
     }
 
-    pub fn blocking_write(&self, sample: Sample) -> Result<(), mpsc::error::SendError<<Sample>> {
+    pub fn blocking_write(&self, sample: Sample) -> Result<(), mpsc::error::SendError<Sample>> {
         self.tx.blocking_send(sample)
     }
 }
@@ -106,8 +106,8 @@ impl Writer {
 /// l'attendre lors d'un shutdown propre ; en pratique le service tourne
 /// jusqu'à `SIGTERM` systemd).
 pub fn spawn(
-    db: Arc<<Database>,
-    rx: mpsc::Receiver<<Sample>,
+    db: Arc<Database>,
+    rx: mpsc::Receiver<Sample>,
     cfg: WriterConfig,
 ) -> thread::JoinHandle<()> {
     thread::Builder::new()
@@ -122,7 +122,7 @@ pub fn spawn(
         .expect("spawn writer thread")
 }
 
-fn run(db: Arc<<Database>, mut rx: mpsc::Receiver<<Sample>, cfg: WriterConfig) -> Result<()> {
+fn run(db: Arc<Database>, mut rx: mpsc::Receiver<Sample>, cfg: WriterConfig) -> Result<()> {
     let cache_size = NonZeroUsize::new(SERIES_CACHE_MAX)
         .expect("SERIES_CACHE_MAX must be > 0");
     let mut series_cache: LruCache<(String, String), u32> = LruCache::new(cache_size);
@@ -139,7 +139,7 @@ fn run(db: Arc<<Database>, mut rx: mpsc::Receiver<<Sample>, cfg: WriterConfig) -
     }
 }
 
-fn drain(rx: &mut mpsc::Receiver<<Sample>, cfg: &WriterConfig) -> Vec<<Sample> {
+fn drain(rx: &mut mpsc::Receiver<Sample>, cfg: &WriterConfig) -> Vec<Sample> {
     let mut batch = Vec::with_capacity(cfg.batch_max);
     // Premier sample : on bloque jusqu'à réception (ou shutdown).
     match rx.blocking_recv() {
