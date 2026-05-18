@@ -59,43 +59,72 @@ fi
 #
 # IMPORTANT — le Config.toml du repo est un TEMPLATE par défaut destiné à
 # l'initialisation. Sur un Pi5 déjà en prod, la config a été calibrée par
-# l'opérateur (cache_mb, default_backend, enabled flags, etc.) ; la copier
-# aveuglément ÉCRASERAIT ces réglages. On NE copie donc que si le fichier
-# de destination n'existe pas (bootstrap initial).
+# l'opérateur (cache_mb, enabled flags, etc.) ; la copier aveuglément
+# ÉCRASERAIT ces réglages. On NE copie donc que si le fichier de
+# destination n'existe pas (bootstrap initial).
 #
 # Pour appliquer des changements de config en cours d'exploitation, l'opérateur
 # édite /etc/daly-bms/config.toml manuellement OU passe explicitement par :
 #   sudo cp Config.toml /etc/daly-bms/config.toml   # ÉCRASE
-if [[ ! -f /etc/daly-bms/config.toml ]]; then
-    step "Première installation : copie Config.toml → /etc/daly-bms/config.toml…"
+CONF=/etc/daly-bms/config.toml
+if [[ ! -f "$CONF" ]]; then
+    step "Première installation : copie Config.toml → $CONF…"
     sudo mkdir -p /etc/daly-bms
-    sudo cp Config.toml /etc/daly-bms/config.toml
-    info "Config.toml initialisée — pense à activer [metrics_store] enabled = true et default_backend"
+    sudo cp Config.toml "$CONF"
+    info "Config.toml initialisée"
 else
-    info "/etc/daly-bms/config.toml existe déjà — préservé (pas d'écrasement)"
-    # Sanity check : présence des sections critiques
-    if ! grep -q '^\[metrics_store\]' /etc/daly-bms/config.toml; then
-        warn "Section [metrics_store] absente de /etc/daly-bms/config.toml — fonctionnalité dégradée"
-    fi
+    info "$CONF existe déjà — préservé (pas d'écrasement)"
 fi
 
-# ── 4. Répertoires runtime ───────────────────────────────────────────────────
-step "Vérification répertoires runtime…"
-mountpoint -q /mnt/nvme || warn "/mnt/nvme non monté — vérifier /etc/fstab"
+# ── 3.bis Auto-réparation des flags critiques (post-Phase 5.1) ───────────────
+# metrics-store est maintenant la SEULE TSDB de lecture — si elle est
+# désactivée par accident (cp Config.toml, sed mal ciblé, etc.), le service
+# n'a plus de backend et le dashboard custom + Grafana retournent vide.
+# Cette étape détecte ces cas et applique la réparation automatiquement
+# (avec backup horodaté).
+step "Vérification config critique (auto-répare si besoin)…"
 
-# metrics-store redb
-REDB_PATH=$(grep -E '^db_path' /etc/daly-bms/config.toml 2>/dev/null \
-    | sed -E 's/.*=\s*"([^"]+)".*/\1/' | head -1)
-REDB_PATH="${REDB_PATH:-/mnt/nvme/daly-bms/metrics.redb}"
-REDB_DIR=$(dirname "$REDB_PATH")
+# Check 1 : section [metrics_store] présente
+if ! grep -q '^\[metrics_store\]' "$CONF"; then
+    error "Section [metrics_store] absente de $CONF — éditer manuellement avant de relancer"
+fi
+
+# Check 2 : metrics_store.enabled = true
+METRICS_ENABLED=$(awk '/^\[metrics_store\]/,/^\[/' "$CONF" \
+    | grep -E '^enabled' | sed -E 's/.*=\s*(true|false).*/\1/' | head -1)
+if [[ "$METRICS_ENABLED" != "true" ]]; then
+    BACKUP="$CONF.before-autorepair-$(date +%Y%m%d_%H%M%S)"
+    warn "[metrics_store].enabled = '$METRICS_ENABLED' — réparation en cours (backup → $BACKUP)"
+    sudo cp "$CONF" "$BACKUP"
+    sudo sed -i '/^\[metrics_store\]/,/^\[/ {s/^enabled = false$/enabled = true/}' "$CONF"
+    METRICS_ENABLED=$(awk '/^\[metrics_store\]/,/^\[/' "$CONF" \
+        | grep -E '^enabled' | sed -E 's/.*=\s*(true|false).*/\1/' | head -1)
+    if [[ "$METRICS_ENABLED" != "true" ]]; then
+        error "Échec de la réparation [metrics_store].enabled — éditer manuellement $CONF"
+    fi
+    info "[metrics_store].enabled forcé à true ✓"
+else
+    info "[metrics_store].enabled = true ✓"
+fi
+
+# Check 3 : db_path résolvable, parent writable par dalybms
+DB_PATH=$(grep -E '^db_path' "$CONF" | sed -E 's/.*=\s*"([^"]+)".*/\1/' | head -1)
+DB_PATH="${DB_PATH:-/mnt/nvme/daly-bms/metrics.redb}"
+DB_DIR=$(dirname "$DB_PATH")
+if [[ ! -d "$DB_DIR" ]]; then
+    warn "Répertoire $DB_DIR absent — création"
+fi
 DALY_USER=$(systemctl show daly-bms --property=User --value 2>/dev/null || echo dalybms)
 DALY_USER="${DALY_USER:-dalybms}"
-sudo mkdir -p "$REDB_DIR"
-sudo chown "$DALY_USER:$DALY_USER" "$REDB_DIR"
-info "Répertoire redb : $REDB_DIR (owner=$DALY_USER)"
+sudo mkdir -p "$DB_DIR"
+sudo chown "$DALY_USER:$DALY_USER" "$DB_DIR"
+info "db_path = $DB_PATH (parent owner=$DALY_USER) ✓"
+
+# ── 4. NVMe + répertoire VictoriaMetrics (optionnel, dual-write) ────────────
+mountpoint -q /mnt/nvme || warn "/mnt/nvme non monté — vérifier /etc/fstab"
 
 # VictoriaMetrics (optionnel) — initialisé seulement si activé dans Config.toml
-VM_ENABLED=$(awk '/^\[victoriametrics\]/,/^\[/' /etc/daly-bms/config.toml \
+VM_ENABLED=$(awk '/^\[victoriametrics\]/,/^\[/' "$CONF" \
     | grep -E '^enabled' | sed -E 's/.*=\s*(true|false).*/\1/' | head -1)
 if [[ "$VM_ENABLED" == "true" ]]; then
     VM_DIR="/mnt/nvme/victoria-metrics"
