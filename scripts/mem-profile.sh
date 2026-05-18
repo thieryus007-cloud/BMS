@@ -158,9 +158,13 @@ stop)
     SIZE=$(du -h "$OUT_TRACE" | cut -f1)
     info "Trace récupérée : $OUT_TRACE ($SIZE)"
 
-    step "3/5 Analyse des leaks (heaptrack_print --print-leaks)…"
-    heaptrack_print --print-leaks "$OUT_TRACE" > "$OUT_LEAKS" 2>/dev/null || \
-        heaptrack_print "$OUT_TRACE" > "$OUT_LEAKS"
+    step "3/5 Analyse de la trace (heaptrack_print)…"
+    # heaptrack_print sans flag affiche les sections :
+    #   - MOST CALLS TO ALLOCATION FUNCTIONS
+    #   - PEAK MEMORY CONSUMERS  ← top des consommateurs RAM avec backtrace
+    #   - MOST TEMPORARY ALLOCATIONS
+    # Pas de --print-leaks (option inexistante dans heaptrack 1.5).
+    heaptrack_print "$OUT_TRACE" > "$OUT_LEAKS"
     info "Rapport : $OUT_LEAKS"
 
     step "4/5 Restauration binaire prod (sans heaptrack)…"
@@ -185,9 +189,10 @@ stop)
     echo -e "${GREEN}  Heaptrack analyse — Top leaks${NC}"
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-    # Section "MOST CALLS TO ALLOCATION FUNCTIONS" + "PEAK MEMORY CONSUMERS" +
-    # "MEMORY LEAKED" du rapport heaptrack_print
-    grep -A 40 -E "MEMORY LEAKED|PEAK MEMORY CONSUMERS" "$OUT_LEAKS" | head -100 || head -50 "$OUT_LEAKS"
+    # Section "PEAK MEMORY CONSUMERS" du rapport heaptrack_print —
+    # affiche les sites d'allocation qui retiennent le + de mémoire avec
+    # backtrace complète résolue (fichier:ligne).
+    awk '/^PEAK MEMORY CONSUMERS/,/^$|^MOST/' "$OUT_LEAKS" | head -60
     echo ""
     echo "  Rapport complet : $OUT_LEAKS"
     echo "  Trace brute     : $OUT_TRACE"
