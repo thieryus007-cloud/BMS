@@ -18,6 +18,7 @@ TARGET_ARMV7 := armv7-unknown-linux-gnueabihf
 TARGET_MUSL := aarch64-unknown-linux-musl
 RELEASE_DIR := target/release
 ARM_RELEASE_DIR := target/$(TARGET_ARM)/release
+ARM_DEBUG_DIR   := target/$(TARGET_ARM)/release-debug
 ARMV7_RELEASE_DIR := target/$(TARGET_ARMV7)/release
 MUSL_RELEASE_DIR := target/$(TARGET_MUSL)/release
 
@@ -112,7 +113,7 @@ build-arm-debug: check-arm-deps
 	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(CROSS_LINKER_GNU) \
 	RUSTFLAGS="$(ARM_RUSTFLAGS_DEBUG)" \
 	$(CARGO) build --profile release-debug --target $(TARGET_ARM) --bin $(BINARY)
-	@echo "✓ Binaire ARM avec symboles : $(ARM_RELEASE_DIR)/$(BINARY)"
+	@echo "✓ Binaire ARM avec symboles : $(ARM_DEBUG_DIR)/$(BINARY)"
 	@echo "  → Profiler sur Pi5 : sudo perf record -F 99 -g ./$(BINARY) && sudo perf report"
 
 # Build ARM64 avec dhat-heap pour traquer une fuite mémoire.
@@ -133,8 +134,10 @@ build-arm-debug: check-arm-deps
 #   │      cd ~/Daly-BMS-Rust && make sync && make build-arm-dhat         │
 #   │                                                                     │
 #   │ 3. Déployer le binaire (le service tournera ~10x plus lent) :      │
+#   │      ⚠️ NOTE: le profile `release-debug` sort dans release-debug/   │
+#   │         et NON dans release/ — bien utiliser le chemin correct.    │
 #   │      sudo systemctl stop daly-bms                                   │
-#   │      sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ │
+#   │      sudo cp target/aarch64-unknown-linux-gnu/release-debug/daly-bms-server /usr/local/bin/ │
 #   │      sudo rm -f /var/lib/daly-bms/dhat-heap.json   # clean state    │
 #   │      sudo systemctl start daly-bms                                  │
 #   │                                                                     │
@@ -158,7 +161,7 @@ build-arm-debug: check-arm-deps
 #   │      scp pi5compute@192.168.1.141:/tmp/dhat-heap.json .             │
 #   │                                                                     │
 #   │ 8. Restaurer le binaire normal (pas de dhat en prod) :              │
-#   │      make build-arm                                                 │
+#   │      make build-arm   # rebuild en release/ optimisé (sans dhat)    │
 #   │      sudo systemctl stop daly-bms                                   │
 #   │      sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ │
 #   │      sudo systemctl start daly-bms                                  │
@@ -177,7 +180,16 @@ build-arm-dhat: check-arm-deps
 	RUSTFLAGS="$(ARM_RUSTFLAGS_DEBUG)" \
 	$(CARGO) build --profile release-debug --target $(TARGET_ARM) --bin $(BINARY) \
 		--features dhat-heap
-	@echo "✓ Binaire ARM dhat-heap : $(ARM_RELEASE_DIR)/$(BINARY)"
+	@echo "✓ Binaire ARM dhat-heap : $(ARM_DEBUG_DIR)/$(BINARY)"
+	@ls -lh $(ARM_DEBUG_DIR)/$(BINARY) 2>/dev/null || true
+	@echo ""
+	@echo "  Étape suivante — déployer :"
+	@echo "    sudo systemctl stop daly-bms"
+	@echo "    sudo cp $(ARM_DEBUG_DIR)/$(BINARY) /usr/local/bin/"
+	@echo "    sudo rm -f /var/lib/daly-bms/dhat-heap.json"
+	@echo "    sudo systemctl start daly-bms"
+	@echo "    sudo journalctl -u daly-bms -n 10 | grep dhat   # vérifier activation"
+	@echo ""
 	@echo "  ⚠️ Diagnostic uniquement — ne pas laisser en prod (10x plus lent)"
 	@echo "  → Voir Makefile section build-arm-dhat pour la procédure complète"
 
