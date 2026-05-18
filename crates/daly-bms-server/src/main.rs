@@ -169,11 +169,24 @@ fn cleanup_old_logs(dir: &str, keep_days: u64) {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Démarre le profiler heap dhat AVANT toute allocation. Le guard est
-    // retenu jusqu'à la fin de main() — à l'arrêt il flushe `dhat-heap.json`
-    // dans le CWD. Pour un arrêt propre via systemd : `sudo systemctl stop
-    // daly-bms` → SIGTERM → main retourne → guard drop → fichier écrit.
+    // retenu jusqu'à la fin de main() — à l'arrêt il flushe le fichier
+    // dans le chemin spécifié. Pour un arrêt propre via systemd :
+    // `sudo systemctl stop daly-bms` → SIGTERM → main retourne → guard
+    // drop → fichier écrit.
+    //
+    // Chemin déterministe via DHAT_OUTPUT (env) ou fallback /var/lib/daly-bms
+    // (StateDirectory créé par systemd, owned par user dalybms).
+    // Le défaut dhat (CWD = "/") ne fonctionnerait pas — service tourne en
+    // user dalybms non-root sans WorkingDirectory.
     #[cfg(feature = "dhat-heap")]
-    let _dhat_profiler = dhat::Profiler::new_heap();
+    let _dhat_profiler = {
+        let path = std::env::var("DHAT_OUTPUT")
+            .unwrap_or_else(|_| "/var/lib/daly-bms/dhat-heap.json".to_string());
+        eprintln!("[dhat] profiling actif → {}", path);
+        dhat::Profiler::builder()
+            .file_name(&path)
+            .build()
+    };
 
     let args = ServerArgs::parse();
 

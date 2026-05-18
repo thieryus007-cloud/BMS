@@ -117,18 +117,59 @@ build-arm-debug: check-arm-deps
 
 # Build ARM64 avec dhat-heap pour traquer une fuite mémoire.
 # Au démarrage, dhat::Alloc remplace jemalloc et trace TOUTES les allocations.
-# À l'arrêt propre (SIGTERM/Ctrl-C), écrit dhat-heap.json dans le CWD.
+# À l'arrêt propre (SIGTERM/Ctrl-C), écrit le profil JSON dans :
+#   /var/lib/daly-bms/dhat-heap.json
+#   (créé par systemd StateDirectory=daly-bms, owned par user dalybms)
+# Customisable via env var DHAT_OUTPUT=/autre/chemin.json
 #
-# Usage sur Pi5 :
-#   1. make build-arm-dhat
-#   2. scp / make sync, puis sudo systemctl stop daly-bms
-#   3. sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/
-#   4. sudo systemctl start daly-bms
-#   5. laisser tourner 30-60 min en mode passif
-#   6. sudo systemctl stop daly-bms  (déclenche l'écriture dhat-heap.json)
-#   7. Récupérer dhat-heap.json depuis le CWD du service (probablement /)
-#   8. Analyser avec https://nnethercote.github.io/dh_view/
-#      → Trier par "t-end bytes" pour voir la mémoire RETENUE = la fuite
+# Procédure complète sur Pi5 :
+#   ┌─────────────────────────────────────────────────────────────────────┐
+#   │ 1. Compiler la variante diagnostic (depuis ton poste de dev) :     │
+#   │      make build-arm-dhat                                            │
+#   │                                                                     │
+#   │ 2. Pousser le code + binaire sur Pi5 (ou make sync + rebuild) :    │
+#   │      git push                                                       │
+#   │      ssh pi5compute@192.168.1.141                                   │
+#   │      cd ~/Daly-BMS-Rust && make sync && make build-arm-dhat         │
+#   │                                                                     │
+#   │ 3. Déployer le binaire (le service tournera ~10x plus lent) :      │
+#   │      sudo systemctl stop daly-bms                                   │
+#   │      sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ │
+#   │      sudo rm -f /var/lib/daly-bms/dhat-heap.json   # clean state    │
+#   │      sudo systemctl start daly-bms                                  │
+#   │                                                                     │
+#   │ 4. Vérifier que dhat est actif :                                    │
+#   │      sudo journalctl -u daly-bms -n 5 | grep dhat                   │
+#   │      → "[dhat] profiling actif → /var/lib/daly-bms/dhat-heap.json"  │
+#   │                                                                     │
+#   │ 5. Laisser tourner 30-60 min en mode passif (pas de curl, pas de   │
+#   │    dashboard ouvert). Vérifier que le RSS grimpe comme avant via    │
+#   │    rss-tracker.sh                                                   │
+#   │                                                                     │
+#   │ 6. Arrêter PROPREMENT (SIGTERM → écriture du JSON) :                │
+#   │      sudo systemctl stop daly-bms                                   │
+#   │      # Pas de SIGKILL : `kill -9` perd les données dhat             │
+#   │                                                                     │
+#   │ 7. Vérifier que le fichier existe et le récupérer :                 │
+#   │      sudo ls -lh /var/lib/daly-bms/dhat-heap.json                   │
+#   │      sudo cp /var/lib/daly-bms/dhat-heap.json /tmp/                 │
+#   │      sudo chmod 644 /tmp/dhat-heap.json                             │
+#   │      # Depuis ton poste :                                           │
+#   │      scp pi5compute@192.168.1.141:/tmp/dhat-heap.json .             │
+#   │                                                                     │
+#   │ 8. Restaurer le binaire normal (pas de dhat en prod) :              │
+#   │      make build-arm                                                 │
+#   │      sudo systemctl stop daly-bms                                   │
+#   │      sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ │
+#   │      sudo systemctl start daly-bms                                  │
+#   │                                                                     │
+#   │ 9. Analyser dhat-heap.json :                                        │
+#   │      Option A : navigateur → https://nnethercote.github.io/dh_view/ │
+#   │      Option B : git clone https://github.com/nnethercote/dhat-rs    │
+#   │                 et ouvrir dhat-rs/dh_view.html en local             │
+#   │      → Trier par "t-end bytes" = mémoire LIVE retenue = la fuite    │
+#   │      → La backtrace pointe la fonction qui alloue sans libérer     │
+#   └─────────────────────────────────────────────────────────────────────┘
 #
 # ⚠️ NE PAS LAISSER EN PROD : dhat ralentit ~10x et consomme bcp de RAM.
 build-arm-dhat: check-arm-deps
