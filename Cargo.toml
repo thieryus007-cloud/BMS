@@ -119,12 +119,18 @@ debug = false
 rpath = false
 incremental = false
 
-# Profile pour le profiling avec perf/flamegraph (symboles conservés)
+# Profile pour le profiling avec perf/flamegraph/heaptrack (symboles conservés)
+# Override des settings release qui rendent le link step très lent sur Pi5 natif :
+# fat LTO + codegen-units=1 + DWARF complet peuvent prendre 10+ min au link
+# pour un binaire de cette taille. Pour un build de DIAGNOSTIC (pas prod),
+# thin LTO donne ~90% du gain perf en 5-10x moins de temps + codegen parallèle.
 [profile.release-debug]
-inherits = "release"
-debug = true                     # Garde les symboles pour perf
-strip = "none"                   # Ne pas strip pour le profiling
-panic = "unwind"                 # Permet backtrace pour debug
+inherits      = "release"
+lto           = "thin"           # vs "fat" en release : 5-10x plus rapide à linker
+codegen-units = 16               # vs 1 en release : exploite les 4 cores Pi5
+debug         = 1                # Line info (suffit pour backtraces) vs DWARF complet
+strip         = "none"           # Garde les symboles
+panic         = "unwind"         # Permet backtrace
 
 # Profile "size" si espace disque critique (optionnel)
 [profile.release-size]
