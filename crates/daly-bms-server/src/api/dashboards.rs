@@ -138,7 +138,7 @@ pub async fn get_panel_data(
         }
     };
 
-    if state.vm.is_none() && state.metrics_store.is_none() {
+    if !state.is_query_backend_ready() {
         return Json(json!({"ok": false, "reason": "no_query_backend"}));
     }
 

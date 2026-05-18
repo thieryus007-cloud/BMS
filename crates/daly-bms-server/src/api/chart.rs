@@ -36,8 +36,10 @@ pub async fn get_chart_history(
 ) -> impl IntoResponse {
     let minutes = q.minutes.unwrap_or(60).clamp(1, 720) as i64;
 
-    // Pré-flight : un backend de lecture doit être configuré (VM proxy ou redb).
-    if state.vm.is_none() && state.metrics_store.is_none() {
+    // Pré-flight : le backend SÉLECTIONNÉ par config doit être disponible
+    // (review gemini #2 sur PR #456 — éviter le faux positif "ok+data vides"
+    // quand default_backend pointe sur un backend non initialisé).
+    if !state.is_query_backend_ready() {
         return Json(json!({"solar": [], "soc": [], "load": [], "ok": false, "reason": "no_query_backend"}));
     }
 
@@ -112,7 +114,7 @@ pub async fn get_edge_history(
 ) -> impl IntoResponse {
     let minutes = q.minutes.unwrap_or(360).clamp(1, 1440) as i64;
 
-    if state.vm.is_none() && state.metrics_store.is_none() {
+    if !state.is_query_backend_ready() {
         return Json(json!({ "ok": false, "series": [], "reason": "no_query_backend" }));
     }
 
