@@ -29,14 +29,11 @@ use crate::tables::{
 
 const META_KEY_NEXT_SERIES_ID: &str = "next_series_id";
 
-/// Capacité max du cache de séries en mémoire dans le writer thread.
-/// Quand cette limite est atteinte, les entrées les moins récemment utilisées
-/// sont évictées. Cela empêche la fuite mémoire linéaire sur les bases
-/// avec un grand nombre de séries uniques (ex: import VM 1.2 Go).
-/// 
-/// 2 000 entrées ≈ 300-600 Ko de RSS (contre plusieurs Mo/heure en fuite).
-/// Ajuste selon le nombre de séries actives simultanément dans ton workload.
-const SERIES_CACHE_MAX: usize = 2_000;
+/// Taille max du cache LRU.
+///
+/// 50k est volontairement large pour éviter un churn excessif tout en
+/// empêchant une croissance mémoire infinie.
+const SERIES_CACHE_CAPACITY: usize = 50_000;
 
 #[derive(Debug, Clone)]
 pub struct Sample {
@@ -123,16 +120,19 @@ pub fn spawn(
 }
 
 fn run(db: Arc<Database>, mut rx: mpsc::Receiver<Sample>, cfg: WriterConfig) -> Result<()> {
-    let cache_size = NonZeroUsize::new(SERIES_CACHE_MAX)
-        .expect("SERIES_CACHE_MAX must be > 0");
-    let mut series_cache: LruCache<(String, String), u32> = LruCache::new(cache_size);
+    let mut series_cache: LruCache<(String, String), u32> = LruCache::new(
+        NonZeroUsize::new(SERIES_CACHE_CAPACITY).unwrap(),
+    );
+
     let mut next_id = load_next_id(&db).context("load_next_id")?;
 
     loop {
         let batch = drain(&mut rx, &cfg);
+
         if batch.is_empty() {
             return Ok(()); // channel fermé
         }
+
         if let Err(e) = commit_batch(&db, &batch, &mut series_cache, &mut next_id) {
             tracing::error!(error = %e, samples = batch.len(), "commit_batch a échoué");
         }
@@ -141,13 +141,16 @@ fn run(db: Arc<Database>, mut rx: mpsc::Receiver<Sample>, cfg: WriterConfig) -> 
 
 fn drain(rx: &mut mpsc::Receiver<Sample>, cfg: &WriterConfig) -> Vec<Sample> {
     let mut batch = Vec::with_capacity(cfg.batch_max);
+
     // Premier sample : on bloque jusqu'à réception (ou shutdown).
     match rx.blocking_recv() {
         Some(s) => batch.push(s),
         None => return batch,
     }
+
     let deadline = Instant::now() + Duration::from_millis(cfg.flush_ms);
     let idle = Duration::from_millis(cfg.poll_idle_ms);
+
     while batch.len() < cfg.batch_max && Instant::now() < deadline {
         match rx.try_recv() {
             Ok(s) => batch.push(s),
@@ -155,12 +158,14 @@ fn drain(rx: &mut mpsc::Receiver<Sample>, cfg: &WriterConfig) -> Vec<Sample> {
             Err(mpsc::error::TryRecvError::Disconnected) => break,
         }
     }
+
     batch
 }
 
 fn load_next_id(db: &Database) -> Result<u32> {
     let rtx = db.begin_read()?;
     let t = rtx.open_table(TABLE_META)?;
+
     Ok(t.get(META_KEY_NEXT_SERIES_ID)?
         .map(|g| g.value() as u32)
         .unwrap_or(1))
@@ -174,6 +179,7 @@ fn commit_batch(
 ) -> Result<()> {
     let wtx = db.begin_write()?;
     let mut next_id_dirty = false;
+
     {
         let mut t_raw = wtx.open_table(TABLE_RAW)?;
         let mut t_skey = wtx.open_table(TABLE_SERIES_BY_KEY)?;
@@ -187,28 +193,39 @@ fn commit_batch(
                 id
             } else {
                 let lookup_key = make_lookup_key(&s.metric, &labels_json);
+
                 // Lookup avant insert : on extrait la valeur du guard
                 // immédiatement pour libérer l'emprunt immutable sur `t_skey`
                 // avant d'appeler `.insert()` (sinon borrow checker fail).
                 let existing = t_skey.get(&lookup_key[..])?.map(|g| g.value());
+
                 let id = if let Some(id) = existing {
                     id
                 } else {
                     let id = *next_id;
-                    *next_id = next_id.checked_add(1).context("series_id overflow u32")?;
+
+                    *next_id = next_id.checked_add(1)
+                        .context("series_id overflow u32")?;
+
                     next_id_dirty = true;
+
                     t_skey.insert(&lookup_key[..], id)?;
+
                     let meta = SeriesMeta {
                         metric: s.metric.clone(),
                         labels_json: labels_json.clone(),
                         first_seen_ms: s.ts_ms,
                         last_seen_ms: s.ts_ms,
                     };
+
                     let bytes = bincode::serialize(&meta)?;
                     t_smeta.insert(id, &bytes[..])?;
+
                     id
                 };
-                cache.insert(cache_key, id);
+
+                cache.put(cache_key, id);
+
                 id
             };
 
@@ -221,6 +238,8 @@ fn commit_batch(
             t_meta.insert(META_KEY_NEXT_SERIES_ID, *next_id as u64)?;
         }
     }
+
     wtx.commit()?;
+
     Ok(())
 }
