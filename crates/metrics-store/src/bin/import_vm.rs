@@ -62,9 +62,15 @@ struct Args {
     /// Profondeur de queue mpsc (défaut 200 000 pour absorber les pics)
     #[arg(long, default_value_t = 200_000)]
     queue_depth: usize,
-    /// Taille max des batchs writer (défaut 5 000 pour throughput import)
-    #[arg(long, default_value_t = 5_000)]
+    /// Taille max des batchs writer (défaut 50 000 — 10× le défaut prod
+    /// pour réduire le nombre de fsync sur gros imports ; le coût per-insert
+    /// B-tree devient dominant à plusieurs millions de samples sur Pi5)
+    #[arg(long, default_value_t = 50_000)]
     batch_max: usize,
+    /// Fenêtre de flush en ms (défaut 250 — laisse le batch se remplir
+    /// avant commit pour amortir le fsync)
+    #[arg(long, default_value_t = 250)]
+    flush_ms: u64,
     /// Cache redb en MiB (défaut 256 — plus généreux que la prod 64)
     #[arg(long, default_value_t = 256)]
     cache_mb: usize,
@@ -96,7 +102,7 @@ fn main() -> Result<()> {
             writer_queue_depth: args.queue_depth,
             writer: WriterConfig {
                 batch_max: args.batch_max,
-                flush_ms: 100,
+                flush_ms: args.flush_ms,
                 poll_idle_ms: 1,
             },
         };
@@ -187,6 +193,11 @@ fn main() -> Result<()> {
         }
     }
 
+    // IMPORTANT : drop le Writer AVANT le store, sinon le Sender clone que
+    // contient `writer` maintient le channel ouvert → le thread writer reste
+    // bloqué dans blocking_recv() → drop(store) ne peut jamais join le thread
+    // → deadlock (observé en prod le 18 mai sur import 19M samples).
+    drop(writer);
     finalize(start, series_count, sample_count, skipped, store)
 }
 
@@ -208,10 +219,21 @@ fn finalize(
         rate
     );
     if let Some(s) = store {
-        eprintln!("ATTENTE DRAIN: 8s pour que le writer commit le dernier batch...");
-        std::thread::sleep(Duration::from_secs(8));
+        eprintln!(
+            "DRAIN EN COURS — bloque jusqu'à ce que le writer thread ait commit \
+             tous les batchs restants. Peut prendre plusieurs minutes pour des \
+             gros imports (~50k samples/s commit rate sur Pi5 NVMe)."
+        );
+        let drain_start = Instant::now();
+        // Le drop blocking sur le writer thread arrive dans Inner::Drop.
+        // Le sender principal est libéré via take() ; comme `writer` a déjà
+        // été droppé, le channel se ferme proprement → run() return Ok →
+        // thread exit → join() return.
         drop(s);
-        eprintln!("BASE REDB FERMÉE PROPREMENT");
+        eprintln!(
+            "BASE REDB FERMÉE PROPREMENT en {:.1}s de drain",
+            drain_start.elapsed().as_secs_f64()
+        );
     } else {
         eprintln!("DRY-RUN: aucune écriture effectuée");
     }
