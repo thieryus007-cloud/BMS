@@ -18,7 +18,6 @@ TARGET_ARMV7 := armv7-unknown-linux-gnueabihf
 TARGET_MUSL := aarch64-unknown-linux-musl
 RELEASE_DIR := target/release
 ARM_RELEASE_DIR := target/$(TARGET_ARM)/release
-ARM_DEBUG_DIR   := target/$(TARGET_ARM)/release-debug
 ARMV7_RELEASE_DIR := target/$(TARGET_ARMV7)/release
 MUSL_RELEASE_DIR := target/$(TARGET_MUSL)/release
 
@@ -113,7 +112,7 @@ build-arm-debug: check-arm-deps
 	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(CROSS_LINKER_GNU) \
 	RUSTFLAGS="$(ARM_RUSTFLAGS_DEBUG)" \
 	$(CARGO) build --profile release-debug --target $(TARGET_ARM) --bin $(BINARY)
-	@echo "✓ Binaire ARM avec symboles : $(ARM_DEBUG_DIR)/$(BINARY)"
+	@echo "✓ Binaire ARM avec symboles : $(ARM_RELEASE_DIR)/$(BINARY)"
 	@echo "  → Profiler sur Pi5 : sudo perf record -F 99 -g ./$(BINARY) && sudo perf report"
 
 # Build ARM64 statique (musl) — plus portable, binaire autonome
