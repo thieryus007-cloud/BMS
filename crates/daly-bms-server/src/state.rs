@@ -478,37 +478,20 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Backend de lecture courant pour les routes Grafana-facing et internes.
-    pub fn query_backend(&self) -> &str {
-        if self.config.metrics_store.default_backend.eq_ignore_ascii_case("redb") {
-            "redb"
-        } else {
-            "vm"
-        }
-    }
-
-    /// Indique si le backend de lecture **sélectionné par config** est
-    /// effectivement disponible. À utiliser par les routes pour leur
-    /// pré-flight check (au lieu de tester `vm.is_none() && metrics_store.is_none()`
-    /// qui peut donner un faux positif "ok mais data vides" si la config
-    /// pointe sur un backend non initialisé).
+    /// Indique si le backend de lecture (metrics-store / redb) est prêt.
+    /// À utiliser par les routes pour leur pré-flight check.
     pub fn is_query_backend_ready(&self) -> bool {
-        match self.query_backend() {
-            "redb" => self.metrics_store.is_some(),
-            _ => self.vm.is_some(),
-        }
+        self.metrics_store.is_some()
     }
 
-    /// Exécute une requête PromQL sur plage temporelle, dispatchée entre
-    /// VictoriaMetrics (proxy HTTP historique) et `metrics-store` (shim
-    /// PromQL local redb) selon `config.metrics_store.default_backend`.
-    /// Retourne le format JSON Prometheus standard.
+    /// Exécute une requête PromQL sur plage temporelle via le shim redb
+    /// (`metrics-store::promql`). Le travail synchrone (open reader + eval
+    /// PromQL + B-tree scans) est déporté sur `tokio::task::spawn_blocking`
+    /// pour ne pas monopoliser un worker de l'exécuteur async —
+    /// particulièrement important quand un caller comme `api/history.rs`
+    /// lance 9 requêtes en parallèle via `tokio::join!`.
     ///
-    /// Côté redb, le travail synchrone (open reader + eval PromQL + B-tree
-    /// scans) est déporté sur `tokio::task::spawn_blocking` pour ne pas
-    /// monopoliser un worker de l'exécuteur async — particulièrement
-    /// important quand un caller comme `api/history.rs` lance 9 requêtes
-    /// en parallèle via `tokio::join!`.
+    /// Retourne le format JSON Prometheus standard.
     pub async fn dispatched_query_range(
         &self,
         query: &str,
@@ -516,53 +499,35 @@ impl AppState {
         end_ms: i64,
         step_ms: i64,
     ) -> anyhow::Result<serde_json::Value> {
-        if self.query_backend() == "redb" {
-            let store = self
-                .metrics_store
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("metrics-store backend not configured"))?;
-            let query = query.to_string();
-            tokio::task::spawn_blocking(move || {
-                redb_query_range_inner(&store, &query, start_ms, end_ms, step_ms)
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("redb worker panic: {e}"))?
-        } else {
-            let vm = self
-                .vm
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("VictoriaMetrics not configured"))?;
-            vm.query_range_json(query, start_ms, end_ms, step_ms).await
-        }
+        let store = self
+            .metrics_store
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("metrics-store backend not configured"))?;
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || {
+            redb_query_range_inner(&store, &query, start_ms, end_ms, step_ms)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("redb worker panic: {e}"))?
     }
 
     /// Variante instant — symétrique de [`dispatched_query_range`].
-    /// Pas de caller actuel ; sera utilisé pour simplifier `api/promql.rs`
-    /// pendant la Phase 4 cleanup.
     #[allow(dead_code)]
     pub async fn dispatched_query_instant(
         &self,
         query: &str,
         time_ms: i64,
     ) -> anyhow::Result<serde_json::Value> {
-        if self.query_backend() == "redb" {
-            let store = self
-                .metrics_store
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("metrics-store backend not configured"))?;
-            let query = query.to_string();
-            tokio::task::spawn_blocking(move || {
-                redb_query_instant_inner(&store, &query, time_ms)
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("redb worker panic: {e}"))?
-        } else {
-            let vm = self
-                .vm
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("VictoriaMetrics not configured"))?;
-            vm.query_instant_json(query, time_ms).await
-        }
+        let store = self
+            .metrics_store
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("metrics-store backend not configured"))?;
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || {
+            redb_query_instant_inner(&store, &query, time_ms)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("redb worker panic: {e}"))?
     }
 }
 

@@ -55,20 +55,28 @@ else
     warn "Build skippé (--no-build)"
 fi
 
-# ── 3. Déploiement Config.toml (préserve default_backend de l'existant) ─────
-step "Déploiement Config.toml → /etc/daly-bms/config.toml…"
-EXISTING_BACKEND=""
-if [[ -f /etc/daly-bms/config.toml ]]; then
-    EXISTING_BACKEND=$(grep -E '^default_backend' /etc/daly-bms/config.toml 2>/dev/null | head -1 || true)
-fi
-sudo cp Config.toml /etc/daly-bms/config.toml
-if [[ -n "$EXISTING_BACKEND" ]]; then
-    # Restaure la valeur déployée précédemment (évite de reverter à "vm"
-    # si l'opérateur avait basculé en redb)
-    sudo sed -i "s|^default_backend = .*|$EXISTING_BACKEND|" /etc/daly-bms/config.toml
-    info "Config.toml déployée (default_backend préservé : $EXISTING_BACKEND)"
+# ── 3. Déploiement Config.toml (uniquement si /etc/daly-bms/config.toml absent) ──
+#
+# IMPORTANT — le Config.toml du repo est un TEMPLATE par défaut destiné à
+# l'initialisation. Sur un Pi5 déjà en prod, la config a été calibrée par
+# l'opérateur (cache_mb, default_backend, enabled flags, etc.) ; la copier
+# aveuglément ÉCRASERAIT ces réglages. On NE copie donc que si le fichier
+# de destination n'existe pas (bootstrap initial).
+#
+# Pour appliquer des changements de config en cours d'exploitation, l'opérateur
+# édite /etc/daly-bms/config.toml manuellement OU passe explicitement par :
+#   sudo cp Config.toml /etc/daly-bms/config.toml   # ÉCRASE
+if [[ ! -f /etc/daly-bms/config.toml ]]; then
+    step "Première installation : copie Config.toml → /etc/daly-bms/config.toml…"
+    sudo mkdir -p /etc/daly-bms
+    sudo cp Config.toml /etc/daly-bms/config.toml
+    info "Config.toml initialisée — pense à activer [metrics_store] enabled = true et default_backend"
 else
-    info "Config.toml déployée"
+    info "/etc/daly-bms/config.toml existe déjà — préservé (pas d'écrasement)"
+    # Sanity check : présence des sections critiques
+    if ! grep -q '^\[metrics_store\]' /etc/daly-bms/config.toml; then
+        warn "Section [metrics_store] absente de /etc/daly-bms/config.toml — fonctionnalité dégradée"
+    fi
 fi
 
 # ── 4. Répertoires runtime ───────────────────────────────────────────────────
