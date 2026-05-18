@@ -51,13 +51,14 @@ tokio-metrics = { workspace = true }
 # fragmentation glibc confirmée. Switch jemalloc résoud le problème
 # sans appel manuel à trim.
 #
-# Feature cargo `jeprof` (cf. [features] plus bas) : propage le feature
-# `profiling` à tikv-jemallocator → jemalloc compilé avec --enable-prof.
-# Permet capture de heap profiles via _RJEM_MALLOC_CONF=prof:true,...
-# au runtime. Beaucoup plus léger que dhat (~5% overhead vs 10x),
-# pas de debuginfo=2 requis, donc rebuild rapide sur Pi5.
+# Feature `profiling` ACTIVÉE EN PERMANENCE : compile jemalloc avec
+# --enable-prof. Coût ~0% perf tant qu'on ne set pas `prof_active:true`
+# au runtime, mais permet de capturer des heap profiles à la demande
+# via `_RJEM_MALLOC_CONF=prof:true,prof_active:true,...` (cf.
+# scripts/mem-profile.sh). Évite d'avoir à rebuilder pour diagnostiquer
+# une fuite mémoire en prod.
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
+tikv-jemallocator = { version = "0.6", features = ["profiling"] }
 
 # ── Heap profiling (diagnostic fuite mémoire) ────────────────────────────────
 # Build : cargo build --release --features dhat-heap
@@ -78,7 +79,3 @@ optional = true
 
 [features]
 dhat-heap = ["dep:dhat"]
-# Active le sous-système de profiling de jemalloc (--enable-prof).
-# Build léger (pas de debuginfo lourd). Heap profile via mallctl/env vars.
-# Voir scripts/mem-profile.sh.
-jeprof = ["tikv-jemallocator/profiling"]
