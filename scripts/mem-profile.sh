@@ -56,13 +56,17 @@ start)
     make build-arm-debug
     [[ -x "$BIN_DEBUG" ]] || error "Binaire absent : $BIN_DEBUG"
 
-    # FAIL-FAST : vérifier que les symboles sont présents (sans symboles
-    # heaptrack montre des adresses inutilisables)
-    if ! nm "$BIN_DEBUG" 2>/dev/null | head -5 | grep -q "."; then
-        error "Le binaire n'a pas de symboles — vérifier profile release-debug (debug=true, strip=none)"
+    # FAIL-FAST : vérifier la présence de sections DWARF (debug info pour
+    # backtraces heaptrack). readelf est plus fiable que nm car il liste
+    # directement les sections ELF sans dépendre du symbol table format.
+    if ! readelf -S "$BIN_DEBUG" 2>/dev/null | grep -qE "\.debug_(info|line)"; then
+        echo "----- DIAGNOSTIC ELF -----"
+        readelf -S "$BIN_DEBUG" 2>/dev/null | head -30
+        echo "--------------------------"
+        error "Pas de sections .debug_info/.debug_line → backtraces heaptrack inutilisables. Vérifier RUSTFLAGS=-C debuginfo=2 dans make build-arm-debug."
     fi
-    SYM_COUNT=$(nm "$BIN_DEBUG" 2>/dev/null | wc -l)
-    info "Binaire compilé avec $SYM_COUNT symboles"
+    DEBUG_SIZE=$(readelf -S "$BIN_DEBUG" 2>/dev/null | awk '/\.debug_info/ {print strtonum("0x"$6)}')
+    info "Binaire OK — sections DWARF présentes (.debug_info ≈ $((DEBUG_SIZE / 1024 / 1024)) MB)"
 
     step "3/7 Préparation du dossier de trace…"
     sudo mkdir -p "$DROPIN_DIR" "$TRACE_DIR"
