@@ -20,8 +20,9 @@
 | Compiler Pi5 | `make build-arm` |
 | Déployer binaire Pi5 | `sudo systemctl stop daly-bms && sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ && sudo systemctl start daly-bms` |
 | Broker MQTT (status/logs) | `systemctl status mosquitto-broker` / `journalctl -u mosquitto-broker -f` |
-| VictoriaMetrics (status/logs) | `systemctl status victoriametrics` / `journalctl -u victoriametrics -f` |
-| TSDB stats VM (cardinalité) | `curl -s http://localhost:8428/api/v1/status/tsdb \| jq` |
+| Taille base redb | `du -sh /mnt/nvme/daly-bms/metrics.redb` |
+| Nb séries en base | `curl -s http://localhost:8080/api/v1/redb/series \| jq '.data \| length'` |
+| Healthcheck backend | `curl -s http://localhost:8080/-/healthy` |
 | Logs energy-manager | `journalctl -u energy-manager -f` |
 | Compiler energy-manager | `make build-energy-arm` |
 | Déployer energy-manager | `sudo systemctl stop energy-manager && sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ && sudo systemctl start energy-manager` |
@@ -70,12 +71,12 @@ Pi5 (192.168.1.141, pi5compute)
     ├── RS485 /dev/ttyUSB0 → 2 BMS + 3 ET112 + 1 PRALRAN
     ├── REST API + WebSocket :8080
     ├── MQTT subscribe/publish → 127.0.0.1:1883 (broker local)
-    └── VictoriaMetrics → localhost:8428
+    └── metrics-store (redb à /mnt/nvme/daly-bms/metrics.redb)
   energy-manager (systemd, :8081)
     ├── MQTT subscribe/publish → 127.0.0.1:1883 (broker local)
     ├── Logique solaire, DEYE, chauffe-eau, charge, météo
     ├── WebSocket live events :8081/live
-    └── VictoriaMetrics → localhost:8428
+    └── publication MQTT → consommée par daly-bms-server (writes metrics-store)
 
 NanoPi (192.168.1.120, root)
   dbus-mqtt-venus (runit /service/dbus-mqtt-venus)
@@ -117,7 +118,7 @@ crates/energy-manager/src/              ← gestionnaire énergie (remplace Node
   types.rs                              ← types partagés (EnergyState, MqttIncoming, ...)
   bus.rs                                ← AppBus (broadcast MQTT)
   main.rs                               ← démarrage séquentiel de tous les modules
-  monitoring.rs                         ← métriques système + tokio → VictoriaMetrics
+  monitoring.rs                         ← métriques système + tokio (TODO : republier dans metrics-store)
   logic/                                ← modules logiques métier (charge_current,
                                           deye_command, inverter, irradiance, meteo,
                                           platform, smartshunt, solar_power,

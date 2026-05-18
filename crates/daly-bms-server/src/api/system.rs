@@ -60,7 +60,7 @@ pub async fn get_config(State(state): State<AppState>) -> Json<Value> {
         },
         "addresses": addresses,
         "mqtt_enabled": cfg.mqtt.enabled,
-        "vm_enabled": cfg.victoriametrics.enabled,
+        "metrics_store_enabled": cfg.metrics_store.enabled,
         "read_only": cfg.read_only.enabled,
     }))
 }
@@ -170,19 +170,9 @@ pub async fn set_mppt_yield(
         *state.house_power_w.write().await = hw;
     }
 
-    // Write solar metrics to VictoriaMetrics — throttlé à 1 écriture / 5s
-    if let Some(vm) = &state.vm {
-        if state.vm_solar_rate_ok() {
-            let kwh_val    = *state.mppt_yield_kwh.read().await;
-            let dc_pv_val  = *state.dc_pv_power_w.read().await;
-            let pvinv_val  = *state.pvinv_power_w.read().await;
-            let total_w    = *state.solar_total_w.read().await;
-            let rows = crate::vm_client::VmClient::solar_rows(total_w, dc_pv_val, pvinv_val, kwh_val);
-            if let Err(e) = vm.write_rows(rows).await {
-                tracing::warn!("VictoriaMetrics solar write failed: {e}");
-            }
-        }
-    }
+    // Phase 5 cleanup : écriture VM retirée. Les métriques solaires
+    // (solar_total_w, dc_pv_power_w, pvinv_power_w, mppt_yield_kwh) sont
+    // déjà publiées dans metrics-store via le hook MQTT côté state.rs.
 
     let kwh    = *state.mppt_yield_kwh.read().await;
     let dc_pv  = *state.dc_pv_power_w.read().await;

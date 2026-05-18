@@ -10,7 +10,6 @@
 //! - Température CPU
 
 use crate::state::{AppState, MonitorSnapshot, ProcessInfo, ServiceStatus};
-use crate::vm_client::VmRow;
 use chrono::Utc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
@@ -53,16 +52,9 @@ pub async fn run_monitor_agent(state: AppState) {
         prev_net_ts     = Instant::now();
 
         let snap = collect_snapshot(&state, net_rx_bps, net_tx_bps).await;
-
-        // Écriture métriques système dans VictoriaMetrics
-        if let Some(vm) = &state.vm {
-            let ts_ms = snap.timestamp.timestamp_millis();
-            let rows  = build_monitor_vm_rows(&snap, ts_ms);
-            if let Err(e) = vm.write_rows(rows).await {
-                warn!("VM write monitor métriques: {}", e);
-            }
-        }
-
+        // Phase 5 cleanup : écriture VM retirée. Les métriques système sont
+        // écrites uniquement dans metrics-store via on_monitor_snapshot
+        // (et le hook dual-write côté state.rs).
         state.on_monitor_snapshot(snap).await;
     }
 }
@@ -424,51 +416,13 @@ pub async fn run_watchdog_agent(_state: AppState) {
 // Métriques système → VictoriaMetrics
 // =============================================================================
 
-fn build_monitor_vm_rows(snap: &MonitorSnapshot, ts_ms: i64) -> Vec<VmRow> {
-    let mut rows = vec![
-        VmRow::new("pi5_cpu_percent",    snap.cpu_percent    as f64, ts_ms),
-        VmRow::new("pi5_memory_percent", snap.memory_percent as f64, ts_ms),
-        VmRow::new("pi5_disk_percent",   snap.disk_percent   as f64, ts_ms),
-        VmRow::new("pi5_uptime_secs",    snap.uptime_secs    as f64, ts_ms),
-        VmRow::new("pi5_mem_used_mb",    snap.mem_used_mb    as f64, ts_ms),
-        VmRow::new("pi5_swap_used_mb",   snap.swap_used_mb   as f64, ts_ms),
-        VmRow::new("pi5_net_rx_bps",     snap.net_rx_bps     as f64, ts_ms),
-        VmRow::new("pi5_net_tx_bps",     snap.net_tx_bps     as f64, ts_ms),
-        VmRow::with_labels("pi5_load_avg", vec![("window", "1m")],  snap.load_avg[0] as f64, ts_ms),
-        VmRow::with_labels("pi5_load_avg", vec![("window", "5m")],  snap.load_avg[1] as f64, ts_ms),
-        VmRow::with_labels("pi5_load_avg", vec![("window", "15m")], snap.load_avg[2] as f64, ts_ms),
-    ];
-    if let Some(temp) = snap.cpu_temp_c {
-        rows.push(VmRow::new("pi5_cpu_temp_c", temp as f64, ts_ms));
-    }
-    // Top processus (CPU > 0.1 %) — agrégés par nom pour éviter la cardinalité
-    // éphémère du `pid` (chaque rustc/cargo qui démarre créait une nouvelle série
-    // qui survivait 5 ans dans la rétention VM). On somme cpu_percent et mem_rss_mb
-    // sur tous les processus du même nom dans le snapshot courant.
-    let mut by_name: std::collections::HashMap<&str, (f32, f32)> = std::collections::HashMap::new();
-    for proc in &snap.processes {
-        if proc.cpu_percent > 0.1 {
-            let entry = by_name.entry(proc.name.as_str()).or_insert((0.0, 0.0));
-            entry.0 += proc.cpu_percent;
-            entry.1 += proc.mem_rss_mb;
-        }
-    }
-    for (name, (cpu, mem)) in by_name {
-        rows.push(VmRow::with_labels(
-            "pi5_process_cpu_percent",
-            vec![("process", name)],
-            cpu as f64,
-            ts_ms,
-        ));
-        rows.push(VmRow::with_labels(
-            "pi5_process_mem_mb",
-            vec![("process", name)],
-            mem as f64,
-            ts_ms,
-        ));
-    }
-    rows
-}
+// Phase 5 cleanup : la fonction build_monitor_vm_rows() qui sérialisait les
+// métriques système (pi5_cpu_percent, pi5_memory_percent, pi5_disk_percent,
+// pi5_load_avg, pi5_cpu_temp_c, pi5_process_*) au format VmRow a été retirée
+// avec le client VM. Pour réintroduire l'export de ces séries vers
+// metrics-store, ajouter un hook dans state.rs::on_monitor_snapshot qui
+// pousse directement dans le Writer redb (TODO si besoin réel d'observabilité
+// système en prod).
 
 // =============================================================================
 // Point d'entrée unique — remplace les deux tokio::spawn dans main.rs
@@ -486,49 +440,12 @@ pub fn spawn_all(state: AppState) {
     tokio::spawn(monitor_tm.instrument(run_monitor_agent(state.clone())));
     tokio::spawn(watchdog_tm.instrument(run_watchdog_agent(state.clone())));
 
-    // Exporteur métriques tokio → VictoriaMetrics (toutes les 60s)
-    let vm = state.vm.clone();
-    tokio::spawn(async move {
-        let mut mon_ivals = monitor_tm.intervals();
-        let mut wdg_ivals = watchdog_tm.intervals();
-        let mut ticker    = interval(Duration::from_secs(60));
-        loop {
-            ticker.tick().await;
-            let ts_ms = Utc::now().timestamp_millis();
-            let mut rows: Vec<VmRow> = Vec::new();
-
-            for (name, m) in [
-                ("daly_bms_monitor",  mon_ivals.next()),
-                ("daly_bms_watchdog", wdg_ivals.next()),
-            ] {
-                let Some(m) = m else { continue };
-                rows.push(VmRow::with_labels(
-                    "tokio_task_polls_total",
-                    vec![("task", name)],
-                    m.total_poll_count as f64,
-                    ts_ms,
-                ));
-                rows.push(VmRow::with_labels(
-                    "tokio_task_mean_poll_us",
-                    vec![("task", name)],
-                    m.mean_poll_duration().as_micros() as f64,
-                    ts_ms,
-                ));
-                rows.push(VmRow::with_labels(
-                    "tokio_task_mean_scheduled_us",
-                    vec![("task", name)],
-                    m.mean_scheduled_duration().as_micros() as f64,
-                    ts_ms,
-                ));
-            }
-
-            if let Some(vm) = &vm {
-                if let Err(e) = vm.write_rows(rows).await {
-                    warn!("VM write tokio métriques: {}", e);
-                }
-            }
-        }
-    });
+    // Exporteur métriques tokio : Phase 5 cleanup — retiré avec le client
+    // VM. Pour réintroduire l'export tokio_task_* vers metrics-store, il
+    // faut un hook équivalent qui pousse directement dans le Writer redb
+    // (TODO si besoin d'observabilité tokio en prod).
+    let _ = monitor_tm;
+    let _ = watchdog_tm;
 }
 
 /// Redémarre une unité systemd. Nécessite une règle polkit autorisant

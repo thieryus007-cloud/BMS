@@ -17,7 +17,6 @@ mod irradiance;
 mod shelly;
 mod tasmota;
 mod state;
-mod vm_client;
 mod api;
 mod bridges;
 mod dashboard;
@@ -178,7 +177,6 @@ async fn main() -> anyhow::Result<()> {
                 api:         config::ApiConfig::default(),
                 logging:     config::LoggingConfig::default(),
                 mqtt:        config::MqttConfig::default(),
-                victoriametrics: config::VmConfig::default(),
                 metrics_store: config::MetricsStoreConfig::default(),
                 alerts:      config::AlertsConfig::default(),
                 read_only:   config::ReadOnlyConfig::default(),
@@ -332,32 +330,13 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    // ── VictoriaMetrics (client HTTP stockage time-series) ────────────────────
-    let vm_handle = if config.victoriametrics.enabled {
-        match vm_client::VmClient::new(&config.victoriametrics) {
-            Ok(mut h) => {
-                if let Some(s) = &metrics_store {
-                    h = h.with_metrics_store(s.writer());
-                }
-                info!("VictoriaMetrics activé — url '{}'", config.victoriametrics.url);
-                Some(h)
-            }
-            Err(e) => {
-                warn!("VictoriaMetrics init échoué : {} — stockage désactivé", e);
-                None
-            }
-        }
-    } else {
-        info!("VictoriaMetrics désactivé (victoriametrics.enabled = false)");
-        None
-    };
-
     // ── État partagé ───────────────────────────────────────────────────────────
+    // Phase 5 cleanup : VictoriaMetrics retiré. metrics-store est la seule
+    // TSDB (lecture + écriture via le Writer du shim).
     let metrics_store_arc = metrics_store.as_ref().map(|s| std::sync::Arc::new(s.clone()));
     let state = AppState::new(
         config.clone(),
         log_buffer,
-        vm_handle,
         alert_engine.clone(),
         metrics_store_arc,
     );
