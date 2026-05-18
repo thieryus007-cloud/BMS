@@ -29,9 +29,17 @@ mod monitor;
 // historique (+15-20 Mo par burst, non libérés). malloc_trim manuel
 // libérait 18 Mo confirmant le diagnostic. jemalloc rend les pages au
 // kernel agressivement → RSS retombe au baseline après chaque burst.
-#[cfg(not(target_env = "msvc"))]
+//
+// En mode profiling heap (--features dhat-heap), on remplace jemalloc par
+// dhat::Alloc pour tracer toutes les allocations et identifier la backtrace
+// d'une fuite. Mutuellement exclusif avec jemalloc.
+#[cfg(all(not(target_env = "msvc"), not(feature = "dhat-heap")))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
 
 use crate::bridges::{alerts, mqtt};
 use crate::config::AppConfig;
@@ -160,6 +168,13 @@ fn cleanup_old_logs(dir: &str, keep_days: u64) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Démarre le profiler heap dhat AVANT toute allocation. Le guard est
+    // retenu jusqu'à la fin de main() — à l'arrêt il flushe `dhat-heap.json`
+    // dans le CWD. Pour un arrêt propre via systemd : `sudo systemctl stop
+    // daly-bms` → SIGTERM → main retourne → guard drop → fichier écrit.
+    #[cfg(feature = "dhat-heap")]
+    let _dhat_profiler = dhat::Profiler::new_heap();
+
     let args = ServerArgs::parse();
 
     // ── Configuration ──────────────────────────────────────────────────────────
