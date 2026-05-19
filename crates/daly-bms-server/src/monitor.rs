@@ -428,24 +428,18 @@ pub async fn run_watchdog_agent(_state: AppState) {
 // Point d'entrée unique — remplace les deux tokio::spawn dans main.rs
 // =============================================================================
 
-/// Démarre monitor_agent, watchdog_agent et l'exporteur tokio-metrics.
+/// Démarre monitor_agent et watchdog_agent en arrière-plan.
 /// Appeler depuis main.rs à la place des deux tokio::spawn séparés.
+///
+/// Note : l'instrumentation `tokio_metrics::TaskMonitor` a été retirée
+/// après Phase 5 (l'exporteur VM qui consommait ces métriques a été retiré
+/// avec le client VM, donc le TaskMonitor était orphelin). Le TaskMonitor
+/// retenait un `Arc<RawMetrics>` par task instrumentée pour la durée de vie
+/// du programme — supprimé pour éliminer cette rétention (audit fuite
+/// mémoire phase 2.3, mai 2026).
 pub fn spawn_all(state: AppState) {
-    use tokio_metrics::TaskMonitor;
-
-    let monitor_tm  = TaskMonitor::new();
-    let watchdog_tm = TaskMonitor::new();
-
-    // Agents instrumentés avec TaskMonitor (mesure durée de polling tokio)
-    tokio::spawn(monitor_tm.instrument(run_monitor_agent(state.clone())));
-    tokio::spawn(watchdog_tm.instrument(run_watchdog_agent(state.clone())));
-
-    // Exporteur métriques tokio : Phase 5 cleanup — retiré avec le client
-    // VM. Pour réintroduire l'export tokio_task_* vers metrics-store, il
-    // faut un hook équivalent qui pousse directement dans le Writer redb
-    // (TODO si besoin d'observabilité tokio en prod).
-    let _ = monitor_tm;
-    let _ = watchdog_tm;
+    tokio::spawn(run_monitor_agent(state.clone()));
+    tokio::spawn(run_watchdog_agent(state.clone()));
 }
 
 /// Redémarre une unité systemd. Nécessite une règle polkit autorisant
