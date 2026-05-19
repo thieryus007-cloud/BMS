@@ -603,17 +603,70 @@ allocate/release rapide), mais la croissance lente vient d'ailleurs.
 VmPeak grimpe en bursts → une tâche périodique alloue ~9 MB d'un coup
 puis libère. Cohérent avec un poll loop RS485 ou un burst MQTT.
 
-### 12.8 — Mesures terrain post-PR #482 : TODO
+### 12.8 — Mesures terrain post-PR #482/#483 (2026-05-19 ~08h)
 
-À refaire après déploiement de la PR #482 (commit `1dddc19`) :
-1. Baseline RSS attendu : encore plus bas que 30 MB (élim. des 20 000
-   clones BTreeMap restants + des 20 000 ouvertures rtx).
-2. Pic `/dashboard/history` : devrait être quasi nul.
-3. Pente passive : on s'attend à ce qu'elle **reste à ~6 MB/h** (la
-   PR n'adresse toujours pas la source réelle de la fuite passive).
+Déployé avec les 3 optimisations Gemini (Arc<Labels>, rtx partagée,
+cache par ptr AST) + libération du match_cache avant try_unwrap.
 
-Si la pente passive reste à ~6 MB/h après PR #482, la cause est
-**définitivement hors du chemin PromQL** → passer à §13.
+Mesure d'un burst `/dashboard/history` (tracker 30 s) :
+```
+30608 21216   ← baseline
+30688 21296   ← stable
+45264 34992   ← navigation history (+14.7 MB pic)
+42048 31760   ← après burst (+11.4 MB persistants au-dessus du baseline)
+```
+
+**Constat** : le pic d'allocation est réduit par rapport au pré-fix
+mais **+11.4 MB restent retenus** par jemalloc après le burst, alors
+que `dirty_decay_ms:1000` devrait les libérer en < 1 s.
+
+**Diagnostic** : les optimisations Rust ont fait leur boulot
+(allocations réduites côté heap), mais **jemalloc retient les pages
+au niveau allocator** parce que :
+- `MALLOC_ARENA_MAX=2` dans la service unit est **glibc-only**, ignoré
+  par jemalloc (cf. §12.4).
+- jemalloc crée par défaut `4 × ncpus = 16 arenas` sur le Pi5 quadri-cœur.
+- Chaque arena retient ses propres dirty pages indépendamment.
+- `dirty_decay_ms` ne déclenche le purge que par thread idle ; avec
+  16 arenas réparties sur des threads `spawn_blocking` qui se relient
+  rapidement, le decay est rarement atteint.
+
+### 12.9 — Fix appliqué : narenas:2 dans `_RJEM_MALLOC_CONF`
+
+`contrib/daly-bms.service` mis à jour :
+```diff
+- Environment=_RJEM_MALLOC_CONF=dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
++ Environment=_RJEM_MALLOC_CONF=narenas:2,dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
+```
+
+Effet attendu :
+- Limite à 2 arenas → 8× moins de pages dirty retenues en parallèle.
+- Avec `background_thread:true`, le thread de purging visite ces 2
+  arenas plus fréquemment.
+- Compromis : légère contention de lock sur l'allocation (acceptable
+  pour notre profil ~4 fsync/s + bursts ponctuels).
+
+Procédure d'application sur Pi5 (sans rebuild) :
+```bash
+# Sur Pi5
+make sync                    # récupère le service file maj
+sudo cp contrib/daly-bms.service /etc/systemd/system/daly-bms.service
+sudo systemctl daemon-reload
+sudo systemctl restart daly-bms
+
+# Vérifier que la conf est appliquée
+sudo systemctl show daly-bms -p Environment | grep RJEM
+```
+
+Attendu après navigation `/dashboard/history` :
+- Pic transitoire toujours présent (~+15 MB, normal pendant l'exec
+  des 9 queries parallèles)
+- RSS doit redescendre **à <3 MB du baseline** dans la minute qui suit
+  (vs +11.4 MB observés sans narenas:2).
+
+Si même après ce fix il reste >5 MB persistants par burst, c'est qu'il
+y a une vraie rétention Rust (Arc cyclique, push dans une struct
+shared) qu'on n'a pas identifiée — passer à §13.3 (heaptrack attach).
 
 ---
 
