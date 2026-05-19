@@ -385,6 +385,9 @@ pub struct AppState {
     /// le retrait de VictoriaMetrics. `None` uniquement si désactivé dans
     /// la config (mode dégradé pour debug).
     pub metrics_store: Option<Arc<metrics_store::MetricsStore>>,
+    /// Rate limiter pour les écritures redb depuis les `on_*_snapshot()`.
+    /// Empêche un sample d'être poussé plus d'1× / 5 s par série.
+    pub redb_rl: crate::redb_writes::RateLimiter,
     /// Catalogue de panels (importés depuis docs/grafana-ess_dashboard.json au démarrage).
     pub dashboard_catalog: crate::dashboards::Catalog,
     /// Persistance SQLite des layouts dashboard (None si init a échoué — fallback localStorage côté UI).
@@ -612,6 +615,7 @@ impl AppState {
             shelly_client: Arc::new(tokio::sync::Mutex::new(None)),
             alert_engine,
             metrics_store,
+            redb_rl: crate::redb_writes::RateLimiter::new(),
             dashboard_catalog: crate::dashboards::Catalog::load_default(),
             dashboard_storage,
         }
@@ -674,6 +678,10 @@ impl AppState {
             let latest = self.latest_snapshots().await;
             let _ = self.ws_tx.send(Arc::new(latest));
         }
+        // Écriture redb (rate-limitée 1/5s par série).
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_bms(&store.writer(), &self.redb_rl, &snap);
+        }
     }
     /// Retourne le dernier snapshot de chaque BMS.
     pub async fn latest_snapshots(&self) -> Vec<BmsSnapshot> {
@@ -719,6 +727,9 @@ impl AppState {
                 .or_insert_with(|| Et112RingBuffer::new(self.config.et112.ring_buffer_size))
                 .push(snap.clone());
         }
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_et112(&store.writer(), &self.redb_rl, &snap);
+        }
     }
     /// Retourne le dernier snapshot ET112 pour une adresse donnée.
     pub async fn et112_latest_for(&self, addr: u8) -> Option<Et112Snapshot> {
@@ -747,6 +758,9 @@ impl AppState {
                 "irradiance_wm2": snap.irradiance_wm2,
             })));
         }
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_irradiance(&store.writer(), &self.redb_rl, &snap);
+        }
         *self.irradiance_value.write().await = Some(snap);
     }
     /// Retourne la dernière mesure d'irradiance (None si jamais reçue).
@@ -765,6 +779,9 @@ impl AppState {
                 "current_a": snap.current_a,
                 "energy_today_kwh": snap.energy_today_kwh,
             })));
+        }
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_tasmota(&store.writer(), &self.redb_rl, &snap);
         }
         let mut buffers = self.tasmota_buffers.write().await;
         buffers
@@ -796,6 +813,9 @@ impl AppState {
     // ==========================================================================
     /// Enregistre/met à jour un snapshot MPPT unique (format v1 legacy).
     pub async fn on_venus_mppt(&self, mppt: VenusMppt) {
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_venus_mppt(&store.writer(), &self.redb_rl, &mppt);
+        }
         let mut mppts = self.venus_mppts.write().await;
         mppts.insert(mppt.instance, mppt);
     }
@@ -804,6 +824,12 @@ impl AppState {
     /// Utilisé quand Venus OS publie un snapshot complet de tous les chargeurs.
     /// Les entrées orphelines (MPPT déconnecté) sont ainsi purgées automatiquement.
     pub async fn on_venus_mppts_replace(&self, mppts: Vec<VenusMppt>) {
+        if let Some(store) = &self.metrics_store {
+            let w = store.writer();
+            for m in &mppts {
+                crate::redb_writes::write_venus_mppt(&w, &self.redb_rl, m);
+            }
+        }
         let mut map = self.venus_mppts.write().await;
         map.clear();
         for mppt in mppts {
@@ -853,6 +879,9 @@ impl AppState {
                     "ah_discharged_today": shunt.ah_discharged_today,
                 })));
             }
+            if let Some(store) = &self.metrics_store {
+                crate::redb_writes::write_venus_smartshunt(&store.writer(), &self.redb_rl, &shunt);
+            }
             *self.venus_smartshunt.write().await = Some(shunt);
             return;
         }
@@ -892,6 +921,9 @@ impl AppState {
                 "ah_discharged_today": shunt.ah_discharged_today,
             })));
         }
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_venus_smartshunt(&store.writer(), &self.redb_rl, &shunt);
+        }
         *self.venus_smartshunt.write().await = Some(shunt);
     }
     /// Retourne le SmartShunt actuel.
@@ -900,6 +932,9 @@ impl AppState {
     }
     /// Enregistre/met à jour un capteur de température.
     pub async fn on_venus_temperature(&self, temp: VenusTemperature) {
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_venus_temperature(&store.writer(), &self.redb_rl, &temp);
+        }
         let mut temps = self.venus_temperatures.write().await;
         temps.insert(temp.instance, temp);
     }
@@ -910,6 +945,9 @@ impl AppState {
     }
     /// Enregistre/met à jour les données de l'onduleur Victron (MultiPlus, cgwacs, etc.).
     pub async fn on_venus_inverter(&self, inverter: VenusInverter) {
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_venus_inverter(&store.writer(), &self.redb_rl, &inverter);
+        }
         *self.venus_inverter.write().await = Some(inverter);
     }
     /// Retourne les données actuelles de l'onduleur Victron.
@@ -921,6 +959,9 @@ impl AppState {
     // ==========================================================================
     /// Enregistre/met à jour un snapshot heatpump.
     pub async fn on_venus_heatpump(&self, hp: VenusHeatpump) {
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_venus_heatpump(&store.writer(), &self.redb_rl, &hp);
+        }
         let mut hps = self.venus_heatpumps.write().await;
         hps.insert(hp.mqtt_index, hp);
     }
@@ -962,6 +1003,9 @@ impl AppState {
                 "sw_mode": if snap.sw_mode { "Auto" } else { "Manuel" },
             })));
         }
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_ats(&store.writer(), &self.redb_rl, &snap);
+        }
         *self.ats_snapshot.write().await = Some(snap);
     }
     /// Retourne le dernier snapshot ATS (None si jamais reçu).
@@ -1000,6 +1044,9 @@ impl AppState {
                     },
                 }),
             ));
+        }
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_shelly(&store.writer(), &self.redb_rl, &snap);
         }
         let mut map = self.shelly_latest.write().await;
         map.insert(snap.id, snap);

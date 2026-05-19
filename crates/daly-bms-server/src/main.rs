@@ -22,6 +22,7 @@ mod bridges;
 mod dashboard;
 mod dashboards;
 mod monitor;
+mod redb_writes;
 
 // Allocator jemalloc à la place de glibc malloc.
 // Cf. commit accompagnant : observation 18 mai 2026 d'une fragmentation
