@@ -369,27 +369,22 @@ async fn read_uptime_secs() -> u64 {
 // Watchdog
 // =============================================================================
 
+const WATCHDOG_SERVICES: &[(&str, &str, u16, Option<&str>)] = &[
+    ("energy-manager", "127.0.0.1", 8081, None),
+];
+
+const WATCHDOG_INTERVAL:      Duration = Duration::from_secs(15);
+const WATCHDOG_CONFIRM_DELAY: Duration = Duration::from_secs(5);
+const WATCHDOG_COOLDOWN:      Duration = Duration::from_secs(120);
+
 pub async fn run_watchdog_agent(_state: AppState) {
     info!("Watchdog démarré (intervalle: {}s, cooldown: {}s)",
         WATCHDOG_INTERVAL.as_secs(), WATCHDOG_COOLDOWN.as_secs());
-    
-    let mut ticker = interval(WATCHDOG_INTERVAL);
+    let mut ticker       = interval(WATCHDOG_INTERVAL);
     let mut last_restart: Vec<Option<Instant>> = vec![None; WATCHDOG_SERVICES.len()];
-    
-    // ✅ AJOUT CRITIQUE : Handle pour suivre la tâche de restart
-    let mut restart_task: Option<tokio::task::JoinHandle<()>> = None;
 
     loop {
         ticker.tick().await;
-        
-        // ✅ AJOUT CRITIQUE : Nettoyer l'ancienne tâche AVANT d'en créer une nouvelle
-        if let Some(handle) = restart_task.take() {
-            if !handle.is_finished() {
-                handle.abort(); // Tue la tâche immédiatement
-            }
-            let _ = handle.await; // Attend le Drop complet des ressources
-        }
-        
         for (idx, &(name, host, port, systemd_unit)) in WATCHDOG_SERVICES.iter().enumerate() {
             if !tcp_probe(host, port).await {
                 tokio::time::sleep(WATCHDOG_CONFIRM_DELAY).await;
@@ -404,24 +399,19 @@ pub async fn run_watchdog_agent(_state: AppState) {
                 }
 
                 warn!("Watchdog: {} injoignable — tentative de redémarrage", name);
-                
-                // ✅ AJOUT CRITIQUE : Spawn avec backoff et gestion du handle
                 if let Some(unit) = systemd_unit {
-                    restart_task = Some(tokio::spawn(async move {
-                        if restart_systemd_service(unit).await {
-                            info!("Watchdog: {} redémarré avec succès", name);
-                        } else {
-                            warn!("Watchdog: échec redémarrage de {}", name);
-                        }
-                        // Backoff exponentiel pour éviter le spam
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                    }));
-                    last_restart[idx] = Some(Instant::now());
+                    if restart_systemd_service(unit).await {
+                        info!("Watchdog: {} redémarré avec succès", name);
+                        last_restart[idx] = Some(Instant::now());
+                    } else {
+                        warn!("Watchdog: échec redémarrage de {}", name);
+                    }
                 }
             }
         }
     }
 }
+
 // =============================================================================
 // Métriques système → VictoriaMetrics
 // =============================================================================
