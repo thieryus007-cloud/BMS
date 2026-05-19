@@ -611,21 +611,49 @@ async fn main() -> anyhow::Result<()> {
                         };
                         let state_poll = state.clone();
                         let state_err  = state.clone();
+
+                        // Channels MPSC pour découpler les callbacks sync de poll_loop
+                        // des appels async sur AppState. Évite N × `tokio::spawn` par
+                        // snapshot (qui alloue ~500 bytes par task) qui s'accumulent
+                        // sous rétention jemalloc — audit fuite mémoire phase 2.6.
+                        // Cap 64 = ~10 s de buffer à 6 Hz (3 BMS × 2 Hz).
+                        let (snap_tx, mut snap_rx) =
+                            tokio::sync::mpsc::channel::<daly_bms_core::types::BmsSnapshot>(64);
+                        let (err_tx, mut err_rx) =
+                            tokio::sync::mpsc::channel::<(u8, String, String)>(64);
+
+                        // Consumer task : await sur les 2 channels et appelle state.
+                        let state_consumer = state.clone();
+                        tokio::spawn(async move {
+                            loop {
+                                tokio::select! {
+                                    Some(snap) = snap_rx.recv() => {
+                                        let addr = snap.address;
+                                        let name = snap.name.clone();
+                                        state_consumer.record_rs485_success(addr, "BMS", &name).await;
+                                        state_consumer.on_snapshot(snap).await;
+                                    }
+                                    Some((addr, name, err_msg)) = err_rx.recv() => {
+                                        state_consumer.record_rs485_error(addr, "BMS", &name, &err_msg).await;
+                                    }
+                                    else => break,
+                                }
+                            }
+                        });
+
+                        let _ = state_poll;
+                        let _ = state_err;
+
                         tokio::spawn(async move {
                             poll_loop(
                                 manager,
                                 poll_cfg,
                                 move |snap| {
-                                    let s = state_poll.clone();
-                                    let addr = snap.address;
-                                    let name = snap.name.clone();
-                                    tokio::spawn(async move {
-                                        s.record_rs485_success(addr, "BMS", &name).await;
-                                        s.on_snapshot(snap).await;
-                                    });
+                                    // try_send : non-bloquant, drop si plein.
+                                    // Pas d'allocation supplémentaire (slot pré-alloué).
+                                    let _ = snap_tx.try_send(snap);
                                 },
                                 move |addr, kind, msg| {
-                                    let s = state_err.clone();
                                     let name = bms_names
                                         .get(&addr)
                                         .cloned()
@@ -637,9 +665,7 @@ async fn main() -> anyhow::Result<()> {
                                         PollErrorKind::Other   => "other",
                                     };
                                     let err_msg = format!("{}: {}", err_tag, msg);
-                                    tokio::spawn(async move {
-                                        s.record_rs485_error(addr, "BMS", &name, &err_msg).await;
-                                    });
+                                    let _ = err_tx.try_send((addr, name, err_msg));
                                 },
                             )
                             .await;
