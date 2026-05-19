@@ -21,12 +21,29 @@ use crate::state::{AppState, VenusHeatpump, VenusMppt, VenusSmartShunt, VenusTem
 use crate::tasmota::TasmotaSnapshot;
 use chrono::Utc;
 use daly_bms_core::types::BmsSnapshot;
-use rumqttc::{AsyncClient, MqttOptions, QoS};
+use rumqttc::{AsyncClient, Event, MqttOptions, Outgoing, Packet, QoS};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
-use tokio::time::interval;
-use tracing::{debug, error, info, warn};
+use tokio::time::{interval, timeout};
+use tracing::{debug, error, info, trace, warn};
+
+// =============================================================================
+// Paramètres MQTT optimisés pour réduire la rétention mémoire
+// =============================================================================
+
+/// QoS pour publications périodiques (données temps-réel).
+/// AtMostOnce = 0 élimine la file inflight et réduit drastiquement la pression
+/// mémoire côté publisher (pas d'attente de PUBACK, pas de retransmission).
+const PUB_QOS: QoS = QoS::AtMostOnce;
+
+/// QoS pour les souscriptions. AtMostOnce suffisant pour les données Venus OS
+/// qui sont publiées périodiquement toutes les secondes.
+const SUB_QOS: QoS = QoS::AtMostOnce;
+
+/// Capacité interne des channels rumqttc. Réduite de 128 → 64 pour limiter
+/// la quantité maximale de messages retenus en mémoire en cas de ralentissement.
+const EVENTLOOP_CAP: usize = 64;
 
 /// Démarre la tâche de publication MQTT en arrière-plan.
 ///
@@ -59,16 +76,30 @@ pub async fn run_mqtt_bridge(state: AppState, cfg: MqttConfig, addr_map: HashMap
         opts.set_credentials(user, pass);
     }
 
-    let (client, mut eventloop) = AsyncClient::new(opts, 128);
+    let (client, mut eventloop) = AsyncClient::new(opts, EVENTLOOP_CAP);
 
-    // Spawner la boucle d'événements MQTT (requis pour rumqttc async)
+    // Spawner la boucle d'événements MQTT (requis pour rumqttc async).
+    // Timeout ajouté pour éviter les blocages infinis qui empêcheraient
+    // la libération des buffers réseau internes.
     tokio::spawn(async move {
         loop {
-            match eventloop.poll().await {
-                Ok(_) => {}
-                Err(e) => {
+            match timeout(Duration::from_secs(60), eventloop.poll()).await {
+                Ok(Ok(Event::Incoming(Packet::ConnAck(_)))) => {
+                    trace!("MQTT publisher connecté");
+                }
+                Ok(Ok(Event::Incoming(Packet::PubAck(_)))) => {
+                    trace!("MQTT publisher PUBACK reçu");
+                }
+                Ok(Ok(Event::Outgoing(Outgoing::Publish(_)))) => {
+                    trace!("MQTT publisher PUBLISH sortant");
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
                     warn!("MQTT eventloop erreur : {:?}", e);
                     tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+                Err(_) => {
+                    warn!("MQTT publisher eventloop timeout (60s) — possible blocage réseau");
                 }
             }
         }
@@ -167,7 +198,7 @@ async fn publish_irradiance(
     let topic = format!("{}/irradiance/raw", base);
     let payload = format!("{:.0}", irradiance_wm2);
     client
-        .publish(&topic, QoS::AtLeastOnce, true, payload)
+        .publish(&topic, PUB_QOS, true, payload)
         .await?;
     Ok(())
 }
@@ -238,7 +269,7 @@ async fn publish_et112_snapshot(
     };
 
     client
-        .publish(&topic, QoS::AtLeastOnce, true, serde_json::to_vec(&payload)?)
+        .publish(&topic, PUB_QOS, true, serde_json::to_vec(&payload)?)
         .await?;
 
     Ok(())
@@ -278,7 +309,7 @@ async fn publish_ats_snapshot(
     });
 
     client
-        .publish(&topic, QoS::AtLeastOnce, true, serde_json::to_vec(&payload)?)
+        .publish(&topic, PUB_QOS, true, serde_json::to_vec(&payload)?)
         .await?;
 
     Ok(())
@@ -323,7 +354,7 @@ async fn publish_tasmota_snapshot(
     };
 
     client
-        .publish(&topic_prefix, QoS::AtLeastOnce, true, serde_json::to_vec(&payload)?)
+        .publish(&topic_prefix, PUB_QOS, true, serde_json::to_vec(&payload)?)
         .await?;
 
     Ok(())
@@ -349,26 +380,26 @@ async fn publish_snapshot(
     // JSON status complet
     let status_json = serde_json::to_string(snap)?;
     client
-        .publish(format!("{}/status", prefix), QoS::AtLeastOnce, true, status_json)
+        .publish(format!("{}/status", prefix), PUB_QOS, true, status_json)
         .await?;
 
     // JSON cellules
     let cells_json = serde_json::to_string(&snap.voltages)?;
     client
-        .publish(format!("{}/cells", prefix), QoS::AtLeastOnce, false, cells_json)
+        .publish(format!("{}/cells", prefix), PUB_QOS, false, cells_json)
         .await?;
 
     // JSON alarmes
     let alarms_json = serde_json::to_string(&snap.alarms)?;
     client
-        .publish(format!("{}/alarms", prefix), QoS::AtLeastOnce, false, alarms_json)
+        .publish(format!("{}/alarms", prefix), PUB_QOS, false, alarms_json)
         .await?;
 
     // Format Venus OS (dbus-mqtt-battery)
     let venus_payload = build_venus_payload(snap);
     let venus_json = serde_json::to_string(&venus_payload)?;
     client
-        .publish(format!("{}/venus", prefix), QoS::AtLeastOnce, true, venus_json)
+        .publish(format!("{}/venus", prefix), PUB_QOS, true, venus_json)
         .await?;
 
     Ok(())
@@ -376,7 +407,7 @@ async fn publish_snapshot(
 
 async fn publish_str(client: &AsyncClient, topic: &str, value: &str) {
     if let Err(e) = client
-        .publish(topic, QoS::AtLeastOnce, false, value.to_string())
+        .publish(topic, PUB_QOS, false, value.to_string())
         .await
     {
         warn!("MQTT publish failed on {topic}: {e}");
@@ -482,15 +513,15 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
         opts.set_credentials(user, pass);
     }
 
-    let (client, mut eventloop) = AsyncClient::new(opts, 128);
+    let (client, mut eventloop) = AsyncClient::new(opts, EVENTLOOP_CAP);
 
-    // S'abonner aux topics Venus OS
+    // S'abonner aux topics Venus OS — QoS 0 pour éviter la rétention inflight
     let topics = vec![
-        ("santuario/meteo/venus", QoS::AtLeastOnce),
-        ("santuario/inverter/venus", QoS::AtLeastOnce),
-        ("santuario/heat/+/venus", QoS::AtLeastOnce),
-        ("santuario/heatpump/+/venus", QoS::AtLeastOnce),
-        ("santuario/system/venus", QoS::AtLeastOnce),
+        ("santuario/meteo/venus", SUB_QOS),
+        ("santuario/inverter/venus", SUB_QOS),
+        ("santuario/heat/+/venus", SUB_QOS),
+        ("santuario/heatpump/+/venus", SUB_QOS),
+        ("santuario/system/venus", SUB_QOS),
     ];
 
     for (topic, qos) in &topics {
@@ -501,10 +532,10 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
         }
     }
 
-    // Boucle de réception
+    // Boucle de réception avec timeout pour éviter les blocages infinis
     loop {
-        match eventloop.poll().await {
-            Ok(rumqttc::Event::Incoming(rumqttc::Packet::ConnAck(_))) => {
+        match timeout(Duration::from_secs(60), eventloop.poll()).await {
+            Ok(Ok(Event::Incoming(Packet::ConnAck(_)))) => {
                 info!("MQTT Venus connecté/reconnecté — réabonnement aux topics");
                 if state.console_bus.receiver_count() > 0 {
                     state.console_bus.emit(ConsoleEvent::system("MQTT Venus", "Connecté/reconnecté — réabonnement aux topics"));
@@ -515,14 +546,13 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
                     }
                 }
             }
-            Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(p))) => {
+            Ok(Ok(Event::Incoming(Packet::Publish(p)))) => {
                 let topic = &p.topic;
-                let payload = std::str::from_utf8(&p.payload).unwrap_or("");
+                let payload_str = std::str::from_utf8(&p.payload).unwrap_or("");
+                debug!("MQTT reçu {} = {}", topic, payload_str);
 
-                debug!("MQTT reçu {} = {}", topic, payload);
-
-                // Parser le payload JSON
-                if let Ok(json) = serde_json::from_str::<Value>(payload) {
+                // Parser directement depuis les bytes sans allocation UTF-8 intermédiaire
+                if let Ok(json) = serde_json::from_slice::<Value>(&p.payload) {
                     // Console MQTT IN — device inferred from topic.
                     // Skip si pas d'abonné : évite un clone() complet du JSON
                     // (peut être lourd) à chaque message MQTT entrant.
@@ -554,14 +584,19 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
                     }
                 }
             }
-            Ok(rumqttc::Event::Outgoing(_)) => {
+            Ok(Ok(Event::Outgoing(_))) => {
                 // Ignorer les ACK d'envoi
             }
-            Err(e) => {
+            Ok(Ok(_)) => {
+                // Autres variants Event::Incoming (PingResp, SubAck, etc.) — non actionnables
+            }
+            Ok(Err(e)) => {
                 warn!("MQTT Venus eventloop erreur (reconnexion dans 5s) : {:?}", e);
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
-            _ => {}
+            Err(_) => {
+                warn!("MQTT Venus eventloop timeout (60s) — possible blocage réseau");
+            }
         }
     }
 }
