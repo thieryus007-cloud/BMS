@@ -129,7 +129,7 @@ pub async fn run_query_instant(state: &AppState, params: &InstantParams) -> Resp
         .into_iter()
         .map(|s| {
             json!({
-                "metric": s.labels,
+                "metric": &*s.labels,
                 "value": [ts_secs(t), val_str(s.value)],
             })
         })
