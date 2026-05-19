@@ -161,6 +161,13 @@ impl<'r> Evaluator<'r> {
             }
             t = t.saturating_add(step_ms);
         }
+        // Libère les Arc<Labels> co-détenus par le cache et la sentinelle
+        // locale — sinon `Arc::try_unwrap` ci-dessous échoue toujours et
+        // retombe sur le clone fallback. L'Evaluator est scoped per-request
+        // (un seul eval_range par instance) donc vider le cache ici n'a
+        // pas d'effet de bord. Cf. review Gemini PR #482.
+        drop(scalar_key);
+        self.match_cache.borrow_mut().clear();
         Ok(by_labels
             .into_iter()
             .map(|(labels_arc, samples)| {

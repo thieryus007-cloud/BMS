@@ -507,50 +507,265 @@ quadricore. Chaque arena peut retenir ses propres dirty pages. Ajouter
 inter-arenas (au prix de plus de contention de lock — acceptable pour le
 profil ~4 fsync/s du writer).
 
-### 12.5 — Fix recommandé (non encore appliqué)
+### 12.5 — Fix appliqué : PR #481 (merge 2026-05-19 07:29)
 
-**Priorité 1 — Cache `match_series` au niveau Evaluator** :
+**Commit `9d549b7` / merge `56f6771`** dans `crates/metrics-store/src/promql/exec.rs` :
 
-`match_series` ne dépend que de `(metric, matchers)` et du contenu de
-`TABLE_SERIES_META`. Dans une `eval_range` unique, ces valeurs sont
-constantes pour chaque VectorSelector. Patch minimal dans `exec.rs` :
+- `series_catalog: RefCell<Option<Arc<Vec<SeriesMeta>>>>` chargé 1× au
+  premier `match_series`, partagé pour tous les steps.
+- `match_cache: RefCell<HashMap<(String, String), Arc<Vec<(u32, Labels)>>>>`
+  éliminait la redondance `serde_json::from_str` par step (1ère version).
+- Empreinte stable des matchers via `name + op + value` (séparateurs
+  `\x1f`/`\x1e`).
+- Réduction d'allocs **attendue** sur eval_range 200 steps × 1 VectorSelector :
+  - `list_series` : 200 → 1 (× 200)
+  - `serde_json::from_str` : 200 × N_séries → N_séries (× 200)
+- 35 tests unitaires + 2 goldens passent inchangés.
 
-```rust
-pub struct Evaluator<'r> {
-    reader: &'r Reader,
-    pub lookback_ms: i64,
-    // Cache scopé à l'Evaluator (drop avec l'Evaluator donc fin de query).
-    // Clef = (metric, hash des matchers sérialisés). Valeur = résultat
-    // partagé via Rc pour éviter le clone.
-    series_cache: RefCell<HashMap<(String, u64), Rc<Vec<(u32, Labels)>>>>,
-    // Catalogue de séries chargé 1 fois par Evaluator.
-    series_catalog: OnceCell<Vec<(u32, SeriesMeta)>>,
-}
+### 12.6 — Fix appliqué : PR #482 (commit `1dddc19`, suite review Gemini)
+
+Trois optimisations supplémentaires recommandées par la review Gemini
+sur la PR #481 :
+
+1. **HIGH — `InstantSample.labels: Arc<Labels>`** (au lieu de `Labels`)
+   - Avant : chaque step clonait le `BTreeMap<String,String>` pour chaque
+     série matchée (~20 000 allocs sur eval_range 200×100).
+   - Après : `Arc` partagé entre cache et samples, le clone devient un
+     refcount atomique. Conversion en `Labels` owned se fait une seule
+     fois en sortie d'`eval_range` (`Arc::try_unwrap` puis fallback clone).
+   - `eval_aggregate` et `align_and_op` continuent d'allouer des Labels
+     owned car sémantique PromQL exige des BTreeMap mutables (cas rares).
+
+2. **MEDIUM — `ReadTransaction` partagée sur tout l'`eval_range`**
+   - Avant : `Reader::query_range_raw` faisait `begin_read()` +
+     `open_table()` par série × step (~20 000 ouvertures par query).
+   - Après : `read_txn: OnceCell<ReadTransaction>` dans l'Evaluator,
+     lazy-init au 1er accès. Reader expose des variantes `_with_tx`
+     (`query_range_raw_with_tx`, `query_range_buckets_with_tx`,
+     `list_series_with_tx`) qui prennent une rtx en paramètre.
+   - Anciennes méthodes Reader conservées pour les call sites externes
+     (`api/redb.rs` lookups isolés, `metrics-cli`).
+
+3. **MEDIUM — Cache `match_series` keyé par adresse mémoire du `VectorSelector`**
+   - Avant : `matchers_fingerprint()` + clé `(String, String)` recalculés
+     à chaque step (200×).
+   - Après : clé = `vs as *const VectorSelector as usize`. L'AST PromQL
+     est immutable pendant `eval_range` (parsé dans
+     `redb_query_range_inner`, drop à la fin), donc le ptr est stable
+     et unique par nœud syntaxique. Évite tout calcul de fingerprint
+     après le 1er step + 2 allocs `String` par step.
+   - Signature de `match_series` change pour prendre `&VectorSelector`
+     au lieu de `(metric, matchers)`.
+
+Call sites externes adaptés :
+- `crates/daly-bms-server/src/api/redb.rs:131` : `"metric": &*s.labels`
+- `crates/daly-bms-server/src/state.rs:496` : idem dans
+  `redb_query_instant_inner`
+
+(Le feature `rc` de serde n'est pas activé donc Arc<T> n'implémente pas
+directement Serialize — on déréférence à la sérialisation JSON.)
+
+35 (metrics-store) + 16 (daly-bms-server) + 2 goldens passent.
+
+### 12.7 — Mesures terrain post-PR #481
+
+Première itération déployée sur Pi5 le 2026-05-19 ~07h12.
+
+**Bonne nouvelle — baseline RSS divisé** :
+
+| Métrique | Avant fix (18 mai) | Après PR #481 (19 mai) | Δ |
+|----------|--------------------|------------------------|---|
+| RSS baseline au démarrage | ~47 MB | **~30 MB** | **−17 MB** |
+| RssAnon baseline | ~37 MB | **~21 MB** | **−16 MB** |
+
+Le cache `match_series` + catalogue empêche bien l'accumulation de
+centaines de milliers de `BTreeMap<String,String>` éphémères → moins de
+pages dirty dans les arenas jemalloc. Gain réel et attribuable au fix.
+
+**Moins bonne nouvelle — pente passive ~identique** :
+
+- Tracker 5 min : 07:12 → 07:22 = +1136 kB RSS, +1008 kB Anon → **~6.8 MB/h**
+- Tracker 30 s : 30160 → 31984 kB sur 16.5 min → **~6.6 MB/h**
+
+Pour comparaison, avant fix : ~5.5 MB/h. La pente reste équivalente.
+
+**Conclusion factuelle** : la fuite passive (heap Rust car ΔAnon ≈ ΔRSS,
+~6 MB/h) n'est **pas** dans le chemin PromQL. Le fix élimine bien le pic
+d'allocation lié à `/dashboard/history` (visible par la baseline 17 MB
+plus basse + oscillations 30-32 MB du tracker 30s qui montrent
+allocate/release rapide), mais la croissance lente vient d'ailleurs.
+
+**Observation `VmPeak`** (rss-tracker) :
+```
+07:12:25 Peak=264560 kB
+07:22:25 Peak=273360 kB   → +8.8 MB en 10 min
+```
+VmPeak grimpe en bursts → une tâche périodique alloue ~9 MB d'un coup
+puis libère. Cohérent avec un poll loop RS485 ou un burst MQTT.
+
+### 12.8 — Mesures terrain post-PR #482 : TODO
+
+À refaire après déploiement de la PR #482 (commit `1dddc19`) :
+1. Baseline RSS attendu : encore plus bas que 30 MB (élim. des 20 000
+   clones BTreeMap restants + des 20 000 ouvertures rtx).
+2. Pic `/dashboard/history` : devrait être quasi nul.
+3. Pente passive : on s'attend à ce qu'elle **reste à ~6 MB/h** (la
+   PR n'adresse toujours pas la source réelle de la fuite passive).
+
+Si la pente passive reste à ~6 MB/h après PR #482, la cause est
+**définitivement hors du chemin PromQL** → passer à §13.
+
+---
+
+## 13. Prochaine cible : la fuite passive ~6 MB/h hors PromQL
+
+Le chemin lecture redb / PromQL est désormais audité et optimisé. La
+pente passive observée (~6 MB/h, RssAnon = RSS donc heap Rust pur) doit
+venir d'une tâche périodique interne. Suspects classés par probabilité.
+
+### 13.1 — Test décisif à faire en premier
+
+**Bloquer le trafic externe** (§11.3) puis mesurer 1-2 h :
+```bash
+sudo iptables -I INPUT -p tcp --dport 8080 ! -s 127.0.0.1 -j DROP
+# ... 1-2h de tracker RSS ...
+sudo iptables -D INPUT -p tcp --dport 8080 ! -s 127.0.0.1 -j DROP
 ```
 
-Effet attendu :
-- 9 queries × 200 steps × 1 VectorSelector = 1 800 → **9 appels** à
-  `list_series` (réduction × 200).
-- Total `serde_json::from_str` par burst : 900 000 → **4 500** (réduction
-  × 200).
+- **Si la pente disparaît** → un client externe (Grafana, onglet
+  navigateur, healthcheck) scrape en permanence. Identifier via §11.2.
+- **Si la pente persiste à ~6 MB/h** → c'est une tâche interne, suite
+  ci-dessous.
 
-**Priorité 2 — Pré-charger le catalogue une fois par Evaluator** :
-même logique, niveau `Reader::list_series` mémoïsé au niveau Evaluator.
+### 13.2 — Suspects internes par ordre de probabilité
 
-**Priorité 3 (optionnelle) — Cache cross-request au niveau MetricsStore** :
-`TABLE_SERIES_META` change rarement (uniquement à l'ajout d'une nouvelle
-série, donc nouveau device ou nouvelle label combo). Un cache invalidé
-par bump de génération côté writer permettrait de servir 100% des
-queries sans toucher redb. Mais comme le writer est dormant en prod,
-le catalogue ne change littéralement jamais aujourd'hui → cache éternel
-trivialement valide. À implémenter quand le writer sera réactivé.
+#### A. Boucles MQTT (`crates/daly-bms-server/src/bridges/mqtt.rs`)
 
-### 12.6 — Pour valider le fix sans rebuild
+Le bridge MQTT reçoit en continu des messages depuis Mosquitto (BMS,
+ET112 publish via le bridge `pi5-nanopi`, payloads Venus). Chaque
+message :
+- Alloue un payload `Vec<u8>` puis le décode en string
+- Désérialise du JSON via serde (BTreeMap, String)
+- Émet potentiellement un événement via `console_bus` / `ws_tx` /
+  `bus.live` (déjà gardé par `receiver_count > 0` post PR antérieures)
 
-Avant de patcher, refaire la mesure avec firewall actif (§11.3) **pendant
-qu'un curl unique tape `/api/v1/query_range`** avec un range "year"
-toutes les 30s. Le delta RSS observé doit être proportionnel au nombre
-de queries lancées. Une fois le patch en place, refaire le même test :
-le delta doit chuter de l'ordre de × 200 sur le pic d'allocation et la
-RSS résiduelle doit redescendre plus vite (moins de pression
-inter-arenas).
+À vérifier :
+- Existe-t-il un `HashMap<String, Foo>` indexé par topic qui ne fait
+  jamais shrink ? (ex: si un nouveau topic apparaît occasionnellement)
+- Les payloads sont-ils stockés quelque part (`last_payloads` cache) ?
+- `rumqttc::AsyncClient` interne accumule-t-il un état (pending PUBACK
+  buffer, etc.) ?
+
+Diagnostic rapide :
+```bash
+# Compter les messages MQTT reçus en 60s
+sudo journalctl -u daly-bms --since "1 min ago" | grep -c "mqtt_in"
+# Et la taille du log binding MQTT
+grep -rn "HashMap\|Vec\|VecDeque" crates/daly-bms-server/src/bridges/mqtt.rs | head -20
+```
+
+#### B. AlertEngine — subscribe permanent ws_tx + state SQLite
+
+`crates/daly-bms-server/src/bridges/alerts.rs:run_alert_engine` :
+- Subscribe ws_tx en permanence (cf. §3, limite identifiée des
+  broadcast guards : `ws_tx.receiver_count()` ≥ 1 toujours grâce à ça).
+- Reçoit chaque `BmsSnapshot` → évalue les règles → écrit dans
+  `alerts.db_path` (SQLite).
+
+À vérifier :
+- `AlertEngine::states: HashMap<(u8, &'static str), AlertState>` est
+  borné par §4 (cardinalité fixe), donc OK pour ce HashMap.
+- Mais la connexion `rusqlite::Connection` accumule-t-elle un cache de
+  statement préparé qui grossit ? (`Connection::prepare_cached` retient
+  les statements indéfiniment par défaut).
+- Le buffer interne de `tokio::sync::broadcast::Receiver` : chaque slot
+  consommé libère son slot, mais l'allocation underlying du ring reste.
+  Sur un Receiver qui consomme lentement par rapport au producer, ça
+  peut accumuler des lag drops mais pas une fuite.
+
+Diagnostic rapide :
+```bash
+grep -n "prepare_cached\|Connection\|states\.insert" crates/daly-bms-server/src/bridges/alerts.rs
+```
+
+#### C. Poll loops RS485 (`crates/daly-bms-core/src/poll.rs`)
+
+Chaque BMS poll → `BmsSnapshot` alloué → state update + broadcast →
+écriture dans `BmsRingBuffer` borné.
+
+À vérifier :
+- Le snapshot contient `cells: Vec<f32>`, `temperatures: Vec<f32>` —
+  vérifier qu'on ne `push` jamais sans clear (peu probable, Vec local
+  à chaque poll).
+- `Rs485DeviceStats: BTreeMap<u8, ...>` borné par nb_devices, OK.
+- Les erreurs RS485 sont-elles loggées de façon à grossir un buffer
+  qui ne shrink pas ? `LogBuffer` est borné à 200, mais si chaque entry
+  contient une String de 10 KB (stack trace, payload hexa) sur 200
+  entries = 2 MB pic → pas la source d'une croissance linéaire.
+
+#### D. Tasmota/Shelly HTTP polling (`crates/daly-bms-server/src/tasmota/`, `.../shelly/`)
+
+Chaque poll fait un GET HTTP via `reqwest::Client`. Si une nouvelle
+`Client` est créée à chaque poll au lieu d'être réutilisée, le pool
+de connexions kept-alive s'accumule.
+
+Vérification :
+```bash
+grep -n "Client::new\|ClientBuilder" crates/daly-bms-server/src/tasmota/ crates/daly-bms-server/src/shelly/
+```
+
+#### E. `monitor_agent` + métriques tokio
+
+`monitor.rs` collecte toutes les 30 s des stats système (proc/stat,
+proc/meminfo). Le `MonitorSnapshot` est overwrite dans state. Mais si
+les métriques tokio (`tokio-metrics` crate, présente dans le Cargo.lock)
+accumulent un histogramme borné en théorie mais qui retient les buckets
+créés → vérifier `tokio_metrics::RuntimeMonitor`.
+
+### 13.3 — Outils diagnostiques utilisables sans rebuild
+
+**heaptrack en attach direct** (sans wrapper systemd) — pas testé mais
+recommandé pour la prochaine session :
+```bash
+sudo apt install heaptrack
+PID=$(pgrep -f 'daly-bms-server$' | head -1)
+sudo heaptrack -p $PID &
+# Attendre 30 min (génère ~6 MB de croissance attendue)
+sudo kill -INT %1   # arrêt propre
+heaptrack_print heaptrack.daly-bms-server.*.gz | head -100
+```
+
+Si heaptrack-attach fonctionne, le top 10 backtraces des allocations
+non-libérées **désigne directement** le coupable.
+
+**Stats jemalloc via gdb** (cf. §7, déjà documenté) :
+```bash
+sudo gdb -p $PID -batch \
+  -ex 'call (void)_rjem_malloc_stats_print(0,0,"Jmdablxe")' \
+  -ex 'detach' 2>&1 | tee /tmp/jestats-t0.json
+```
+Comparer T0 vs T+30min → le delta `stats.allocated` décomposé par size
+class indique le type d'objet en fuite.
+
+### 13.4 — Si la pente persiste après TOUT le reste
+
+Dernier recours pragmatique : **redémarrage périodique du service** via
+systemd `RuntimeMaxSec=` dans `contrib/daly-bms.service` (ex: 7 jours).
+Acceptable car le service redémarre en <5 s, perte = état in-memory non
+persisté (toutes les sources critiques sont persistées via MQTT
+retained / redb / sqlite).
+
+À évaluer comme workaround **uniquement si la cause racine résiste**
+malgré §13.1-13.3. Documenter le choix dans CLAUDE.md.
+
+---
+
+## 14. Synthèse pour reprise rapide en cas de nouvelle session
+
+| État | Fait | TODO |
+|------|------|------|
+| Pic `/dashboard/history` | ✅ Résolu par PR #481 + #482 (réduction × 200 allocs/query) | Mesurer post-déploiement PR #482 |
+| Fuite passive ~6 MB/h | ❌ Hors chemin PromQL confirmé | §13.1 test firewall puis §13.2 suspects MQTT/Alerts/Polls |
+| `MALLOC_ARENA_MAX` ignoré | ❌ Documenté en §12.4 | Ajouter `narenas:2` dans `_RJEM_MALLOC_CONF` |
+| Writer dormant en prod | ⚠️ Confirmé §12.3 | Décider : activer un writer (vraies écritures redb) ou retirer le code mort |
+| heaptrack attach | ❌ Jamais validé | §13.3 — outil recommandé pour identifier la fuite passive |
