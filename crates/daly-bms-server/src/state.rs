@@ -494,7 +494,7 @@ fn redb_query_instant_inner(
         .into_iter()
         .map(|s| {
             serde_json::json!({
-                "metric": s.labels,
+                "metric": &*s.labels,
                 "value": [time_ms as f64 / 1000.0, fmt_val(s.value)],
             })
         })

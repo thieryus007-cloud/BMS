@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use redb::{Database, ReadableDatabase, ReadableTable};
+use redb::{Database, ReadTransaction, ReadableDatabase, ReadableTable};
 
 use crate::encoding::{dec_skey, enc_skey, make_lookup_key};
 use crate::tables::{
@@ -25,8 +25,9 @@ impl Reader {
     }
 
     /// Expose une transaction de lecture pour les usages avancés (ex: tests
-    /// qui inspectent plusieurs tables dans le même snapshot).
-    pub fn begin_read(&self) -> Result<redb::ReadTransaction> {
+    /// qui inspectent plusieurs tables dans le même snapshot ; évaluateur
+    /// PromQL qui réutilise une seule rtx pour toute la durée d'`eval_range`).
+    pub fn begin_read(&self) -> Result<ReadTransaction> {
         Ok(self.db.begin_read()?)
     }
 
@@ -39,16 +40,20 @@ impl Reader {
         to_ms: i64,
     ) -> Result<Vec<(i64, f64)>> {
         let rtx = self.db.begin_read()?;
-        let t = rtx.open_table(TABLE_RAW)?;
-        let k_lo = enc_skey(series_id, from_ms);
-        let k_hi = enc_skey(series_id, to_ms);
-        let mut out = Vec::new();
-        for entry in t.range::<&[u8]>(&k_lo[..]..=&k_hi[..])? {
-            let (k, v) = entry?;
-            let (_sid, ts) = dec_skey(k.value());
-            out.push((ts, v.value()));
-        }
-        Ok(out)
+        query_range_raw_inner(&rtx, series_id, from_ms, to_ms)
+    }
+
+    /// Variante qui réutilise une `ReadTransaction` existante — évite
+    /// l'overhead `begin_read` répété quand on boucle sur de nombreux steps
+    /// (cf. eval_range PromQL, ~200 itérations × N séries).
+    pub fn query_range_raw_with_tx(
+        &self,
+        rtx: &ReadTransaction,
+        series_id: u32,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<Vec<(i64, f64)>> {
+        query_range_raw_inner(rtx, series_id, from_ms, to_ms)
     }
 
     /// Range scan sur les tables compactées (hourly/daily). Renvoie les
@@ -61,22 +66,19 @@ impl Reader {
         tier: Tier,
     ) -> Result<Vec<(i64, AggBucket)>> {
         let rtx = self.db.begin_read()?;
-        let table = match tier {
-            Tier::Raw => anyhow::bail!("query_range_buckets: Tier::Raw non supporté"),
-            Tier::Hourly => TABLE_HOURLY,
-            Tier::Daily => TABLE_DAILY,
-        };
-        let t = rtx.open_table(table)?;
-        let k_lo = enc_skey(series_id, from_ms);
-        let k_hi = enc_skey(series_id, to_ms);
-        let mut out = Vec::new();
-        for entry in t.range::<&[u8]>(&k_lo[..]..=&k_hi[..])? {
-            let (k, v) = entry?;
-            let (_sid, ts) = dec_skey(k.value());
-            let bucket: AggBucket = bincode::deserialize(v.value())?;
-            out.push((ts, bucket));
-        }
-        Ok(out)
+        query_range_buckets_inner(&rtx, series_id, from_ms, to_ms, tier)
+    }
+
+    /// Variante avec rtx partagée — cf. `query_range_raw_with_tx`.
+    pub fn query_range_buckets_with_tx(
+        &self,
+        rtx: &ReadTransaction,
+        series_id: u32,
+        from_ms: i64,
+        to_ms: i64,
+        tier: Tier,
+    ) -> Result<Vec<(i64, AggBucket)>> {
+        query_range_buckets_inner(rtx, series_id, from_ms, to_ms, tier)
     }
 
     /// Lookup `series_id` à partir de `(metric, labels_json canonique)`.
@@ -91,13 +93,65 @@ impl Reader {
     /// par `metrics-cli list-series`).
     pub fn list_series(&self) -> Result<Vec<(u32, SeriesMeta)>> {
         let rtx = self.db.begin_read()?;
-        let t = rtx.open_table(TABLE_SERIES_META)?;
-        let mut out = Vec::new();
-        for entry in t.iter()? {
-            let (k, v) = entry?;
-            let meta: SeriesMeta = bincode::deserialize(v.value())?;
-            out.push((k.value(), meta));
-        }
-        Ok(out)
+        list_series_inner(&rtx)
     }
+
+    /// Variante avec rtx partagée — cf. `query_range_raw_with_tx`.
+    pub fn list_series_with_tx(&self, rtx: &ReadTransaction) -> Result<Vec<(u32, SeriesMeta)>> {
+        list_series_inner(rtx)
+    }
+}
+
+fn query_range_raw_inner(
+    rtx: &ReadTransaction,
+    series_id: u32,
+    from_ms: i64,
+    to_ms: i64,
+) -> Result<Vec<(i64, f64)>> {
+    let t = rtx.open_table(TABLE_RAW)?;
+    let k_lo = enc_skey(series_id, from_ms);
+    let k_hi = enc_skey(series_id, to_ms);
+    let mut out = Vec::new();
+    for entry in t.range::<&[u8]>(&k_lo[..]..=&k_hi[..])? {
+        let (k, v) = entry?;
+        let (_sid, ts) = dec_skey(k.value());
+        out.push((ts, v.value()));
+    }
+    Ok(out)
+}
+
+fn query_range_buckets_inner(
+    rtx: &ReadTransaction,
+    series_id: u32,
+    from_ms: i64,
+    to_ms: i64,
+    tier: Tier,
+) -> Result<Vec<(i64, AggBucket)>> {
+    let table = match tier {
+        Tier::Raw => anyhow::bail!("query_range_buckets: Tier::Raw non supporté"),
+        Tier::Hourly => TABLE_HOURLY,
+        Tier::Daily => TABLE_DAILY,
+    };
+    let t = rtx.open_table(table)?;
+    let k_lo = enc_skey(series_id, from_ms);
+    let k_hi = enc_skey(series_id, to_ms);
+    let mut out = Vec::new();
+    for entry in t.range::<&[u8]>(&k_lo[..]..=&k_hi[..])? {
+        let (k, v) = entry?;
+        let (_sid, ts) = dec_skey(k.value());
+        let bucket: AggBucket = bincode::deserialize(v.value())?;
+        out.push((ts, bucket));
+    }
+    Ok(out)
+}
+
+fn list_series_inner(rtx: &ReadTransaction) -> Result<Vec<(u32, SeriesMeta)>> {
+    let t = rtx.open_table(TABLE_SERIES_META)?;
+    let mut out = Vec::new();
+    for entry in t.iter()? {
+        let (k, v) = entry?;
+        let meta: SeriesMeta = bincode::deserialize(v.value())?;
+        out.push((k.value(), meta));
+    }
+    Ok(out)
 }
