@@ -401,3 +401,156 @@ sudo ss -tnp -o state established | grep -c "pid=$PID"
 
 Si ce nombre grimpe au cours du temps même sans nouveau client → fuite de
 connexions WS (peu probable mais à exclure).
+
+---
+
+## 12. Audit du chemin PromQL (session 2026-05-19)
+
+### 12.1 — Cause confirmée du spike `/dashboard/history`
+
+Le smoking gun est dans **`crates/metrics-store/src/promql/exec.rs`**.
+Chaîne d'appel pour une requête `/api/v1/query_range` :
+
+```
+query_range  →  state.dispatched_query_range  →  spawn_blocking
+   →  Evaluator::eval_range  (boucle while t <= end_ms, step_ms)
+       →  eval_at(expr, t)                             ← N appels
+           →  eval_vector_selector  OR  eval_range_call
+               →  Evaluator::match_series (exec.rs:349-377)
+                   →  Reader::list_series (reader.rs:92-102)
+                       →  désérialise TOUTE la table TABLE_SERIES_META
+                       →  serde_json::from_str(labels_json) pour chaque série
+```
+
+**Amplification mesurable** :
+
+Le JS de `templates/history.html:753` calcule un pas pour viser **~200 points**
+quel que soit le range :
+```js
+const step = Math.max(1, Math.round(Math.min(86400, Math.max(5, span / 200))));
+```
+
+Donc `eval_range` exécute **~200 itérations**. Pour chaque itération, chaque
+`VectorSelector` ou `MatrixSelector` dans l'expression provoque :
+- 1 ouverture de transaction redb (`begin_read`)
+- 1 scan complet de `TABLE_SERIES_META`
+- N `serde_json::from_str(&meta.labels_json)` (1 par série en base)
+- M `Labels::clone()` (1 par série matchée)
+
+Sur `/api/v1/history/energy` (cf. `api/history.rs:61-73`), **9 requêtes
+PromQL parallèles** via `tokio::join!`. Pour une période "year" avec
+window=30d, c'est 9 × 200 = **1 800 scans complets du catalogue** par
+chargement de la page (+1 800 si l'utilisateur change le sélecteur de
+période). Avec ~500 séries en base (BMS×2 + ET112×3 + Tasmota + Venus +
+Shelly + irradiance), c'est **~900 000 `serde_json::from_str` par
+navigation** dont chacun alloue un `BTreeMap<String, String>`.
+
+Ces allocations sont **toutes éphémères** (Rust les drop à la fin de
+chaque itération), mais elles font exploser la pression sur jemalloc.
+Combiné avec l'observation utilisateur (« la RAM reste persistante »),
+cela pointe vers de la **rétention de pages jemalloc dans les arenas
+des threads `spawn_blocking`** :
+
+- `tokio::task::spawn_blocking` réutilise un pool de threads (default 512
+  max). Les arenas jemalloc sont **par-thread**.
+- Les ~1 800 scans sont distribués sur N threads blocking → chacun
+  conserve des dirty pages.
+- `dirty_decay_ms:1000` libère sous 1s **mais seulement si le thread est
+  idle** — pendant un burst de 9 queries parallèles, le decay ne se
+  déclenche que **après** la fin du burst. Le pic reste matérialisé.
+
+### 12.2 — Détails du verrou
+
+- `exec.rs:349-377` (`match_series`) : pas de cache. Recalcule entièrement
+  pour chaque step même quand `metric` + `matchers` sont identiques (ce qui
+  est TOUJOURS le cas pour un même VectorSelector dans une eval_range).
+- `exec.rs:100` (`by_labels: BTreeMap<Labels, Vec<(i64, f64)>>`) : accumule
+  tous les points pour tous les steps. Pour 9 queries × 200 points × M
+  séries, le pic mémoire scale avec le produit. Local à la fonction donc
+  drop à la fin, mais contribue au pic.
+- `reader.rs:92-102` (`list_series`) : ouvre une nouvelle transaction
+  redb et désérialise tous les `SeriesMeta` à chaque appel. Aucune
+  mémoïzation au niveau Reader. `bincode::deserialize` + clone de
+  `metric: String` + `labels_json: String` × N séries.
+
+### 12.3 — Confirmation : le writer est dormant
+
+`grep -rn "Sample::new" crates/` → seulement des hits dans les tests
+(`metrics-store/src/lib.rs`). **Aucun code de production ne pousse de
+samples**. Le writer thread (`writer::run`) bloque sur `blocking_recv()`
+indéfiniment. Donc :
+
+- §5.1 (`series_cache` LruCache du writer) : **éliminé comme suspect**
+  pour ce comportement, il est vide en prod.
+- §5.4 (canal `mpsc::channel::<Sample>`) : **éliminé**, jamais alimenté.
+- §5.5 (rate de Sample) : confirmé 0/s.
+
+La base `metrics.redb` de 1.2 GB est donc **uniquement lue, jamais
+écrite** par daly-bms-server en l'état actuel. Les seules écritures
+viennent peut-être de `metrics-cli` (à vérifier) ou de runs antérieurs.
+→ Question pour la prochaine session : qui a écrit ces 1.2 GB et est-ce
+qu'on veut activer un writer en prod ?
+
+### 12.4 — Suspect mineur : `MALLOC_ARENA_MAX=2` ignoré par jemalloc
+
+Dans `contrib/daly-bms.service` :
+```
+MALLOC_ARENA_MAX=2
+_RJEM_MALLOC_CONF=dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
+```
+
+`MALLOC_ARENA_MAX` est une variable **glibc-malloc-only**. jemalloc
+l'ignore. L'équivalent jemalloc est `narenas:N` dans `_RJEM_MALLOC_CONF`.
+Par défaut, jemalloc crée `4 × ncpus` arenas — soit 16 sur le Pi5
+quadricore. Chaque arena peut retenir ses propres dirty pages. Ajouter
+`narenas:2` dans `_RJEM_MALLOC_CONF` limiterait la fragmentation
+inter-arenas (au prix de plus de contention de lock — acceptable pour le
+profil ~4 fsync/s du writer).
+
+### 12.5 — Fix recommandé (non encore appliqué)
+
+**Priorité 1 — Cache `match_series` au niveau Evaluator** :
+
+`match_series` ne dépend que de `(metric, matchers)` et du contenu de
+`TABLE_SERIES_META`. Dans une `eval_range` unique, ces valeurs sont
+constantes pour chaque VectorSelector. Patch minimal dans `exec.rs` :
+
+```rust
+pub struct Evaluator<'r> {
+    reader: &'r Reader,
+    pub lookback_ms: i64,
+    // Cache scopé à l'Evaluator (drop avec l'Evaluator donc fin de query).
+    // Clef = (metric, hash des matchers sérialisés). Valeur = résultat
+    // partagé via Rc pour éviter le clone.
+    series_cache: RefCell<HashMap<(String, u64), Rc<Vec<(u32, Labels)>>>>,
+    // Catalogue de séries chargé 1 fois par Evaluator.
+    series_catalog: OnceCell<Vec<(u32, SeriesMeta)>>,
+}
+```
+
+Effet attendu :
+- 9 queries × 200 steps × 1 VectorSelector = 1 800 → **9 appels** à
+  `list_series` (réduction × 200).
+- Total `serde_json::from_str` par burst : 900 000 → **4 500** (réduction
+  × 200).
+
+**Priorité 2 — Pré-charger le catalogue une fois par Evaluator** :
+même logique, niveau `Reader::list_series` mémoïsé au niveau Evaluator.
+
+**Priorité 3 (optionnelle) — Cache cross-request au niveau MetricsStore** :
+`TABLE_SERIES_META` change rarement (uniquement à l'ajout d'une nouvelle
+série, donc nouveau device ou nouvelle label combo). Un cache invalidé
+par bump de génération côté writer permettrait de servir 100% des
+queries sans toucher redb. Mais comme le writer est dormant en prod,
+le catalogue ne change littéralement jamais aujourd'hui → cache éternel
+trivialement valide. À implémenter quand le writer sera réactivé.
+
+### 12.6 — Pour valider le fix sans rebuild
+
+Avant de patcher, refaire la mesure avec firewall actif (§11.3) **pendant
+qu'un curl unique tape `/api/v1/query_range`** avec un range "year"
+toutes les 30s. Le delta RSS observé doit être proportionnel au nombre
+de queries lancées. Une fois le patch en place, refaire le même test :
+le delta doit chuter de l'ordre de × 200 sur le pic d'allocation et la
+RSS résiduelle doit redescendre plus vite (moins de pression
+inter-arenas).
