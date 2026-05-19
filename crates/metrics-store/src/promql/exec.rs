@@ -19,7 +19,9 @@
 //! first_bucket.first` (correct pour les compteurs monotones — c'est
 //! le cas de `et112_energy_*` qui sont nos seuls usages réels).
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 use std::time::Duration;
 
 use promql_parser::label::{MatchOp, Matcher};
@@ -29,7 +31,7 @@ use promql_parser::parser::{
 };
 
 use crate::reader::Reader;
-use crate::tables::{AggBucket, Tier};
+use crate::tables::{AggBucket, SeriesMeta, Tier};
 
 use super::error::PromQlError;
 
@@ -71,15 +73,31 @@ pub struct Evaluator<'r> {
     /// Lookback pour les instant vector selectors (analogue à Prometheus,
     /// défaut 5 min).
     pub lookback_ms: i64,
+    // Catalogue de séries chargé au premier `match_series`, puis réutilisé
+    // pour tous les steps de l'`eval_range` (cf. doc de `match_series`).
+    series_catalog: RefCell<Option<Arc<Vec<(u32, SeriesMeta)>>>>,
+    // Memoïzation `(metric, fingerprint matchers) → série matchées`. Élimine
+    // les ~200 redondances par VectorSelector dans une eval_range.
+    match_cache: RefCell<HashMap<(String, String), Arc<Vec<(u32, Labels)>>>>,
 }
 
 impl<'r> Evaluator<'r> {
     pub fn new(reader: &'r Reader) -> Self {
-        Self { reader, lookback_ms: 5 * 60_000 }
+        Self {
+            reader,
+            lookback_ms: 5 * 60_000,
+            series_catalog: RefCell::new(None),
+            match_cache: RefCell::new(HashMap::new()),
+        }
     }
 
     pub fn with_lookback(reader: &'r Reader, lookback: Duration) -> Self {
-        Self { reader, lookback_ms: lookback.as_millis() as i64 }
+        Self {
+            reader,
+            lookback_ms: lookback.as_millis() as i64,
+            series_catalog: RefCell::new(None),
+            match_cache: RefCell::new(HashMap::new()),
+        }
     }
 
     /// Évalue `expr` aux instants `start, start+step, …, end`. Renvoie une
@@ -163,13 +181,13 @@ impl<'r> Evaluator<'r> {
             .ok_or_else(|| PromQlError::Execution("selector sans nom de métrique".into()))?;
         let matched = self.match_series(metric, &vs.matchers.matchers)?;
         let mut out = Vec::with_capacity(matched.len());
-        for (sid, labels) in matched {
+        for (sid, labels) in matched.iter() {
             let pts = self
                 .reader
-                .query_range_raw(sid, t - self.lookback_ms, t)
+                .query_range_raw(*sid, t - self.lookback_ms, t)
                 .map_err(|e| PromQlError::Execution(e.to_string()))?;
             if let Some((_, v)) = pts.last() {
-                out.push(InstantSample { labels, value: *v });
+                out.push(InstantSample { labels: labels.clone(), value: *v });
             }
         }
         Ok(Value::Vector(out))
@@ -259,25 +277,25 @@ impl<'r> Evaluator<'r> {
             .ok_or_else(|| PromQlError::Execution("matrix selector sans métrique".into()))?;
         let matched = self.match_series(metric, &vs.matchers.matchers)?;
         let mut out = Vec::with_capacity(matched.len());
-        for (sid, labels) in matched {
+        for (sid, labels) in matched.iter() {
             let value_opt = match tier {
                 Tier::Raw => {
                     let pts = self
                         .reader
-                        .query_range_raw(sid, win_start, t)
+                        .query_range_raw(*sid, win_start, t)
                         .map_err(|e| PromQlError::Execution(e.to_string()))?;
                     apply_range_fn_raw(name, &pts, range_ms)
                 }
                 Tier::Hourly | Tier::Daily => {
                     let buckets = self
                         .reader
-                        .query_range_buckets(sid, win_start, t, tier)
+                        .query_range_buckets(*sid, win_start, t, tier)
                         .map_err(|e| PromQlError::Execution(e.to_string()))?;
                     apply_range_fn_buckets(name, &buckets, range_ms)
                 }
             };
             if let Some(v) = value_opt {
-                out.push(InstantSample { labels, value: v });
+                out.push(InstantSample { labels: labels.clone(), value: v });
             }
         }
         Ok(Value::Vector(out))
@@ -346,17 +364,34 @@ impl<'r> Evaluator<'r> {
         })
     }
 
-    fn match_series(
-        &self,
-        metric: &str,
-        matchers: &[Matcher],
-    ) -> Result<Vec<(u32, Labels)>, PromQlError> {
+    /// Charge le catalogue `TABLE_SERIES_META` au plus une fois par Evaluator.
+    /// Le résultat est partagé via `Arc` entre tous les appels de
+    /// `match_series` dans la même `eval_range` (~200 steps × N VectorSelector).
+    fn series_catalog(&self) -> Result<Arc<Vec<(u32, SeriesMeta)>>, PromQlError> {
+        if let Some(catalog) = self.series_catalog.borrow().as_ref() {
+            return Ok(catalog.clone());
+        }
         let all = self
             .reader
             .list_series()
             .map_err(|e| PromQlError::Execution(e.to_string()))?;
+        let arc = Arc::new(all);
+        *self.series_catalog.borrow_mut() = Some(arc.clone());
+        Ok(arc)
+    }
+
+    fn match_series(
+        &self,
+        metric: &str,
+        matchers: &[Matcher],
+    ) -> Result<Arc<Vec<(u32, Labels)>>, PromQlError> {
+        let key = (metric.to_string(), matchers_fingerprint(matchers));
+        if let Some(cached) = self.match_cache.borrow().get(&key) {
+            return Ok(cached.clone());
+        }
+        let catalog = self.series_catalog()?;
         let mut out = Vec::new();
-        for (sid, meta) in all {
+        for (sid, meta) in catalog.iter() {
             if meta.metric != metric {
                 continue;
             }
@@ -368,13 +403,27 @@ impl<'r> Evaluator<'r> {
                     || (matches!(m.op, MatchOp::NotEqual | MatchOp::NotRe(_)) && v.is_empty())
             }) {
                 // Inclut __name__ pour la compatibilité Grafana.
-                let mut with_name = labels.clone();
+                let mut with_name = labels;
                 with_name.insert("__name__".into(), metric.into());
-                out.push((sid, with_name));
+                out.push((*sid, with_name));
             }
         }
-        Ok(out)
+        let arc = Arc::new(out);
+        self.match_cache.borrow_mut().insert(key, arc.clone());
+        Ok(arc)
     }
+}
+
+/// Empreinte stable pour mettre en cache `match_series` par
+/// `(metric, matchers)`. On formate name + op + value de chaque matcher
+/// dans l'ordre fourni — l'ordre est stable car il vient du parser PromQL.
+fn matchers_fingerprint(matchers: &[Matcher]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(matchers.len() * 16);
+    for m in matchers {
+        let _ = write!(s, "{}\x1f{:?}\x1f{}\x1e", m.name, m.op, m.value);
+    }
+    s
 }
 
 fn scalar_arg(c: &Call, idx: usize, t: i64, ev: &Evaluator) -> Result<f64, PromQlError> {
