@@ -223,17 +223,137 @@ fuite passive.
 5. **Les bisections par service (stop energy-manager) sont
    redoutablement efficaces** pour identifier la source.
 
-## 9. Synthèse pour reprise
+## 9. Investigation finale (2026-05-19 après-midi)
 
-| Aspect | État |
-|--------|------|
-| Pic `/dashboard/history` | Réduit par PR #481/#482/#483 (optimisations PromQL) |
-| Fuite passive 16 MB/h | **NON RÉSOLU** — coupable principal isolé à la réception MQTT d'energy-manager (~12 MB/h) |
-| Reste 4 MB/h résiduel | Source inconnue — polling RS485 ? monitor_agent ? |
-| narenas:2 jemalloc | Retiré (aggravait) |
-| `vm: Option<Arc<VmClient>>` | Réintroduit par rollback user, à vérifier si actif au runtime |
-| heaptrack via GDB | Échoue, ne pas réessayer |
+### 9.1 — Bisection composant par composant (10 min)
 
-**Prochain test à faire** : confirmer la valeur de `self.vm` au démarrage
-puis tester un patch qui force `None` ou désactive le bridge MQTT
-incoming.
+Tous les composants applicatifs ont été désactivés individuellement, la
+pente RSS reste 6-8 MB/h **quelle que soit la config**.
+
+| Désactivation testée | Pente RSS sur 10 min |
+|----------------------|----------------------|
+| Normal (tout actif) | ~6-7 MB/h |
+| `energy-manager` stoppé | ~4 MB/h |
+| `mqtt.enabled=false` (publisher + subscriber) | ~8 MB/h |
+| `alerts.db_path=""` (AlertEngine off) | ~8 MB/h |
+| `TaskMonitor` instrumentation retirée | ~7 MB/h |
+| BMS poll callback `tokio::spawn` → `mpsc::channel` | ~6 MB/h |
+| `_RJEM_MALLOC_CONF=dirty_decay_ms:0` | ~7.5 MB/h |
+| `narenas:2` jemalloc | ~7-8 MB/h (pire) |
+| `publish_interval_sec=60` | ~13 MB/h (pire) |
+| `DALY_DISABLE_MONITOR=1` (monitor + watchdog off) | ~6.7 MB/h |
+| `DALY_DISABLE_RS485=1` (polling RS485 bypass) | ~6.7 MB/h |
+| `metrics_store.enabled=false` (redb mmap retiré) | ~7.8 MB/h |
+| TOUT désactivé en même temps | ~9 MB/h |
+
+→ **La mesure 10 min a un bruit de ±2 MB**, suffisant pour masquer
+l'impact des composants individuels. Aucune source isolée par bisection.
+
+### 9.2 — heaptrack LD_PRELOAD : non concluant
+
+Tentative `heaptrack -o /var/lib/daly-bms/heaptrack-daly <binary>` comme
+ExecStart : le fichier `.zst` reste à 0 byte après 30 min, le
+`heaptrack_interpret` companion consomme 65 MB de RAM mais 0:00 CPU
+time → ne reçoit rien dans le FIFO. Probable incompatibilité avec
+notre `Type=simple` workaround + variables d'env systemd.
+
+LD_PRELOAD direct testé avant : `grep -c heaptrack /proc/PID/maps = 0`
+→ lib pas chargée. Variables `HEAPTRACK_OUTPUT` / `DUMP_HEAPTRACK_OUTPUT`
+ignorées.
+
+heaptrack inutilisable dans notre environnement.
+
+### 9.3 — Décomposition `/proc/PID/smaps_rollup`
+
+Identification que la fuite est **100% dans le heap Rust** :
+
+| Métrique | T0 | T+10min | Δ |
+|----------|-----|---------|---|
+| Rss | X | Y | +1-2 MB |
+| **Anonymous** (heap) | X | Y | **+1-2 MB (toute la fuite)** |
+| Private_Dirty | = Anonymous | = Anonymous | idem |
+| Pss_File (mmap) | constant | constant | +0 |
+| Pss_Shmem | 0 | 0 | 0 |
+
+Pas de mmap exotique, pas de mémoire partagée. Heap allocator-managed
+exclusivement.
+
+### 9.4 — Mesure de référence 1 h propre (2026-05-19 ~20h)
+
+Avec config complète + writer redb actif + tous les composants OK :
+
+| Métrique | T0 | T+1h | Δ |
+|----------|-----|------|---|
+| Rss | 52048 | 58656 | **+6608 kB** |
+| Anonymous | 41808 | 48416 | +6608 kB |
+| Private_Dirty | 41808 | 48416 | +6608 kB |
+
+**Pente fiable : +6.6 MB/h** dans Anonymous heap. Sur 24h = +158 MB.
+Sur 1 semaine = +1.1 GB → catastrophique sans intervention.
+
+### 9.5 — Conclusion
+
+Source de la fuite **non identifiée par bisection applicative**. Pente
+stable à ~6-8 MB/h indépendamment de la config désactivée. Cohérent avec
+une fuite dans une **couche partagée** : runtime tokio, hyper, axum,
+askama, ou une dépendance transitive (rumqttc, reqwest, etc.) — ou un
+bug d'allocator jemalloc dans un pattern précis.
+
+Outils d'investigation tentés :
+- ❌ heaptrack via GDB attach (crash du service)
+- ❌ heaptrack via LD_PRELOAD (lib pas chargée)
+- ❌ heaptrack via ExecStart wrapper (FIFO inactif)
+- ❌ jemalloc profiling cargo feature (ne propage pas au build C)
+- ❌ pmap / smaps_rollup (confirme la classe Anonymous mais pas la source)
+
+## 10. Workaround appliqué — `RuntimeMaxSec=86400`
+
+Décision pragmatique : restart quotidien automatique via systemd.
+
+`contrib/daly-bms.service` :
+```ini
+[Service]
+RuntimeMaxSec=86400
+```
+
+Effet :
+- Service redémarre toutes les 24 h (timer systemd interne)
+- Coût : ~5 s d'interruption
+- MQTT retained messages reviennent automatiquement
+- BMS poll RS485 reprend immédiatement
+- Écritures redb continuent
+- État in-memory (snapshots, broadcasts) reconstruit en <30 s
+
+Plafond RSS estimé : `52 MB (baseline) + 24 × 6.6 MB/h = 52 + 158 ≈ 210 MB`
+avant restart quotidien. Très acceptable sur un Pi5 avec 8 GB RAM.
+
+## 11. Code d'investigation conservé
+
+Deux env vars sont laissées dans le code pour pouvoir réinvestiguer
+sans recompiler :
+
+- `DALY_DISABLE_MONITOR=1` → désactive `monitor::spawn_all` (monitor +
+  watchdog agents). Cf. commit 153ba97.
+- `DALY_DISABLE_RS485=1` → bypass complet du polling RS485 (BMS, ET112,
+  ATS, irradiance). Cf. commit 11d7e60.
+
+Inactives par défaut. À utiliser via systemd drop-in :
+```ini
+[Service]
+Environment=DALY_DISABLE_MONITOR=1
+WatchdogSec=0  # nécessaire car sd_notify n'est plus envoyé
+```
+
+## 12. Si on veut REPRENDRE l'investigation
+
+Pistes restantes :
+1. **Rebuild avec system malloc** au lieu de jemalloc (retirer
+   `tikv_jemallocator` dans `main.rs`). Si la pente change → c'est
+   jemalloc. Sinon → c'est une dépendance Rust.
+2. **dhat-rs en mode prod** : recompiler avec `--features dhat-heap`,
+   accepter la perte de perf 5×, capturer un profil sur 30 min.
+3. **Identifier la version de chaque dépendance** et chercher des
+   issues mémoire reportées (rumqttc, tokio, hyper, axum, redb).
+4. **Bisection par revert progressif** : reverter PR par PR (en
+   commençant par la plus récente) jusqu'à voir la pente disparaître,
+   pour identifier le commit qui a introduit la fuite.
