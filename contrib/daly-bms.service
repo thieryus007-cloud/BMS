@@ -45,13 +45,6 @@ Environment=_RJEM_MALLOC_CONF=narenas:2,dirty_decay_ms:1000,muzzy_decay_ms:0,bac
 
 ExecStart=/usr/local/bin/daly-bms-server
 
-# Restart automatique d'energy-manager après chaque démarrage de daly-bms.
-# Nécessaire car energy-manager est subscriber MQTT de daly-bms et perd la
-# connexion lors d'un restart (notamment le RuntimeMaxSec=86400 quotidien
-# ci-dessous). Le `|| true` évite de faire échouer daly-bms si
-# energy-manager n'existe pas sur ce host.
-ExecStartPost=/bin/sh -c '/bin/systemctl restart energy-manager || true'
-
 # Redémarrage automatique en cas de crash
 Restart=on-failure
 RestartSec=5s
@@ -63,9 +56,14 @@ RestartSec=5s
 # runtime tokio / hyper / Axum / jemalloc ou une dépendance externe.
 # Coût restart : ~5 s d'interruption. MQTT retained messages reviennent,
 # BMS poll RS485 reprend immédiatement. État in-memory reconstruit en <30 s.
-# energy-manager est aussi restart via ExecStartPost ci-dessus pour
-# rétablir le pipeline MQTT entrant.
-# Cf. docs/memory-leak-investigation.md §6 Conclusion.
+#
+# Note sur energy-manager : pas besoin d'ExecStartPost pour le restart.
+# Le watchdog interne `daly_bms_server::monitor::run_watchdog_agent` sonde
+# energy-manager (TCP port 8081 toutes les 15 s) et le redémarre via la
+# règle polkit `50-dalybms-systemd-restart.rules` si injoignable. Ajouter
+# un ExecStartPost créerait un deadlock systemd (daly-bms reste en état
+# activating tant que `systemctl restart energy-manager` ne rend pas la
+# main, et inversement). Cf. docs/memory-leak-investigation.md §10.
 RuntimeMaxSec=86400
 
 # Accès au port série RS485 (/dev/ttyUSB* ou /dev/ttyACM*)
