@@ -355,10 +355,12 @@ async fn main() -> anyhow::Result<()> {
         })
         .collect();
 
-    tokio::spawn({
-        let (s, c, m) = (state.clone(), config.mqtt.clone(), mqtt_addr_map);
-        async move { mqtt::run_mqtt_bridge(s, c, m).await }
-    });
+    if config.mqtt.enabled {
+        tokio::spawn({
+            let (s, c, m) = (state.clone(), config.mqtt.clone(), mqtt_addr_map);
+            async move { mqtt::run_mqtt_bridge(s, c, m).await }
+        });
+    }
     if let Some(ref engine) = alert_engine {
         tokio::spawn({
             let (s, e) = (state.clone(), engine.clone());
