@@ -683,7 +683,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── Agent de monitoring Pi5 (+ watchdog sd_notify + métriques tokio→VM) ──
-    monitor::spawn_all(state.clone());
+    // TEMPORAIRE — audit fuite mémoire phase 2.8 : commenter pour isoler la
+    // contribution de monitor_agent (fork ps/systemctl/df toutes les 30s) et
+    // watchdog_agent (TCP probes toutes les 15s). À restaurer après diagnostic.
+    if std::env::var("DALY_DISABLE_MONITOR").is_err() {
+        monitor::spawn_all(state.clone());
+    } else {
+        tracing::warn!("Monitor + watchdog désactivés via DALY_DISABLE_MONITOR (debug fuite mémoire)");
+    }
 
     // ── Serveur HTTP Axum ──────────────────────────────────────────────────────
     let router = api::build_router(state);
