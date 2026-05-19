@@ -165,14 +165,14 @@ pub async fn set_mppt_yield(
     }
     if let Some(tw) = body.solar_total_w {
         *state.solar_total_w.write().await = tw;
+        // Écriture redb (rate-limitée 1/5s — cf. redb_writes::MIN_WRITE_INTERVAL).
+        if let Some(store) = &state.metrics_store {
+            crate::redb_writes::write_solar_total(&store.writer(), &state.redb_rl, tw);
+        }
     }
     if let Some(hw) = body.house_power_w {
         *state.house_power_w.write().await = hw;
     }
-
-    // Phase 5 cleanup : écriture VM retirée. Les métriques solaires
-    // (solar_total_w, dc_pv_power_w, pvinv_power_w, mppt_yield_kwh) sont
-    // déjà publiées dans metrics-store via le hook MQTT côté state.rs.
 
     let kwh    = *state.mppt_yield_kwh.read().await;
     let dc_pv  = *state.dc_pv_power_w.read().await;
