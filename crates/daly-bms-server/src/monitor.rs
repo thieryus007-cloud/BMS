@@ -370,7 +370,10 @@ async fn read_uptime_secs() -> u64 {
 // =============================================================================
 
 const WATCHDOG_SERVICES: &[(&str, &str, u16, Option<&str>)] = &[
-    ("energy-manager", "127.0.0.1", 8081, None),
+    // (label, host, port, systemd_unit_à_restart_si_injoignable)
+    // L'unit énergy-manager.service doit être restartable par dalybms
+    // via la règle polkit `contrib/polkit/50-dalybms-systemd-restart.rules`.
+    ("energy-manager", "127.0.0.1", 8081, Some("energy-manager")),
 ];
 
 const WATCHDOG_INTERVAL:      Duration = Duration::from_secs(15);
