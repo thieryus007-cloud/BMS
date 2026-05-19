@@ -30,12 +30,18 @@ Environment=MALLOC_ARENA_MAX=2
 # VmPeak à 367 Mo (eval_range sur ~270 séries × 43k itérations) et
 # jemalloc retient ~55 Mo après libération avec les defaults (delay 10s
 # avant retour des pages au kernel). Configuration agressive :
+#   narenas:2             — limite à 2 arenas (défaut = 4×N_CPU = 16 sur Pi5)
+#                           ATTENTION : MALLOC_ARENA_MAX ci-dessus est
+#                           glibc-only, jemalloc l'ignore. Ce narenas est
+#                           le VRAI équivalent. Voir mesures 2026-05-19 :
+#                           +11 MB persistants après nav /dashboard/history,
+#                           imputables à la rétention multi-arena.
 #   dirty_decay_ms:1000   — pages dirty rendues après 1 s (vs 10 s)
 #   muzzy_decay_ms:0      — pages muzzy rendues IMMÉDIATEMENT
 #   background_thread:true — un thread dédié fait le purging en arrière-plan
 # Effet : RSS retombe au baseline ~30-40 Mo après chaque burst, plus
 # de high-water mark.
-Environment=_RJEM_MALLOC_CONF=dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
+Environment=_RJEM_MALLOC_CONF=narenas:2,dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
 
 ExecStart=/usr/local/bin/daly-bms-server
 
