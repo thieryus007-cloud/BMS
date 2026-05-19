@@ -101,17 +101,26 @@ async fn run_monitoring_loop(vm_url: String) {
         if let Some(temp) = cpu_temp {
             lines.push(format!("em_cpu_temp_c {} {}", temp, ts_ms));
         }
+        // Agrégation par nom de processus pour éviter la cardinalité éphémère du
+        // `pid` (chaque compilation Rust créait des séries fantômes survivant 5 ans
+        // dans la rétention VM). Tuple : (cpu_percent, mem_mb, name, pid).
+        let mut by_name: std::collections::HashMap<&str, (f32, f32)> = std::collections::HashMap::new();
         for proc in &processes {
             if proc.0 > 0.1 {
-                lines.push(format!(
-                    "em_process_cpu_percent{{process=\"{}\",pid=\"{}\"}} {} {}",
-                    proc.2, proc.3, proc.0, ts_ms
-                ));
-                lines.push(format!(
-                    "em_process_mem_mb{{process=\"{}\",pid=\"{}\"}} {} {}",
-                    proc.2, proc.3, proc.1, ts_ms
-                ));
+                let entry = by_name.entry(proc.2.as_str()).or_insert((0.0, 0.0));
+                entry.0 += proc.0;
+                entry.1 += proc.1;
             }
+        }
+        for (name, (cpu, mem)) in by_name {
+            lines.push(format!(
+                "em_process_cpu_percent{{process=\"{}\"}} {} {}",
+                name, cpu, ts_ms
+            ));
+            lines.push(format!(
+                "em_process_mem_mb{{process=\"{}\"}} {} {}",
+                name, mem, ts_ms
+            ));
         }
 
         write_to_vm(&client, &vm_url, &lines.join("\n")).await;

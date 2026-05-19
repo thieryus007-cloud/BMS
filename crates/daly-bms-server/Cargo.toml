@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 rs485-bus     = { workspace = true }
 daly-bms-core = { path = "../daly-bms-core" }
+metrics-store = { workspace = true }
 
 tokio          = { workspace = true }
 tokio-serial   = { workspace = true }
@@ -42,3 +43,12 @@ askama         = "0.12"
 # ── Monitoring ────────────────────────────────────────────────────────────────
 sd-notify     = { workspace = true }
 tokio-metrics = { workspace = true }
+
+# Allocator jemalloc — remplace glibc malloc pour éliminer la fragmentation
+# heap observée en prod (RSS qui croît à chaque burst dashboard sans
+# redescendre). jemalloc rend agressivement les pages au kernel.
+# Cf. observation 18 mai : malloc_trim libère 18 Mo après une request →
+# fragmentation glibc confirmée. Switch jemalloc résoud le problème
+# sans appel manuel à trim.
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.6"

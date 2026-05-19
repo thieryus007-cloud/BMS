@@ -64,8 +64,16 @@ impl AppBus {
         let _ = self.mqtt_out.send(msg).await;
     }
 
-    /// Broadcast a live event to WebSocket clients
+    /// Broadcast a live event to WebSocket clients.
+    ///
+    /// Skip si aucun client WebSocket n'écoute : évite de retenir un `LiveEvent`
+    /// volumineux (contient un `serde_json::Value`) dans le ring buffer broadcast
+    /// (capacité 64) en permanence. Sans subscriber, chaque event resterait dans
+    /// son slot jusqu'à être écrasé par le prochain — fuite de rétention.
     pub fn emit_live(&self, event: LiveEvent) {
+        if self.live.receiver_count() == 0 {
+            return;
+        }
         let _ = self.live.send(event);
     }
 }

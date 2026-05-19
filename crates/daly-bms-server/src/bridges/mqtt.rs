@@ -88,11 +88,13 @@ pub async fn run_mqtt_bridge(state: AppState, cfg: MqttConfig, addr_map: HashMap
                 .unwrap_or_else(|| snap.address.to_string());
             let topic = format!("{}/bms/{}/venus", cfg.topic_prefix.trim_end_matches('/').rsplit_once('/').map(|(p,_)| p).unwrap_or("santuario"), topic_id);
             let device = if snap.address == 1 { EventDevice::Bms1 } else { EventDevice::Bms2 };
-            state.console_bus.emit(ConsoleEvent::mqtt_out(device, &topic, json!({
-                "Soc": snap.soc,
-                "Voltage": snap.dc.voltage,
-                "Current": snap.dc.current,
-            })));
+            if state.console_bus.receiver_count() > 0 {
+                state.console_bus.emit(ConsoleEvent::mqtt_out(device, &topic, json!({
+                    "Soc": snap.soc,
+                    "Voltage": snap.dc.voltage,
+                    "Current": snap.dc.current,
+                })));
+            }
             if let Err(e) = publish_snapshot(&client, &cfg, snap, &topic_id).await {
                 error!("MQTT publish BMS erreur : {:?}", e);
             }
@@ -504,7 +506,9 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
         match eventloop.poll().await {
             Ok(rumqttc::Event::Incoming(rumqttc::Packet::ConnAck(_))) => {
                 info!("MQTT Venus connecté/reconnecté — réabonnement aux topics");
-                state.console_bus.emit(ConsoleEvent::system("MQTT Venus", "Connecté/reconnecté — réabonnement aux topics"));
+                if state.console_bus.receiver_count() > 0 {
+                    state.console_bus.emit(ConsoleEvent::system("MQTT Venus", "Connecté/reconnecté — réabonnement aux topics"));
+                }
                 for (topic, qos) in &topics {
                     if let Err(e) = client.subscribe(*topic, *qos).await {
                         warn!("MQTT re-subscribe erreur pour {}: {:?}", topic, e);
@@ -519,19 +523,23 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
 
                 // Parser le payload JSON
                 if let Ok(json) = serde_json::from_str::<Value>(payload) {
-                    // Console MQTT IN — device inferred from topic
-                    let ev_device = if topic.contains("/meteo/") {
-                        EventDevice::Solar
-                    } else if topic.contains("/inverter/") {
-                        EventDevice::Inverter
-                    } else if topic.contains("/system/") {
-                        EventDevice::SmartShunt
-                    } else if topic.contains("/heatpump/") {
-                        EventDevice::WaterHeater
-                    } else {
-                        EventDevice::Venus
-                    };
-                    state.console_bus.emit(ConsoleEvent::mqtt_in(ev_device, topic, json.clone()));
+                    // Console MQTT IN — device inferred from topic.
+                    // Skip si pas d'abonné : évite un clone() complet du JSON
+                    // (peut être lourd) à chaque message MQTT entrant.
+                    if state.console_bus.receiver_count() > 0 {
+                        let ev_device = if topic.contains("/meteo/") {
+                            EventDevice::Solar
+                        } else if topic.contains("/inverter/") {
+                            EventDevice::Inverter
+                        } else if topic.contains("/system/") {
+                            EventDevice::SmartShunt
+                        } else if topic.contains("/heatpump/") {
+                            EventDevice::WaterHeater
+                        } else {
+                            EventDevice::Venus
+                        };
+                        state.console_bus.emit(ConsoleEvent::mqtt_in(ev_device, topic, json.clone()));
+                    }
 
                     if topic == "santuario/meteo/venus" {
                         handle_meteo_topic(&state, &json).await;
@@ -569,11 +577,13 @@ async fn handle_meteo_topic(state: &AppState, json: &Value) {
     let irradiance = json.get("Irradiance").and_then(|v| v.as_f64()).map(|v| v as f32).unwrap_or(0.0);
     let yield_kwh  = json.get("TodaysYield").and_then(|v| v.as_f64()).map(|v| v as f32);
     let mppt_power = json.get("MpptPower").and_then(|v| v.as_f64()).map(|v| v as f32);
-    state.console_bus.emit(ConsoleEvent::state(EventDevice::Solar, "Solaire/MPPT update", json!({
-        "irradiance_wm2": irradiance,
-        "yield_today_kwh": yield_kwh,
-        "mppt_power_w": mppt_power,
-    })));
+    if state.console_bus.receiver_count() > 0 {
+        state.console_bus.emit(ConsoleEvent::state(EventDevice::Solar, "Solaire/MPPT update", json!({
+            "irradiance_wm2": irradiance,
+            "yield_today_kwh": yield_kwh,
+            "mppt_power_w": mppt_power,
+        })));
+    }
 
     // Format v2 : tableau Mppts avec données individuelles par chargeur.
     // On remplace toute la map en une seule opération pour purger les entrées
@@ -795,14 +805,16 @@ async fn handle_heatpump_topic(state: &AppState, topic: &str, json: &Value) {
     };
 
     debug!(index = idx, state = hp_state, "Heatpump MQTT reçu");
-    let mode_lbl = match hp_state { 0 => "Vacances", 1 => "HEAT_PUMP", 2 => "TURBO", _ => "Inconnu" };
-    let temp_str = temperature.map(|t| format!(" | {:.1}°C", t)).unwrap_or_default();
-    let tgt_str  = target_temp.map(|t| format!(" → {:.1}°C", t)).unwrap_or_default();
-    state.console_bus.emit(ConsoleEvent::state(EventDevice::WaterHeater, &format!("Chauffe-eau idx={idx} — {mode_lbl}{temp_str}{tgt_str}"), json!({
-        "idx": idx, "state": hp_state, "mode": mode_lbl,
-        "temperature_c": temperature, "target_c": target_temp,
-        "power_w": ac_power, "energy_kwh": ac_energy,
-    })));
+    if state.console_bus.receiver_count() > 0 {
+        let mode_lbl = match hp_state { 0 => "Vacances", 1 => "HEAT_PUMP", 2 => "TURBO", _ => "Inconnu" };
+        let temp_str = temperature.map(|t| format!(" | {:.1}°C", t)).unwrap_or_default();
+        let tgt_str  = target_temp.map(|t| format!(" → {:.1}°C", t)).unwrap_or_default();
+        state.console_bus.emit(ConsoleEvent::state(EventDevice::WaterHeater, &format!("Chauffe-eau idx={idx} — {mode_lbl}{temp_str}{tgt_str}"), json!({
+            "idx": idx, "state": hp_state, "mode": mode_lbl,
+            "temperature_c": temperature, "target_c": target_temp,
+            "power_w": ac_power, "energy_kwh": ac_energy,
+        })));
+    }
     state.on_venus_heatpump(hp).await;
 }
 

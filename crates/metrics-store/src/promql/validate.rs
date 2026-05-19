@@ -1,0 +1,182 @@
+//! Validation : walk de l'AST. Rejette tout ce qui n'est pas dans le
+//! sous-ensemble PromQL audité §6.5.
+
+use promql_parser::parser::{
+    AggregateExpr, BinaryExpr, Call, Expr, MatrixSelector, ParenExpr, SubqueryExpr, UnaryExpr,
+    VectorSelector,
+};
+
+use super::error::PromQlError;
+
+/// Fonctions à fenêtre temporelle (`f(m[range])`).
+pub const SUPPORTED_RANGE_FUNCS: &[&str] = &[
+    "increase",
+    "rate",
+    "delta",
+    "avg_over_time",
+    "sum_over_time",
+    "min_over_time",
+    "max_over_time",
+    "count_over_time",
+    "last_over_time",
+];
+
+/// Fonctions instantanées (`f(vec)` ou `f(vec, scalar)`).
+pub const SUPPORTED_INSTANT_FUNCS: &[&str] =
+    &["abs", "clamp_min", "clamp_max", "ceil", "floor", "round"];
+
+/// Opérateurs d'agrégation instant supportés.
+pub const SUPPORTED_AGGREGATORS: &[&str] = &["sum", "max", "min", "avg", "count"];
+
+/// Opérateurs binaires arithmétiques supportés (vec×scalar et vec×vec
+/// aligné — §6.5).
+pub const SUPPORTED_BINOPS: &[&str] = &["+", "-", "*", "/"];
+
+pub fn validate(expr: &Expr) -> Result<(), PromQlError> {
+    match expr {
+        Expr::NumberLiteral(_) => Ok(()),
+        Expr::StringLiteral(_) => unsupported("string literal"),
+        Expr::VectorSelector(vs) => validate_vector_selector(vs),
+        Expr::MatrixSelector(MatrixSelector { vs, .. }) => validate_vector_selector(vs),
+        Expr::Paren(ParenExpr { expr }) => validate(expr),
+        Expr::Unary(UnaryExpr { expr }) => validate(expr),
+        Expr::Subquery(SubqueryExpr { .. }) => unsupported(
+            "subquery (e.g. [Xh:Ym]) — réécrire la requête en deux \
+             expressions distinctes côté client (cf. plan §6.5)",
+        ),
+        Expr::Extension(_) => unsupported("extension expression"),
+        Expr::Aggregate(a) => validate_aggregate(a),
+        Expr::Binary(b) => validate_binary(b),
+        Expr::Call(c) => validate_call(c),
+    }
+}
+
+fn validate_vector_selector(vs: &VectorSelector) -> Result<(), PromQlError> {
+    if vs.offset.is_some() {
+        return unsupported("offset modifier");
+    }
+    if vs.at.is_some() {
+        return unsupported("@ modifier");
+    }
+    Ok(())
+}
+
+fn validate_aggregate(a: &AggregateExpr) -> Result<(), PromQlError> {
+    let op_str = a.op.to_string();
+    if !SUPPORTED_AGGREGATORS.contains(&op_str.as_str()) {
+        return unsupported(&format!("aggregator: {op_str}"));
+    }
+    // `topk`, `bottomk`, `quantile` ont un paramètre — non supportés.
+    if a.param.is_some() {
+        return unsupported(&format!("parameterized aggregator: {op_str}"));
+    }
+    validate(&a.expr)
+}
+
+fn validate_binary(b: &BinaryExpr) -> Result<(), PromQlError> {
+    let op_str = b.op.to_string();
+    if !SUPPORTED_BINOPS.contains(&op_str.as_str()) {
+        return unsupported(&format!("binary operator: {op_str}"));
+    }
+    if let Some(m) = &b.modifier {
+        if m.return_bool {
+            return unsupported("bool modifier");
+        }
+    }
+    validate(&b.lhs)?;
+    validate(&b.rhs)?;
+    Ok(())
+}
+
+fn validate_call(c: &Call) -> Result<(), PromQlError> {
+    let name = c.func.name;
+    let is_range = SUPPORTED_RANGE_FUNCS.contains(&name);
+    let is_instant = SUPPORTED_INSTANT_FUNCS.contains(&name);
+    if !is_range && !is_instant {
+        return unsupported(&format!("function: {name}"));
+    }
+    for arg in &c.args.args {
+        validate(arg)?;
+    }
+    Ok(())
+}
+
+fn unsupported(msg: &str) -> Result<(), PromQlError> {
+    Err(PromQlError::Unsupported(msg.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::promql::parse_and_validate;
+
+    fn ok(s: &str) {
+        if let Err(e) = parse_and_validate(s) {
+            panic!("attendu OK pour {s:?}, erreur: {e}");
+        }
+    }
+
+    fn ko(s: &str, contains: &str) {
+        match parse_and_validate(s) {
+            Err(PromQlError::Unsupported(m)) => assert!(
+                m.contains(contains),
+                "message {m:?} ne contient pas {contains:?}"
+            ),
+            other => panic!("attendu Unsupported({contains:?}), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn accepts_simple_selector() {
+        ok(r#"bms_v"#);
+        ok(r#"bms_v{bms_id="0x01"}"#);
+        ok(r#"bms_v{bms_id!="0x02"}"#);
+        ok(r#"bms_v{bms_id=~"0x.*"}"#);
+    }
+
+    #[test]
+    fn accepts_increase_and_division() {
+        ok(r#"increase(et112_energy_export_wh{address="0x09"}[24h]) / 1000"#);
+    }
+
+    #[test]
+    fn accepts_complex_binary() {
+        ok(r#"(increase(a[24h]) - increase(b[24h])) / increase(a[24h]) * 100"#);
+    }
+
+    #[test]
+    fn accepts_aggregations() {
+        ok("max(bms_cell_delta_mv)");
+        ok("sum(et112_power_w)");
+        ok("avg(bms_v)");
+    }
+
+    #[test]
+    fn rejects_subquery() {
+        ko(
+            r#"avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])"#,
+            "subquery",
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_function() {
+        ko("histogram_quantile(0.95, foo)", "function: histogram_quantile");
+        ko("label_replace(foo, \"a\", \"b\", \"c\", \"d\")", "function: label_replace");
+    }
+
+    #[test]
+    fn rejects_comparison_operator() {
+        ko("foo > 5", "binary operator: >");
+    }
+
+    #[test]
+    fn rejects_set_operator() {
+        ko("foo and bar", "binary operator: and");
+    }
+
+    #[test]
+    fn rejects_offset_modifier() {
+        ko("foo offset 5m", "offset");
+    }
+}

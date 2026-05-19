@@ -33,10 +33,9 @@ pub async fn get_energy_history(
 ) -> impl IntoResponse {
     let period = q.period.as_deref().unwrap_or("day");
 
-    let vm = match &state.vm {
-        Some(v) => v,
-        None => return Json(json!({"ok": false, "reason": "vm_disabled"})),
-    };
+    if !state.is_query_backend_ready() {
+        return Json(json!({"ok": false, "reason": "no_query_backend"}));
+    }
 
     let now_ms = Utc::now().timestamp_millis();
 
@@ -62,15 +61,15 @@ pub async fn get_energy_history(
     let (solar_w_r, import_w_r, consumption_w_r,
          solar_energy_r, import_energy_r, export_energy_r, consumption_energy_r,
          charge_ah_r, discharge_ah_r) = tokio::join!(
-        vm.query_range_json(&q_solar_w,        start_ms, now_ms, step_ms),
-        vm.query_range_json(&q_import_w,       start_ms, now_ms, step_ms),
-        vm.query_range_json(&q_consump_w,      start_ms, now_ms, step_ms),
-        vm.query_range_json(&q_solar_energy,   start_ms, now_ms, step_ms),
-        vm.query_range_json(&q_import_energy,  start_ms, now_ms, step_ms),
-        vm.query_range_json(&q_export_energy,  start_ms, now_ms, step_ms),
-        vm.query_range_json(&q_consump_energy, start_ms, now_ms, step_ms),
-        vm.query_range_json(&q_charge_ah,      start_ms, now_ms, step_ms),
-        vm.query_range_json(&q_discharge_ah,   start_ms, now_ms, step_ms),
+        state.dispatched_query_range(&q_solar_w,        start_ms, now_ms, step_ms),
+        state.dispatched_query_range(&q_import_w,       start_ms, now_ms, step_ms),
+        state.dispatched_query_range(&q_consump_w,      start_ms, now_ms, step_ms),
+        state.dispatched_query_range(&q_solar_energy,   start_ms, now_ms, step_ms),
+        state.dispatched_query_range(&q_import_energy,  start_ms, now_ms, step_ms),
+        state.dispatched_query_range(&q_export_energy,  start_ms, now_ms, step_ms),
+        state.dispatched_query_range(&q_consump_energy, start_ms, now_ms, step_ms),
+        state.dispatched_query_range(&q_charge_ah,      start_ms, now_ms, step_ms),
+        state.dispatched_query_range(&q_discharge_ah,   start_ms, now_ms, step_ms),
     );
 
     // ── Extraction ──────────────────────────────────────────────────────────────

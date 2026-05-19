@@ -169,6 +169,13 @@ build-energy-arm: check-arm-deps
 	$(CARGO) build --release --target $(TARGET_ARM) --bin $(ENERGY_BIN)
 	@echo "✓ Binaire ARM energy-manager (optimisé Pi5) : $(ARM_RELEASE_DIR)/$(ENERGY_BIN)"
 
+# Migration redb : binaire d'import VM → redb (cf. docs/plan_migration_vm_redb.md §0.7)
+build-import-vm-arm: check-arm-deps
+	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(CROSS_LINKER_GNU) \
+	RUSTFLAGS="$(ARM_RUSTFLAGS)" \
+	$(CARGO) build --release --target $(TARGET_ARM) --bin import-vm
+	@echo "✓ Binaire ARM import-vm (optimisé Pi5) : $(ARM_RELEASE_DIR)/import-vm"
+
 install-energy: build-energy-arm
 	scp $(ARM_RELEASE_DIR)/$(ENERGY_BIN) $(PI_HOST):/tmp/$(ENERGY_BIN)
 	ssh $(PI_HOST) "sudo install -m 755 /tmp/$(ENERGY_BIN) /usr/local/bin/$(ENERGY_BIN) && sudo systemctl restart energy-manager && sudo systemctl status energy-manager --no-pager -l"

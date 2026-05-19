@@ -14,6 +14,7 @@ pub mod shelly;
 pub mod chart;
 pub mod history;
 pub mod promql;
+pub mod redb;
 pub mod health;
 
 use crate::dashboard;
@@ -125,9 +126,29 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/shelly/:id/status",                  get(shelly::get_shelly_status))
         .route("/api/v1/shelly/:id/channel/:ch/control",     post(shelly::control_shelly_channel))
         // ── PromQL (historique Tsink) ─────────────────────────────────────────
-        .route("/api/v1/query",          get(promql::query_instant))
-        .route("/api/v1/query_range",    get(promql::query_range))
+        // ── PromQL Grafana-facing — dispatch vm/redb selon
+        //    `[metrics_store].default_backend` (cf. api/promql.rs).
+        //    GET + POST tous les deux (Grafana `httpMethod: POST` par défaut)
+        .route("/api/v1/query",
+               get(promql::query_instant).post(promql::query_instant_post))
+        .route("/api/v1/query_range",
+               get(promql::query_range).post(promql::query_range_post))
         .route("/api/v1/labels",         get(promql::list_metrics))
+
+        // ── Endpoints Prometheus complémentaires §8.2 (toujours redb) ─────
+        .route("/api/v1/series",                      get(redb::list_series))
+        .route("/api/v1/label/:name/values",          get(redb::label_values))
+        .route("/-/healthy",                          get(redb::healthy))
+
+        // ── Endpoints redb explicites (debug, parité côte-à-côte) ──────────
+        .route("/api/v1/redb/query",
+               get(redb::query_instant).post(redb::query_instant_post))
+        .route("/api/v1/redb/query_range",
+               get(redb::query_range).post(redb::query_range_post))
+        .route("/api/v1/redb/series",                 get(redb::list_series))
+        .route("/api/v1/redb/labels",                 get(redb::list_labels))
+        .route("/api/v1/redb/label/:name/values",     get(redb::label_values))
+        .route("/api/v1/redb/healthy",                get(redb::healthy))
 
         // ── Alertes (journal SQLite) ──────────────────────────────────────────
         .route("/api/v1/alerts/list",              get(alerts::list_alerts))

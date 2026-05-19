@@ -90,25 +90,45 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// Construit un catalogue vide (fallback si parsing échoue).
-    pub fn empty() -> Self {
-        Self { panels: Arc::new(Vec::new()) }
-    }
-
-    /// Charge le dashboard Grafana embarqué dans le binaire.
-    /// Le fichier est inclus au build via `include_str!`.
+    /// Charge tous les dashboards Grafana embarqués dans le binaire.
+    /// Les fichiers sont inclus au build via `include_str!` puis concaténés.
+    /// Les IDs de chaque fichier doivent rester disjoints (cf. en-tête de chaque JSON).
     pub fn load_default() -> Self {
-        const GRAFANA_JSON: &str = include_str!("../../../../docs/grafana-ess_dashboard.json");
-        match grafana::parse_dashboard(GRAFANA_JSON) {
-            Ok(panels) => {
-                tracing::info!(count = panels.len(), "Catalogue de panels chargé depuis grafana-ess_dashboard.json");
-                Self { panels: Arc::new(panels) }
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Échec parsing grafana-ess_dashboard.json — catalogue vide");
-                Self::empty()
+        const SOURCES: &[(&str, &str)] = &[
+            ("ess",      include_str!("../../../../docs/grafana-ess_dashboard.json")),
+            ("solar_pv", include_str!("../../../../docs/grafana-solar_pv_dashboard.json")),
+        ];
+
+        let mut all: Vec<Panel> = Vec::new();
+        for (name, src) in SOURCES {
+            match grafana::parse_dashboard(src) {
+                Ok(mut panels) => {
+                    tracing::info!(count = panels.len(), source = name,
+                                   "Catalogue : panels chargés");
+                    all.append(&mut panels);
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, source = name,
+                                    "Catalogue : parsing échoué — source ignorée");
+                }
             }
         }
+
+        // Détection de collision d'ID (les dashboards sources doivent rester
+        // disjoints). On garde la première occurrence et on logue les doublons.
+        let mut seen = std::collections::HashSet::new();
+        all.retain(|p| {
+            if seen.insert(p.id.clone()) {
+                true
+            } else {
+                tracing::warn!(id = %p.id, title = %p.title,
+                               "Catalogue : ID dupliqué entre sources — panel ignoré");
+                false
+            }
+        });
+
+        tracing::info!(total = all.len(), "Catalogue de panels prêt");
+        Self { panels: Arc::new(all) }
     }
 
     pub fn panels(&self) -> &[Panel] {

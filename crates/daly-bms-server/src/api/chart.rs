@@ -36,19 +36,22 @@ pub async fn get_chart_history(
 ) -> impl IntoResponse {
     let minutes = q.minutes.unwrap_or(60).clamp(1, 720) as i64;
 
-    let vm = match &state.vm {
-        Some(v) => v,
-        None => return Json(json!({"solar": [], "soc": [], "load": [], "ok": false, "reason": "vm_disabled"})),
-    };
+    // Pré-flight : le backend SÉLECTIONNÉ par config doit être disponible
+    // (review gemini #2 sur PR #456 — éviter le faux positif "ok+data vides"
+    // quand default_backend pointe sur un backend non initialisé).
+    if !state.is_query_backend_ready() {
+        return Json(json!({"solar": [], "soc": [], "load": [], "ok": false, "reason": "no_query_backend"}));
+    }
 
     let now_ms   = Utc::now().timestamp_millis();
     let start_ms = now_ms - minutes * 60 * 1000;
     let step_ms: i64 = if minutes <= 60 { 60_000 } else if minutes <= 360 { 300_000 } else { 600_000 };
 
+    // Dispatcher VM/redb (cf. AppState::dispatched_query_range)
     let (solar_res, soc_res, load_res) = tokio::join!(
-        vm.query_range_json("solar_total_w",                           start_ms, now_ms, step_ms),
-        vm.query_range_json("avg(bms_soc)",                            start_ms, now_ms, step_ms),
-        vm.query_range_json("et112_power_w{address=\"0x08\"}",         start_ms, now_ms, step_ms),
+        state.dispatched_query_range("solar_total_w",                       start_ms, now_ms, step_ms),
+        state.dispatched_query_range("avg(bms_soc)",                        start_ms, now_ms, step_ms),
+        state.dispatched_query_range("et112_power_w{address=\"0x08\"}",     start_ms, now_ms, step_ms),
     );
 
     Json(json!({
@@ -111,10 +114,9 @@ pub async fn get_edge_history(
 ) -> impl IntoResponse {
     let minutes = q.minutes.unwrap_or(360).clamp(1, 1440) as i64;
 
-    let vm = match &state.vm {
-        Some(v) => v,
-        None => return Json(json!({ "ok": false, "series": [], "reason": "vm_disabled" })),
-    };
+    if !state.is_query_backend_ready() {
+        return Json(json!({ "ok": false, "series": [], "reason": "no_query_backend" }));
+    }
 
     let (metric, unit): (&str, &str);
     let metric_owned: String;
@@ -167,7 +169,7 @@ pub async fn get_edge_history(
     let start_ms = now_ms - minutes * 60 * 1000;
     let step_ms: i64 = if minutes <= 60 { 60_000 } else if minutes <= 360 { 180_000 } else { 600_000 };
 
-    let result = vm.query_range_json(&query, start_ms, now_ms, step_ms).await;
+    let result = state.dispatched_query_range(&query, start_ms, now_ms, step_ms).await;
 
     let series: Vec<Value> = match result.ok() {
         Some(v) => {

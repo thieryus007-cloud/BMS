@@ -396,21 +396,27 @@ name      = "DEYE — Shelly Pro 2PM"
 
 
 # =============================================================================
-# VictoriaMetrics — Stockage time-series externe (service systemd sur Pi5)
+# metrics-store — backend TSDB embarqué (redb pure-Rust)
 # =============================================================================
-# VictoriaMetrics tourne en service systemd natif (PAS Docker) sur le Pi5.
-# Installation : /usr/local/bin/victoria-metrics
-# Service      : /etc/systemd/system/victoria-metrics.service
-# Données      : /var/lib/victoria-metrics/
-# Logs         : journalctl -u victoria-metrics -f
-[victoriametrics]
+# Seule TSDB du système depuis Phase 5 (retrait VictoriaMetrics).
+# Cf. docs/plan_migration_vm_redb.md.
+#
+# IMPORTANT : enabled doit être à `true` en prod, sinon plus aucune lecture/
+# écriture de séries temporelles ne fonctionne (le dashboard custom et
+# Grafana retournent "no_query_backend").
+[metrics_store]
 enabled = true
-
-# URL de l'instance VictoriaMetrics (bind 127.0.0.1 = non exposé sur le réseau)
-url = "http://127.0.0.1:8428"
-
-# Timeout des requêtes HTTP vers VM en secondes
-timeout_secs = 10
+db_path = "/mnt/nvme/daly-bms/metrics.redb"
+# Cache pages redb en MiB (jemalloc rend les pages au kernel, donc 16 Mo
+# suffit pour notre workload ; baisser encore si RSS sous pression).
+cache_mb = 16
+# Profondeur de la queue mpsc entre producteurs et writer.
+queue_depth = 10000
+# Intervalle de la passe de compaction tiered (heures, 0 = désactivé).
+maintenance_interval_hours = 6
+raw_retention_days = 30
+hourly_retention_days = 365
+daily_retention_days = 1825   # 5 ans
 
 
 [alerts]

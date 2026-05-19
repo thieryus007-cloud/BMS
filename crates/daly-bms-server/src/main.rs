@@ -17,12 +17,21 @@ mod irradiance;
 mod shelly;
 mod tasmota;
 mod state;
-mod vm_client;
 mod api;
 mod bridges;
 mod dashboard;
 mod dashboards;
 mod monitor;
+
+// Allocator jemalloc à la place de glibc malloc.
+// Cf. commit accompagnant : observation 18 mai 2026 d'une fragmentation
+// heap qui faisait croître le RSS à chaque utilisation du dashboard
+// historique (+15-20 Mo par burst, non libérés). malloc_trim manuel
+// libérait 18 Mo confirmant le diagnostic. jemalloc rend les pages au
+// kernel agressivement → RSS retombe au baseline après chaque burst.
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 use crate::bridges::{alerts, mqtt};
 use crate::config::AppConfig;
@@ -168,7 +177,7 @@ async fn main() -> anyhow::Result<()> {
                 api:         config::ApiConfig::default(),
                 logging:     config::LoggingConfig::default(),
                 mqtt:        config::MqttConfig::default(),
-                victoriametrics: config::VmConfig::default(),
+                metrics_store: config::MetricsStoreConfig::default(),
                 alerts:      config::AlertsConfig::default(),
                 read_only:   config::ReadOnlyConfig::default(),
                 bms:         Vec::new(),
@@ -279,25 +288,58 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    // ── VictoriaMetrics (client HTTP stockage time-series) ────────────────────
-    let vm_handle = if config.victoriametrics.enabled {
-        match vm_client::VmClient::new(&config.victoriametrics) {
-            Ok(h) => {
-                info!("VictoriaMetrics activé — url '{}'", config.victoriametrics.url);
-                Some(h)
+    // ── metrics-store redb (dual-write Phase 1, `plan_migration_vm_redb.md`) ──
+    let metrics_store = if config.metrics_store.enabled {
+        let opts = metrics_store::Options {
+            cache_bytes: config.metrics_store.cache_mb * 1024 * 1024,
+            writer_queue_depth: config.metrics_store.queue_depth,
+            writer: metrics_store::WriterConfig::default(),
+        };
+        match metrics_store::MetricsStore::open(
+            std::path::Path::new(&config.metrics_store.db_path),
+            opts,
+        ) {
+            Ok(s) => {
+                info!(
+                    db_path = %config.metrics_store.db_path,
+                    "metrics-store ouvert (dual-write activé)"
+                );
+                if config.metrics_store.maintenance_interval_hours > 0 {
+                    let policy = metrics_store::TierPolicy {
+                        raw_retention_days: config.metrics_store.raw_retention_days,
+                        hourly_retention_days: config.metrics_store.hourly_retention_days,
+                        daily_retention_days: config.metrics_store.daily_retention_days,
+                    };
+                    let _ = s.spawn_maintenance(
+                        policy,
+                        config.metrics_store.maintenance_interval_hours,
+                    );
+                    info!(
+                        interval_h = config.metrics_store.maintenance_interval_hours,
+                        "metrics-store: maintenance tiered planifiée"
+                    );
+                }
+                Some(s)
             }
             Err(e) => {
-                warn!("VictoriaMetrics init échoué : {} — stockage désactivé", e);
+                warn!("metrics-store ouverture échouée : {e} — dual-write désactivé");
                 None
             }
         }
     } else {
-        info!("VictoriaMetrics désactivé (victoriametrics.enabled = false)");
         None
     };
 
     // ── État partagé ───────────────────────────────────────────────────────────
-    let state = AppState::new(config.clone(), log_buffer, vm_handle, alert_engine.clone());
+    // Phase 5 cleanup : VictoriaMetrics retiré. metrics-store est la seule
+    // TSDB (lecture + écriture via le Writer du shim).
+    let metrics_store_arc = metrics_store.as_ref().map(|s| std::sync::Arc::new(s.clone()));
+    let state = AppState::new(
+        config.clone(),
+        log_buffer,
+        alert_engine.clone(),
+        metrics_store_arc,
+    );
 
     // ── Bridges en arrière-plan ─────────────────────────────────────────────────
 
