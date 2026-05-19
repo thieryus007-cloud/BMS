@@ -425,7 +425,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── Mode HARDWARE ──────────────────────────────────────────────────────────
-    {
+    // TEMPORAIRE — audit fuite mémoire phase 2.9 : flag DALY_DISABLE_RS485 pour
+    // bypasser TOUT le polling RS485 (BMS + ET112 + ATS + irradiance). Permet
+    // d'isoler si la fuite vient des poll loops ou du runtime tokio/hyper.
+    if std::env::var("DALY_DISABLE_RS485").is_ok() {
+        tracing::warn!("Polling RS485 désactivé via DALY_DISABLE_RS485 (debug fuite mémoire)");
+    } else {
         // ── 1. Résoudre le port (auto-détection ou config) ───────────────────
         // find_daly_port() retourne le port déjà ouvert pour éviter la double
         // ouverture Windows ("Accès refusé" si on ouvre, ferme, puis rouvre).
