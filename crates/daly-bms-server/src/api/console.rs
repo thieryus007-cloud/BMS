@@ -52,7 +52,7 @@ async fn handle_ws_console(socket: WebSocket, state: AppState, q: ConsoleQuery) 
             "kinds":   q.kinds.as_deref().unwrap_or("all"),
         }
     });
-    let _ = sender.send(Message::Text(welcome.to_string())).await;
+    let _ = sender.send(Message::Text(welcome.to_string().into())).await;
 
     loop {
         tokio::select! {
@@ -73,7 +73,7 @@ async fn handle_ws_console(socket: WebSocket, state: AppState, q: ConsoleQuery) 
                 }
 
                 if let Ok(json) = serde_json::to_string(&*ev) {
-                    if sender.send(Message::Text(json)).await.is_err() {
+                    if sender.send(Message::Text(json.into())).await.is_err() {
                         break;
                     }
                 }

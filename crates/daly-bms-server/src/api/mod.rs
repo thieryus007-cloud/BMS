@@ -60,30 +60,30 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/monitor/logs/content",  get(system::get_monitor_log_content))
 
         // ── BMS — Lecture ────────────────────────────────────────────────────
-        .route("/api/v1/bms/:id/status",      get(bms::get_bms_status))
-        .route("/api/v1/bms/:id/cells",       get(bms::get_cells))
-        .route("/api/v1/bms/:id/temperatures",get(bms::get_temperatures))
-        .route("/api/v1/bms/:id/alarms",      get(bms::get_alarms))
-        .route("/api/v1/bms/:id/mos",         get(bms::get_mos))
-        .route("/api/v1/bms/:id/history",     get(bms::get_history))
-        .route("/api/v1/bms/:id/history/summary", get(bms::get_history_summary))
-        .route("/api/v1/bms/:id/export/csv",  get(bms::export_csv))
+        .route("/api/v1/bms/{id}/status",      get(bms::get_bms_status))
+        .route("/api/v1/bms/{id}/cells",       get(bms::get_cells))
+        .route("/api/v1/bms/{id}/temperatures",get(bms::get_temperatures))
+        .route("/api/v1/bms/{id}/alarms",      get(bms::get_alarms))
+        .route("/api/v1/bms/{id}/mos",         get(bms::get_mos))
+        .route("/api/v1/bms/{id}/history",     get(bms::get_history))
+        .route("/api/v1/bms/{id}/history/summary", get(bms::get_history_summary))
+        .route("/api/v1/bms/{id}/export/csv",  get(bms::export_csv))
         .route("/api/v1/bms/compare",         get(bms::compare_all))
 
         // ── BMS — Paramètres (lecture à la demande) ───────────────────────────
-        .route("/api/v1/bms/:id/settings",                         get(bms::get_settings))
+        .route("/api/v1/bms/{id}/settings",                         get(bms::get_settings))
 
         // ── BMS — Écriture ────────────────────────────────────────────────────
-        .route("/api/v1/bms/:id/mos",                              post(bms::set_mos))
-        .route("/api/v1/bms/:id/soc",                              post(bms::set_soc))
-        .route("/api/v1/bms/:id/soc/full",                         post(bms::set_soc_full))
-        .route("/api/v1/bms/:id/soc/empty",                        post(bms::set_soc_empty))
-        .route("/api/v1/bms/:id/reset",                            post(bms::reset_bms))
-        .route("/api/v1/bms/:id/settings/cell-voltage-alarms",     post(bms::set_cell_volt_alarms))
-        .route("/api/v1/bms/:id/settings/pack-voltage-alarms",     post(bms::set_pack_volt_alarms))
-        .route("/api/v1/bms/:id/settings/current-alarms",          post(bms::set_current_alarms))
-        .route("/api/v1/bms/:id/settings/delta-alarms",            post(bms::set_delta_alarms))
-        .route("/api/v1/bms/:id/settings/balancing",               post(bms::set_balancing))
+        .route("/api/v1/bms/{id}/mos",                              post(bms::set_mos))
+        .route("/api/v1/bms/{id}/soc",                              post(bms::set_soc))
+        .route("/api/v1/bms/{id}/soc/full",                         post(bms::set_soc_full))
+        .route("/api/v1/bms/{id}/soc/empty",                        post(bms::set_soc_empty))
+        .route("/api/v1/bms/{id}/reset",                            post(bms::reset_bms))
+        .route("/api/v1/bms/{id}/settings/cell-voltage-alarms",     post(bms::set_cell_volt_alarms))
+        .route("/api/v1/bms/{id}/settings/pack-voltage-alarms",     post(bms::set_pack_volt_alarms))
+        .route("/api/v1/bms/{id}/settings/current-alarms",          post(bms::set_current_alarms))
+        .route("/api/v1/bms/{id}/settings/delta-alarms",            post(bms::set_delta_alarms))
+        .route("/api/v1/bms/{id}/settings/balancing",               post(bms::set_balancing))
 
         // ── ATS CHINT ────────────────────────────────────────────────────────
         .route("/api/v1/ats/status",        get(ats::get_ats_status))
@@ -98,8 +98,8 @@ pub fn build_router(state: AppState) -> Router {
 
         // ── ET112 ────────────────────────────────────────────────────────────
         .route("/api/v1/et112",                   get(et112::list_et112))
-        .route("/api/v1/et112/:addr/status",      get(et112::get_et112_status))
-        .route("/api/v1/et112/:addr/history",     get(et112::get_et112_history))
+        .route("/api/v1/et112/{addr}/status",      get(et112::get_et112_status))
+        .route("/api/v1/et112/{addr}/history",     get(et112::get_et112_history))
 
         // ── Chart historique (Tsink) ──────────────────────────────────────────
         .route("/api/v1/chart/history",           get(chart::get_chart_history))
@@ -108,7 +108,7 @@ pub fn build_router(state: AppState) -> Router {
 
         // ── Dashboards (catalogue panels Grafana + data + layouts) ────────────
         .route("/api/v1/dashboards/catalog",         get(dashboards::get_catalog))
-        .route("/api/v1/dashboards/panel/:id/data",  get(dashboards::get_panel_data))
+        .route("/api/v1/dashboards/panel/{id}/data",  get(dashboards::get_panel_data))
         .route(
             "/api/v1/dashboards/layout",
             get(dashboards::get_layout)
@@ -118,13 +118,13 @@ pub fn build_router(state: AppState) -> Router {
 
         // ── Tasmota ──────────────────────────────────────────────────────────
         .route("/api/v1/tasmota",                 get(tasmota::list_tasmota))
-        .route("/api/v1/tasmota/:id/status",      get(tasmota::get_tasmota_status))
-        .route("/api/v1/tasmota/:id/history",     get(tasmota::get_tasmota_history))
-        .route("/api/v1/tasmota/:id/control",     post(tasmota::control_tasmota))
+        .route("/api/v1/tasmota/{id}/status",      get(tasmota::get_tasmota_status))
+        .route("/api/v1/tasmota/{id}/history",     get(tasmota::get_tasmota_history))
+        .route("/api/v1/tasmota/{id}/control",     post(tasmota::control_tasmota))
         // ── Shelly ───────────────────────────────────────────────────────────
         .route("/api/v1/shelly",                             get(shelly::list_shelly))
-        .route("/api/v1/shelly/:id/status",                  get(shelly::get_shelly_status))
-        .route("/api/v1/shelly/:id/channel/:ch/control",     post(shelly::control_shelly_channel))
+        .route("/api/v1/shelly/{id}/status",                  get(shelly::get_shelly_status))
+        .route("/api/v1/shelly/{id}/channel/{ch}/control",     post(shelly::control_shelly_channel))
         // ── PromQL (historique Tsink) ─────────────────────────────────────────
         // ── PromQL Grafana-facing — dispatch vm/redb selon
         //    `[metrics_store].default_backend` (cf. api/promql.rs).
@@ -137,7 +137,7 @@ pub fn build_router(state: AppState) -> Router {
 
         // ── Endpoints Prometheus complémentaires §8.2 (toujours redb) ─────
         .route("/api/v1/series",                      get(redb::list_series))
-        .route("/api/v1/label/:name/values",          get(redb::label_values))
+        .route("/api/v1/label/{name}/values",          get(redb::label_values))
         .route("/-/healthy",                          get(redb::healthy))
 
         // ── Endpoints redb explicites (debug, parité côte-à-côte) ──────────
@@ -147,20 +147,20 @@ pub fn build_router(state: AppState) -> Router {
                get(redb::query_range).post(redb::query_range_post))
         .route("/api/v1/redb/series",                 get(redb::list_series))
         .route("/api/v1/redb/labels",                 get(redb::list_labels))
-        .route("/api/v1/redb/label/:name/values",     get(redb::label_values))
+        .route("/api/v1/redb/label/{name}/values",     get(redb::label_values))
         .route("/api/v1/redb/healthy",                get(redb::healthy))
 
         // ── Alertes (journal SQLite) ──────────────────────────────────────────
         .route("/api/v1/alerts/list",              get(alerts::list_alerts))
         .route("/api/v1/alerts/stats",             get(alerts::get_stats))
-        .route("/api/v1/alerts/:id/acknowledge",   post(alerts::acknowledge_alert))
+        .route("/api/v1/alerts/{id}/acknowledge",   post(alerts::acknowledge_alert))
 
         // ── Health check ──────────────────────────────────────────────────────
         .route("/health",                get(health::health_check))
 
         // ── WebSocket ─────────────────────────────────────────────────────────
         .route("/ws/bms/stream",         get(bms::ws_all))
-        .route("/ws/bms/:id/stream",     get(bms::ws_single))
+        .route("/ws/bms/{id}/stream",     get(bms::ws_single))
         .route("/ws/venus/stream",       get(bms::ws_venus))
         .route("/ws/console",            get(console::ws_console))
 

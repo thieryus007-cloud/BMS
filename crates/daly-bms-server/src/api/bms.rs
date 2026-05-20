@@ -612,7 +612,7 @@ async fn handle_ws_all(socket: WebSocket, state: AppState) {
     let initial = state.latest_snapshots().await;
     if !initial.is_empty() {
         if let Ok(json) = serde_json::to_string(&initial) {
-            let _ = sender.send(Message::Text(json)).await;
+            let _ = sender.send(Message::Text(json.into())).await;
         }
     }
 
@@ -620,7 +620,7 @@ async fn handle_ws_all(socket: WebSocket, state: AppState) {
         tokio::select! {
             Ok(snaps) = rx.recv() => {
                 if let Ok(json) = serde_json::to_string(&*snaps) {
-                    if sender.send(Message::Text(json)).await.is_err() {
+                    if sender.send(Message::Text(json.into())).await.is_err() {
                         break;
                     }
                 }
@@ -660,7 +660,7 @@ async fn handle_ws_single(socket: WebSocket, state: AppState, id: String) {
                 // Filtrer pour ce BMS uniquement
                 if let Some(snap) = snaps.iter().find(|s| s.address == addr) {
                     if let Ok(json) = serde_json::to_string(snap) {
-                        if sender.send(Message::Text(json)).await.is_err() {
+                        if sender.send(Message::Text(json.into())).await.is_err() {
                             break;
                         }
                     }
@@ -714,7 +714,7 @@ async fn handle_ws_venus(socket: WebSocket, state: AppState) {
                 });
 
                 if let Ok(json_str) = serde_json::to_string(&payload) {
-                    if sender.send(Message::Text(json_str)).await.is_err() {
+                    if sender.send(Message::Text(json_str.into())).await.is_err() {
                         break;
                     }
                 }
