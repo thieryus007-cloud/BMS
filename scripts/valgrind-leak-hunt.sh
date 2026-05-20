@@ -101,63 +101,56 @@ step "Stop service daly-bms…"
 sudo systemctl stop daly-bms || true
 sleep 2
 
-# ── 2. Config minimale dédiée valgrind ───────────────────────────────────────
-# On crée une config MINIMALE plutôt que de dériver du config prod par sed
-# (qui a posé problème avec les brackets [section] dans les regex). Cette
-# config ne touche AUCUN fichier de prod (pas de redb, pas d'alerts.db,
-# pas de log file dans /var/log).
-step "Préparation config minimale dédiée valgrind…"
+# ── 2. Config dérivée du template Config.toml du repo + awk modifs ──────────
+# Approche définitive : on part du Config.toml du repo qui est le template
+# de référence (parser-compatible). On modifie 3 valeurs avec awk (plus
+# prévisible que sed pour les modifs section-aware).
+step "Préparation config dédiée valgrind…"
 sudo rm -f "$CONFIG_TMP"
-cat > "$CONFIG_TMP" <<'TOMLEOF'
-# Config minimale pour test valgrind — généré par valgrind-leak-hunt.sh.
-# Ne touche AUCUN fichier de prod. Toutes les intégrations désactivées.
 
-[serial]
-port = "/dev/null"
-baud = 9600
-poll_interval_ms = 10000
-ring_buffer_size = 10
-default_cell_count = 16
-default_temp_sensors = 4
+TEMPLATE_CONFIG="$PROJECT_DIR/Config.toml"
+[[ -f "$TEMPLATE_CONFIG" ]] || { error "Template absent : $TEMPLATE_CONFIG"; exit 1; }
 
-[api]
-bind = "127.0.0.1:18080"
+# awk : pour chaque ligne, détermine la section courante, applique les
+# modifs ciblées. Plus robuste que sed avec ranges + brackets.
+awk '
+    /^\[/                    { section = $0 }
+    section == "[logging]"   && /^log_dir/          { print "log_dir = \"\""; next }
+    section == "[metrics_store]" && /^enabled/      { print "enabled = false"; next }
+    section == "[alerts]"    && /^db_path/          { print "db_path = \"\""; next }
+    section == "[mqtt]"      && /^enabled/          { print "enabled = false"; next }
+    { print }
+' "$TEMPLATE_CONFIG" > "$CONFIG_TMP"
 
-[logging]
-level = "info"
-log_dir = ""
-format = "pretty"
-log_keep_days = 1
+# Sécurité : si [logging] n'avait pas log_dir, l'ajouter (pour neutraliser
+# le default /var/log/daly-bms).
+# Helper : extraire le contenu d'une section TOML (exclut le header pour
+# que la range awk ne se referme pas immédiatement sur `^\[`).
+section_body() {
+    awk -v s="$1" '
+        $0 == s { in_section=1; next }
+        /^\[/   { in_section=0 }
+        in_section { print }
+    ' "$CONFIG_TMP"
+}
 
-[mqtt]
-enabled = false
-host = "127.0.0.1"
-port = 1883
-topic_prefix = "santuario"
-publish_interval_sec = 60
+if ! section_body "[logging]" | grep -q '^log_dir'; then
+    sed -i '/^\[logging\]/a log_dir = ""' "$CONFIG_TMP"
+fi
 
-[et112]
-ring_buffer_size = 10
-devices = []
+# Sanity check : 4 valeurs critiques doivent être correctes
+LOG_DIR_LINE=$(section_body "[logging]"       | grep '^log_dir' | head -1)
+METRICS_LINE=$(section_body "[metrics_store]" | grep '^enabled' | head -1)
+ALERTS_LINE=$(section_body "[alerts]"         | grep '^db_path' | head -1)
+MQTT_LINE=$(section_body   "[mqtt]"           | grep '^enabled' | head -1)
 
-[tasmota]
-ring_buffer_size = 10
-devices = []
-
-[shelly]
-devices = []
-
-[metrics_store]
-enabled = false
-db_path = "/tmp/valgrind-metrics.redb"
-
-[alerts]
-db_path = ""
-
-[dashboards]
-storage_path = ""
-TOMLEOF
-info "Config minimale : $CONFIG_TMP (tout désactivé, port API 18080 pour éviter conflit)"
+FAIL=0
+[[ "$LOG_DIR_LINE" == 'log_dir = ""' ]]      || { error "log_dir incorrect : '$LOG_DIR_LINE'"; FAIL=1; }
+[[ "$METRICS_LINE" == 'enabled = false' ]]   || { error "metrics_store.enabled incorrect : '$METRICS_LINE'"; FAIL=1; }
+[[ "$ALERTS_LINE"  == 'db_path = ""' ]]      || { error "alerts.db_path incorrect : '$ALERTS_LINE'"; FAIL=1; }
+[[ "$MQTT_LINE"    == 'enabled = false' ]]   || { error "mqtt.enabled incorrect : '$MQTT_LINE'"; FAIL=1; }
+[[ "$FAIL" -eq 0 ]] || { error "Sanity check config échoué — voir $CONFIG_TMP"; exit 1; }
+info "Config dédiée : $CONFIG_TMP (4 valeurs neutralisées, sanity OK)"
 
 # ── 3. Patch main.rs pour désactiver jemalloc ───────────────────────────────
 if grep -q '^#\[global_allocator\]' "$MAIN_RS"; then
