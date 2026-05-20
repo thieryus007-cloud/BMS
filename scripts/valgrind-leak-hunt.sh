@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # valgrind-leak-hunt.sh — Capture un profil valgrind sur daly-bms-server.
 #
-# Usage :
+# Usage (NE PAS lancer en sudo — le script appelle sudo seulement pour
+# les commandes systemctl qui en ont besoin) :
 #   bash scripts/valgrind-leak-hunt.sh              # durée 300s (5 min)
 #   bash scripts/valgrind-leak-hunt.sh 600          # durée 10 min
 #   bash scripts/valgrind-leak-hunt.sh 300 --keep   # garde le patch jemalloc
-#                                                     pour réutilisation
 #
 # Ce que fait le script :
 #   1. Stoppe le service systemd daly-bms (libère le port 8080)
 #   2. Crée une config temporaire sans file logger (/tmp/daly-valgrind.toml)
 #   3. Patche temporairement main.rs pour désactiver jemalloc (sinon valgrind
 #      génère des milliers de faux positifs "reachable" internes jemalloc)
-#   4. Rebuild en debug
+#   4. Rebuild en debug (cargo dans le PATH de l'utilisateur courant)
 #   5. Lance valgrind avec timeout configurable
 #   6. Analyse le rapport, extrait les "definitely lost" / "indirectly lost"
 #   7. CLEANUP GARANTI via trap EXIT :
@@ -25,6 +25,14 @@
 #   /tmp/valgrind-summary.txt — extraction des leaks intéressants
 #
 set -uo pipefail
+
+# Refuse d'être lancé en root (cargo n'est pas dans le PATH de root).
+if [[ "$EUID" -eq 0 ]]; then
+    echo "ERREUR : ne pas lancer en sudo/root — cargo ne sera pas trouvé."
+    echo "Lancer simplement : bash scripts/valgrind-leak-hunt.sh [DUREE]"
+    echo "Le script appelle sudo en interne pour les commandes systemctl."
+    exit 1
+fi
 
 DURATION="${1:-300}"
 KEEP_PATCH=false
@@ -95,6 +103,10 @@ sleep 2
 
 # ── 2. Config sans file logger ───────────────────────────────────────────────
 step "Préparation config temporaire (log_dir vide)…"
+# Supprime un éventuel fichier précédent qui appartiendrait à root et
+# bloquerait l'écriture par l'utilisateur courant.
+sudo rm -f "$CONFIG_TMP"
+# /etc/daly-bms/config.toml est readable par tous, on peut le lire en non-root.
 sed 's|^log_dir.*|log_dir = ""|' /etc/daly-bms/config.toml > "$CONFIG_TMP"
 if ! grep -q '^log_dir' "$CONFIG_TMP"; then
     sed -i '/^\[logging\]/a log_dir = ""' "$CONFIG_TMP"
