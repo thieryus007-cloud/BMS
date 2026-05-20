@@ -101,44 +101,63 @@ step "Stop service daly-bms…"
 sudo systemctl stop daly-bms || true
 sleep 2
 
-# ── 2. Config sans file logger + sans DB persistantes ───────────────────────
-step "Préparation config temporaire (log_dir vide + redb/alerts désactivés)…"
-# Supprime un éventuel fichier précédent qui appartiendrait à root et
-# bloquerait l'écriture par l'utilisateur courant.
+# ── 2. Config minimale dédiée valgrind ───────────────────────────────────────
+# On crée une config MINIMALE plutôt que de dériver du config prod par sed
+# (qui a posé problème avec les brackets [section] dans les regex). Cette
+# config ne touche AUCUN fichier de prod (pas de redb, pas d'alerts.db,
+# pas de log file dans /var/log).
+step "Préparation config minimale dédiée valgrind…"
 sudo rm -f "$CONFIG_TMP"
-# /etc/daly-bms/config.toml est readable par tous, on peut le lire en non-root.
-# Copie initiale puis 3 sed séparés (plus robuste qu'un sed multi-expression).
-cp /etc/daly-bms/config.toml "$CONFIG_TMP"
+cat > "$CONFIG_TMP" <<'TOMLEOF'
+# Config minimale pour test valgrind — généré par valgrind-leak-hunt.sh.
+# Ne touche AUCUN fichier de prod. Toutes les intégrations désactivées.
 
-# A) Désactive log_dir → sinon tracing-appender essaie de créer dans
-#    /var/log/daly-bms qui appartient à dalybms (Permission denied)
-if grep -q '^log_dir' "$CONFIG_TMP"; then
-    sed -i 's|^log_dir.*|log_dir = ""|' "$CONFIG_TMP"
-else
-    sed -i '/^\[logging\]/a log_dir = ""' "$CONFIG_TMP"
-fi
+[serial]
+port = "/dev/null"
+baud = 9600
+poll_interval_ms = 10000
+ring_buffer_size = 10
+default_cell_count = 16
+default_temp_sensors = 4
 
-# B) Désactive metrics_store → sinon redb essaie d'ouvrir
-#    /mnt/nvme/daly-bms/metrics.redb (owner dalybms)
-sed -i '/^\[metrics_store\]/,/^\[/ s/^enabled = true$/enabled = false/' "$CONFIG_TMP"
+[api]
+bind = "127.0.0.1:18080"
 
-# C) Désactive AlertEngine → sinon il essaie d'ouvrir
-#    /var/lib/daly-bms/alerts.db (owner dalybms)
-sed -i '/^\[alerts\]/,/^\[/ s|^db_path = ".*"|db_path = ""|' "$CONFIG_TMP"
+[logging]
+level = "info"
+log_dir = ""
+format = "pretty"
+log_keep_days = 1
 
-# Vérification que les 3 modifs sont bien appliquées (sinon le binaire panic
-# au démarrage et valgrind tourne 10 min sur un process mort).
-LOG_DIR_VALUE=$(grep '^log_dir' "$CONFIG_TMP" | head -1 | sed 's/log_dir = //')
-METRICS_VALUE=$(awk '/^\[metrics_store\]/,/^\[/' "$CONFIG_TMP" | grep '^enabled' | head -1)
-ALERTS_VALUE=$(awk '/^\[alerts\]/,/^\[/' "$CONFIG_TMP" | grep '^db_path' | head -1)
-if [[ "$LOG_DIR_VALUE" != "\"\"" ]] || [[ "$METRICS_VALUE" != *"false"* ]] || [[ "$ALERTS_VALUE" != *'""'* ]]; then
-    error "Sanity check config échoué :"
-    error "  log_dir = $LOG_DIR_VALUE (attendu: \"\")"
-    error "  $METRICS_VALUE (attendu: enabled = false)"
-    error "  $ALERTS_VALUE (attendu: db_path = \"\")"
-    exit 1
-fi
-info "Config temporaire : $CONFIG_TMP (redb + alerts + log_dir off, validé)"
+[mqtt]
+enabled = false
+host = "127.0.0.1"
+port = 1883
+topic_prefix = "santuario"
+publish_interval_sec = 60
+
+[et112]
+ring_buffer_size = 10
+devices = []
+
+[tasmota]
+ring_buffer_size = 10
+devices = []
+
+[shelly]
+devices = []
+
+[metrics_store]
+enabled = false
+db_path = "/tmp/valgrind-metrics.redb"
+
+[alerts]
+db_path = ""
+
+[dashboards]
+storage_path = ""
+TOMLEOF
+info "Config minimale : $CONFIG_TMP (tout désactivé, port API 18080 pour éviter conflit)"
 
 # ── 3. Patch main.rs pour désactiver jemalloc ───────────────────────────────
 if grep -q '^#\[global_allocator\]' "$MAIN_RS"; then
