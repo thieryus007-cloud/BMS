@@ -107,21 +107,38 @@ step "Préparation config temporaire (log_dir vide + redb/alerts désactivés)�
 # bloquerait l'écriture par l'utilisateur courant.
 sudo rm -f "$CONFIG_TMP"
 # /etc/daly-bms/config.toml est readable par tous, on peut le lire en non-root.
-# Désactive :
-#  - log_dir   → sinon tracing-appender essaie de créer dans /var/log/daly-bms
-#                qui appartient à dalybms (Permission denied)
-#  - metrics_store.enabled → sinon redb essaie d'ouvrir
-#                /mnt/nvme/daly-bms/metrics.redb (owner dalybms)
-#  - alerts.db_path → sinon AlertEngine essaie d'ouvrir
-#                /var/lib/daly-bms/alerts.db (owner dalybms)
-sed 's|^log_dir.*|log_dir = ""|; \
-     /^\[metrics_store\]/,/^\[/{s/^enabled = true$/enabled = false/}; \
-     /^\[alerts\]/,/^\[/{s|^db_path = ".*"|db_path = ""|}' \
-    /etc/daly-bms/config.toml > "$CONFIG_TMP"
-if ! grep -q '^log_dir' "$CONFIG_TMP"; then
+# Copie initiale puis 3 sed séparés (plus robuste qu'un sed multi-expression).
+cp /etc/daly-bms/config.toml "$CONFIG_TMP"
+
+# A) Désactive log_dir → sinon tracing-appender essaie de créer dans
+#    /var/log/daly-bms qui appartient à dalybms (Permission denied)
+if grep -q '^log_dir' "$CONFIG_TMP"; then
+    sed -i 's|^log_dir.*|log_dir = ""|' "$CONFIG_TMP"
+else
     sed -i '/^\[logging\]/a log_dir = ""' "$CONFIG_TMP"
 fi
-info "Config temporaire : $CONFIG_TMP (redb + alerts + log_dir off)"
+
+# B) Désactive metrics_store → sinon redb essaie d'ouvrir
+#    /mnt/nvme/daly-bms/metrics.redb (owner dalybms)
+sed -i '/^\[metrics_store\]/,/^\[/ s/^enabled = true$/enabled = false/' "$CONFIG_TMP"
+
+# C) Désactive AlertEngine → sinon il essaie d'ouvrir
+#    /var/lib/daly-bms/alerts.db (owner dalybms)
+sed -i '/^\[alerts\]/,/^\[/ s|^db_path = ".*"|db_path = ""|' "$CONFIG_TMP"
+
+# Vérification que les 3 modifs sont bien appliquées (sinon le binaire panic
+# au démarrage et valgrind tourne 10 min sur un process mort).
+LOG_DIR_VALUE=$(grep '^log_dir' "$CONFIG_TMP" | head -1 | sed 's/log_dir = //')
+METRICS_VALUE=$(awk '/^\[metrics_store\]/,/^\[/' "$CONFIG_TMP" | grep '^enabled' | head -1)
+ALERTS_VALUE=$(awk '/^\[alerts\]/,/^\[/' "$CONFIG_TMP" | grep '^db_path' | head -1)
+if [[ "$LOG_DIR_VALUE" != "\"\"" ]] || [[ "$METRICS_VALUE" != *"false"* ]] || [[ "$ALERTS_VALUE" != *'""'* ]]; then
+    error "Sanity check config échoué :"
+    error "  log_dir = $LOG_DIR_VALUE (attendu: \"\")"
+    error "  $METRICS_VALUE (attendu: enabled = false)"
+    error "  $ALERTS_VALUE (attendu: db_path = \"\")"
+    exit 1
+fi
+info "Config temporaire : $CONFIG_TMP (redb + alerts + log_dir off, validé)"
 
 # ── 3. Patch main.rs pour désactiver jemalloc ───────────────────────────────
 if grep -q '^#\[global_allocator\]' "$MAIN_RS"; then
