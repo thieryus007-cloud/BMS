@@ -24,8 +24,7 @@ use axum::{
     routing::{get, post},
 };
 use tower_http::cors::{Any, CorsLayer};
-// TraceLayer retiré phase 3 fuite mémoire — cf. lignes 168-176.
-// use tower_http::trace::TraceLayer;
+use tower_http::trace::TraceLayer;
 
 /// Construit le router principal de l'application.
 pub fn build_router(state: AppState) -> Router {
@@ -166,18 +165,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ws/console",            get(console::ws_console))
 
         // ── Middlewares ───────────────────────────────────────────────────────
-        // CorsLayer conservé : nécessaire pour Grafana cross-origin (3000)
-        // qui interroge daly-bms (8080).
+        // tower-http upgrade 0.5 → 0.6 a refactoré le pattern BoxCloneService
+        // qui causait ~80 % des allocations linéaires par requête HTTP en 0.5
+        // (cf. docs/memory-leak-investigation.md §13). Avec 0.6, CorsLayer +
+        // TraceLayer ne fuient plus → on peut tout réactiver.
         .layer(cors)
-        // TraceLayer RETIRÉ — audit fuite mémoire phase 3 (2026-05-20) :
-        // valgrind --full a identifié `BoxCloneService::clone_box` +
-        // `tower_http::cors::Vary::clone` causant ~80% des allocations
-        // par requête HTTP (240-296 bytes/req). En retirant TraceLayer
-        // ON SEULE, le nombre de blocks "possibly lost" chute de 2761 →
-        // 549 (-80%). Le TraceLayer ne sert qu'à émettre des spans HTTP
-        // pour observabilité, dispensable. À réactiver si tower-http
-        // upgrade ≥ 0.6 (refactor du pattern BoxCloneService).
-        // Cf. docs/memory-leak-investigation.md §10.
-        // .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
