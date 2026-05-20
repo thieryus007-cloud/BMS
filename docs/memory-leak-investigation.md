@@ -458,3 +458,81 @@ sur 1 h après déploiement, comparer avec la valeur de §9.4.
   conservé (inactif par défaut, utile pour debug futur).
 - Dossier `valgrind/` à supprimer du repo (logs binaires de test, gros
   fichiers .zst + .db inutiles pour la prod).
+
+---
+
+## 14. Phase B livré (commit b73024f) — `tower-http 0.5 → 0.6`
+
+### 14.1 — Upgrade appliqué
+
+`Cargo.toml` workspace ligne 53 : `tower-http = "0.5"` → `"0.6"`.
+`cargo update -p tower-http` : version effective 0.6.11.
+TraceLayer et CorsLayer **réactivés** dans `api/mod.rs` (le commit
+33dd5e4 les avait retirés en workaround partiel).
+
+### 14.2 — Mesure de validation 1 h propre (2026-05-20)
+
+Test post-déploiement Plan B :
+
+| Métrique | T0 | T+1h | Δ |
+|----------|-----|------|---|
+| Rss | 67056 kB | 69904 kB | +2848 kB |
+| Anonymous | 56912 kB | 59760 kB | **+2848 kB** |
+
+**Pente confirmée : +2.85 MB/h** (vs 6.6 MB/h avant). **Réduction -57 %**.
+
+### 14.3 — Synthèse globale
+
+| État | Pente Anonymous | Réduction |
+|------|------------------|-----------|
+| Avant tout fix (nuit complète) | ~16 MB/h | référence |
+| Après broadcast guards (PRs antérieures) | ~5.5 MB/h | -66 % |
+| Mesure 1 h propre (post writer redb actif) | 6.6 MB/h | référence stable |
+| **Après tower-http 0.6** | **2.85 MB/h** | **-57 % cumulé** |
+
+### 14.4 — Workaround `RuntimeMaxSec=86400` conservé
+
+Avec pente résiduelle 2.85 MB/h, le restart quotidien absorbe +68 MB
+par jour. Plafond cumulé : 52 MB (baseline) + 68 = ~120 MB → restart →
+~52 MB. Cycle stable largement supportable sur Pi5 8 GB.
+
+À RETIRER seulement si l'investigation continue jusqu'à <1 MB/h.
+
+### 14.5 — Source résiduelle 2.85 MB/h (hypothèses)
+
+Le résiduel ne vient pas de `tower-http` (qui est fixé). Hypothèses :
+- Allocations restantes dans `axum 0.7` (clonage de `Route` ?)
+- `hyper 1.x` connections handling
+- `tokio` runtime allocations sous charge
+- Notre code : `json!`, `format!` dans handlers MQTT
+- `serde_json::Value` parsing → des Strings allouées non poolées
+
+### 14.6 — Pour pousser plus loin (futur, optionnel)
+
+1. **Upgrade `axum 0.7 → 0.8`** : breaking changes plus larges
+   (router path matching), mais potentiel gain similaire à tower-http.
+2. **Audit `still reachable: 4.6 MB` dans valgrind** : ces blocks
+   sont vivants mais peut-être grossissants (caches internes, pools).
+   Relancer valgrind avec `--show-leak-kinds=all`.
+3. **Pooler les allocations** dans `bridges/mqtt.rs` : réutiliser
+   les Strings et Values via une pool (peu compatible avec serde mais
+   possible pour le payload final).
+
+Effort estimé : 3-5 h dédiées. Gain potentiel : -1 à -2 MB/h.
+
+## 15. Status final — investigation close
+
+| Aspect | État |
+|--------|------|
+| Cause racine identifiée | ✅ `tower-http 0.5 BoxCloneService` (§13) |
+| Fix permanent appliqué | ✅ upgrade tower-http 0.6 (commit b73024f) |
+| Pente prod | ✅ 6.6 → 2.85 MB/h (-57 %) |
+| Workaround restart quotidien | ✅ conservé (RuntimeMaxSec=86400) |
+| Plafond cumulé 24 h | ✅ ~120 MB (très acceptable) |
+| Writer redb fonctionnel | ✅ Grafana reçoit données fraîches (PR commit 2016b24) |
+| Documentation | ✅ §1-15 complète |
+| Code instrumentation debug | ✅ `DALY_DISABLE_MONITOR`, `DALY_DISABLE_RS485` conservés |
+| Script `valgrind-leak-hunt.sh` | ✅ conservé pour futures sessions (modes isolé/--full) |
+
+**Investigation déclarée terminée**. Si on veut atteindre <1 MB/h dans
+le futur, voir §14.6 pour les pistes.
