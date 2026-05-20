@@ -1,0 +1,31 @@
+[>>] Stop service daly-bms…
+[>>] Préparation config MODE --full (MQTT + redb + alerts actifs, DB en /tmp)…
+[OK] Config dédiée MODE --full : /tmp/daly-valgrind.toml
+[OK]   mqtt.enabled         = true (publisher + subscriber actifs)
+[OK]   metrics_store.db_path = /tmp/valgrind-metrics.redb
+[OK]   alerts.db_path        = /tmp/valgrind-alerts.db
+[>>] Patch main.rs : désactivation temporaire de jemalloc…
+[OK] jemalloc désactivé pour ce test
+[>>] Build debug avec system malloc (peut prendre 1-3 min)…
+
+warning: `daly-bms-server` (bin "daly-bms-server") generated 1 warning (run `cargo fix --bin "daly-bms-server" -p daly-bms-server` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 26.15s
+[OK] Build OK : ./target/debug/daly-bms-server
+[>>] Lancement valgrind (durée: 600s = 10 min)…
+[!!] Le service va tourner ~5-10× plus lentement sous valgrind.
+[!!] Surveille avec : tail -f /tmp/valgrind.log
+2026-05-20T07:48:05.611915Z  WARN daly_bms_server: Polling RS485 désactivé via DALY_DISABLE_RS485 (debug fuite mémoire)
+2026-05-20T07:48:05.963119Z  WARN daly_bms_server: Monitor + watchdog désactivés via DALY_DISABLE_MONITOR (debug fuite mémoire)
+2026-05-20T07:50:07.385648Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:50:12.833844Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:50:18.136436Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:50:22.994975Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:50:28.103461Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:50:33.240853Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:51:30.821508Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:51:36.118035Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:51:41.139475Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:51:46.659179Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:51:52.183960Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:51:57.260229Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
+2026-05-20T07:52:02.374012Z  WARN daly_bms_server::api::dashboards: panel query failed panel=43 ref_id=A expr=(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100 error=PromQL: unsupported: subquery (e.g. [Xh:Ym]) — réécrire la requête en deux expressions distinctes côté client (cf. plan §6.5)
