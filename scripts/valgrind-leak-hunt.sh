@@ -3,40 +3,39 @@
 #
 # Usage (NE PAS lancer en sudo — le script appelle sudo seulement pour
 # les commandes systemctl qui en ont besoin) :
-#   bash scripts/valgrind-leak-hunt.sh              # durée 300s (5 min)
-#   bash scripts/valgrind-leak-hunt.sh 600          # durée 10 min
-#   bash scripts/valgrind-leak-hunt.sh 300 --keep   # garde le patch jemalloc
+#   bash scripts/valgrind-leak-hunt.sh                    # mode isolé, 300s
+#   bash scripts/valgrind-leak-hunt.sh 600                # mode isolé, 600s
+#   bash scripts/valgrind-leak-hunt.sh 600 --full         # MQTT + redb actifs
+#   bash scripts/valgrind-leak-hunt.sh 600 --full --keep  # idem + garde patch
 #
-# Ce que fait le script :
-#   1. Stoppe le service systemd daly-bms (libère le port 8080)
-#   2. Crée une config temporaire sans file logger (/tmp/daly-valgrind.toml)
-#   3. Patche temporairement main.rs pour désactiver jemalloc (sinon valgrind
-#      génère des milliers de faux positifs "reachable" internes jemalloc)
-#   4. Rebuild en debug (cargo dans le PATH de l'utilisateur courant)
-#   5. Lance valgrind avec timeout configurable
-#   6. Analyse le rapport, extrait les "definitely lost" / "indirectly lost"
-#   7. CLEANUP GARANTI via trap EXIT :
-#      - Revert le patch jemalloc
-#      - Rebuild release (pour redéploiement futur)
-#      - Restart le service systemd
-#
-# Sorties :
-#   /tmp/valgrind.log         — log complet valgrind
-#   /tmp/valgrind-summary.txt — extraction des leaks intéressants
-#
+# Modes :
+#   isolé (défaut) : tout désactivé (mqtt, redb, alerts). Binaire idle sur
+#                    Axum HTTP. Capture les leaks pure-runtime tokio/hyper.
+#   --full         : mqtt + redb + alerts ACTIFS (DB redirigées vers /tmp
+#                    pour ne pas conflit avec prod). RS485 et monitor restent
+#                    désactivés (RS485 = /dev/ttyUSB0 owned par dalybms +
+#                    locked par service prod ; monitor = spam polkit).
+#                    Ce mode capture les leaks du publisher MQTT, du writer
+#                    redb et de l'AlertEngine en charge réaliste.
+
 set -uo pipefail
 
 # Refuse d'être lancé en root (cargo n'est pas dans le PATH de root).
 if [[ "$EUID" -eq 0 ]]; then
     echo "ERREUR : ne pas lancer en sudo/root — cargo ne sera pas trouvé."
-    echo "Lancer simplement : bash scripts/valgrind-leak-hunt.sh [DUREE]"
-    echo "Le script appelle sudo en interne pour les commandes systemctl."
+    echo "Lancer simplement : bash scripts/valgrind-leak-hunt.sh [DUREE] [--full] [--keep]"
     exit 1
 fi
 
 DURATION="${1:-300}"
+FULL_MODE=false
 KEEP_PATCH=false
-[[ "${2:-}" == "--keep" ]] && KEEP_PATCH=true
+for arg in "${@:2}"; do
+    case "$arg" in
+        --full) FULL_MODE=true ;;
+        --keep) KEEP_PATCH=true ;;
+    esac
+done
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
@@ -46,6 +45,10 @@ MAIN_RS_BAK="/tmp/main.rs.before-valgrind"
 CONFIG_TMP="/tmp/daly-valgrind.toml"
 VALGRIND_LOG="/tmp/valgrind.log"
 VALGRIND_SUMMARY="/tmp/valgrind-summary.txt"
+# DB temporaires en mode --full (évite conflit avec prod owned dalybms)
+TMP_REDB="/tmp/valgrind-metrics.redb"
+TMP_ALERTS_DB="/tmp/valgrind-alerts.db"
+TMP_DASHBOARDS_DB="/tmp/valgrind-dashboards.db"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[OK]${NC} $*"; }
@@ -103,24 +106,43 @@ sleep 2
 
 # ── 2. Config dérivée du template Config.toml du repo + awk modifs ──────────
 # Approche définitive : on part du Config.toml du repo qui est le template
-# de référence (parser-compatible). On modifie 3 valeurs avec awk (plus
-# prévisible que sed pour les modifs section-aware).
-step "Préparation config dédiée valgrind…"
+# de référence (parser-compatible). On modifie quelques valeurs avec awk
+# (plus prévisible que sed pour les modifs section-aware).
+if $FULL_MODE; then
+    step "Préparation config MODE --full (MQTT + redb + alerts actifs, DB en /tmp)…"
+else
+    step "Préparation config MODE ISOLÉ (tout désactivé, binaire idle)…"
+fi
 sudo rm -f "$CONFIG_TMP"
 
 TEMPLATE_CONFIG="$PROJECT_DIR/Config.toml"
 [[ -f "$TEMPLATE_CONFIG" ]] || { error "Template absent : $TEMPLATE_CONFIG"; exit 1; }
 
-# awk : pour chaque ligne, détermine la section courante, applique les
-# modifs ciblées. Plus robuste que sed avec ranges + brackets.
-awk '
-    /^\[/                    { section = $0 }
-    section == "[logging]"   && /^log_dir/          { print "log_dir = \"\""; next }
-    section == "[metrics_store]" && /^enabled/      { print "enabled = false"; next }
-    section == "[alerts]"    && /^db_path/          { print "db_path = \"\""; next }
-    section == "[mqtt]"      && /^enabled/          { print "enabled = false"; next }
-    { print }
-' "$TEMPLATE_CONFIG" > "$CONFIG_TMP"
+# Modifs awk selon le mode.
+if $FULL_MODE; then
+    # Mode --full : conserve mqtt/redb/alerts actifs mais redirige les DB
+    # vers /tmp pour éviter conflit avec les fichiers de prod (owned par
+    # dalybms) que pi5compute ne peut pas ouvrir.
+    awk -v TMP_REDB="$TMP_REDB" -v TMP_ALERTS="$TMP_ALERTS_DB" '
+        /^\[/                              { section = $0 }
+        section == "[logging]"     && /^log_dir/ { print "log_dir = \"\""; next }
+        section == "[metrics_store]" && /^db_path/ { print "db_path = \"" TMP_REDB "\""; next }
+        section == "[alerts]"      && /^db_path/ { print "db_path = \"" TMP_ALERTS "\""; next }
+        { print }
+    ' "$TEMPLATE_CONFIG" > "$CONFIG_TMP"
+    # Nettoyage des DB temporaires précédentes pour partir d'un état frais
+    rm -f "$TMP_REDB" "$TMP_ALERTS_DB" "$TMP_DASHBOARDS_DB"
+else
+    # Mode isolé : tout off.
+    awk '
+        /^\[/                    { section = $0 }
+        section == "[logging]"   && /^log_dir/          { print "log_dir = \"\""; next }
+        section == "[metrics_store]" && /^enabled/      { print "enabled = false"; next }
+        section == "[alerts]"    && /^db_path/          { print "db_path = \"\""; next }
+        section == "[mqtt]"      && /^enabled/          { print "enabled = false"; next }
+        { print }
+    ' "$TEMPLATE_CONFIG" > "$CONFIG_TMP"
+fi
 
 # Sécurité : si [logging] n'avait pas log_dir, l'ajouter (pour neutraliser
 # le default /var/log/daly-bms).
@@ -138,19 +160,35 @@ if ! section_body "[logging]" | grep -q '^log_dir'; then
     sed -i '/^\[logging\]/a log_dir = ""' "$CONFIG_TMP"
 fi
 
-# Sanity check : 4 valeurs critiques doivent être correctes
-LOG_DIR_LINE=$(section_body "[logging]"       | grep '^log_dir' | head -1)
-METRICS_LINE=$(section_body "[metrics_store]" | grep '^enabled' | head -1)
-ALERTS_LINE=$(section_body "[alerts]"         | grep '^db_path' | head -1)
-MQTT_LINE=$(section_body   "[mqtt]"           | grep '^enabled' | head -1)
-
+# Sanity check : valeurs critiques selon le mode
+LOG_DIR_LINE=$(section_body "[logging]" | grep '^log_dir' | head -1)
 FAIL=0
-[[ "$LOG_DIR_LINE" == 'log_dir = ""' ]]      || { error "log_dir incorrect : '$LOG_DIR_LINE'"; FAIL=1; }
-[[ "$METRICS_LINE" == 'enabled = false' ]]   || { error "metrics_store.enabled incorrect : '$METRICS_LINE'"; FAIL=1; }
-[[ "$ALERTS_LINE"  == 'db_path = ""' ]]      || { error "alerts.db_path incorrect : '$ALERTS_LINE'"; FAIL=1; }
-[[ "$MQTT_LINE"    == 'enabled = false' ]]   || { error "mqtt.enabled incorrect : '$MQTT_LINE'"; FAIL=1; }
+
+if $FULL_MODE; then
+    # Mode --full : on vérifie que les paths DB sont bien redirigés vers /tmp.
+    METRICS_DB=$(section_body "[metrics_store]" | grep '^db_path' | head -1)
+    ALERTS_DB=$(section_body  "[alerts]"        | grep '^db_path' | head -1)
+    [[ "$LOG_DIR_LINE" == 'log_dir = ""' ]]               || { error "log_dir incorrect : '$LOG_DIR_LINE'"; FAIL=1; }
+    [[ "$METRICS_DB"   == *"$TMP_REDB"* ]]                || { error "metrics_store.db_path incorrect : '$METRICS_DB'"; FAIL=1; }
+    [[ "$ALERTS_DB"    == *"$TMP_ALERTS_DB"* ]]           || { error "alerts.db_path incorrect : '$ALERTS_DB'"; FAIL=1; }
+    MQTT_LINE=$(section_body "[mqtt]" | grep '^enabled' | head -1)
+    [[ "$MQTT_LINE"    == 'enabled = true' ]]             || { error "mqtt.enabled incorrect (attendu true en --full) : '$MQTT_LINE'"; FAIL=1; }
+    info "Config dédiée MODE --full : $CONFIG_TMP"
+    info "  mqtt.enabled         = true (publisher + subscriber actifs)"
+    info "  metrics_store.db_path = $TMP_REDB"
+    info "  alerts.db_path        = $TMP_ALERTS_DB"
+else
+    METRICS_LINE=$(section_body "[metrics_store]" | grep '^enabled' | head -1)
+    ALERTS_LINE=$(section_body  "[alerts]"        | grep '^db_path' | head -1)
+    MQTT_LINE=$(section_body    "[mqtt]"          | grep '^enabled' | head -1)
+    [[ "$LOG_DIR_LINE" == 'log_dir = ""' ]]      || { error "log_dir incorrect : '$LOG_DIR_LINE'"; FAIL=1; }
+    [[ "$METRICS_LINE" == 'enabled = false' ]]   || { error "metrics_store.enabled incorrect : '$METRICS_LINE'"; FAIL=1; }
+    [[ "$ALERTS_LINE"  == 'db_path = ""' ]]      || { error "alerts.db_path incorrect : '$ALERTS_LINE'"; FAIL=1; }
+    [[ "$MQTT_LINE"    == 'enabled = false' ]]   || { error "mqtt.enabled incorrect : '$MQTT_LINE'"; FAIL=1; }
+    info "Config dédiée MODE ISOLÉ : $CONFIG_TMP (tout désactivé)"
+fi
+
 [[ "$FAIL" -eq 0 ]] || { error "Sanity check config échoué — voir $CONFIG_TMP"; exit 1; }
-info "Config dédiée : $CONFIG_TMP (4 valeurs neutralisées, sanity OK)"
 
 # ── 3. Patch main.rs pour désactiver jemalloc ───────────────────────────────
 if grep -q '^#\[global_allocator\]' "$MAIN_RS"; then
