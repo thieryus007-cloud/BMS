@@ -101,17 +101,27 @@ step "Stop service daly-bms…"
 sudo systemctl stop daly-bms || true
 sleep 2
 
-# ── 2. Config sans file logger ───────────────────────────────────────────────
-step "Préparation config temporaire (log_dir vide)…"
+# ── 2. Config sans file logger + sans DB persistantes ───────────────────────
+step "Préparation config temporaire (log_dir vide + redb/alerts désactivés)…"
 # Supprime un éventuel fichier précédent qui appartiendrait à root et
 # bloquerait l'écriture par l'utilisateur courant.
 sudo rm -f "$CONFIG_TMP"
 # /etc/daly-bms/config.toml est readable par tous, on peut le lire en non-root.
-sed 's|^log_dir.*|log_dir = ""|' /etc/daly-bms/config.toml > "$CONFIG_TMP"
+# Désactive :
+#  - log_dir   → sinon tracing-appender essaie de créer dans /var/log/daly-bms
+#                qui appartient à dalybms (Permission denied)
+#  - metrics_store.enabled → sinon redb essaie d'ouvrir
+#                /mnt/nvme/daly-bms/metrics.redb (owner dalybms)
+#  - alerts.db_path → sinon AlertEngine essaie d'ouvrir
+#                /var/lib/daly-bms/alerts.db (owner dalybms)
+sed 's|^log_dir.*|log_dir = ""|; \
+     /^\[metrics_store\]/,/^\[/{s/^enabled = true$/enabled = false/}; \
+     /^\[alerts\]/,/^\[/{s|^db_path = ".*"|db_path = ""|}' \
+    /etc/daly-bms/config.toml > "$CONFIG_TMP"
 if ! grep -q '^log_dir' "$CONFIG_TMP"; then
     sed -i '/^\[logging\]/a log_dir = ""' "$CONFIG_TMP"
 fi
-info "Config temporaire : $CONFIG_TMP"
+info "Config temporaire : $CONFIG_TMP (redb + alerts + log_dir off)"
 
 # ── 3. Patch main.rs pour désactiver jemalloc ───────────────────────────────
 if grep -q '^#\[global_allocator\]' "$MAIN_RS"; then
@@ -137,7 +147,19 @@ step "Lancement valgrind (durée: ${DURATION}s = $((DURATION / 60)) min)…"
 warn "Le service va tourner ~5-10× plus lentement sous valgrind."
 warn "Surveille avec : tail -f $VALGRIND_LOG"
 
-DALY_CONFIG="$CONFIG_TMP" RUST_LOG=warn \
+# DALY_DISABLE_MONITOR=1  → désactive monitor_agent + watchdog_agent. Sinon
+#                          le watchdog tente toutes les 15s un
+#                          `systemctl restart energy-manager` qui échoue
+#                          (polkit n'autorise que dalybms, pas l'user courant)
+#                          et déclenche un agent polkit interactif qui pollue
+#                          la sortie + spam les logs.
+# DALY_DISABLE_RS485=1    → désactive le polling RS485 BMS. Évite le bruit
+#                          dans les logs et simplifie l'investigation
+#                          (les "Timeout BMS 0x02" sont juste du bruit).
+DALY_CONFIG="$CONFIG_TMP" \
+RUST_LOG=warn \
+DALY_DISABLE_MONITOR=1 \
+DALY_DISABLE_RS485=1 \
     timeout --foreground -s INT "$DURATION" \
     valgrind \
         --leak-check=full \
