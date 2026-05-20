@@ -28,7 +28,9 @@ use tower_http::trace::TraceLayer;
 
 /// Construit le router principal de l'application.
 pub fn build_router(state: AppState) -> Router {
-    let cors = CorsLayer::new()
+    // TEMPORAIRE phase 3 fuite mémoire : `cors` non utilisé car les .layer()
+    // sont commentés plus bas. Préfixé `_` pour silencer warnings.
+    let _cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
@@ -165,7 +167,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ws/console",            get(console::ws_console))
 
         // ── Middlewares ───────────────────────────────────────────────────────
-        .layer(cors)
-        .layer(TraceLayer::new_for_http())
+        // TEMPORAIRE — audit fuite mémoire phase 3 (valgrind --full a montré
+        // que `tower_http::cors::Vary::clone` + `BoxCloneService::clone_box`
+        // allouaient ~296 bytes par requête HTTP entrante, cohérent avec la
+        // fuite ~6.6 MB/h en prod). On commente les 2 layers pour CONFIRMER
+        // que la fuite tombe. Si oui → solution finale = upgrade axum/tower-http
+        // ou retrait définitif. Si non → leak ailleurs.
+        // .layer(cors)
+        // .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
