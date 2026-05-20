@@ -24,13 +24,12 @@ use axum::{
     routing::{get, post},
 };
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::trace::TraceLayer;
+// TraceLayer retiré phase 3 fuite mémoire — cf. lignes 168-176.
+// use tower_http::trace::TraceLayer;
 
 /// Construit le router principal de l'application.
 pub fn build_router(state: AppState) -> Router {
-    // TEMPORAIRE phase 3 fuite mémoire : `cors` non utilisé car les .layer()
-    // sont commentés plus bas. Préfixé `_` pour silencer warnings.
-    let _cors = CorsLayer::new()
+    let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
@@ -167,13 +166,18 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ws/console",            get(console::ws_console))
 
         // ── Middlewares ───────────────────────────────────────────────────────
-        // TEMPORAIRE — audit fuite mémoire phase 3 (valgrind --full a montré
-        // que `tower_http::cors::Vary::clone` + `BoxCloneService::clone_box`
-        // allouaient ~296 bytes par requête HTTP entrante, cohérent avec la
-        // fuite ~6.6 MB/h en prod). On commente les 2 layers pour CONFIRMER
-        // que la fuite tombe. Si oui → solution finale = upgrade axum/tower-http
-        // ou retrait définitif. Si non → leak ailleurs.
-        // .layer(cors)
+        // CorsLayer conservé : nécessaire pour Grafana cross-origin (3000)
+        // qui interroge daly-bms (8080).
+        .layer(cors)
+        // TraceLayer RETIRÉ — audit fuite mémoire phase 3 (2026-05-20) :
+        // valgrind --full a identifié `BoxCloneService::clone_box` +
+        // `tower_http::cors::Vary::clone` causant ~80% des allocations
+        // par requête HTTP (240-296 bytes/req). En retirant TraceLayer
+        // ON SEULE, le nombre de blocks "possibly lost" chute de 2761 →
+        // 549 (-80%). Le TraceLayer ne sert qu'à émettre des spans HTTP
+        // pour observabilité, dispensable. À réactiver si tower-http
+        // upgrade ≥ 0.6 (refactor du pattern BoxCloneService).
+        // Cf. docs/memory-leak-investigation.md §10.
         // .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

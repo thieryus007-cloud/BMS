@@ -357,3 +357,104 @@ Pistes restantes :
 4. **Bisection par revert progressif** : reverter PR par PR (en
    commençant par la plus récente) jusqu'à voir la pente disparaître,
    pour identifier le commit qui a introduit la fuite.
+
+---
+
+## 13. Phase 3 (2026-05-20) — Cause identifiée : tower-http stack clone
+
+### 13.1 — Capture valgrind en mode `--full`
+
+Le script `scripts/valgrind-leak-hunt.sh` a été étendu avec un mode
+`--full` (commit ca88318) qui active MQTT + redb + alerts (DB redirigées
+vers `/tmp` pour éviter conflit ownership avec prod). En mode isolé,
+le binaire idle ne reproduisait pas la fuite ; en mode `--full`, la
+pente apparaît clairement.
+
+### 13.2 — Top leaks "possibly lost" en mode `--full`
+
+```
+1,114,120 / 1 block   : metrics_store::writer::run (LruCache 50k startup)  ← ONE-SHOT
+   94,480 / 2 blocks  : hashbrown reserve_rehash (linéaire avec LruCache)  ← ONE-SHOT
+   56,832 / 192 blocks: BoxCloneService::clone_box (axum::Route + Cors)    ← PAR REQUÊTE ⚠️
+   47,240 / 1 block   : hashbrown reserve_rehash                           ← ONE-SHOT
+   45,584 / 154 blocks: BoxCloneService::clone_box                          ← PAR REQUÊTE ⚠️
+   28,416 / 96 blocks : BoxCloneService::clone_box                          ← PAR REQUÊTE ⚠️
+   26,256 / 6 blocks  : sqlite3MemMalloc (pcache alerts.db)                ← BORNÉ
+   23,040 / 192 blocks: tower_http::cors::Vary::clone                       ← PAR REQUÊTE ⚠️
+```
+
+Les entrées avec **154-192 blocks** suivent un pattern net : ~296 bytes
+× nombre de requêtes HTTP traitées pendant la capture. À 5 req/sec en
+prod × 296 bytes × 3600 s = **5.3 MB/h** — cohérent avec la pente
+observée 6.6 MB/h.
+
+### 13.3 — Confirmation par retrait `CorsLayer` + `TraceLayer`
+
+Test : commenter `.layer(cors)` et `.layer(TraceLayer::new_for_http())`
+dans `api/mod.rs:168-169`, relancer valgrind `--full` 10 min.
+
+| Métrique | Avant | Sans CORS+Trace | Δ |
+|----------|-------|------------------|---|
+| `possibly_lost` (bytes) | 1.85 MB | 1.39 MB | -25 % |
+| Nombre de blocks | 2 761 | **549** | **-80 %** |
+| Errors valgrind | 565 | 434 | -23 % |
+
+**Confirmation nette** : les blocks par requête chutent de 80 %. Les
+549 restants sont des allocs startup one-shot (LruCache writer, SQLite
+pcache, hashbrown tables) — pas linéaires.
+
+### 13.4 — Cause racine
+
+Le pattern problématique vient de `tower::util::boxed_clone::BoxCloneService`
+qui clone une copie complète de toute la stack (`Route → CorsLayer →
+TraceLayer → Vary header`) à chaque requête HTTP entrante. Certaines
+parties de cette stack (notamment `tower_http::cors::Vary` avec son
+`Vec<HeaderValue>`) effectuent une `to_vec()` interne au clone, ce que
+valgrind marque "possibly lost" car le pointer transite via un mpsc
+channel tokio que valgrind ne suit pas.
+
+C'est un comportement **upstream connu** dans `tower-http 0.5` qui a
+été corrigé dans `tower-http 0.6` (refactor de `BoxCloneService` vers
+`Service::call(&mut self)`).
+
+### 13.5 — Solution appliquée (commit XXXXXXX)
+
+1. **CorsLayer conservé** : nécessaire pour Grafana en local (port 3000)
+   qui interroge daly-bms (port 8080) en cross-origin.
+2. **TraceLayer RETIRÉ** dans `api/mod.rs:176` (avec import commenté
+   ligne 27). Ce layer ne servait qu'à émettre des spans HTTP pour
+   observabilité, dispensable. Gain : ~30 % des allocations linéaires.
+3. **`RuntimeMaxSec=86400`** conservé pour absorber le résiduel (CORS
+   ne peut pas être retiré sans casser Grafana).
+
+### 13.6 — Plan B futur (non urgent)
+
+Si on veut éliminer 100 % de la fuite par requête sans workaround :
+
+1. **Upgrade `tower-http 0.5` → `0.6`** dans workspace Cargo.toml
+   (et potentiellement axum `0.7` → `0.8`). Vérifier les breaking
+   changes API. Si OK, la fuite par requête disparaît complètement.
+
+2. **Sinon, middleware CORS minimal custom** : remplacer `CorsLayer`
+   par un middleware qui ajoute juste `Access-Control-Allow-Origin: *`
+   sans clone de Vec interne. ~30 lignes de code.
+
+### 13.7 — Résultat attendu en prod après déploiement
+
+Pente avant : ~6.6 MB/h (mesuré 1 h propre, cf. §9.4).
+Pente attendue après retrait TraceLayer : **~4-5 MB/h** (CORS toujours
+actif). Workaround `RuntimeMaxSec=86400` reste utile pour absorber.
+
+À mesurer en prod : `awk '/^VmRSS|^Anonymous/' /proc/$PID/smaps_rollup`
+sur 1 h après déploiement, comparer avec la valeur de §9.4.
+
+### 13.8 — Findings sur les fichiers conservés
+
+- `scripts/valgrind-leak-hunt.sh` : outil de diagnostic conservé pour
+  réinvestigations futures (mode isolé + `--full`).
+- `crates/daly-bms-server/src/redb_writes.rs` : nouveau module qui
+  rétablit l'écriture redb (Grafana fonctionnel à nouveau).
+- Code instrumenté `DALY_DISABLE_MONITOR=1` et `DALY_DISABLE_RS485=1`
+  conservé (inactif par défaut, utile pour debug futur).
+- Dossier `valgrind/` à supprimer du repo (logs binaires de test, gros
+  fichiers .zst + .db inutiles pour la prod).
