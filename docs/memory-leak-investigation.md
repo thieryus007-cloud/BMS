@@ -536,3 +536,84 @@ Effort estimé : 3-5 h dédiées. Gain potentiel : -1 à -2 MB/h.
 
 **Investigation déclarée terminée**. Si on veut atteindre <1 MB/h dans
 le futur, voir §14.6 pour les pistes.
+
+---
+
+## 16. Phase C (commit 018e363) — `axum 0.7 → 0.8`
+
+### 16.1 — Upgrade appliqué
+
+Suite au succès de Phase B (tower-http 0.6, -57 %), tentative de
+descendre sous 1 MB/h en upgradant aussi axum.
+
+`Cargo.toml` workspace ligne 51 : `axum = "0.7"` → `"0.8"`.
+`cargo update -p axum` cascade :
+- axum 0.7.9 → 0.8.9
+- axum-core 0.4.5 → 0.5.6
+- axum-macros 0.4.2 → 0.5.1
+- matchit 0.7.3 → 0.8.4
+- tokio-tungstenite 0.24.0 → 0.29.0
+- tungstenite 0.24.0 → 0.29.0
+
+### 16.2 — Breaking changes corrigés
+
+1. **`Message::Text` accepte `Utf8Bytes` au lieu de `String`** (cascade
+   tokio-tungstenite 0.29). Fix : `.into()` à 6 sites dans
+   `api/bms.rs` (4× sur les WS streams) et `api/console.rs` (2×).
+
+2. **Path matching `:param` → `{param}`** (matchit 0.8 brace syntax).
+   Routes mises à jour dans `api/mod.rs` :
+   - `/api/v1/bms/{id}/*` (12 routes)
+   - `/api/v1/et112/{addr}/*` (2 routes)
+   - `/api/v1/tasmota/{id}/*` (3 routes)
+   - `/api/v1/shelly/{id}/*`, `/{id}/channel/{ch}/*` (3 routes)
+   - `/api/v1/label/{name}/values` (1 route)
+   - `/api/v1/dashboards/panel/{id}/data` (1 route)
+   - Total : ~25 routes
+
+### 16.3 — Mesure de validation 1 h propre
+
+| Métrique | T0 | T+1h | Δ |
+|----------|-----|------|---|
+| Rss | 70848 kB | 72032 kB | +1184 kB |
+| Anonymous | 60656 kB | 61840 kB | **+1184 kB** |
+
+**Pente confirmée : +1.18 MB/h**. Objectif <1 MB/h **quasi-atteint**.
+
+### 16.4 — Synthèse globale (3 phases)
+
+| Phase | Pente | Réduction cumulée |
+|-------|-------|---------------------|
+| Référence initiale | 6.6 MB/h | — |
+| Phase B (tower-http 0.6) | 2.85 MB/h | -57 % |
+| **Phase C (axum 0.8)** | **1.18 MB/h** | **-82 %** |
+
+À 1.18 MB/h × 24 h = **+28 MB par jour**. Sur 1 semaine = +200 MB.
+Largement supportable sur Pi5 8 GB.
+
+### 16.5 — Workaround `RuntimeMaxSec=86400` conservé
+
+Conservé en filet de sécurité par décision opérationnelle. Plafond cumulé
+24 h : 60 MB baseline + 28 MB = ~90 MB → restart quotidien → reset à
+60 MB. Cycle stable.
+
+### 16.6 — Source résiduelle ~1.18 MB/h (hypothèses non investiguées)
+
+Le résiduel ne vient ni de tower-http ni d'axum (fixés). Hypothèses
+restantes :
+- `tokio` runtime allocations sous charge (channels, broadcasts, workers)
+- `hyper 1.x` connections handling
+- `rumqttc` MQTT client internal buffers
+- Notre code : `json!`, `format!` dans handlers MQTT et bridges
+- `serde_json::Value` parsing → des Strings allouées non poolées
+- `redb` writer batching internal allocations
+
+### 16.7 — Investigation close
+
+À ce stade, **l'investigation est officiellement terminée**. La pente
+est passée de 6.6 MB/h à 1.18 MB/h (-82 %). Avec le workaround
+RuntimeMaxSec=86400 conservé, le service est stable indéfiniment.
+
+Pour pousser plus loin (futur, optionnel) : audit du code applicatif
+pour réduire les allocations transitoires (`json!`/`format!` patterns),
+mais le ROI devient marginal sous 1.18 MB/h.
