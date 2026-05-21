@@ -51,8 +51,11 @@ pub async fn import_prometheus(
         }
         match parse_line(line) {
             Some(sample) => {
-                let _ = writer.try_write(sample);
-                written += 1;
+                if writer.try_write(sample).is_ok() {
+                    written += 1;
+                } else {
+                    skipped += 1;
+                }
             }
             None => {
                 warn!("prometheus_import: ligne ignorée (format invalide) : {}", line);
@@ -70,7 +73,7 @@ pub async fn import_prometheus(
 /// Retourne `None` si la ligne est mal formée ou la valeur non finie (NaN/Inf).
 fn parse_line(line: &str) -> Option<Sample> {
     // Découpe entre la spec métrique (nom + labels) et "valeur [timestamp]"
-    let (spec, rest) = if let Some(brace_end) = line.find('}') {
+    let (spec, rest) = if let Some(brace_end) = line.rfind('}') {
         (&line[..=brace_end], line[brace_end + 1..].trim())
     } else {
         // Pas de labels : le premier espace délimite le nom
@@ -142,7 +145,7 @@ fn parse_labels(s: &str) -> Vec<(String, String)> {
                 None => break,
             }
         }
-        rest = rest[end_idx..].trim().trim_start_matches(',').trim();
+        rest = rest.get(end_idx + 1..).unwrap_or("").trim().trim_start_matches(',').trim();
         result.push((key, val));
     }
     result
@@ -192,5 +195,24 @@ mod tests {
     fn test_comment_ignored() {
         // parse_line n'est pas appelé pour les commentaires (filtre dans import_prometheus)
         assert!(parse_line("# HELP em_cpu_percent CPU usage").is_none());
+    }
+
+    #[test]
+    fn test_two_labels_parsed_correctly() {
+        let s = parse_line(r#"rule_eval_total{rule="charge_current",result="ok"} 42 1700000000000"#).unwrap();
+        assert_eq!(s.metric, "rule_eval_total");
+        assert_eq!(s.value, 42.0);
+        let has_rule = s.labels.iter().any(|(k, v)| k == "rule" && v == "charge_current");
+        let has_result = s.labels.iter().any(|(k, v)| k == "result" && v == "ok");
+        assert!(has_rule, "label 'rule' manquant ou mal parsé");
+        assert!(has_result, "label 'result' manquant ou mal parsé");
+    }
+
+    #[test]
+    fn test_closing_brace_in_label_value() {
+        // rfind('}') garantit que la valeur "a}b" ne casse pas le découpage
+        let s = parse_line(r#"my_metric{label="a}b"} 1.0 1700000000000"#).unwrap();
+        assert_eq!(s.metric, "my_metric");
+        assert!(s.labels.iter().any(|(k, v)| k == "label" && v == "a}b"));
     }
 }

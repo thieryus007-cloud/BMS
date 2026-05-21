@@ -1,0 +1,56 @@
+{
+  "annotations": { "list": [{ "builtIn": 1, "datasource": { "type": "grafana", "uid": "-- Grafana --" }, "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)", "name": "Annotations & Alerts", "type": "dashboard" }] },
+  "description": "Venus OS - MPPT, SmartShunt, Inverter, Heatpumps et chauffe-eau",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "id": 100, "panels": [], "title": "MPPT", "type": "row" },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 1 }, "id": 1, "type": "timeseries", "title": "MPPT - Tension PV (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_mppt_pv_voltage_v", "legendFormat": "inst {{instance}}", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 1 }, "id": 2, "type": "timeseries", "title": "MPPT - Courant DC (A)", "fieldConfig": { "defaults": { "unit": "amp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_mppt_dc_current_a", "legendFormat": "inst {{instance}}", "refId": "A" }] },
+
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 }, "id": 101, "panels": [], "title": "SmartShunt", "type": "row" },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 8, "x": 0, "y": 8 }, "id": 3, "type": "timeseries", "title": "SmartShunt - Tension (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_shunt_voltage_v", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 8, "x": 8, "y": 8 }, "id": 4, "type": "timeseries", "title": "SmartShunt - Énergie In (kWh)", "fieldConfig": { "defaults": { "unit": "kwatth" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_shunt_energy_in_kwh", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 8, "x": 16, "y": 8 }, "id": 5, "type": "timeseries", "title": "SmartShunt - Énergie Out (kWh)", "fieldConfig": { "defaults": { "unit": "kwatth" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_shunt_energy_out_kwh", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 24, "x": 0, "y": 14 }, "id": 6, "type": "timeseries", "title": "SmartShunt - Ah Chargé/Déchargé Aujourd'hui", "fieldConfig": { "defaults": { "unit": "amph" } }, "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_shunt_ah_charged_today", "legendFormat": "Chargé", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_shunt_ah_discharged_today", "legendFormat": "Déchargé", "refId": "B" }
+      ] },
+
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 }, "id": 102, "panels": [], "title": "Inverter", "type": "row" },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 21 }, "id": 7, "type": "timeseries", "title": "Inverter - Courant DC (A)", "fieldConfig": { "defaults": { "unit": "amp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_inverter_current_a", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 21 }, "id": 8, "type": "timeseries", "title": "Inverter - Tension AC Sortie (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_inverter_ac_output_voltage_v", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 27 }, "id": 9, "type": "timeseries", "title": "Inverter - Courant AC Sortie (A)", "fieldConfig": { "defaults": { "unit": "amp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_inverter_ac_output_current_a", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 27 }, "id": 10, "type": "timeseries", "title": "Inverter - Fréquence AC (Hz)", "fieldConfig": { "defaults": { "unit": "hertz" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_inverter_ac_freq_hz", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 24, "x": 0, "y": 33 }, "id": 11, "type": "state-timeline", "title": "Inverter - AC Input Ignore", "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_inverter_ac_in_ignore", "legendFormat": "ac_in_ignore", "refId": "A" }] },
+
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 }, "id": 103, "panels": [], "title": "Environnement & Heatpumps", "type": "row" },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 40 }, "id": 12, "type": "timeseries", "title": "Humidité (%)", "fieldConfig": { "defaults": { "unit": "humidity", "min": 0, "max": 100 } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_humidity_percent", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 40 }, "id": 13, "type": "timeseries", "title": "Heatpump - Énergie (kWh)", "fieldConfig": { "defaults": { "unit": "kwatth" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_heatpump_energy_kwh", "legendFormat": "mqtt_{{mqtt_index}}", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 46 }, "id": 14, "type": "timeseries", "title": "Heatpump - Target Temp (°C)", "fieldConfig": { "defaults": { "unit": "celsius" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_heatpump_target_temp_c", "legendFormat": "mqtt_{{mqtt_index}}", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 46 }, "id": 15, "type": "state-timeline", "title": "Heatpump - État", "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "venus_heatpump_state", "legendFormat": "mqtt_{{mqtt_index}}", "refId": "A" }] },
+
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 52 }, "id": 104, "panels": [], "title": "Chauffe-eau", "type": "row" },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 53 }, "id": 16, "type": "timeseries", "title": "Chauffe-eau - Température (°C)", "fieldConfig": { "defaults": { "unit": "celsius" } }, "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "wh_current_temp_c", "legendFormat": "Actuelle", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "wh_target_temp_c", "legendFormat": "Cible", "refId": "B" }
+      ] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 53 }, "id": 17, "type": "state-timeline", "title": "Chauffe-eau - Mode", "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "wh_mode", "legendFormat": "mode", "refId": "A" }] }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["venus", "victron", "mppt", "smartshunt", "inverter", "heatpump", "water-heater"],
+  "templating": { "list": [{ "current": { "selected": false, "text": "Prometheus", "value": "prometheus" }, "hide": 0, "includeAll": false, "label": "Data Source", "multi": false, "name": "datasource", "options": [], "query": "prometheus", "refresh": 1, "regex": "", "skipUrlSync": false, "type": "datasource" }] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "Europe/Paris",
+  "title": "Venus OS - Detail MPPT/SmartShunt/Inverter & Chauffe-eau",
+  "uid": "venus-detail",
+  "version": 1,
+  "weekStart": ""
+}
