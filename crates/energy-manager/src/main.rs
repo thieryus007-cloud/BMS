@@ -106,8 +106,10 @@ async fn main() -> anyhow::Result<()> {
         live_ws::server::serve(&bind, live_tx, srv_state, srv_lg, srv_loader, srv_reload).await;
     });
 
-    // --- Module monitoring Pi5 (métriques système + tokio → VictoriaMetrics) ---
-    monitoring::spawn(cfg.water_heater.vm_url.clone());
+    // --- Module monitoring Pi5 (métriques système + tokio).
+    //     Publication MQTT vers `santuario/em/metrics` — daly-bms souscrit
+    //     et écrit dans redb. L'ancien POST VM est conservé pour compat. ---
+    monitoring::spawn(cfg.water_heater.vm_url.clone(), bus.clone());
 
     info!("energy-manager fully started");
 

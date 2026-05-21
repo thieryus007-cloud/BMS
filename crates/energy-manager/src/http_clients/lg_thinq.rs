@@ -246,6 +246,16 @@ pub async fn spawn_poller(
                     if let Err(e) = reqwest::Client::new().post(&url).body(body).send().await {
                         warn!("LG ThinQ VM write error: {e}");
                     }
+
+                    // Publication MQTT vers `santuario/em/water_heater` (consommée par daly-bms-server).
+                    let payload = serde_json::json!({
+                        "mode":           snap.mode.to_venus_state(),
+                        "current_temp_c": snap.current_temp_c,
+                        "target_temp_c":  snap.target_temp_c,
+                    });
+                    bus2.publish(crate::types::MqttOutgoing::transient(
+                        "santuario/em/water_heater", payload,
+                    )).await;
                 }
                 Err(e) => error!("LG ThinQ poll error: {e}"),
             }

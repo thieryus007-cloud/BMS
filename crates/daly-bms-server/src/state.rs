@@ -981,6 +981,9 @@ impl AppState {
     // ==========================================================================
     /// Enregistre le dernier snapshot de monitoring système.
     pub async fn on_monitor_snapshot(&self, snap: MonitorSnapshot) {
+        if let Some(store) = &self.metrics_store {
+            crate::redb_writes::write_monitor(&store.writer(), &self.redb_rl, &snap);
+        }
         *self.monitor_snapshot.write().await = Some(snap);
     }
     /// Retourne le dernier snapshot de monitoring système.

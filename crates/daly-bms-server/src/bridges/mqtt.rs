@@ -522,6 +522,8 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
         ("santuario/heat/+/venus", SUB_QOS),
         ("santuario/heatpump/+/venus", SUB_QOS),
         ("santuario/system/venus", SUB_QOS),
+        ("santuario/em/metrics", SUB_QOS),
+        ("santuario/em/water_heater", SUB_QOS),
     ];
 
     for (topic, qos) in &topics {
@@ -581,6 +583,10 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
                         handle_system_topic(&state, &json).await;
                     } else if topic == "santuario/inverter/venus" {
                         handle_inverter_topic(&state, &json).await;
+                    } else if topic == "santuario/em/metrics" {
+                        handle_em_metrics_topic(&state, &json);
+                    } else if topic == "santuario/em/water_heater" {
+                        handle_wh_metrics_topic(&state, &json);
                     }
                 }
             }
@@ -917,4 +923,47 @@ async fn handle_inverter_topic(state: &AppState, json: &Value) {
     };
 
     state.on_venus_inverter(inverter).await;
+}
+
+/// Traite le topic `santuario/em/metrics` — métriques système energy-manager.
+///
+/// Payload JSON attendu (tous champs optionnels) :
+/// ```json
+/// { "cpu_percent": 4.2, "cpu_temp_c": 51.0, "memory_percent": 35.0,
+///   "mem_used_mb": 280, "swap_used_mb": 0, "disk_percent": 27.0,
+///   "load_avg_1m": 0.4, "load_avg_5m": 0.6, "load_avg_15m": 0.5,
+///   "net_rx_bps": 1234, "net_tx_bps": 567 }
+/// ```
+fn handle_em_metrics_topic(state: &AppState, json: &Value) {
+    let Some(store) = &state.metrics_store else { return };
+    let f = |k: &str| json.get(k).and_then(|v| v.as_f64()).map(|v| v as f32);
+    let payload = crate::redb_writes::EmMetricsPayload {
+        cpu_percent:    f("cpu_percent"),
+        cpu_temp_c:     f("cpu_temp_c"),
+        memory_percent: f("memory_percent"),
+        mem_used_mb:    f("mem_used_mb"),
+        swap_used_mb:   f("swap_used_mb"),
+        disk_percent:   f("disk_percent"),
+        load_avg_1m:    f("load_avg_1m"),
+        load_avg_5m:    f("load_avg_5m"),
+        load_avg_15m:   f("load_avg_15m"),
+        net_rx_bps:     f("net_rx_bps"),
+        net_tx_bps:     f("net_tx_bps"),
+    };
+    crate::redb_writes::write_em_metrics(&store.writer(), &state.redb_rl, &payload);
+}
+
+/// Traite le topic `santuario/em/water_heater` — état chauffe-eau LG ThinQ.
+///
+/// Payload : `{ "current_temp_c": 48.0, "target_temp_c": 50.0, "mode": 1 }`
+fn handle_wh_metrics_topic(state: &AppState, json: &Value) {
+    let Some(store) = &state.metrics_store else { return };
+    let f = |k: &str| json.get(k).and_then(|v| v.as_f64()).map(|v| v as f32);
+    let i = |k: &str| json.get(k).and_then(|v| v.as_i64()).map(|v| v as i32);
+    let payload = crate::redb_writes::WhMetricsPayload {
+        current_temp_c: f("current_temp_c"),
+        target_temp_c:  f("target_temp_c"),
+        mode:           i("mode"),
+    };
+    crate::redb_writes::write_wh_metrics(&store.writer(), &state.redb_rl, &payload);
 }
