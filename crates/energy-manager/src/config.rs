@@ -215,7 +215,7 @@ fn default_lg_base_url()  -> String { "https://api-eic.lgthinq.com".into() }
 fn default_lg_country()   -> String { "FR".into() }
 fn default_lg_client_id() -> String { "energy-manager".into() }
 fn default_lg_poll_secs() -> u64 { 600 }
-fn default_lg_vm_url()    -> String { "http://127.0.0.1:8428".into() }
+fn default_lg_vm_url()    -> String { "http://127.0.0.1:8080".into() }
 
 impl Default for LgThinqConfig {
     fn default() -> Self {
@@ -357,7 +357,7 @@ fn default_temp_set_delay_secs() -> u64 { 15 }
 fn default_keepalive_secs() -> u64 { 25 }
 fn default_irradiance_min_wm2() -> f64 { 300.0 }
 fn default_soc_min_pct() -> f64 { 90.0 }
-fn default_wh_vm_url() -> String { "http://127.0.0.1:8428".into() }
+fn default_wh_vm_url() -> String { "http://127.0.0.1:8080".into() }
 
 impl Default for WaterHeaterConfig {
     fn default() -> Self {

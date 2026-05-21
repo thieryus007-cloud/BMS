@@ -16,6 +16,7 @@ pub mod history;
 pub mod promql;
 pub mod redb;
 pub mod health;
+pub mod prometheus_import;
 
 use crate::dashboard;
 use crate::state::AppState;
@@ -134,6 +135,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/query_range",
                get(promql::query_range).post(promql::query_range_post))
         .route("/api/v1/labels",         get(promql::list_metrics))
+
+        // ── Import Prometheus text format → redb (remplace VM /api/v1/import/prometheus)
+        .route("/api/v1/import/prometheus",
+               post(prometheus_import::import_prometheus))
 
         // ── Endpoints Prometheus complémentaires §8.2 (toujours redb) ─────
         .route("/api/v1/series",                      get(redb::list_series))
