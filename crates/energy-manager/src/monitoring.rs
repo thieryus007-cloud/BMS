@@ -13,18 +13,22 @@ use tokio::process::Command;
 use tokio::time::interval;
 use tracing::warn;
 
+use crate::bus::AppBus;
+use crate::types::MqttOutgoing;
+
 // =============================================================================
 // Point d'entrée
 // =============================================================================
 
 /// Spawne l'agent de monitoring en arrière-plan.
-pub fn spawn(vm_url: String) {
+pub fn spawn(vm_url: String, bus: AppBus) {
     use tokio_metrics::TaskMonitor;
 
     let task_mon = TaskMonitor::new();
     let vm_url_mon = vm_url.clone();
+    let bus_mon    = bus.clone();
     tokio::spawn(task_mon.instrument(async move {
-        run_monitoring_loop(vm_url_mon).await;
+        run_monitoring_loop(vm_url_mon, bus_mon).await;
     }));
 
     // Exporteur métriques tokio → VM (toutes les 60s)
@@ -53,7 +57,7 @@ pub fn spawn(vm_url: String) {
 // Boucle principale
 // =============================================================================
 
-async fn run_monitoring_loop(vm_url: String) {
+async fn run_monitoring_loop(vm_url: String, bus: AppBus) {
     tracing::info!("energy-manager monitoring démarré (intervalle: 60s)");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -124,6 +128,22 @@ async fn run_monitoring_loop(vm_url: String) {
         }
 
         write_to_vm(&client, &vm_url, &lines.join("\n")).await;
+
+        // Publication MQTT vers `santuario/em/metrics` (consommée par daly-bms-server).
+        let payload = serde_json::json!({
+            "cpu_percent":    cpu_percent,
+            "memory_percent": mem_percent,
+            "mem_used_mb":    mem_used,
+            "swap_used_mb":   swap_used,
+            "disk_percent":   disk_percent,
+            "load_avg_1m":    load_avg[0],
+            "load_avg_5m":    load_avg[1],
+            "load_avg_15m":   load_avg[2],
+            "net_rx_bps":     net_rx_bps,
+            "net_tx_bps":     net_tx_bps,
+            "cpu_temp_c":     cpu_temp,
+        });
+        bus.publish(MqttOutgoing::transient("santuario/em/metrics", payload)).await;
     }
 }
 

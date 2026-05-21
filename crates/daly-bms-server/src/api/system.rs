@@ -154,14 +154,24 @@ pub async fn set_mppt_yield(
 ) -> impl IntoResponse {
     if let Some(kwh) = body.total_yield_kwh.or(body.mppt_yield_kwh) {
         *state.mppt_yield_kwh.write().await = kwh;
+        if let Some(store) = &state.metrics_store {
+            crate::redb_writes::write_solar_yield(&store.writer(), &state.redb_rl, kwh);
+        }
     }
     // dc_pv_power_w est prioritaire ; mppt_power_w est l'alias rétrocompat
-    if let Some(v) = body.dc_pv_power_w.or(body.mppt_power_w) {
+    let dc_pv_in = body.dc_pv_power_w.or(body.mppt_power_w);
+    if let Some(v) = dc_pv_in {
         *state.dc_pv_power_w.write().await = v;
         *state.mppt_power_w.write().await  = v;
     }
     if let Some(v) = body.pvinv_power_w {
         *state.pvinv_power_w.write().await = v;
+    }
+    if dc_pv_in.is_some() || body.pvinv_power_w.is_some() {
+        if let Some(store) = &state.metrics_store {
+            crate::redb_writes::write_solar_components(
+                &store.writer(), &state.redb_rl, dc_pv_in, body.pvinv_power_w);
+        }
     }
     if let Some(tw) = body.solar_total_w {
         *state.solar_total_w.write().await = tw;
