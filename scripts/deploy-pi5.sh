@@ -146,7 +146,14 @@ if ! sudo diff -q contrib/daly-bms.service /etc/systemd/system/daly-bms.service 
     step "Mise à jour /etc/systemd/system/daly-bms.service…"
     sudo cp contrib/daly-bms.service /etc/systemd/system/
     sudo systemctl daemon-reload
-    info "Unit systemd mis à jour"
+    info "Unit systemd daly-bms mis à jour"
+fi
+if [[ -f contrib/energy-manager.service ]] \
+   && ! sudo diff -q contrib/energy-manager.service /etc/systemd/system/energy-manager.service >/dev/null 2>&1; then
+    step "Mise à jour /etc/systemd/system/energy-manager.service…"
+    sudo cp contrib/energy-manager.service /etc/systemd/system/
+    sudo systemctl daemon-reload
+    info "Unit systemd energy-manager mis à jour"
 fi
 
 # ── 6. Déploiement daly-bms-server ───────────────────────────────────────────
@@ -201,6 +208,48 @@ echo -e "${GREEN}═════════════════════
 echo ""
 systemctl status daly-bms energy-manager --no-pager 2>/dev/null \
     | grep -E "^●|Active:" || true
+echo ""
+# Version git du binaire déployé — utile pour confirmer que le bon code tourne.
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
+info "Code déployé : branche '$BRANCH' au commit $COMMIT"
+
+# Comptage des séries en base + check de présence des nouvelles métriques.
+# Laisse 8 s au backend pour traiter les premiers snapshots après restart.
+echo ""
+step "Patientons 8 s avant comptage des séries…"
+sleep 8
+N_SERIES=$(curl -s http://localhost:8080/api/v1/redb/series 2>/dev/null | jq '.data | length' 2>/dev/null || echo "?")
+info "Nb séries en base : $N_SERIES"
+
+NEW_METRICS=(
+    bms_capacity_ah bms_temp_min bms_charge_mos bms_cell_voltage
+    et112_apparent_power_va et112_frequency_hz et112_power_factor
+    venus_mppt_power_w venus_mppt_yield_today_kwh venus_mppt_dc_current_a
+    venus_shunt_soc_percent venus_shunt_energy_in_kwh
+    venus_inverter_ac_output_power_w venus_inverter_ac_output_voltage_v
+    venus_heatpump_power_w venus_heatpump_temp_c
+    shelly_current_a shelly_output shelly_energy_wh
+    pi5_cpu_percent pi5_memory_percent pi5_cpu_temp_c
+    em_cpu_percent em_memory_percent
+    dc_pv_power_w pvinv_power_w solar_yield_kwh
+)
+SERIES_JSON=$(curl -s http://localhost:8080/api/v1/redb/series 2>/dev/null || echo '{}')
+PRESENT=0; MISSING=()
+for m in "${NEW_METRICS[@]}"; do
+    if echo "$SERIES_JSON" | jq -e --arg m "$m" '.data[] | select(.__name__ == $m)' >/dev/null 2>&1; then
+        PRESENT=$((PRESENT+1))
+    else
+        MISSING+=("$m")
+    fi
+done
+info "Nouvelles métriques présentes : $PRESENT / ${#NEW_METRICS[@]}"
+if (( ${#MISSING[@]} > 0 )); then
+    warn "Manquantes : ${MISSING[*]}"
+    warn "→ vérifier les payloads MQTT amont (NanoPi dbus-mqtt-venus, energy-manager) :"
+    warn "    timeout 5 mosquitto_sub -h 127.0.0.1 -t 'santuario/#' -v"
+fi
+
 echo ""
 if [[ -x scripts/grafana-redb-switch.sh ]]; then
     step "État backends de lecture :"
