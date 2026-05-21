@@ -185,6 +185,35 @@ else
     error "energy-manager n'a pas démarré — vérifier : journalctl -u energy-manager -n 50"
 fi
 
+# ── 7.bis Déploiement dashboards Grafana ────────────────────────────────────
+# Provisioning Grafana : datasource (daly-metrics.yaml) + dashboards JSON.
+# Le provider grafana/provisioning/dashboards/daly-bms.yaml pointe vers
+# /var/lib/grafana/dashboards — on synchronise depuis le repo.
+if systemctl list-unit-files grafana-server.service &>/dev/null; then
+    step "Synchronisation provisioning Grafana…"
+    if [[ -d contrib/grafana/provisioning/datasources ]]; then
+        sudo install -d -m 755 /etc/grafana/provisioning/datasources
+        sudo cp contrib/grafana/provisioning/datasources/*.yaml /etc/grafana/provisioning/datasources/
+    fi
+    if [[ -d contrib/grafana/provisioning/dashboards ]]; then
+        sudo install -d -m 755 /etc/grafana/provisioning/dashboards
+        sudo cp contrib/grafana/provisioning/dashboards/*.yaml /etc/grafana/provisioning/dashboards/
+    fi
+    if [[ -d contrib/grafana/dashboards ]]; then
+        sudo install -d -m 755 /var/lib/grafana/dashboards
+        sudo cp contrib/grafana/dashboards/*.json /var/lib/grafana/dashboards/
+        N_DASH=$(ls contrib/grafana/dashboards/*.json 2>/dev/null | wc -l)
+        info "Dashboards Grafana synchronisés : $N_DASH fichier(s)"
+    fi
+    if systemctl is-active --quiet grafana-server; then
+        sudo systemctl reload grafana-server 2>/dev/null \
+            || sudo systemctl restart grafana-server
+        info "grafana-server reloaded"
+    fi
+else
+    info "Grafana non installé — skip provisioning"
+fi
+
 # ── 8. Validation API ────────────────────────────────────────────────────────
 if $DO_VALIDATE; then
     echo ""

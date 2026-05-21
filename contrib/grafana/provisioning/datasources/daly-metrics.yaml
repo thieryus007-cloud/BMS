@@ -1,19 +1,12 @@
 apiVersion: 1
 
-# Datasource Grafana qui interroge le backend `metrics-store` (redb) via
-# daly-bms-server. Cf. docs/plan_migration_vm_redb.md §8.1 Phase 3.
+# Datasource Grafana qui interroge le backend metrics-store (redb) via
+# daly-bms-server. VictoriaMetrics a été retiré (Phase 5) — redb est la
+# seule TSDB de lecture du système.
 #
 # Les endpoints Prometheus-compat exposés par daly-bms-server (/api/v1/query,
 # /api/v1/query_range, /api/v1/labels, /api/v1/series, /api/v1/label/:n/values,
-# /-/healthy) dispatchent vers redb quand `[metrics_store].default_backend =
-# "redb"` dans /etc/daly-bms/config.toml.
-#
-# Pour basculer Grafana :
-#   1. Activer cette datasource (la rendre `isDefault: true`).
-#   2. Désactiver `victoriametrics.yaml` (mettre `isDefault: false`).
-#   3. Restart Grafana : `sudo systemctl restart grafana-server` (ou docker).
-# Les dashboards `.json` existants restent inchangés — le shim PromQL accepte
-# les mêmes expressions (cf. golden test §6.5).
+# /-/healthy) lisent redb directement.
 
 datasources:
   - name: Daly Metrics (redb)
@@ -21,7 +14,7 @@ datasources:
     access: proxy
     url: http://127.0.0.1:8080
     uid: daly-metrics
-    isDefault: false
+    isDefault: true
     editable: true
     jsonData:
       httpMethod: GET

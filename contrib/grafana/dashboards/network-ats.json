@@ -1,0 +1,54 @@
+{
+  "annotations": { "list": [{ "builtIn": 1, "datasource": { "type": "grafana", "uid": "-- Grafana --" }, "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)", "name": "Annotations & Alerts", "type": "dashboard" }] },
+  "description": "ATS CHINT + ET112 (réseau électrique)",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "id": 100, "panels": [], "title": "ATS CHINT", "type": "row" },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 }, "id": 1, "type": "stat", "title": "Source Active", "fieldConfig": { "defaults": { "mappings": [
+          { "type": "value", "options": { "0": { "text": "Onduleur", "color": "blue" }, "1": { "text": "Réseau", "color": "green" }, "2": { "text": "Neutre", "color": "orange" } } }
+        ] } }, "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background" }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_active_source", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 4, "w": 18, "x": 6, "y": 1 }, "id": 2, "type": "state-timeline", "title": "État Switches ATS", "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_sw1_closed", "legendFormat": "SW1", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_sw2_closed", "legendFormat": "SW2", "refId": "B" }
+      ] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 5 }, "id": 3, "type": "timeseries", "title": "Source 1 - Tensions phases (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v1a", "legendFormat": "V1A", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v1b", "legendFormat": "V1B", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v1c", "legendFormat": "V1C", "refId": "C" }
+      ] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 5 }, "id": 4, "type": "timeseries", "title": "Source 2 - Tensions phases (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v2a", "legendFormat": "V2A", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v2b", "legendFormat": "V2B", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v2c", "legendFormat": "V2C", "refId": "C" }
+      ] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 11 }, "id": 5, "type": "timeseries", "title": "Fréquences Source1 / Source2 (Hz)", "fieldConfig": { "defaults": { "unit": "hertz" } }, "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_freq1_hz", "legendFormat": "Source 1", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_freq2_hz", "legendFormat": "Source 2", "refId": "B" }
+      ] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 11 }, "id": 6, "type": "timeseries", "title": "ATS Aggregate (Voltage / Freq)", "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_voltage_v", "legendFormat": "Voltage (V)", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_freq_hz", "legendFormat": "Freq (Hz)", "refId": "B" }
+      ] },
+
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }, "id": 101, "panels": [], "title": "ET112 - Compteurs", "type": "row" },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 18 }, "id": 7, "type": "timeseries", "title": "ET112 - Puissance Apparente (VA) par address", "fieldConfig": { "defaults": { "unit": "voltamp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "et112_apparent_power_va", "legendFormat": "addr {{address}}", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 18 }, "id": 8, "type": "timeseries", "title": "ET112 - Power Factor par address", "fieldConfig": { "defaults": { "min": -1, "max": 1 } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "et112_power_factor", "legendFormat": "addr {{address}}", "refId": "A" }] }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["ats", "et112", "grid"],
+  "templating": { "list": [{ "current": { "selected": false, "text": "Prometheus", "value": "prometheus" }, "hide": 0, "includeAll": false, "label": "Data Source", "multi": false, "name": "datasource", "options": [], "query": "prometheus", "refresh": 1, "regex": "", "skipUrlSync": false, "type": "datasource" }] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "Europe/Paris",
+  "title": "Reseau Electrique & ATS",
+  "uid": "network-ats",
+  "version": 1,
+  "weekStart": ""
+}
