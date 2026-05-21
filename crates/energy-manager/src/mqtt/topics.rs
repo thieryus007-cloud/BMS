@@ -55,6 +55,7 @@ pub fn all_subscriptions(portal_id: &str, vebus: u32, mppt1: u32, mppt2: u32, pv
         // --- MPPT 1 ---
         n(pid, &format!("solarcharger/{mppt1}/Yield/Power")),
         n(pid, &format!("solarcharger/{mppt1}/History/Daily/0/Yield")),
+        n(pid, &format!("solarcharger/{mppt1}/History/Daily/0/MaxPower")),
         n(pid, &format!("solarcharger/{mppt1}/State")),
         n(pid, &format!("solarcharger/{mppt1}/Pv/V")),
         n(pid, &format!("solarcharger/{mppt1}/Dc/0/Current")),
@@ -62,6 +63,7 @@ pub fn all_subscriptions(portal_id: &str, vebus: u32, mppt1: u32, mppt2: u32, pv
         // --- MPPT 2 ---
         n(pid, &format!("solarcharger/{mppt2}/Yield/Power")),
         n(pid, &format!("solarcharger/{mppt2}/History/Daily/0/Yield")),
+        n(pid, &format!("solarcharger/{mppt2}/History/Daily/0/MaxPower")),
         n(pid, &format!("solarcharger/{mppt2}/State")),
         n(pid, &format!("solarcharger/{mppt2}/Pv/V")),
         n(pid, &format!("solarcharger/{mppt2}/Dc/0/Current")),

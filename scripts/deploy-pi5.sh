@@ -223,16 +223,19 @@ N_SERIES=$(curl -s http://localhost:8080/api/v1/redb/series 2>/dev/null | jq '.d
 info "Nb séries en base : $N_SERIES"
 
 NEW_METRICS=(
-    bms_capacity_ah bms_temp_min bms_charge_mos bms_cell_voltage
+    bms_capacity_ah bms_temp_min bms_charge_mos bms_cell_voltage bms_power
     et112_apparent_power_va et112_frequency_hz et112_power_factor
     venus_mppt_power_w venus_mppt_yield_today_kwh venus_mppt_dc_current_a
-    venus_shunt_soc_percent venus_shunt_energy_in_kwh
+    venus_mppt_max_power_today_w
+    venus_shunt_soc_percent venus_shunt_energy_in_kwh venus_shunt_energy_out_kwh
     venus_inverter_ac_output_power_w venus_inverter_ac_output_voltage_v
-    venus_heatpump_power_w venus_heatpump_temp_c
+    venus_inverter_ac_output_current_a venus_inverter_ac_freq_hz
+    venus_heatpump_power_w venus_heatpump_temp_c venus_heatpump_energy_kwh
     shelly_current_a shelly_output shelly_energy_wh
-    pi5_cpu_percent pi5_memory_percent pi5_cpu_temp_c
+    pi5_cpu_percent pi5_memory_percent pi5_cpu_temp_c pi5_uptime_secs
     em_cpu_percent em_memory_percent
-    dc_pv_power_w pvinv_power_w solar_yield_kwh
+    dc_pv_power_w pvinv_power_w solar_yield_kwh solar_total_wh
+    ats_voltage_v ats_freq_hz total_solar_power
 )
 SERIES_JSON=$(curl -s http://localhost:8080/api/v1/redb/series 2>/dev/null || echo '{}')
 PRESENT=0; MISSING=()

@@ -434,6 +434,23 @@ pub fn write_ats(writer: &Writer, rl: &RateLimiter, snap: &AtsSnapshot) {
          Sample::new("ats_sw1_closed", ts, snap.sw1_closed as i32 as f64), "ats_sw1_closed");
     push(writer, rl, MIN_WRITE_INTERVAL,
          Sample::new("ats_sw2_closed", ts, snap.sw2_closed as i32 as f64), "ats_sw2_closed");
+
+    // Alias scalaires de la source active (utilisés par certains dashboards
+    // Grafana qui ne discriminent pas la phase). On expose la valeur de la
+    // source actuellement sélectionnée par l'ATS — pas une moyenne arbitraire.
+    // Source1=0 (Onduleur) → v1*/freq1, Source2=1 (Réseau) → v2*/freq2.
+    // Neutral (2) ou inconnu : on retombe par défaut sur la source 2 (Réseau).
+    let (av_a, av_b, av_c, af_hz) = match snap.active_source as i32 {
+        0 => (snap.v1a, snap.v1b, snap.v1c, snap.freq1_hz.unwrap_or(0)),
+        _ => (snap.v2a, snap.v2b, snap.v2c, snap.freq2_hz.unwrap_or(0)),
+    };
+    let ats_voltage_v = ((av_a as f64) + (av_b as f64) + (av_c as f64)) / 3.0;
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("ats_voltage_v", ts, ats_voltage_v),
+         "ats_voltage_v");
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("ats_freq_hz", ts, af_hz as f64),
+         "ats_freq_hz");
 }
 
 // =============================================================================
@@ -514,6 +531,10 @@ pub fn write_solar_total(writer: &Writer, rl: &RateLimiter, solar_total_w: f32) 
     push(writer, rl, MIN_WRITE_INTERVAL,
          Sample::new("solar_total_w", ts, solar_total_w as f64),
          "solar_total_w");
+    // Alias attendu par les dashboards Grafana drilldown.
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("total_solar_power", ts, solar_total_w as f64),
+         "total_solar_power");
 }
 
 /// Composants de la puissance solaire (publiés par energy-manager via POST).
@@ -581,6 +602,9 @@ pub fn write_monitor(writer: &Writer, rl: &RateLimiter, snap: &crate::state::Mon
     push(writer, rl, MIN_WRITE_INTERVAL,
          Sample::new("pi5_net_tx_bps", ts, snap.net_tx_bps as f64),
          "pi5_net_tx_bps");
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("pi5_uptime_secs", ts, snap.uptime_secs as f64),
+         "pi5_uptime_secs");
     if let Some(t) = snap.cpu_temp_c {
         push(writer, rl, TEMP_WRITE_INTERVAL,
              Sample::new("pi5_cpu_temp_c", ts, t as f64),
