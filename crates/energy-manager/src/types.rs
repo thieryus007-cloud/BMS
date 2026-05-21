@@ -221,6 +221,7 @@ pub struct MpptState {
     pub pv_voltage_v: Option<f64>,
     pub dc_current_a: Option<f64>,
     pub yield_today_kwh: Option<f64>,
+    pub max_power_today_w: Option<f64>,
     pub state: Option<i64>,
 }
 

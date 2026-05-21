@@ -69,6 +69,7 @@ pub async fn publish_all(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
                 "DcCurrent": s.mppt_273.dc_current_a,
                 "Power":     s.mppt_273.power_w,
                 "YieldToday": s.mppt_273.yield_today_kwh,
+                "MaxPowerToday": s.mppt_273.max_power_today_w,
             },
             {
                 "Instance": 289u32,
@@ -77,6 +78,7 @@ pub async fn publish_all(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
                 "DcCurrent": s.mppt_289.dc_current_a,
                 "Power":     s.mppt_289.power_w,
                 "YieldToday": s.mppt_289.yield_today_kwh,
+                "MaxPowerToday": s.mppt_289.max_power_today_w,
             },
         ],
     });

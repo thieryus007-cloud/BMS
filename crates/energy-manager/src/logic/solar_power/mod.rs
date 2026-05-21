@@ -49,6 +49,8 @@ async fn mqtt_task(
     let t_pv_energy = format!("N/{pid}/pvinverter/{pv}/Ac/Energy/Forward");
     let t_m1_yield  = format!("N/{pid}/solarcharger/{m1}/History/Daily/0/Yield");
     let t_m2_yield  = format!("N/{pid}/solarcharger/{m2}/History/Daily/0/Yield");
+    let t_m1_maxpw  = format!("N/{pid}/solarcharger/{m1}/History/Daily/0/MaxPower");
+    let t_m2_maxpw  = format!("N/{pid}/solarcharger/{m2}/History/Daily/0/MaxPower");
     let t_m1_state  = format!("N/{pid}/solarcharger/{m1}/State");
     let t_m2_state  = format!("N/{pid}/solarcharger/{m2}/State");
     let t_m1_pv_v   = format!("N/{pid}/solarcharger/{m1}/Pv/V");
@@ -124,6 +126,10 @@ async fn mqtt_task(
                 s.mppt_273.yield_today_kwh = msg.victron_value::<f64>();
             } else if *t == t_m2_yield {
                 s.mppt_289.yield_today_kwh = msg.victron_value::<f64>();
+            } else if *t == t_m1_maxpw {
+                s.mppt_273.max_power_today_w = msg.victron_value::<f64>();
+            } else if *t == t_m2_maxpw {
+                s.mppt_289.max_power_today_w = msg.victron_value::<f64>();
             } else if *t == t_m1_state {
                 s.mppt_273.state = msg.victron_value::<i64>();
             } else if *t == t_m2_state {
