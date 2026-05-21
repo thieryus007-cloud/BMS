@@ -574,6 +574,7 @@ api_key            = "v6GFvkweNo7DK7yD3ylIZ9w52aKBU0eJ7wLXkSR3"
 country            = "FR"
 client_id          = "Santuario-123456"
 poll_interval_secs = 600              # 10 minutes
+vm_url             = "http://127.0.0.1:8080"  # redb via daly-bms-server (plus de VictoriaMetrics)
 
 # --- Gestion courant de charge ---
 [energy_manager.charge_current]
@@ -600,6 +601,7 @@ vacation_target_c     = 45.0          # °C cible en VACATION
 temp_set_delay_secs   = 15            # s — délai avant réglage temp
 keepalive_secs        = 25            # s — keepalive Venus OS watchdog
 irradiance_min_wm2    = 300         # W/m² — irradiance min pour activer HEAT_PUMP
+vm_url                = "http://127.0.0.1:8080"  # redb via daly-bms-server (plus de VictoriaMetrics)
 
 # --- Production solaire ---
 [energy_manager.solar]
