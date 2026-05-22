@@ -1,6 +1,21 @@
 {
-  "annotations": { "list": [{ "builtIn": 1, "datasource": { "type": "grafana", "uid": "-- Grafana --" }, "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)", "name": "Annotations & Alerts", "type": "dashboard" }] },
-  "description": "Tasmota & Shelly smart devices - puissance, tension, courant, énergie, état",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Tasmota & Shelly smart devices - puissance, tension, courant, \u00e9nergie, \u00e9tat",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -8,27 +23,617 @@
   "links": [],
   "liveNow": false,
   "panels": [
-    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "id": 100, "panels": [], "title": "Tasmota", "type": "row" },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 1 }, "id": 1, "type": "timeseries", "title": "Tasmota - Puissance (W)", "fieldConfig": { "defaults": { "unit": "watt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "tasmota_power_w", "legendFormat": "{{id}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 1 }, "id": 2, "type": "timeseries", "title": "Tasmota - Tension (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "tasmota_voltage_v", "legendFormat": "{{id}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 7 }, "id": 3, "type": "timeseries", "title": "Tasmota - Courant (A)", "fieldConfig": { "defaults": { "unit": "amp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "tasmota_current_a", "legendFormat": "{{id}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 7 }, "id": 4, "type": "timeseries", "title": "Tasmota - Énergie du Jour (kWh)", "fieldConfig": { "defaults": { "unit": "kwatth" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "tasmota_energy_today_kwh", "legendFormat": "{{id}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 24, "x": 0, "y": 13 }, "id": 5, "type": "state-timeline", "title": "Tasmota - État ON/OFF", "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "tasmota_power_on", "legendFormat": "{{id}}", "refId": "A" }] },
-
-    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 }, "id": 101, "panels": [], "title": "Shelly", "type": "row" },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 20 }, "id": 6, "type": "timeseries", "title": "Shelly - Puissance Totale (W)", "fieldConfig": { "defaults": { "unit": "watt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "shelly_power_w", "legendFormat": "{{id}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 20 }, "id": 7, "type": "timeseries", "title": "Shelly - Tension (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "shelly_voltage_v", "legendFormat": "{{id}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 26 }, "id": 8, "type": "timeseries", "title": "Shelly - Puissance par Canal (W)", "fieldConfig": { "defaults": { "unit": "watt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "shelly_channel_power_w", "legendFormat": "{{id}} ch{{channel}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 26 }, "id": 9, "type": "timeseries", "title": "Shelly - Courant par Canal (A)", "fieldConfig": { "defaults": { "unit": "amp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "shelly_current_a", "legendFormat": "{{id}} ch{{channel}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 32 }, "id": 10, "type": "timeseries", "title": "Shelly - Énergie par Canal (Wh)", "fieldConfig": { "defaults": { "unit": "watth" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "shelly_energy_wh", "legendFormat": "{{id}} ch{{channel}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 32 }, "id": 11, "type": "state-timeline", "title": "Shelly - Sortie par Canal", "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "shelly_output", "legendFormat": "{{id}} ch{{channel}}", "refId": "A" }] }
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Tasmota",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "type": "timeseries",
+      "title": "Tasmota - Puissance (W)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "tasmota_power_w",
+          "legendFormat": "{{id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "id": 2,
+      "type": "timeseries",
+      "title": "Tasmota - Tension (V)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "tasmota_voltage_v",
+          "legendFormat": "{{id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "id": 3,
+      "type": "timeseries",
+      "title": "Tasmota - Courant (A)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amp"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "tasmota_current_a",
+          "legendFormat": "{{id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "id": 4,
+      "type": "timeseries",
+      "title": "Tasmota - \u00c9nergie du Jour (kWh)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "tasmota_energy_today_kwh",
+          "legendFormat": "{{id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 5,
+      "type": "state-timeline",
+      "title": "Tasmota - \u00c9tat ON/OFF",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "tasmota_power_on",
+          "legendFormat": "{{id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Shelly",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "id": 6,
+      "type": "timeseries",
+      "title": "Shelly - Puissance Totale (W)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "shelly_power_w",
+          "legendFormat": "{{id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 7,
+      "type": "timeseries",
+      "title": "Shelly - Tension (V)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "shelly_voltage_v",
+          "legendFormat": "{{id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "id": 8,
+      "type": "timeseries",
+      "title": "Shelly - Puissance par Canal (W)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "shelly_channel_power_w",
+          "legendFormat": "{{id}} ch{{channel}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "id": 9,
+      "type": "timeseries",
+      "title": "Shelly - Courant par Canal (A)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amp"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "shelly_current_a",
+          "legendFormat": "{{id}} ch{{channel}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 10,
+      "type": "timeseries",
+      "title": "Shelly - \u00c9nergie par Canal (Wh)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watth"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "shelly_energy_wh",
+          "legendFormat": "{{id}} ch{{channel}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 11,
+      "type": "state-timeline",
+      "title": "Shelly - Sortie par Canal",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "shelly_output",
+          "legendFormat": "{{id}} ch{{channel}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "id": 201,
+      "panels": [],
+      "title": "Smart devices \u2014 M\u00e9triques \u00e9tendues",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "id": 202,
+      "type": "timeseries",
+      "title": "Tasmota - Puissance apparente / Facteur",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "tasmota_apparent_power_va",
+          "refId": "A",
+          "legendFormat": "VA {{id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "tasmota_power_factor",
+          "refId": "B",
+          "legendFormat": "PF {{id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "id": 203,
+      "type": "timeseries",
+      "title": "Tasmota - \u00c9nergie cumul\u00e9e",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "tasmota_energy_yesterday_kwh",
+          "refId": "A",
+          "legendFormat": "hier {{id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "tasmota_energy_total_kwh",
+          "refId": "B",
+          "legendFormat": "total {{id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "id": 204,
+      "type": "timeseries",
+      "title": "Tasmota - Signal WiFi (dBm)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBm"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "tasmota_rssi",
+          "refId": "A",
+          "legendFormat": "{{id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      },
+      "id": 205,
+      "type": "timeseries",
+      "title": "Shelly - Facteur de puissance par canal",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "shelly_power_factor",
+          "refId": "A",
+          "legendFormat": "{{id}}/ch{{channel}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
+      "id": 206,
+      "type": "timeseries",
+      "title": "Shelly - \u00c9nergie retourn\u00e9e au r\u00e9seau (Wh)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watth"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "shelly_returned_wh",
+          "refId": "A",
+          "legendFormat": "{{id}}/ch{{channel}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "id": 207,
+      "type": "timeseries",
+      "title": "Shelly - Signal WiFi (dBm)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dBm"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "shelly_rssi",
+          "refId": "A",
+          "legendFormat": "{{id}}"
+        }
+      ]
+    }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["tasmota", "shelly", "smart-devices"],
-  "templating": { "list": [{ "current": { "selected": false, "text": "Prometheus", "value": "prometheus" }, "hide": 0, "includeAll": false, "label": "Data Source", "multi": false, "name": "datasource", "options": [], "query": "prometheus", "refresh": 1, "regex": "", "skipUrlSync": false, "type": "datasource" }] },
-  "time": { "from": "now-6h", "to": "now" },
+  "tags": [
+    "tasmota",
+    "shelly",
+    "smart-devices"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Data Source",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "Europe/Paris",
   "title": "Smart Devices - Tasmota & Shelly",

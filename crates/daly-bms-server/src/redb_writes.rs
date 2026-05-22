@@ -150,6 +150,172 @@ pub fn write_bms(writer: &Writer, rl: &RateLimiter, snap: &BmsSnapshot) {
                  .with_label("cell", cell_idx.to_string()),
              &format!("bms_cell_voltage:{}:{}", bms_id, cell_idx));
     }
+
+    // État d'équilibrage par cellule (Balances Cell1..N → 0/1).
+    for (key, &active) in snap.balances.iter() {
+        let cell_idx = key.trim_start_matches("Cell");
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new("bms_cell_balancing", ts, active as f64)
+                 .with_label("bms_id", bms_id.clone())
+                 .with_label("cell", cell_idx.to_string()),
+             &format!("bms_cell_balancing:{}:{}", bms_id, cell_idx));
+    }
+
+    // ── État de santé & temps restant ────────────────────────────────────────
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_soh", ts, snap.soh as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_soh:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_time_to_go_secs", ts, snap.time_to_go as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_time_to_go_secs:{}", bms_id));
+
+    // ── États bool/flag ──────────────────────────────────────────────────────
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_balancing_active", ts, snap.balancing as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_balancing_active:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_system_switch", ts, snap.system_switch as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_system_switch:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_heating_active", ts, snap.heating as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_heating_active:{}", bms_id));
+
+    // ── Tensions / température DC ───────────────────────────────────────────
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_min_cell_voltage", ts, snap.system.min_cell_voltage as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_min_cell_voltage:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_max_cell_voltage", ts, snap.system.max_cell_voltage as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_max_cell_voltage:{}", bms_id));
+    push(writer, rl, TEMP_WRITE_INTERVAL,
+         Sample::new("bms_mos_temp_c", ts, snap.system.mos_temperature as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_mos_temp_c:{}", bms_id));
+
+    // ── Capacités (Ah) ───────────────────────────────────────────────────────
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("bms_consumed_ah", ts, snap.consumed_amphours as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_consumed_ah:{}", bms_id));
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("bms_capacity_remaining_ah", ts, snap.capacity as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_capacity_remaining_ah:{}", bms_id));
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("bms_reported_capacity_ah", ts, snap.bms_reported_capacity_ah as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_reported_capacity_ah:{}", bms_id));
+
+    // ── Modules ──────────────────────────────────────────────────────────────
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_modules_online", ts, snap.system.nr_of_modules_online as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_modules_online:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_modules_offline", ts, snap.system.nr_of_modules_offline as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_modules_offline:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_modules_blocking_charge", ts, snap.system.nr_of_modules_blocking_charge as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_modules_blocking_charge:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_modules_blocking_discharge", ts, snap.system.nr_of_modules_blocking_discharge as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_modules_blocking_discharge:{}", bms_id));
+
+    // ── Alarmes (13 flags) ──────────────────────────────────────────────────
+    let alarms: [(&str, u8); 13] = [
+        ("bms_alarm_low_voltage",            snap.alarms.low_voltage),
+        ("bms_alarm_high_voltage",           snap.alarms.high_voltage),
+        ("bms_alarm_low_soc",                snap.alarms.low_soc),
+        ("bms_alarm_high_charge_current",    snap.alarms.high_charge_current),
+        ("bms_alarm_high_discharge_current", snap.alarms.high_discharge_current),
+        ("bms_alarm_high_current",           snap.alarms.high_current),
+        ("bms_alarm_cell_imbalance",         snap.alarms.cell_imbalance),
+        ("bms_alarm_high_charge_temp",       snap.alarms.high_charge_temperature),
+        ("bms_alarm_low_charge_temp",        snap.alarms.low_charge_temperature),
+        ("bms_alarm_low_cell_voltage",       snap.alarms.low_cell_voltage),
+        ("bms_alarm_low_temp",               snap.alarms.low_temperature),
+        ("bms_alarm_high_temp",              snap.alarms.high_temperature),
+        ("bms_alarm_fuse_blown",             snap.alarms.fuse_blown),
+    ];
+    for (name, v) in alarms {
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new(name, ts, v as f64).with_label("bms_id", bms_id.clone()),
+             &format!("{}:{}", name, bms_id));
+    }
+
+    // ── Historique de vie ────────────────────────────────────────────────────
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("bms_charge_cycles", ts, snap.history.charge_cycles as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_charge_cycles:{}", bms_id));
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("bms_min_voltage_hist", ts, snap.history.minimum_voltage as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_min_voltage_hist:{}", bms_id));
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("bms_max_voltage_hist", ts, snap.history.maximum_voltage as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_max_voltage_hist:{}", bms_id));
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("bms_total_ah_drawn", ts, snap.history.total_ah_drawn as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_total_ah_drawn:{}", bms_id));
+
+    // ── Limites de charge ───────────────────────────────────────────────────
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_charge_request", ts, snap.info.charge_request as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_charge_request:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_max_charge_voltage", ts, snap.info.max_charge_voltage as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_max_charge_voltage:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_max_charge_current", ts, snap.info.max_charge_current as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_max_charge_current:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_max_discharge_current", ts, snap.info.max_discharge_current as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_max_discharge_current:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_max_charge_cell_voltage", ts, snap.info.max_charge_cell_voltage as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_max_charge_cell_voltage:{}", bms_id));
+
+    // ── IO permissions (autorisations BMS) ──────────────────────────────────
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_balance_mos", ts, snap.io.allow_to_balance as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_balance_mos:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_heat_mos", ts, snap.io.allow_to_heat as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_heat_mos:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_external_relay", ts, snap.io.external_relay as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_external_relay:{}", bms_id));
+
+    // ── Chauffage (consigne / consommation) ─────────────────────────────────
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_heating_current", ts, snap.info.heating_current as f64)
+             .with_label("bms_id", bms_id.clone()),
+         &format!("bms_heating_current:{}", bms_id));
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("bms_heating_power", ts, snap.info.heating_power as f64)
+             .with_label("bms_id", bms_id),
+         &format!("bms_heating_power:{:02x}", snap.address));
 }
 
 // =============================================================================
@@ -189,6 +355,11 @@ pub fn write_et112(writer: &Writer, rl: &RateLimiter, snap: &Et112Snapshot) {
          Sample::new("et112_frequency_hz", ts, snap.frequency_hz as f64)
              .with_label("address", addr.clone()),
          &format!("et112_frequency_hz:{}", addr));
+
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("et112_reactive_power_var", ts, snap.reactive_power_var as f64)
+             .with_label("address", addr.clone()),
+         &format!("et112_reactive_power_var:{}", addr));
 
     // Énergie cumulée en Wh (convention VictoriaMetrics historique).
     push(writer, rl, ENERGY_WRITE_INTERVAL,
@@ -246,6 +417,36 @@ pub fn write_venus_mppt(writer: &Writer, rl: &RateLimiter, mppt: &VenusMppt) {
              Sample::new("venus_mppt_dc_current_a", ts, i as f64).with_label("instance", instance.clone()),
              &format!("venus_mppt_dc_current_a:{}", instance));
     }
+    // État du chargeur encodé en numérique : 0=Off, 1=Low power, 2=Fault, 3=Bulk,
+    // 4=Absorption, 5=Float, 6=Storage, 7=Equalize, 8=Passthru, 9=Inverting,
+    // 10=Power assist, 11=Power supply. Le `None` (état inconnu) ne produit rien.
+    if let Some(state_code) = mppt.state.as_ref().and_then(|s| mppt_state_to_code(s)) {
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new("venus_mppt_state", ts, state_code as f64)
+                 .with_label("instance", instance.clone()),
+             &format!("venus_mppt_state:{}", instance));
+    }
+}
+
+/// Inverse du switch dans `handle_meteo_topic` : nom Victron → code numérique.
+fn mppt_state_to_code(label: &str) -> Option<i32> {
+    let code = match label {
+        "Off"          => 0,
+        "Low power"    => 1,
+        "Fault"        => 2,
+        "Bulk"         => 3,
+        "Absorption"   => 4,
+        "Float"        => 5,
+        "Storage"      => 6,
+        "Equalize"     => 7,
+        "Passthru"     => 8,
+        "Inverting"    => 9,
+        "Power assist" => 10,
+        "Power supply" => 11,
+        s if s.starts_with("State ") => s.trim_start_matches("State ").parse().ok()?,
+        _ => return None,
+    };
+    Some(code)
 }
 
 // =============================================================================
@@ -294,6 +495,27 @@ pub fn write_venus_smartshunt(writer: &Writer, rl: &RateLimiter, shunt: &VenusSm
         push(writer, rl, MIN_WRITE_INTERVAL,
              Sample::new("venus_shunt_ah_discharged_today", ts, v as f64),
              "venus_shunt_ah_discharged_today");
+    }
+    // Temps restant en minutes (None si en charge ou inconnu).
+    if let Some(v) = shunt.time_to_go_min {
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new("venus_shunt_time_to_go_min", ts, v as f64),
+             "venus_shunt_time_to_go_min");
+    }
+    // État batterie : 0=Idle, 1=Charging, 2=Discharging, 3=Unknown.
+    if let Some(code) = shunt.state.as_ref().map(|s| shunt_state_to_code(s)) {
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new("venus_shunt_state", ts, code as f64),
+             "venus_shunt_state");
+    }
+}
+
+fn shunt_state_to_code(label: &str) -> i32 {
+    match label {
+        "Idle"        => 0,
+        "Charging"    => 1,
+        "Discharging" => 2,
+        _             => 3,
     }
 }
 
@@ -347,6 +569,37 @@ pub fn write_venus_inverter(writer: &Writer, rl: &RateLimiter, inv: &VenusInvert
              Sample::new("venus_inverter_ac_in_ignore", ts, v as i32 as f64),
              "venus_inverter_ac_in_ignore");
     }
+    // États encodés en numérique (string → code).
+    let st_code = inverter_state_to_code(&inv.state);
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("venus_inverter_state", ts, st_code as f64),
+         "venus_inverter_state");
+    let mode_code = inverter_mode_to_code(&inv.mode);
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("venus_inverter_mode", ts, mode_code as f64),
+         "venus_inverter_mode");
+}
+
+/// État inverter Victron : 0=off, 1=on, 2=inverting, 3=charger, 4=passthrough, 5=other.
+fn inverter_state_to_code(label: &str) -> i32 {
+    match label.to_lowercase().as_str() {
+        "off"         => 0,
+        "on"          => 1,
+        "inverting"   => 2,
+        "charger"     => 3,
+        "passthrough" => 4,
+        _             => 5,
+    }
+}
+
+/// Mode inverter Victron : 0=charger, 1=inverter, 2=passthrough, 3=other.
+fn inverter_mode_to_code(label: &str) -> i32 {
+    match label.to_lowercase().as_str() {
+        "charger"     => 0,
+        "inverter"    => 1,
+        "passthrough" => 2,
+        _             => 3,
+    }
 }
 
 // =============================================================================
@@ -364,9 +617,20 @@ pub fn write_venus_temperature(writer: &Writer, rl: &RateLimiter, temp: &VenusTe
     }
     if let Some(h) = temp.humidity_percent {
         push(writer, rl, TEMP_WRITE_INTERVAL,
-             Sample::new("venus_humidity_percent", ts, h as f64).with_label("instance", instance),
+             Sample::new("venus_humidity_percent", ts, h as f64).with_label("instance", instance.clone()),
              &format!("venus_humidity_percent:{}", temp.instance));
     }
+    if let Some(p) = temp.pressure_mbar {
+        push(writer, rl, TEMP_WRITE_INTERVAL,
+             Sample::new("venus_pressure_mbar", ts, p as f64).with_label("instance", instance.clone()),
+             &format!("venus_pressure_mbar:{}", temp.instance));
+    }
+    // Bool de connexion : 0 = déconnecté, 1 = en ligne.
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("venus_connected", ts, temp.connected as i32 as f64)
+             .with_label("instance", instance)
+             .with_label("device_type", "temperature".to_string()),
+         &format!("venus_connected:temp:{}", temp.instance));
 }
 
 // =============================================================================
@@ -396,9 +660,19 @@ pub fn write_venus_heatpump(writer: &Writer, rl: &RateLimiter, hp: &VenusHeatpum
     }
     if let Some(t) = hp.target_temperature {
         push(writer, rl, TEMP_WRITE_INTERVAL,
-             Sample::new("venus_heatpump_target_temp_c", ts, t as f64).with_label("mqtt_index", idx),
+             Sample::new("venus_heatpump_target_temp_c", ts, t as f64).with_label("mqtt_index", idx.clone()),
              &format!("venus_heatpump_target_temp_c:{}", hp.mqtt_index));
     }
+    // Position : 0=AC Output, 1=AC Input.
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("venus_heatpump_position", ts, hp.position as f64)
+             .with_label("mqtt_index", idx.clone()),
+         &format!("venus_heatpump_position:{}", hp.mqtt_index));
+    // Connected (bool).
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("venus_heatpump_connected", ts, hp.connected as i32 as f64)
+             .with_label("mqtt_index", idx),
+         &format!("venus_heatpump_connected:{}", hp.mqtt_index));
 }
 
 // =============================================================================
@@ -451,6 +725,56 @@ pub fn write_ats(writer: &Writer, rl: &RateLimiter, snap: &AtsSnapshot) {
     push(writer, rl, MIN_WRITE_INTERVAL,
          Sample::new("ats_freq_hz", ts, af_hz as f64),
          "ats_freq_hz");
+
+    // ── Code de défaut (0 = aucun, 1..7 = défauts variés) ───────────────────
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("ats_fault", ts, snap.fault as i32 as f64),
+         "ats_fault");
+
+    // ── Modes / flags ATS ───────────────────────────────────────────────────
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("ats_sw_mode", ts, snap.sw_mode as i32 as f64),
+         "ats_sw_mode");
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("ats_remote", ts, snap.remote as i32 as f64),
+         "ats_remote");
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("ats_middle_off", ts, snap.middle_off as i32 as f64),
+         "ats_middle_off");
+
+    // ── Statut par phase (0=Normal, 1=UnderVoltage, 2=OverVoltage, 3=Error) ─
+    let phases: [(&str, crate::ats::PhaseStatus); 6] = [
+        ("ats_phase_s1a", snap.s1a),
+        ("ats_phase_s1b", snap.s1b),
+        ("ats_phase_s1c", snap.s1c),
+        ("ats_phase_s2a", snap.s2a),
+        ("ats_phase_s2b", snap.s2b),
+        ("ats_phase_s2c", snap.s2c),
+    ];
+    for (name, status) in phases {
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new(name, ts, status as i32 as f64),
+             name);
+    }
+
+    // ── Compteurs de commutation et runtime ─────────────────────────────────
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("ats_cnt1", ts, snap.cnt1 as f64),
+         "ats_cnt1");
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("ats_cnt2", ts, snap.cnt2 as f64),
+         "ats_cnt2");
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("ats_runtime_h", ts, snap.runtime_h as f64),
+         "ats_runtime_h");
+
+    // ── Tensions max historiques ────────────────────────────────────────────
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("ats_max1_v", ts, snap.max1_v as f64),
+         "ats_max1_v");
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("ats_max2_v", ts, snap.max2_v as f64),
+         "ats_max2_v");
 }
 
 // =============================================================================
@@ -481,6 +805,33 @@ pub fn write_tasmota(writer: &Writer, rl: &RateLimiter, snap: &TasmotaSnapshot) 
          Sample::new("tasmota_power_on", ts, snap.power_on as i32 as f64)
              .with_label("id", snap.id.to_string()),
          &format!("tasmota_power_on:{}", snap.id));
+
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("tasmota_apparent_power_va", ts, snap.apparent_power_va as f64)
+             .with_label("id", snap.id.to_string()),
+         &format!("tasmota_apparent_power_va:{}", snap.id));
+
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("tasmota_power_factor", ts, snap.power_factor as f64)
+             .with_label("id", snap.id.to_string()),
+         &format!("tasmota_power_factor:{}", snap.id));
+
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("tasmota_energy_yesterday_kwh", ts, snap.energy_yesterday_kwh as f64)
+             .with_label("id", snap.id.to_string()),
+         &format!("tasmota_energy_yesterday_kwh:{}", snap.id));
+
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("tasmota_energy_total_kwh", ts, snap.energy_total_kwh as f64)
+             .with_label("id", snap.id.to_string()),
+         &format!("tasmota_energy_total_kwh:{}", snap.id));
+
+    if let Some(rssi) = snap.rssi {
+        push(writer, rl, TEMP_WRITE_INTERVAL,
+             Sample::new("tasmota_rssi", ts, rssi as f64)
+                 .with_label("id", snap.id.to_string()),
+             &format!("tasmota_rssi:{}", snap.id));
+    }
 }
 
 // =============================================================================
@@ -517,8 +868,21 @@ pub fn write_shelly(writer: &Writer, rl: &RateLimiter, snap: &ShellyEmSnapshot) 
              &format!("shelly_output:{}:{}", id, ch_idx));
         push(writer, rl, ENERGY_WRITE_INTERVAL,
              Sample::new("shelly_energy_wh", ts, ch.energy_wh)
-                 .with_label("id", id.clone()).with_label("channel", ch_label),
+                 .with_label("id", id.clone()).with_label("channel", ch_label.clone()),
              &format!("shelly_energy_wh:{}:{}", id, ch_idx));
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new("shelly_power_factor", ts, ch.power_factor as f64)
+                 .with_label("id", id.clone()).with_label("channel", ch_label.clone()),
+             &format!("shelly_power_factor:{}:{}", id, ch_idx));
+        push(writer, rl, ENERGY_WRITE_INTERVAL,
+             Sample::new("shelly_returned_wh", ts, ch.returned_wh)
+                 .with_label("id", id.clone()).with_label("channel", ch_label),
+             &format!("shelly_returned_wh:{}:{}", id, ch_idx));
+    }
+    if let Some(rssi) = snap.rssi {
+        push(writer, rl, TEMP_WRITE_INTERVAL,
+             Sample::new("shelly_rssi", ts, rssi as f64).with_label("id", id),
+             &format!("shelly_rssi:{}", snap.id));
     }
 }
 
@@ -609,6 +973,49 @@ pub fn write_monitor(writer: &Writer, rl: &RateLimiter, snap: &crate::state::Mon
         push(writer, rl, TEMP_WRITE_INTERVAL,
              Sample::new("pi5_cpu_temp_c", ts, t as f64),
              "pi5_cpu_temp_c");
+    }
+
+    // ── Totaux mémoire / swap (manquaient — utiles pour pourcentage calculé) ─
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("pi5_mem_total_mb", ts, snap.mem_total_mb as f64),
+         "pi5_mem_total_mb");
+    push(writer, rl, ENERGY_WRITE_INTERVAL,
+         Sample::new("pi5_swap_total_mb", ts, snap.swap_total_mb as f64),
+         "pi5_swap_total_mb");
+
+    // ── État port série RS485 ───────────────────────────────────────────────
+    push(writer, rl, MIN_WRITE_INTERVAL,
+         Sample::new("pi5_serial_port_ok", ts, snap.serial_port_ok as i32 as f64),
+         "pi5_serial_port_ok");
+
+    // ── État des services systemd (active=1, inactive=0) ────────────────────
+    for svc in &snap.services {
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new("pi5_service_active", ts, svc.active as i32 as f64)
+                 .with_label("name", svc.name.clone()),
+             &format!("pi5_service_active:{}", svc.name));
+    }
+    for svc in &snap.network_services {
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new("pi5_network_service_active", ts, svc.active as i32 as f64)
+                 .with_label("name", svc.name.clone()),
+             &format!("pi5_network_service_active:{}", svc.name));
+    }
+
+    // ── Top processus par CPU% (cardinalité contrôlée par les filtres dans
+    //    monitor.rs — typiquement < 15 noms agrégés). ──────────────────────────
+    for proc in &snap.processes {
+        if proc.cpu_percent < 0.1 && proc.mem_rss_mb < 5.0 {
+            continue; // ignore bruit
+        }
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new("pi5_process_cpu_percent", ts, proc.cpu_percent as f64)
+                 .with_label("process", proc.name.clone()),
+             &format!("pi5_process_cpu_percent:{}", proc.name));
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new("pi5_process_mem_mb", ts, proc.mem_rss_mb as f64)
+                 .with_label("process", proc.name.clone()),
+             &format!("pi5_process_mem_mb:{}", proc.name));
     }
 }
 

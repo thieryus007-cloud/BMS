@@ -1,6 +1,21 @@
 {
-  "annotations": { "list": [{ "builtIn": 1, "datasource": { "type": "grafana", "uid": "-- Grafana --" }, "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)", "name": "Annotations & Alerts", "type": "dashboard" }] },
-  "description": "ATS CHINT + ET112 (réseau électrique)",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "ATS CHINT + ET112 (r\u00e9seau \u00e9lectrique)",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -8,44 +23,816 @@
   "links": [],
   "liveNow": false,
   "panels": [
-    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "id": 100, "panels": [], "title": "ATS CHINT", "type": "row" },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 }, "id": 1, "type": "stat", "title": "Source Active", "fieldConfig": { "defaults": { "mappings": [
-          { "type": "value", "options": { "0": { "text": "Onduleur", "color": "blue" }, "1": { "text": "Réseau", "color": "green" }, "2": { "text": "Neutre", "color": "orange" } } }
-        ] } }, "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background" }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_active_source", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 4, "w": 18, "x": 6, "y": 1 }, "id": 2, "type": "state-timeline", "title": "État Switches ATS", "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_sw1_closed", "legendFormat": "SW1", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_sw2_closed", "legendFormat": "SW2", "refId": "B" }
-      ] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 5 }, "id": 3, "type": "timeseries", "title": "Source 1 - Tensions phases (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v1a", "legendFormat": "V1A", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v1b", "legendFormat": "V1B", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v1c", "legendFormat": "V1C", "refId": "C" }
-      ] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 5 }, "id": 4, "type": "timeseries", "title": "Source 2 - Tensions phases (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v2a", "legendFormat": "V2A", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v2b", "legendFormat": "V2B", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_v2c", "legendFormat": "V2C", "refId": "C" }
-      ] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 11 }, "id": 5, "type": "timeseries", "title": "Fréquences Source1 / Source2 (Hz)", "fieldConfig": { "defaults": { "unit": "hertz" } }, "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_freq1_hz", "legendFormat": "Source 1", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_freq2_hz", "legendFormat": "Source 2", "refId": "B" }
-      ] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 11 }, "id": 6, "type": "timeseries", "title": "ATS Aggregate (Voltage / Freq)", "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_voltage_v", "legendFormat": "Voltage (V)", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "ats_freq_hz", "legendFormat": "Freq (Hz)", "refId": "B" }
-      ] },
-
-    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }, "id": 101, "panels": [], "title": "ET112 - Compteurs", "type": "row" },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 18 }, "id": 7, "type": "timeseries", "title": "ET112 - Puissance Apparente (VA) par address", "fieldConfig": { "defaults": { "unit": "voltamp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "et112_apparent_power_va", "legendFormat": "addr {{address}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 18 }, "id": 8, "type": "timeseries", "title": "ET112 - Power Factor par address", "fieldConfig": { "defaults": { "min": -1, "max": 1 } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "et112_power_factor", "legendFormat": "addr {{address}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 24, "x": 0, "y": 24 }, "id": 9, "type": "timeseries", "title": "ET112 - Courant (A) par address", "fieldConfig": { "defaults": { "unit": "amp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "et112_current_a", "legendFormat": "addr {{address}}", "refId": "A" }] }
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "ATS CHINT",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "type": "stat",
+      "title": "Source Active",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Onduleur",
+                  "color": "blue"
+                },
+                "1": {
+                  "text": "R\u00e9seau",
+                  "color": "green"
+                },
+                "2": {
+                  "text": "Neutre",
+                  "color": "orange"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_active_source",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 18,
+        "x": 6,
+        "y": 1
+      },
+      "id": 2,
+      "type": "state-timeline",
+      "title": "\u00c9tat Switches ATS",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_sw1_closed",
+          "legendFormat": "SW1",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_sw2_closed",
+          "legendFormat": "SW2",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "id": 3,
+      "type": "timeseries",
+      "title": "Source 1 - Tensions phases (V)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_v1a",
+          "legendFormat": "V1A",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_v1b",
+          "legendFormat": "V1B",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_v1c",
+          "legendFormat": "V1C",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "id": 4,
+      "type": "timeseries",
+      "title": "Source 2 - Tensions phases (V)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_v2a",
+          "legendFormat": "V2A",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_v2b",
+          "legendFormat": "V2B",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_v2c",
+          "legendFormat": "V2C",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "id": 5,
+      "type": "timeseries",
+      "title": "Fr\u00e9quences Source1 / Source2 (Hz)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "hertz"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_freq1_hz",
+          "legendFormat": "Source 1",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_freq2_hz",
+          "legendFormat": "Source 2",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "id": 6,
+      "type": "timeseries",
+      "title": "ATS Aggregate (Voltage / Freq)",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_voltage_v",
+          "legendFormat": "Voltage (V)",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_freq_hz",
+          "legendFormat": "Freq (Hz)",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "id": 101,
+      "panels": [],
+      "title": "ET112 - Compteurs",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 7,
+      "type": "timeseries",
+      "title": "ET112 - Puissance Apparente (VA) par address",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "voltamp"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "et112_apparent_power_va",
+          "legendFormat": "addr {{address}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 8,
+      "type": "timeseries",
+      "title": "ET112 - Power Factor par address",
+      "fieldConfig": {
+        "defaults": {
+          "min": -1,
+          "max": 1
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "et112_power_factor",
+          "legendFormat": "addr {{address}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "id": 9,
+      "type": "timeseries",
+      "title": "ET112 - Courant (A) par address",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amp"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "et112_current_a",
+          "legendFormat": "addr {{address}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 201,
+      "panels": [],
+      "title": "ATS \u2014 \u00c9tendu (faults / phases / runtime)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 202,
+      "type": "timeseries",
+      "title": "ATS - Code de d\u00e9faut",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_fault",
+          "refId": "A",
+          "legendFormat": "fault code"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "id": 203,
+      "type": "state-timeline",
+      "title": "ATS - Modes (sw_mode/remote/middle_off)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_sw_mode",
+          "refId": "A",
+          "legendFormat": "sw_mode (Auto=1)"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_remote",
+          "refId": "B",
+          "legendFormat": "remote"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_middle_off",
+          "refId": "C",
+          "legendFormat": "middle_off"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "id": 204,
+      "type": "state-timeline",
+      "title": "ATS - Statut par phase (Source 1)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_phase_s1a",
+          "refId": "A",
+          "legendFormat": "S1A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_phase_s1b",
+          "refId": "B",
+          "legendFormat": "S1B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_phase_s1c",
+          "refId": "C",
+          "legendFormat": "S1C"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 50
+      },
+      "id": 205,
+      "type": "state-timeline",
+      "title": "ATS - Statut par phase (Source 2)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_phase_s2a",
+          "refId": "A",
+          "legendFormat": "S2A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_phase_s2b",
+          "refId": "B",
+          "legendFormat": "S2B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_phase_s2c",
+          "refId": "C",
+          "legendFormat": "S2C"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "id": 206,
+      "type": "timeseries",
+      "title": "ATS - Compteurs commutations",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_cnt1",
+          "refId": "A",
+          "legendFormat": "S1\u2192S2"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_cnt2",
+          "refId": "B",
+          "legendFormat": "S2\u2192S1"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 62
+      },
+      "id": 207,
+      "type": "stat",
+      "title": "ATS - Runtime (h)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_runtime_h",
+          "refId": "A",
+          "legendFormat": "runtime_h"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 68
+      },
+      "id": 208,
+      "type": "timeseries",
+      "title": "ATS - Tensions max historiques",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_max1_v",
+          "refId": "A",
+          "legendFormat": "max source 1"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "ats_max2_v",
+          "refId": "B",
+          "legendFormat": "max source 2"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 74
+      },
+      "id": 209,
+      "type": "timeseries",
+      "title": "ET112 - Puissance r\u00e9active (VAr)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "voltampreact"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "et112_reactive_power_var",
+          "refId": "A",
+          "legendFormat": "addr {{address}}"
+        }
+      ]
+    }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["ats", "et112", "grid"],
-  "templating": { "list": [{ "current": { "selected": false, "text": "Prometheus", "value": "prometheus" }, "hide": 0, "includeAll": false, "label": "Data Source", "multi": false, "name": "datasource", "options": [], "query": "prometheus", "refresh": 1, "regex": "", "skipUrlSync": false, "type": "datasource" }] },
-  "time": { "from": "now-6h", "to": "now" },
+  "tags": [
+    "ats",
+    "et112",
+    "grid"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Data Source",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "Europe/Paris",
   "title": "Reseau Electrique & ATS",

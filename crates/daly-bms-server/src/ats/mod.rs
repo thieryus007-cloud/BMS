@@ -25,5 +25,5 @@
 pub mod types;
 pub mod poll;
 
-pub use types::{AtsCommand, AtsSnapshot};
+pub use types::{AtsCommand, AtsSnapshot, PhaseStatus};
 pub use poll::{execute_ats_command, run_ats_poll_loop};
