@@ -105,3 +105,86 @@ rule_eval_total,rule,count,energy-manager rule engine,rust-rule-engine (.grl eva
 wh_current_temp_c,,°C,LG ThinQ Cloud API,LG Therma V chauffe-eau,LG ThinQ API → energy-manager lg_thinq::spawn_poller() → santuario/em/water_heater → write_wh_metrics(),daly-bms-server,60s,aucun consommateur (orphelin — doublon de venus_heatpump_temp_c),Température eau actuelle
 wh_target_temp_c,,°C,LG ThinQ Cloud API,LG Therma V chauffe-eau,LG ThinQ API → energy-manager → santuario/em/water_heater → write_wh_metrics(),daly-bms-server,60s,aucun consommateur (orphelin — doublon de venus_heatpump_target_temp_c),Consigne température
 wh_mode,,int,LG ThinQ Cloud API,LG Therma V chauffe-eau,LG ThinQ API → energy-manager → santuario/em/water_heater → write_wh_metrics(),daly-bms-server,5s,aucun consommateur (orphelin — doublon de venus_heatpump_state),Mode chauffe-eau
+bms_alarm_low_voltage,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Sous-tension pack
+bms_alarm_high_voltage,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Sur-tension pack
+bms_alarm_low_soc,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,SOC trop bas
+bms_alarm_high_charge_current,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Sur-courant charge
+bms_alarm_high_discharge_current,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Sur-courant décharge
+bms_alarm_high_current,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Sur-courant générique
+bms_alarm_cell_imbalance,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Déséquilibre cellules
+bms_alarm_high_charge_temp,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Sur-température charge
+bms_alarm_low_charge_temp,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Sous-température charge
+bms_alarm_low_cell_voltage,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Sous-tension cellule
+bms_alarm_low_temp,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Sous-température globale
+bms_alarm_high_temp,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Sur-température globale
+bms_alarm_fuse_blown,bms_id,bool,RS485 /dev/ttyUSB0,Daly BMS 0x01 (360Ah) / 0x02 (320Ah),RS485 cmd 0x98 → BmsSnapshot.alarms.* → state.on_bms_snapshot() → write_bms(),daly-bms-server,5s,Grafana bms-detail.json (Alarmes) | /dashboard/bms/:id,Fusible grillé
+bms_soh,bms_id,%,RS485,Daly BMS,RS485 cmd 0x90 → BmsSnapshot.soh,daly-bms-server,5s,Grafana bms-detail | /dashboard/bms,État de santé (dégradation pack)
+bms_time_to_go_secs,bms_id,s,RS485,Daly BMS,RS485 → BmsSnapshot.time_to_go,daly-bms-server,5s,Grafana bms-detail,Temps estimé restant décharge
+bms_balancing_active,bms_id,bool,RS485,Daly BMS,BmsSnapshot.balancing,daly-bms-server,5s,Grafana bms-detail,Équilibrage actif global
+bms_system_switch,bms_id,bool,RS485,Daly BMS,BmsSnapshot.system_switch,daly-bms-server,5s,Grafana bms-detail,Interrupteur principal
+bms_heating_active,bms_id,bool,RS485,Daly BMS,BmsSnapshot.heating,daly-bms-server,5s,Grafana bms-detail,Chauffage actif
+bms_min_cell_voltage,bms_id,V,RS485,Daly BMS,BmsSnapshot.system.min_cell_voltage,daly-bms-server,5s,Grafana bms-detail,Tension cellule min
+bms_max_cell_voltage,bms_id,V,RS485,Daly BMS,BmsSnapshot.system.max_cell_voltage,daly-bms-server,5s,Grafana bms-detail,Tension cellule max
+bms_mos_temp_c,bms_id,°C,RS485,Daly BMS,BmsSnapshot.system.mos_temperature,daly-bms-server,60s,Grafana bms-detail,Température MOSFET principal
+bms_consumed_ah,bms_id,Ah,RS485,Daly BMS,BmsSnapshot.consumed_amphours,daly-bms-server,30s,Grafana bms-detail,Ah consommés depuis pleine charge
+bms_capacity_remaining_ah,bms_id,Ah,RS485,Daly BMS,BmsSnapshot.capacity,daly-bms-server,30s,Grafana bms-detail,Capacité restante (estimation)
+bms_reported_capacity_ah,bms_id,Ah,RS485,Daly BMS,BmsSnapshot.bms_reported_capacity_ah (cmd 0x93),daly-bms-server,30s,Grafana bms-detail,Coulométrie BMS
+bms_cell_balancing,bms_id;cell,bool,RS485,Daly BMS,BmsSnapshot.balances (cmd 0x97) par cellule,daly-bms-server,5s,Grafana bms-detail,Équilibrage par cellule
+bms_modules_online,bms_id,cnt,RS485,Daly BMS,BmsSnapshot.system.nr_of_modules_online,daly-bms-server,5s,Grafana bms-detail,Modules en ligne
+bms_modules_offline,bms_id,cnt,RS485,Daly BMS,BmsSnapshot.system.nr_of_modules_offline,daly-bms-server,5s,Grafana bms-detail,Modules hors ligne
+bms_modules_blocking_charge,bms_id,cnt,RS485,Daly BMS,BmsSnapshot.system.nr_of_modules_blocking_charge,daly-bms-server,5s,Grafana bms-detail,Modules bloquant la charge
+bms_modules_blocking_discharge,bms_id,cnt,RS485,Daly BMS,BmsSnapshot.system.nr_of_modules_blocking_discharge,daly-bms-server,5s,Grafana bms-detail,Modules bloquant la décharge
+bms_charge_cycles,bms_id,cnt,RS485,Daly BMS,BmsSnapshot.history.charge_cycles,daly-bms-server,30s,Grafana bms-detail,Nombre de cycles charge effectués
+bms_min_voltage_hist,bms_id,V,RS485,Daly BMS,BmsSnapshot.history.minimum_voltage,daly-bms-server,30s,Grafana bms-detail,Tension min historique
+bms_max_voltage_hist,bms_id,V,RS485,Daly BMS,BmsSnapshot.history.maximum_voltage,daly-bms-server,30s,Grafana bms-detail,Tension max historique
+bms_total_ah_drawn,bms_id,Ah,RS485,Daly BMS,BmsSnapshot.history.total_ah_drawn,daly-bms-server,30s,Grafana bms-detail,Cumul Ah déchargés à vie
+bms_charge_request,bms_id,bool,RS485,Daly BMS,BmsSnapshot.info.charge_request,daly-bms-server,5s,Grafana bms-detail,Demande de charge active
+bms_max_charge_voltage,bms_id,V,RS485,Daly BMS,BmsSnapshot.info.max_charge_voltage,daly-bms-server,5s,Grafana bms-detail,Tension charge max autorisée
+bms_max_charge_current,bms_id,A,RS485,Daly BMS,BmsSnapshot.info.max_charge_current,daly-bms-server,5s,Grafana bms-detail,Courant charge max autorisé
+bms_max_discharge_current,bms_id,A,RS485,Daly BMS,BmsSnapshot.info.max_discharge_current,daly-bms-server,5s,Grafana bms-detail,Courant décharge max autorisé
+bms_max_charge_cell_voltage,bms_id,V,RS485,Daly BMS,BmsSnapshot.info.max_charge_cell_voltage,daly-bms-server,5s,Grafana bms-detail,Tension max cellule
+bms_balance_mos,bms_id,bool,RS485,Daly BMS,BmsSnapshot.io.allow_to_balance,daly-bms-server,5s,Grafana bms-detail,Autorisation équilibrage
+bms_heat_mos,bms_id,bool,RS485,Daly BMS,BmsSnapshot.io.allow_to_heat,daly-bms-server,5s,Grafana bms-detail,Autorisation chauffage
+bms_external_relay,bms_id,bool,RS485,Daly BMS,BmsSnapshot.io.external_relay,daly-bms-server,5s,Grafana bms-detail,Relais externe
+bms_heating_current,bms_id,A,RS485,Daly BMS,BmsSnapshot.info.heating_current,daly-bms-server,5s,Grafana bms-detail,Courant chauffage
+bms_heating_power,bms_id,W,RS485,Daly BMS,BmsSnapshot.info.heating_power,daly-bms-server,5s,Grafana bms-detail,Puissance chauffage
+et112_reactive_power_var,address,VAr,RS485,ET112 0x07/0x08/0x09,Et112Snapshot.reactive_power_var,daly-bms-server,5s,Grafana network-ats,Puissance réactive
+tasmota_apparent_power_va,id,VA,WiFi MQTT,Tasmota plug,TasmotaSnapshot.apparent_power_va,daly-bms-server,5s,Grafana smart-devices,Puissance apparente
+tasmota_power_factor,id,-1..+1,WiFi MQTT,Tasmota plug,TasmotaSnapshot.power_factor,daly-bms-server,5s,Grafana smart-devices,Facteur de puissance
+tasmota_energy_yesterday_kwh,id,kWh,WiFi MQTT,Tasmota plug,TasmotaSnapshot.energy_yesterday_kwh,daly-bms-server,30s,Grafana smart-devices,Énergie hier
+tasmota_energy_total_kwh,id,kWh,WiFi MQTT,Tasmota plug,TasmotaSnapshot.energy_total_kwh,daly-bms-server,30s,Grafana smart-devices,Énergie totale depuis mise en service
+tasmota_rssi,id,dBm,WiFi MQTT,Tasmota plug,TasmotaSnapshot.rssi,daly-bms-server,60s,Grafana smart-devices,Signal WiFi
+shelly_power_factor,id;channel,-1..+1,WiFi MQTT,Shelly Pro 2PM,ShellyChannelData.power_factor,daly-bms-server,5s,Grafana smart-devices,Facteur de puissance par canal
+shelly_returned_wh,id;channel,Wh,WiFi MQTT,Shelly Pro 2PM,ShellyChannelData.returned_wh,daly-bms-server,30s,Grafana smart-devices,Énergie retournée au réseau
+shelly_rssi,id,dBm,WiFi MQTT,Shelly Pro 2PM,ShellyEmSnapshot.rssi,daly-bms-server,60s,Grafana smart-devices,Signal WiFi
+ats_fault,,code,RS485,ATS CHINT,AtsSnapshot.fault (FaultCode enum),daly-bms-server,5s,Grafana network-ats,Code de défaut 0..7
+ats_sw_mode,,bool,RS485,ATS CHINT,AtsSnapshot.sw_mode (Auto/Manuel),daly-bms-server,5s,Grafana network-ats,Mode commutation (1=Auto)
+ats_remote,,bool,RS485,ATS CHINT,AtsSnapshot.remote,daly-bms-server,5s,Grafana network-ats,Télécommande activée
+ats_middle_off,,bool,RS485,ATS CHINT,AtsSnapshot.middle_off,daly-bms-server,5s,Grafana network-ats,Position centrale (double déclenché)
+ats_phase_s1a,,code,RS485,ATS CHINT,AtsSnapshot.s1a (PhaseStatus),daly-bms-server,5s,Grafana network-ats,Statut phase S1A : 0=Normal 1=UV 2=OV 3=Err
+ats_phase_s1b,,code,RS485,ATS CHINT,AtsSnapshot.s1b (PhaseStatus),daly-bms-server,5s,Grafana network-ats,Statut phase S1B : 0=Normal 1=UV 2=OV 3=Err
+ats_phase_s1c,,code,RS485,ATS CHINT,AtsSnapshot.s1c (PhaseStatus),daly-bms-server,5s,Grafana network-ats,Statut phase S1C : 0=Normal 1=UV 2=OV 3=Err
+ats_phase_s2a,,code,RS485,ATS CHINT,AtsSnapshot.s2a (PhaseStatus),daly-bms-server,5s,Grafana network-ats,Statut phase S2A : 0=Normal 1=UV 2=OV 3=Err
+ats_phase_s2b,,code,RS485,ATS CHINT,AtsSnapshot.s2b (PhaseStatus),daly-bms-server,5s,Grafana network-ats,Statut phase S2B : 0=Normal 1=UV 2=OV 3=Err
+ats_phase_s2c,,code,RS485,ATS CHINT,AtsSnapshot.s2c (PhaseStatus),daly-bms-server,5s,Grafana network-ats,Statut phase S2C : 0=Normal 1=UV 2=OV 3=Err
+ats_cnt1,,cnt,RS485,ATS CHINT,AtsSnapshot.cnt1,daly-bms-server,30s,Grafana network-ats,Compteur commutations S1→S2
+ats_cnt2,,cnt,RS485,ATS CHINT,AtsSnapshot.cnt2,daly-bms-server,30s,Grafana network-ats,Compteur commutations S2→S1
+ats_runtime_h,,h,RS485,ATS CHINT,AtsSnapshot.runtime_h,daly-bms-server,30s,Grafana network-ats,Heures de fonctionnement
+ats_max1_v,,V,RS485,ATS CHINT,AtsSnapshot.max1_v,daly-bms-server,30s,Grafana network-ats,Tension max historique source 1
+ats_max2_v,,V,RS485,ATS CHINT,AtsSnapshot.max2_v,daly-bms-server,30s,Grafana network-ats,Tension max historique source 2
+venus_mppt_state,instance,code,D-Bus,Victron MPPT,VenusMppt.state → code 0..11,daly-bms-server,5s,Grafana venus-detail,État chargeur MPPT
+venus_shunt_state,,code,D-Bus,Victron SmartShunt,VenusSmartShunt.state,daly-bms-server,5s,Grafana venus-detail,État batterie (0=Idle 1=Charging 2=Discharging)
+venus_shunt_time_to_go_min,,min,D-Bus,Victron SmartShunt,VenusSmartShunt.time_to_go_min,daly-bms-server,5s,Grafana venus-detail,Temps restant décharge
+venus_inverter_state,,code,D-Bus,Victron Inverter,VenusInverter.state,daly-bms-server,5s,Grafana venus-detail,État onduleur (0=off..5=other)
+venus_inverter_mode,,code,D-Bus,Victron Inverter,VenusInverter.mode,daly-bms-server,5s,Grafana venus-detail,Mode onduleur
+venus_pressure_mbar,instance,mbar,D-Bus,D-Bus Venus via MQTT (NanoPi 192.168.1.120),VenusTemperature.pressure_mbar,daly-bms-server,60s,Grafana venus-detail,Pression atmosphérique
+venus_connected,instance;device_type,bool,D-Bus,D-Bus Venus via MQTT (NanoPi 192.168.1.120),VenusTemperature.connected,daly-bms-server,5s,Grafana venus-detail,État de connexion appareil Venus
+venus_heatpump_position,mqtt_index,code,D-Bus,ET112 PAC / LG ThinQ,VenusHeatpump.position,daly-bms-server,5s,Grafana venus-detail,Position 0=AC Output 1=AC Input
+venus_heatpump_connected,mqtt_index,bool,D-Bus,ET112 PAC / LG ThinQ,VenusHeatpump.connected,daly-bms-server,5s,Grafana venus-detail,Connecté
+pi5_mem_total_mb,,MB,host Pi5,Pi5 host,MonitorSnapshot.mem_total_mb,daly-bms-server,30s,Grafana infrastructure,Mémoire totale
+pi5_swap_total_mb,,MB,host Pi5,Pi5 host,MonitorSnapshot.swap_total_mb,daly-bms-server,30s,Grafana infrastructure,Swap total
+pi5_serial_port_ok,,bool,host Pi5,Pi5 host,MonitorSnapshot.serial_port_ok,daly-bms-server,5s,Grafana infrastructure,RS485 disponible (/dev/ttyUSB0)
+pi5_service_active,name,bool,host Pi5,Pi5 host,MonitorSnapshot.services[].active,daly-bms-server,5s,Grafana infrastructure,systemctl is-active par service
+pi5_network_service_active,name,bool,host Pi5,Pi5 host,MonitorSnapshot.network_services[].active,daly-bms-server,5s,Grafana infrastructure,Probe TCP par service réseau
+pi5_process_cpu_percent,process,%,host Pi5,Pi5 host,MonitorSnapshot.processes[].cpu_percent,daly-bms-server,5s,Grafana infrastructure,CPU par processus (top-N)
+pi5_process_mem_mb,process,MB,host Pi5,Pi5 host,MonitorSnapshot.processes[].mem_rss_mb,daly-bms-server,5s,Grafana infrastructure,Mémoire RSS par processus

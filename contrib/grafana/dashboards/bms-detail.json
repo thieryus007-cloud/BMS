@@ -1,6 +1,21 @@
 {
-  "annotations": { "list": [{ "builtIn": 1, "datasource": { "type": "grafana", "uid": "-- Grafana --" }, "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)", "name": "Annotations & Alerts", "type": "dashboard" }] },
-  "description": "BMS approfondi - cellules, MOSFETs, températures",
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "BMS approfondi - cellules, MOSFETs, temp\u00e9ratures",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -8,45 +23,1336 @@
   "links": [],
   "liveNow": false,
   "panels": [
-    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "id": 100, "panels": [], "title": "Vue d'ensemble BMS", "type": "row" },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 1 }, "id": 1, "type": "timeseries", "title": "Tension Pack (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_voltage", "legendFormat": "BMS {{bms_id}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 1 }, "id": 2, "type": "timeseries", "title": "Courant (A)", "fieldConfig": { "defaults": { "unit": "amp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_current", "legendFormat": "BMS {{bms_id}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 7 }, "id": 3, "type": "timeseries", "title": "SOC (%)", "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_soc", "legendFormat": "BMS {{bms_id}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 7 }, "id": 4, "type": "timeseries", "title": "Puissance (W)", "fieldConfig": { "defaults": { "unit": "watt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_power", "legendFormat": "BMS {{bms_id}}", "refId": "A" }] },
-
-    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 }, "id": 101, "panels": [], "title": "Températures & Delta", "type": "row" },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 14 }, "id": 5, "type": "timeseries", "title": "BMS 1 - Températures Min/Max", "fieldConfig": { "defaults": { "unit": "celsius" } }, "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_temp_max{bms_id=\"1\"}", "legendFormat": "Max", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_temp_min{bms_id=\"1\"}", "legendFormat": "Min", "refId": "B" }
-      ] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 14 }, "id": 6, "type": "timeseries", "title": "BMS 2 - Températures Min/Max", "fieldConfig": { "defaults": { "unit": "celsius" } }, "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_temp_max{bms_id=\"2\"}", "legendFormat": "Max", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_temp_min{bms_id=\"2\"}", "legendFormat": "Min", "refId": "B" }
-      ] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 20 }, "id": 7, "type": "timeseries", "title": "Delta Cellules (mV)", "fieldConfig": { "defaults": { "unit": "mvolt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_cell_delta_mv", "legendFormat": "BMS {{bms_id}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 20 }, "id": 8, "type": "stat", "title": "Capacité (Ah)", "fieldConfig": { "defaults": { "unit": "amph" } }, "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_capacity_ah", "legendFormat": "BMS {{bms_id}}", "refId": "A" }] },
-
-    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 }, "id": 102, "panels": [], "title": "MOSFETs", "type": "row" },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 27 }, "id": 9, "type": "state-timeline", "title": "BMS 1 - MOSFETs", "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_charge_mos{bms_id=\"1\"}", "legendFormat": "Charge", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_discharge_mos{bms_id=\"1\"}", "legendFormat": "Discharge", "refId": "B" }
-      ] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 27 }, "id": 10, "type": "state-timeline", "title": "BMS 2 - MOSFETs", "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_charge_mos{bms_id=\"2\"}", "legendFormat": "Charge", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_discharge_mos{bms_id=\"2\"}", "legendFormat": "Discharge", "refId": "B" }
-      ] },
-
-    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 }, "id": 103, "panels": [], "title": "Tension cellules", "type": "row" },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 10, "w": 24, "x": 0, "y": 34 }, "id": 11, "type": "heatmap", "title": "Tension cellules (heatmap)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_cell_voltage", "legendFormat": "BMS {{bms_id}} cell {{cell}}", "refId": "A", "format": "heatmap" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 }, "id": 12, "type": "timeseries", "title": "BMS 1 - Toutes cellules (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_cell_voltage{bms_id=\"1\"}", "legendFormat": "Cell {{cell}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 }, "id": 13, "type": "timeseries", "title": "BMS 2 - Toutes cellules (V)", "fieldConfig": { "defaults": { "unit": "volt" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "bms_cell_voltage{bms_id=\"2\"}", "legendFormat": "Cell {{cell}}", "refId": "A" }] }
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Vue d'ensemble BMS",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "type": "timeseries",
+      "title": "Tension Pack (V)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_voltage",
+          "legendFormat": "BMS {{bms_id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "id": 2,
+      "type": "timeseries",
+      "title": "Courant (A)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amp"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_current",
+          "legendFormat": "BMS {{bms_id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "id": 3,
+      "type": "timeseries",
+      "title": "SOC (%)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_soc",
+          "legendFormat": "BMS {{bms_id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "id": 4,
+      "type": "timeseries",
+      "title": "Puissance (W)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_power",
+          "legendFormat": "BMS {{bms_id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Temp\u00e9ratures & Delta",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 5,
+      "type": "timeseries",
+      "title": "BMS 1 - Temp\u00e9ratures Min/Max",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_temp_max{bms_id=\"1\"}",
+          "legendFormat": "Max",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_temp_min{bms_id=\"1\"}",
+          "legendFormat": "Min",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 6,
+      "type": "timeseries",
+      "title": "BMS 2 - Temp\u00e9ratures Min/Max",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_temp_max{bms_id=\"2\"}",
+          "legendFormat": "Max",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_temp_min{bms_id=\"2\"}",
+          "legendFormat": "Min",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "id": 7,
+      "type": "timeseries",
+      "title": "Delta Cellules (mV)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mvolt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_cell_delta_mv",
+          "legendFormat": "BMS {{bms_id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 8,
+      "type": "stat",
+      "title": "Capacit\u00e9 (Ah)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amph"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_capacity_ah",
+          "legendFormat": "BMS {{bms_id}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 102,
+      "panels": [],
+      "title": "MOSFETs",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 27
+      },
+      "id": 9,
+      "type": "state-timeline",
+      "title": "BMS 1 - MOSFETs",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_charge_mos{bms_id=\"1\"}",
+          "legendFormat": "Charge",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_discharge_mos{bms_id=\"1\"}",
+          "legendFormat": "Discharge",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 27
+      },
+      "id": 10,
+      "type": "state-timeline",
+      "title": "BMS 2 - MOSFETs",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_charge_mos{bms_id=\"2\"}",
+          "legendFormat": "Charge",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_discharge_mos{bms_id=\"2\"}",
+          "legendFormat": "Discharge",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "id": 103,
+      "panels": [],
+      "title": "Tension cellules",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 11,
+      "type": "heatmap",
+      "title": "Tension cellules (heatmap)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_cell_voltage",
+          "legendFormat": "BMS {{bms_id}} cell {{cell}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "id": 12,
+      "type": "timeseries",
+      "title": "BMS 1 - Toutes cellules (V)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_cell_voltage{bms_id=\"1\"}",
+          "legendFormat": "Cell {{cell}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "id": 13,
+      "type": "timeseries",
+      "title": "BMS 2 - Toutes cellules (V)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_cell_voltage{bms_id=\"2\"}",
+          "legendFormat": "Cell {{cell}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 53
+      },
+      "id": 201,
+      "panels": [],
+      "title": "BMS \u2014 M\u00e9triques \u00e9tendues",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 54
+      },
+      "id": 202,
+      "type": "timeseries",
+      "title": "BMS - \u00c9tat de sant\u00e9 (SOH)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_soh",
+          "refId": "A",
+          "legendFormat": "BMS {{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "id": 203,
+      "type": "timeseries",
+      "title": "BMS - Tension cellules min/max (V)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_min_cell_voltage",
+          "refId": "A",
+          "legendFormat": "min {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_max_cell_voltage",
+          "refId": "B",
+          "legendFormat": "max {{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 66
+      },
+      "id": 204,
+      "type": "timeseries",
+      "title": "BMS - Temp\u00e9rature MOSFET (\u00b0C)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_mos_temp_c",
+          "refId": "A",
+          "legendFormat": "{{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 72
+      },
+      "id": 205,
+      "type": "timeseries",
+      "title": "BMS - Temps restant d\u00e9charge (s)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_time_to_go_secs",
+          "refId": "A",
+          "legendFormat": "{{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 78
+      },
+      "id": 206,
+      "type": "timeseries",
+      "title": "BMS - Capacit\u00e9 (Ah)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amph"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_capacity_ah",
+          "refId": "A",
+          "legendFormat": "nominal {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_capacity_remaining_ah",
+          "refId": "B",
+          "legendFormat": "restant {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_reported_capacity_ah",
+          "refId": "C",
+          "legendFormat": "reported {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_consumed_ah",
+          "refId": "D",
+          "legendFormat": "consomm\u00e9e {{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 84
+      },
+      "id": 207,
+      "type": "timeseries",
+      "title": "BMS - Cycles de charge",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_charge_cycles",
+          "refId": "A",
+          "legendFormat": "{{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 90
+      },
+      "id": 208,
+      "type": "timeseries",
+      "title": "BMS - Tension min/max historique (V)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_min_voltage_hist",
+          "refId": "A",
+          "legendFormat": "min hist {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_max_voltage_hist",
+          "refId": "B",
+          "legendFormat": "max hist {{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 96
+      },
+      "id": 209,
+      "type": "timeseries",
+      "title": "BMS - Total Ah d\u00e9charg\u00e9s (Ah)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amph"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_total_ah_drawn",
+          "refId": "A",
+          "legendFormat": "{{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 102
+      },
+      "id": 210,
+      "type": "timeseries",
+      "title": "BMS - Limites charge / d\u00e9charge",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amp"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_max_charge_current",
+          "refId": "A",
+          "legendFormat": "I_charge_max {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_max_discharge_current",
+          "refId": "B",
+          "legendFormat": "I_decharge_max {{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 108
+      },
+      "id": 211,
+      "type": "timeseries",
+      "title": "BMS - Limites tension",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_max_charge_voltage",
+          "refId": "A",
+          "legendFormat": "V_pack_max {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_max_charge_cell_voltage",
+          "refId": "B",
+          "legendFormat": "V_cell_max {{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 114
+      },
+      "id": 212,
+      "type": "timeseries",
+      "title": "BMS - Modules online / offline",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_modules_online",
+          "refId": "A",
+          "legendFormat": "online {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_modules_offline",
+          "refId": "B",
+          "legendFormat": "offline {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_modules_blocking_charge",
+          "refId": "C",
+          "legendFormat": "block_charge {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_modules_blocking_discharge",
+          "refId": "D",
+          "legendFormat": "block_discharge {{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 120
+      },
+      "id": 213,
+      "type": "timeseries",
+      "title": "BMS - Chauffage (consigne)",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_heating_active",
+          "refId": "A",
+          "legendFormat": "actif {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_heating_current",
+          "refId": "B",
+          "legendFormat": "I (A) {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_heating_power",
+          "refId": "C",
+          "legendFormat": "P (W) {{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 126
+      },
+      "id": 214,
+      "type": "state-timeline",
+      "title": "BMS - Permissions IO",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_balancing_active",
+          "refId": "A",
+          "legendFormat": "balancing {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_system_switch",
+          "refId": "B",
+          "legendFormat": "sys_switch {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_balance_mos",
+          "refId": "C",
+          "legendFormat": "allow_balance {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_heat_mos",
+          "refId": "D",
+          "legendFormat": "allow_heat {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_external_relay",
+          "refId": "E",
+          "legendFormat": "ext_relay {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_charge_request",
+          "refId": "F",
+          "legendFormat": "charge_req {{bms_id}}"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 132
+      },
+      "id": 215,
+      "type": "state-timeline",
+      "title": "BMS - \u00c9quilibrage par cellule",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_cell_balancing",
+          "refId": "A",
+          "legendFormat": "cell {{cell}} ({{bms_id}})"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 138
+      },
+      "id": 216,
+      "type": "state-timeline",
+      "title": "BMS - Alarmes actives (13 flags)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_low_voltage",
+          "refId": "A",
+          "legendFormat": "LV {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_high_voltage",
+          "refId": "B",
+          "legendFormat": "HV {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_low_soc",
+          "refId": "C",
+          "legendFormat": "LowSOC {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_high_charge_current",
+          "refId": "D",
+          "legendFormat": "HiChgI {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_high_discharge_current",
+          "refId": "E",
+          "legendFormat": "HiDisI {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_high_current",
+          "refId": "F",
+          "legendFormat": "HiI {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_cell_imbalance",
+          "refId": "G",
+          "legendFormat": "Imbal {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_high_charge_temp",
+          "refId": "H",
+          "legendFormat": "HiChgT {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_low_charge_temp",
+          "refId": "I",
+          "legendFormat": "LoChgT {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_low_cell_voltage",
+          "refId": "J",
+          "legendFormat": "LoCellV {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_low_temp",
+          "refId": "K",
+          "legendFormat": "LoT {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_high_temp",
+          "refId": "L",
+          "legendFormat": "HiT {{bms_id}}"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "bms_alarm_fuse_blown",
+          "refId": "M",
+          "legendFormat": "Fuse {{bms_id}}"
+        }
+      ]
+    }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["bms", "cells", "mosfet"],
-  "templating": { "list": [{ "current": { "selected": false, "text": "Prometheus", "value": "prometheus" }, "hide": 0, "includeAll": false, "label": "Data Source", "multi": false, "name": "datasource", "options": [], "query": "prometheus", "refresh": 1, "regex": "", "skipUrlSync": false, "type": "datasource" }] },
-  "time": { "from": "now-6h", "to": "now" },
+  "tags": [
+    "bms",
+    "cells",
+    "mosfet"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Data Source",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "Europe/Paris",
   "title": "BMS - Detail Cellules & MOSFETs",
