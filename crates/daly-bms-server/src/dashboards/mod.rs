@@ -92,23 +92,40 @@ pub struct Catalog {
 impl Catalog {
     /// Charge tous les dashboards Grafana embarqués dans le binaire.
     /// Les fichiers sont inclus au build via `include_str!` puis concaténés.
-    /// Les IDs de chaque fichier doivent rester disjoints (cf. en-tête de chaque JSON).
+    /// Les IDs Grafana d'origine se chevauchent entre fichiers (chaque dashboard
+    /// commence à id=1), donc on namespace chaque ID avec son préfixe source
+    /// (ex: `bms.1`, `infra.2`) pour garantir l'unicité dans le catalogue.
     pub fn load_default() -> Self {
         const SOURCES: &[(&str, &str)] = &[
-            ("ess",      include_str!("../../../../docs/grafana-ess_dashboard.json")),
-            ("solar_pv", include_str!("../../../../docs/grafana-solar_pv_dashboard.json")),
+            // Dashboards hérités (IDs déjà disjoints, non préfixés pour compat
+            // avec SOLAR_PV_IDS dans templates/history.html).
+            ("",         include_str!("../../../../docs/grafana-ess_dashboard.json")),
+            ("",         include_str!("../../../../docs/grafana-solar_pv_dashboard.json")),
+            // Nouveaux dashboards (contrib/grafana/dashboards/) — IDs préfixés
+            // pour éviter la collision avec ess (1..106) et entre eux.
+            ("bms",      include_str!("../../../../contrib/grafana/dashboards/bms-detail.json")),
+            ("infra",    include_str!("../../../../contrib/grafana/dashboards/infrastructure.json")),
+            ("network",  include_str!("../../../../contrib/grafana/dashboards/network-ats.json")),
+            ("solar5y",  include_str!("../../../../contrib/grafana/dashboards/pv-solar-5y.json")),
+            ("smart",    include_str!("../../../../contrib/grafana/dashboards/smart-devices.json")),
+            ("venus",    include_str!("../../../../contrib/grafana/dashboards/venus-detail.json")),
         ];
 
         let mut all: Vec<Panel> = Vec::new();
-        for (name, src) in SOURCES {
+        for (prefix, src) in SOURCES {
             match grafana::parse_dashboard(src) {
                 Ok(mut panels) => {
-                    tracing::info!(count = panels.len(), source = name,
+                    if !prefix.is_empty() {
+                        for p in panels.iter_mut() {
+                            p.id = format!("{}.{}", prefix, p.id);
+                        }
+                    }
+                    tracing::info!(count = panels.len(), source = prefix,
                                    "Catalogue : panels chargés");
                     all.append(&mut panels);
                 }
                 Err(e) => {
-                    tracing::error!(error = %e, source = name,
+                    tracing::error!(error = %e, source = prefix,
                                     "Catalogue : parsing échoué — source ignorée");
                 }
             }
@@ -137,5 +154,47 @@ impl Catalog {
 
     pub fn find(&self, id: &str) -> Option<&Panel> {
         self.panels.iter().find(|p| p.id == id)
+    }
+}
+
+#[cfg(test)]
+mod load_tests {
+    use super::*;
+
+    #[test]
+    fn load_default_includes_all_sources() {
+        let cat = Catalog::load_default();
+        let panels = cat.panels();
+
+        // ess (~45) + solar_pv (11) + bms-detail (17) + infrastructure (25) +
+        // network-ats (10+1) + pv-solar-5y (19+1) + smart-devices (13) +
+        // venus-detail (22+1) >> 100
+        assert!(panels.len() >= 100, "trop peu de panels: {}", panels.len());
+
+        // IDs uniques après préfixage
+        let mut seen = std::collections::HashSet::new();
+        for p in panels {
+            assert!(seen.insert(&p.id), "ID dupliqué: {}", p.id);
+        }
+
+        // Au moins un panel de chaque nouveau préfixe
+        for prefix in &["bms.", "infra.", "network.", "solar5y.", "smart.", "venus."] {
+            assert!(
+                panels.iter().any(|p| p.id.starts_with(prefix)),
+                "aucun panel avec préfixe '{}'", prefix
+            );
+        }
+
+        // Vérification spécifique : les 3 métriques que je viens d'ajouter
+        // sont bien présentes dans le catalogue.
+        let exprs: Vec<&str> = panels.iter()
+            .flat_map(|p| p.queries.iter().map(|q| q.expr.as_str()))
+            .collect();
+        for needle in &["et112_current_a", "total_solar_power", "venus_inverter_power_w"] {
+            assert!(
+                exprs.iter().any(|e| e.contains(needle)),
+                "expr contenant '{}' introuvable dans le catalogue", needle
+            );
+        }
     }
 }

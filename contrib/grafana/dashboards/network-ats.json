@@ -37,7 +37,8 @@
 
     { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }, "id": 101, "panels": [], "title": "ET112 - Compteurs", "type": "row" },
     { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 0, "y": 18 }, "id": 7, "type": "timeseries", "title": "ET112 - Puissance Apparente (VA) par address", "fieldConfig": { "defaults": { "unit": "voltamp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "et112_apparent_power_va", "legendFormat": "addr {{address}}", "refId": "A" }] },
-    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 18 }, "id": 8, "type": "timeseries", "title": "ET112 - Power Factor par address", "fieldConfig": { "defaults": { "min": -1, "max": 1 } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "et112_power_factor", "legendFormat": "addr {{address}}", "refId": "A" }] }
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 12, "x": 12, "y": 18 }, "id": 8, "type": "timeseries", "title": "ET112 - Power Factor par address", "fieldConfig": { "defaults": { "min": -1, "max": 1 } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "et112_power_factor", "legendFormat": "addr {{address}}", "refId": "A" }] },
+    { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "gridPos": { "h": 6, "w": 24, "x": 0, "y": 24 }, "id": 9, "type": "timeseries", "title": "ET112 - Courant (A) par address", "fieldConfig": { "defaults": { "unit": "amp" } }, "targets": [{ "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "et112_current_a", "legendFormat": "addr {{address}}", "refId": "A" }] }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
