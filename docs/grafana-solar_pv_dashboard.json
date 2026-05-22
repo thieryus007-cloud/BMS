@@ -1,164 +1,353 @@
 {
-  "__comment_provenance": "Adapté de docs/Solar_PV.json (Grafana Labs, datasource InfluxDB/Home Assistant). Les targets[].expr ont été ré-écrits en PromQL pointant sur nos métriques (solar_total_w, et112_power_w{address=...}, et112_energy_*_wh{address=...}). Les gridPos d'origine sont conservés. IDs ≥ 1000 pour éviter toute collision avec grafana-ess_dashboard.json (qui va jusqu'à 106).",
+  "__comment_provenance": "Adapt\u00e9 de docs/Solar_PV.json (Grafana Labs, datasource InfluxDB/Home Assistant). Les targets[].expr ont \u00e9t\u00e9 r\u00e9-\u00e9crits en PromQL pointant sur nos m\u00e9triques (solar_total_w, et112_power_w{address=...}, et112_energy_*_wh{address=...}). Les gridPos d'origine sont conserv\u00e9s. IDs \u2265 1000 pour \u00e9viter toute collision avec grafana-ess_dashboard.json (qui va jusqu'\u00e0 106).",
   "__comment_metrics_mapping": {
-    "Inverter Power (PV)":     "solar_total_w  (= dc_pv_power_w + pvinv_power_w)",
-    "Feedin Power":            "et112_power_w{address=\"0x09\"}   (signé : >0 import réseau, <0 export)",
-    "Load Power":              "et112_power_w{address=\"0x08\"}   (consommation maison, toujours ≥0)",
-    "Yield Energy (kWh)":      "increase(et112_energy_import_wh{address=\"0x07\"}[...])/1000   (cumul micro-onduleurs)",
-    "Exported Energy (kWh)":   "increase(et112_energy_export_wh{address=\"0x09\"}[...])/1000",
-    "Grid Consumption (kWh)":  "increase(et112_energy_import_wh{address=\"0x09\"}[...])/1000",
-    "Direct self-use (kWh)":   "(yield - exported) / 1000   — autoconsommée = produite - injectée",
-    "Self-consumption rate":   "((yield - exported) / yield) * 100"
+    "Inverter Power (PV)": "solar_total_w  (= dc_pv_power_w + pvinv_power_w)",
+    "Feedin Power": "et112_power_w{address=\"0x09\"}   (sign\u00e9 : >0 import r\u00e9seau, <0 export)",
+    "Load Power": "et112_power_w{address=\"0x08\"}   (consommation maison, toujours \u22650)",
+    "Yield Energy (kWh)": "increase(et112_energy_import_wh{address=\"0x07\"}[...])/1000   (cumul micro-onduleurs)",
+    "Exported Energy (kWh)": "increase(et112_energy_export_wh{address=\"0x09\"}[...])/1000",
+    "Grid Consumption (kWh)": "increase(et112_energy_import_wh{address=\"0x09\"}[...])/1000",
+    "Direct self-use (kWh)": "(yield - exported) / 1000   \u2014 autoconsomm\u00e9e = produite - inject\u00e9e",
+    "Self-consumption rate": "((yield - exported) / yield) * 100"
   },
-  "title": "Solar PV (importé Grafana Labs)",
+  "title": "Solar PV (import\u00e9 Grafana Labs)",
   "uid": "daly-solar-pv",
   "panels": [
     {
       "id": 1001,
-      "title": "PV — Puissance temps réel",
+      "title": "PV \u2014 Puissance temps r\u00e9el",
       "type": "timeseries",
-      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
-      "fieldConfig": {"defaults": {"unit": "watt"}},
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        }
+      },
       "targets": [
-        {"refId": "A", "expr": "solar_total_w",                 "legendFormat": "Inverter Power"},
-        {"refId": "B", "expr": "et112_power_w{address=\"0x09\"}", "legendFormat": "Feedin Power"},
-        {"refId": "C", "expr": "et112_power_w{address=\"0x08\"}", "legendFormat": "Load Power"}
+        {
+          "refId": "A",
+          "expr": "solar_total_w",
+          "legendFormat": "Inverter Power"
+        },
+        {
+          "refId": "B",
+          "expr": "et112_power_w{address=\"0x09\"}",
+          "legendFormat": "Feedin Power"
+        },
+        {
+          "refId": "C",
+          "expr": "et112_power_w{address=\"0x08\"}",
+          "legendFormat": "Load Power"
+        }
       ]
     },
     {
       "id": 1002,
-      "title": "Énergies — Aujourd'hui",
+      "title": "\u00c9nergies \u2014 Aujourd'hui",
       "type": "bargauge",
-      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 8},
-      "fieldConfig": {"defaults": {"unit": "kwatth", "decimals": 2}},
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 2
+        }
+      },
       "targets": [
-        {"refId": "A", "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[24h]) / 1000",
-                       "legendFormat": "Exported"},
-        {"refId": "B", "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[24h]) - increase(et112_energy_export_wh{address=\"0x09\"}[24h])) / 1000",
-                       "legendFormat": "Direct self-use"},
-        {"refId": "C", "expr": "increase(et112_energy_import_wh{address=\"0x07\"}[24h]) / 1000",
-                       "legendFormat": "Yield"},
-        {"refId": "D", "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[24h]) / 1000",
-                       "legendFormat": "Grid Consumption"}
+        {
+          "refId": "A",
+          "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[24h]) / 1000",
+          "legendFormat": "Exported"
+        },
+        {
+          "refId": "B",
+          "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[24h]) - increase(et112_energy_export_wh{address=\"0x09\"}[24h])) / 1000",
+          "legendFormat": "Direct self-use"
+        },
+        {
+          "refId": "C",
+          "expr": "increase(et112_energy_import_wh{address=\"0x07\"}[24h]) / 1000",
+          "legendFormat": "Yield"
+        },
+        {
+          "refId": "D",
+          "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[24h]) / 1000",
+          "legendFormat": "Grid Consumption"
+        }
       ]
     },
     {
       "id": 1003,
-      "title": "Taux d'autoconsommation — Aujourd'hui",
+      "title": "Taux d'autoconsommation \u2014 Aujourd'hui",
       "type": "gauge",
-      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 8},
-      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 1, "min": 0, "max": 100}},
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100
+        }
+      },
       "targets": [
-        {"refId": "A",
-         "expr": "((increase(et112_energy_import_wh{address=\"0x07\"}[24h]) - increase(et112_energy_export_wh{address=\"0x09\"}[24h])) / increase(et112_energy_import_wh{address=\"0x07\"}[24h])) * 100",
-         "legendFormat": "Self-consumption rate"}
+        {
+          "refId": "A",
+          "expr": "((increase(et112_energy_import_wh{address=\"0x07\"}[24h]) - increase(et112_energy_export_wh{address=\"0x09\"}[24h])) / increase(et112_energy_import_wh{address=\"0x07\"}[24h])) * 100",
+          "legendFormat": "Self-consumption rate"
+        }
       ]
     },
     {
       "id": 1004,
-      "title": "Énergies — Ce mois",
+      "title": "\u00c9nergies \u2014 Ce mois",
       "type": "bargauge",
-      "gridPos": {"x": 0, "y": 8, "w": 6, "h": 8},
-      "fieldConfig": {"defaults": {"unit": "kwatth", "decimals": 1}},
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 6,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 1
+        }
+      },
       "targets": [
-        {"refId": "A", "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[30d]) / 1000",
-                       "legendFormat": "Exported"},
-        {"refId": "B", "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[30d]) - increase(et112_energy_export_wh{address=\"0x09\"}[30d])) / 1000",
-                       "legendFormat": "Direct self-use"},
-        {"refId": "C", "expr": "increase(et112_energy_import_wh{address=\"0x07\"}[30d]) / 1000",
-                       "legendFormat": "Yield"},
-        {"refId": "D", "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[30d]) / 1000",
-                       "legendFormat": "Grid Consumption"}
+        {
+          "refId": "A",
+          "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[30d]) / 1000",
+          "legendFormat": "Exported"
+        },
+        {
+          "refId": "B",
+          "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[30d]) - increase(et112_energy_export_wh{address=\"0x09\"}[30d])) / 1000",
+          "legendFormat": "Direct self-use"
+        },
+        {
+          "refId": "C",
+          "expr": "increase(et112_energy_import_wh{address=\"0x07\"}[30d]) / 1000",
+          "legendFormat": "Yield"
+        },
+        {
+          "refId": "D",
+          "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[30d]) / 1000",
+          "legendFormat": "Grid Consumption"
+        }
       ]
     },
     {
       "id": 1005,
-      "title": "Taux d'autoconsommation — Ce mois",
+      "title": "Taux d'autoconsommation \u2014 Ce mois",
       "type": "gauge",
-      "gridPos": {"x": 6, "y": 8, "w": 6, "h": 8},
-      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 1, "min": 0, "max": 100}},
+      "gridPos": {
+        "x": 6,
+        "y": 8,
+        "w": 6,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100
+        }
+      },
       "targets": [
-        {"refId": "A",
-         "expr": "((increase(et112_energy_import_wh{address=\"0x07\"}[30d]) - increase(et112_energy_export_wh{address=\"0x09\"}[30d])) / increase(et112_energy_import_wh{address=\"0x07\"}[30d])) * 100",
-         "legendFormat": "Self-consumption rate"}
+        {
+          "refId": "A",
+          "expr": "((increase(et112_energy_import_wh{address=\"0x07\"}[30d]) - increase(et112_energy_export_wh{address=\"0x09\"}[30d])) / increase(et112_energy_import_wh{address=\"0x07\"}[30d])) * 100",
+          "legendFormat": "Self-consumption rate"
+        }
       ]
     },
     {
       "id": 1006,
-      "title": "Yield — Jour (1h bucket)",
+      "title": "Yield \u2014 Jour (1h bucket)",
       "type": "timeseries",
-      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 7},
-      "fieldConfig": {"defaults": {"unit": "kwatth", "decimals": 2}},
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 2
+        }
+      },
       "targets": [
-        {"refId": "A", "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[1h]) / 1000",
-                       "legendFormat": "Exported"},
-        {"refId": "B", "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[1h]) - increase(et112_energy_export_wh{address=\"0x09\"}[1h])) / 1000",
-                       "legendFormat": "Direct self-use"}
+        {
+          "refId": "A",
+          "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[1h]) / 1000",
+          "legendFormat": "Exported"
+        },
+        {
+          "refId": "B",
+          "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[1h]) - increase(et112_energy_export_wh{address=\"0x09\"}[1h])) / 1000",
+          "legendFormat": "Direct self-use"
+        }
       ]
     },
     {
       "id": 1007,
-      "title": "Yield — Mois (1d bucket)",
+      "title": "Yield \u2014 Mois (1d bucket)",
       "type": "timeseries",
-      "gridPos": {"x": 0, "y": 15, "w": 12, "h": 7},
-      "fieldConfig": {"defaults": {"unit": "kwatth", "decimals": 2}},
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 2
+        }
+      },
       "targets": [
-        {"refId": "A", "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[1d]) / 1000",
-                       "legendFormat": "Exported"},
-        {"refId": "B", "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[1d]) - increase(et112_energy_export_wh{address=\"0x09\"}[1d])) / 1000",
-                       "legendFormat": "Direct self-use"}
+        {
+          "refId": "A",
+          "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[1d]) / 1000",
+          "legendFormat": "Exported"
+        },
+        {
+          "refId": "B",
+          "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[1d]) - increase(et112_energy_export_wh{address=\"0x09\"}[1d])) / 1000",
+          "legendFormat": "Direct self-use"
+        }
       ]
     },
     {
       "id": 1008,
-      "title": "Consommation — Jour (1h bucket)",
+      "title": "Consommation \u2014 Jour (1h bucket)",
       "type": "timeseries",
-      "gridPos": {"x": 12, "y": 15, "w": 12, "h": 7},
-      "fieldConfig": {"defaults": {"unit": "kwatth", "decimals": 2}},
+      "gridPos": {
+        "x": 12,
+        "y": 15,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 2
+        }
+      },
       "targets": [
-        {"refId": "A", "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[1h]) / 1000",
-                       "legendFormat": "Grid Consumption"},
-        {"refId": "B", "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[1h]) - increase(et112_energy_export_wh{address=\"0x09\"}[1h])) / 1000",
-                       "legendFormat": "Direct self-use"}
+        {
+          "refId": "A",
+          "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[1h]) / 1000",
+          "legendFormat": "Grid Consumption"
+        },
+        {
+          "refId": "B",
+          "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[1h]) - increase(et112_energy_export_wh{address=\"0x09\"}[1h])) / 1000",
+          "legendFormat": "Direct self-use"
+        }
       ]
     },
     {
       "id": 1009,
-      "title": "Consommation — Mois (1d bucket)",
+      "title": "Consommation \u2014 Mois (1d bucket)",
       "type": "timeseries",
-      "gridPos": {"x": 0, "y": 22, "w": 12, "h": 7},
-      "fieldConfig": {"defaults": {"unit": "kwatth", "decimals": 2}},
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 2
+        }
+      },
       "targets": [
-        {"refId": "A", "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[1d]) / 1000",
-                       "legendFormat": "Grid Consumption"},
-        {"refId": "B", "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[1d]) - increase(et112_energy_export_wh{address=\"0x09\"}[1d])) / 1000",
-                       "legendFormat": "Direct self-use"}
+        {
+          "refId": "A",
+          "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[1d]) / 1000",
+          "legendFormat": "Grid Consumption"
+        },
+        {
+          "refId": "B",
+          "expr": "(increase(et112_energy_import_wh{address=\"0x07\"}[1d]) - increase(et112_energy_export_wh{address=\"0x09\"}[1d])) / 1000",
+          "legendFormat": "Direct self-use"
+        }
       ]
     },
     {
       "id": 1010,
-      "title": "Bilan énergétique — Jour (1h bucket)",
+      "title": "Bilan \u00e9nerg\u00e9tique \u2014 Jour (1h bucket)",
       "type": "timeseries",
-      "gridPos": {"x": 12, "y": 22, "w": 12, "h": 7},
-      "fieldConfig": {"defaults": {"unit": "kwatth", "decimals": 2}},
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 2
+        }
+      },
       "targets": [
-        {"refId": "A", "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[1h]) / 1000",
-                       "legendFormat": "Grid Consumption"},
-        {"refId": "B", "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[1h]) / 1000",
-                       "legendFormat": "Exported"}
+        {
+          "refId": "A",
+          "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[1h]) / 1000",
+          "legendFormat": "Grid Consumption"
+        },
+        {
+          "refId": "B",
+          "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[1h]) / 1000",
+          "legendFormat": "Exported"
+        }
       ]
     },
     {
       "id": 1011,
-      "title": "Bilan énergétique — Mois (1d bucket)",
+      "title": "Bilan \u00e9nerg\u00e9tique \u2014 Mois (1d bucket)",
       "type": "timeseries",
-      "gridPos": {"x": 0, "y": 29, "w": 24, "h": 7},
-      "fieldConfig": {"defaults": {"unit": "kwatth", "decimals": 2}},
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 24,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 2
+        }
+      },
       "targets": [
-        {"refId": "A", "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[1d]) / 1000",
-                       "legendFormat": "Grid Consumption"},
-        {"refId": "B", "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[1d]) / 1000",
-                       "legendFormat": "Exported"}
+        {
+          "refId": "A",
+          "expr": "increase(et112_energy_import_wh{address=\"0x09\"}[1d]) / 1000",
+          "legendFormat": "Grid Consumption"
+        },
+        {
+          "refId": "B",
+          "expr": "increase(et112_energy_export_wh{address=\"0x09\"}[1d]) / 1000",
+          "legendFormat": "Exported"
+        }
       ]
     }
   ]

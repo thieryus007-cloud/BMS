@@ -592,8 +592,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "topk(10, em_process_cpu_percent)",
-          "legendFormat": "{{name}}",
+          "expr": "topk(10, pi5_process_cpu_percent)",
+          "legendFormat": "{{process}}",
           "refId": "A"
         }
       ]
@@ -623,8 +623,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "topk(10, em_process_mem_mb)",
-          "legendFormat": "{{name}}",
+          "expr": "topk(10, pi5_process_mem_mb)",
+          "legendFormat": "{{process}}",
           "refId": "A"
         }
       ]
@@ -1044,9 +1044,9 @@
     "list": [
       {
         "current": {
-          "selected": false,
-          "text": "Prometheus",
-          "value": "prometheus"
+          "selected": true,
+          "text": "Daly Metrics (redb)",
+          "value": "daly-metrics"
         },
         "hide": 0,
         "includeAll": false,
