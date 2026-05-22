@@ -111,7 +111,12 @@ impl Catalog {
             ("venus",    include_str!("../../../../contrib/grafana/dashboards/venus-detail.json")),
         ];
 
+        // Chaque dashboard source a sa propre grille (24 colonnes, y commençant à 0).
+        // Pour éviter la superposition dans /dashboard/history, on décale les y de
+        // chaque dashboard pour qu'il vienne APRÈS le précédent. On laisse 1 row
+        // d'espace entre deux dashboards.
         let mut all: Vec<Panel> = Vec::new();
+        let mut y_offset: u32 = 0;
         for (prefix, src) in SOURCES {
             match grafana::parse_dashboard(src) {
                 Ok(mut panels) => {
@@ -120,9 +125,20 @@ impl Catalog {
                             p.id = format!("{}.{}", prefix, p.id);
                         }
                     }
-                    tracing::info!(count = panels.len(), source = prefix,
+                    // Décale chaque panel et calcule la nouvelle borne max y.
+                    let mut max_y_in_source: u32 = 0;
+                    for p in panels.iter_mut() {
+                        p.grid_pos.y = p.grid_pos.y.saturating_add(y_offset);
+                        let bottom = p.grid_pos.y.saturating_add(p.grid_pos.h);
+                        if bottom > max_y_in_source {
+                            max_y_in_source = bottom;
+                        }
+                    }
+                    tracing::info!(count = panels.len(), source = prefix, y_offset,
                                    "Catalogue : panels chargés");
                     all.append(&mut panels);
+                    // +1 row d'espace entre sources.
+                    y_offset = max_y_in_source.saturating_add(1);
                 }
                 Err(e) => {
                     tracing::error!(error = %e, source = prefix,

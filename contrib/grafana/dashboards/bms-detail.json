@@ -1331,9 +1331,9 @@
     "list": [
       {
         "current": {
-          "selected": false,
-          "text": "Prometheus",
-          "value": "prometheus"
+          "selected": true,
+          "text": "Daly Metrics (redb)",
+          "value": "daly-metrics"
         },
         "hide": 0,
         "includeAll": false,
