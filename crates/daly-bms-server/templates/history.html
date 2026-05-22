@@ -557,25 +557,27 @@ async function loadLayout() {
 
 /// Layout par défaut spécifique à l'onglet actif.
 /// - `default` : tous les panels du catalog (sauf ceux de l'onglet solar_pv).
-/// - `solar_pv` : uniquement les 11 panels Solar PV, dans leur gridPos d'origine.
+/// - `solar_pv` : uniquement les 11 panels Solar PV, réinitialisés à y=0.
 function defaultLayout() {
   if (STATE.tab === 'solar_pv') {
-    return STATE.catalog
-      .filter(p => SOLAR_PV_IDS.includes(p.id))
-      .map(p => ({
-        id: p.id,
-        x: p.grid_pos.x, y: p.grid_pos.y,
-        w: p.grid_pos.w, h: p.grid_pos.h,
-      }));
-  }
-  // Onglet "default" : tout SAUF les panels Solar PV (ils ont leur propre onglet).
-  return STATE.catalog
-    .filter(p => !SOLAR_PV_IDS.includes(p.id))
-    .map(p => ({
+    const pvPanels = STATE.catalog.filter(p => SOLAR_PV_IDS.includes(p.id));
+    // Normalise Y à 0 (le catalog applique un offset cumulé entre sources).
+    const minY = pvPanels.reduce((m, p) => Math.min(m, p.grid_pos.y), Infinity);
+    return pvPanels.map(p => ({
       id: p.id,
-      x: p.grid_pos.x, y: p.grid_pos.y,
+      x: p.grid_pos.x, y: p.grid_pos.y - minY,
       w: p.grid_pos.w, h: p.grid_pos.h,
     }));
+  }
+  // Onglet "default" : tout SAUF les panels Solar PV (ils ont leur propre onglet).
+  // Normalise également Y à 0 pour que la grille commence en haut.
+  const allPanels = STATE.catalog.filter(p => !SOLAR_PV_IDS.includes(p.id));
+  const minY = allPanels.reduce((m, p) => Math.min(m, p.grid_pos.y), Infinity);
+  return allPanels.map(p => ({
+    id: p.id,
+    x: p.grid_pos.x, y: p.grid_pos.y - minY,
+    w: p.grid_pos.w, h: p.grid_pos.h,
+  }));
 }
 
 async function saveLayout() {
