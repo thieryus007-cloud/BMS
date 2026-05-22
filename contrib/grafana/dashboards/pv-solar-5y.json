@@ -639,6 +639,21 @@
       ],
       "title": "Profil de Production (moyenne / pic horaire)",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "watt" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 51 },
+      "id": 25,
+      "options": {
+        "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "${datasource}" }, "expr": "total_solar_power", "legendFormat": "total_solar_power", "refId": "A" }
+      ],
+      "title": "Puissance Solaire Totale (MPPT + Onduleur PV agrégé)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
