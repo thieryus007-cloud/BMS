@@ -274,6 +274,8 @@ perses-uninstall:
 
 # =============================================================================
 # Grafana — Dashboards provisioning
+# Ces targets s'exécutent DIRECTEMENT sur Pi5 (pas de SSH vers localhost).
+# Workflow : make sync → make grafana-install → make grafana-deploy
 # =============================================================================
 
 GRAFANA_DASHBOARDS_DIR ?= /etc/grafana/dashboards
@@ -281,34 +283,33 @@ GRAFANA_PROV_DIR       ?= /etc/grafana/provisioning
 
 .PHONY: grafana-deploy grafana-update-dashboards grafana-install
 
-# Déploie provisioning + dashboards JSON sur Pi5 (via SSH)
-grafana-deploy:
-	ssh $(PI_HOST) "sudo mkdir -p $(GRAFANA_DASHBOARDS_DIR) $(GRAFANA_PROV_DIR)/datasources $(GRAFANA_PROV_DIR)/dashboards"
-	scp grafana/provisioning/datasources/redb.yaml $(PI_HOST):/tmp/grafana-datasource.yaml
-	scp grafana/provisioning/dashboards/dashboards.yaml $(PI_HOST):/tmp/grafana-dashboards-prov.yaml
-	ssh $(PI_HOST) "sudo cp /tmp/grafana-datasource.yaml $(GRAFANA_PROV_DIR)/datasources/redb.yaml && sudo cp /tmp/grafana-dashboards-prov.yaml $(GRAFANA_PROV_DIR)/dashboards/dashboards.yaml"
-	scp grafana/dashboards/*.json $(PI_HOST):/tmp/
-	ssh $(PI_HOST) "sudo cp /tmp/0*.json /tmp/1*.json $(GRAFANA_DASHBOARDS_DIR)/ 2>/dev/null; sudo systemctl reload-or-restart grafana-server && sudo systemctl status grafana-server --no-pager -l"
-	@echo "✓ Grafana provisioning déployé sur $(PI_HOST)"
-
-# Met à jour uniquement les fichiers JSON des dashboards (sans redéployer le provisioning)
-grafana-update-dashboards:
-	scp grafana/dashboards/*.json $(PI_HOST):/tmp/
-	ssh $(PI_HOST) "sudo cp /tmp/0*.json /tmp/1*.json $(GRAFANA_DASHBOARDS_DIR)/ 2>/dev/null; sudo systemctl reload grafana-server"
-	@echo "✓ Dashboards JSON mis à jour sur $(PI_HOST)"
-
-# Installe Grafana OSS sur Pi5 (ARM64) depuis les dépôts officiels Grafana
-# Raspberry Pi OS (Debian) — pas besoin de software-properties-common
+# Installe Grafana OSS depuis les dépôts officiels (exécuter sur Pi5)
 grafana-install:
-	ssh $(PI_HOST) "sudo apt-get install -y apt-transport-https wget gnupg2 && \
-	  sudo mkdir -p /etc/apt/keyrings && \
-	  wget -q -O - https://apt.grafana.com/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/grafana.gpg && \
-	  echo 'deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main' | sudo tee /etc/apt/sources.list.d/grafana.list && \
-	  sudo apt-get update && sudo apt-get install -y grafana && \
-	  sudo mkdir -p $(GRAFANA_DASHBOARDS_DIR) && \
-	  sudo systemctl daemon-reload && sudo systemctl enable grafana-server && sudo systemctl start grafana-server"
-	@echo "✓ Grafana installé et démarré sur $(PI_HOST) (port 3000)"
-	@echo "  Accès : http://192.168.1.141:3000 (admin/admin)"
+	sudo apt-get install -y apt-transport-https wget gnupg2
+	sudo mkdir -p /etc/apt/keyrings
+	wget -q -O - https://apt.grafana.com/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
+	echo 'deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main' | sudo tee /etc/apt/sources.list.d/grafana.list
+	sudo apt-get update && sudo apt-get install -y grafana
+	sudo mkdir -p $(GRAFANA_DASHBOARDS_DIR)
+	sudo systemctl daemon-reload
+	sudo systemctl enable grafana-server
+	sudo systemctl start grafana-server
+	@echo "✓ Grafana installé — http://192.168.1.141:3000 (admin/admin)"
+
+# Déploie provisioning + 15 dashboards (exécuter sur Pi5, depuis ~/Daly-BMS-Rust)
+grafana-deploy:
+	sudo mkdir -p $(GRAFANA_DASHBOARDS_DIR) $(GRAFANA_PROV_DIR)/datasources $(GRAFANA_PROV_DIR)/dashboards
+	sudo cp grafana/provisioning/datasources/redb.yaml $(GRAFANA_PROV_DIR)/datasources/
+	sudo cp grafana/provisioning/dashboards/dashboards.yaml $(GRAFANA_PROV_DIR)/dashboards/
+	sudo cp grafana/dashboards/*.json $(GRAFANA_DASHBOARDS_DIR)/
+	sudo systemctl restart grafana-server
+	@echo "✓ 15 dashboards déployés — http://192.168.1.141:3000"
+
+# Met à jour uniquement les dashboards JSON
+grafana-update-dashboards:
+	sudo cp grafana/dashboards/*.json $(GRAFANA_DASHBOARDS_DIR)/
+	sudo systemctl restart grafana-server
+	@echo "✓ Dashboards mis à jour — http://192.168.1.141:3000"
 
 # =============================================================================
 # Cross-compile + déploiement SSH vers le Pi
