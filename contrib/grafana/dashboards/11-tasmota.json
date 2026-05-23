@@ -1,7 +1,7 @@
 {
-  "__inputs": [],
-  "__requires": [],
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "description": "Monitoring des prises intelligentes Tasmota : puissance, tension, courant, énergie et signal WiFi.",
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -13,7 +13,12 @@
       "id": 1,
       "type": "row",
       "title": "Puissance",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "collapsed": false,
       "panels": []
     },
@@ -21,24 +26,47 @@
       "id": 2,
       "type": "timeseries",
       "title": "Puissance par prise",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "tasmota_power_w",
           "legendFormat": "Prise {{id}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "watt",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -47,7 +75,12 @@
       "id": 3,
       "type": "row",
       "title": "Tension & Courant",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
       "collapsed": false,
       "panels": []
     },
@@ -55,24 +88,47 @@
       "id": 4,
       "type": "timeseries",
       "title": "Tension",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "tasmota_voltage_v",
           "legendFormat": "Tension {{id}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "volt",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -81,24 +137,47 @@
       "id": 5,
       "type": "timeseries",
       "title": "Courant",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "tasmota_current_a",
           "legendFormat": "Courant {{id}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "amp",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -107,7 +186,12 @@
       "id": 6,
       "type": "row",
       "title": "Énergie",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
       "collapsed": false,
       "panels": []
     },
@@ -115,24 +199,47 @@
       "id": 7,
       "type": "timeseries",
       "title": "Énergie totale (cumul)",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 19},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "tasmota_energy_total_kwh",
           "legendFormat": "Total {{id}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "kwatth",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -141,18 +248,35 @@
       "id": 8,
       "type": "stat",
       "title": "Énergie aujourd'hui",
-      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 27},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 27
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "tasmota_energy_today_kwh",
           "legendFormat": "{{id}}",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -161,7 +285,15 @@
       "fieldConfig": {
         "defaults": {
           "unit": "kwatth",
-          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
           "mappings": []
         },
         "overrides": []
@@ -171,18 +303,35 @@
       "id": 9,
       "type": "stat",
       "title": "Énergie hier",
-      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 27},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 27
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "tasmota_energy_yesterday_kwh",
           "legendFormat": "{{id}}",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -191,7 +340,15 @@
       "fieldConfig": {
         "defaults": {
           "unit": "kwatth",
-          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
           "mappings": []
         },
         "overrides": []
@@ -201,18 +358,35 @@
       "id": 10,
       "type": "stat",
       "title": "État relais",
-      "gridPos": {"h": 4, "w": 8, "x": 16, "y": 27},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 27
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "tasmota_power_on",
           "legendFormat": "{{id}}",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -221,13 +395,27 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
           "mappings": [
             {
               "type": "value",
               "options": {
-                "0": {"text": "OFF", "color": "red"},
-                "1": {"text": "ON", "color": "green"}
+                "0": {
+                  "text": "OFF",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "ON",
+                  "color": "green"
+                }
               }
             }
           ]
@@ -239,7 +427,12 @@
       "id": 11,
       "type": "row",
       "title": "Signal WiFi",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 31},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
       "collapsed": false,
       "panels": []
     },
@@ -247,24 +440,47 @@
       "id": 12,
       "type": "timeseries",
       "title": "Signal WiFi (RSSI)",
-      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 32},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "tasmota_rssi",
           "legendFormat": "RSSI {{id}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "dBm",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -272,11 +488,19 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["daly-bms", "tasmota", "smartplug"],
+  "tags": [
+    "daly-bms",
+    "tasmota",
+    "smartplug"
+  ],
   "templating": {
     "list": [
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "Daly Metrics (redb)",
+          "value": "daly-metrics"
+        },
         "hide": 0,
         "includeAll": false,
         "multi": false,
@@ -289,7 +513,10 @@
       }
     ]
   },
-  "time": {"from": "now-6h", "to": "now"},
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Tasmota — Prises Intelligentes",

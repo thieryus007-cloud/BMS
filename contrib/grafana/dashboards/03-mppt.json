@@ -1,7 +1,7 @@
 {
-  "__inputs": [],
-  "__requires": [],
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "description": "Supervision des chargeurs solaires MPPT Victron — puissance, rendement, tension PV, états",
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -13,7 +13,12 @@
       "id": 1,
       "type": "row",
       "title": "Puissance & Rendement",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "collapsed": false,
       "panels": []
     },
@@ -21,30 +26,56 @@
       "id": 2,
       "type": "timeseries",
       "title": "Puissance MPPT (tous chargeurs)",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "venus_mppt_power_w",
           "legendFormat": "MPPT instance {{instance}}",
           "refId": "A"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "sum(venus_mppt_power_w)",
           "legendFormat": "Total MPPT",
           "refId": "B"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "watt",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -53,18 +84,35 @@
       "id": 3,
       "type": "stat",
       "title": "Rendement journalier total",
-      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 9},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "sum(venus_mppt_yield_today_kwh)",
           "legendFormat": "Rendement total",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -73,7 +121,15 @@
       "fieldConfig": {
         "defaults": {
           "unit": "kwatth",
-          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
           "mappings": []
         },
         "overrides": []
@@ -83,18 +139,35 @@
       "id": 4,
       "type": "stat",
       "title": "Rendement par MPPT",
-      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 9},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "venus_mppt_yield_today_kwh",
           "legendFormat": "MPPT {{instance}}",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -103,7 +176,15 @@
       "fieldConfig": {
         "defaults": {
           "unit": "kwatth",
-          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
           "mappings": []
         },
         "overrides": []
@@ -113,18 +194,35 @@
       "id": 5,
       "type": "stat",
       "title": "Puissance max aujourd'hui",
-      "gridPos": {"h": 4, "w": 8, "x": 16, "y": 9},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "venus_mppt_max_power_today_w",
           "legendFormat": "Max MPPT {{instance}}",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -133,7 +231,15 @@
       "fieldConfig": {
         "defaults": {
           "unit": "watt",
-          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
           "mappings": []
         },
         "overrides": []
@@ -143,7 +249,12 @@
       "id": 6,
       "type": "row",
       "title": "Paramètres PV",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 13},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
       "collapsed": false,
       "panels": []
     },
@@ -151,24 +262,47 @@
       "id": 7,
       "type": "timeseries",
       "title": "Tension PV (panneaux)",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "venus_mppt_pv_voltage_v",
           "legendFormat": "Tension PV inst. {{instance}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "volt",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -177,24 +311,47 @@
       "id": 8,
       "type": "timeseries",
       "title": "Courant DC (charge batterie)",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "venus_mppt_dc_current_a",
           "legendFormat": "Courant DC inst. {{instance}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "amp",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -203,7 +360,12 @@
       "id": 9,
       "type": "row",
       "title": "État des chargeurs",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 22},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
       "collapsed": false,
       "panels": []
     },
@@ -211,36 +373,83 @@
       "id": 10,
       "type": "timeseries",
       "title": "État MPPT (0=Off 3=Bulk 4=Abs 5=Float)",
-      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 23},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "venus_mppt_state",
           "legendFormat": "État inst. {{instance}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false},
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          },
           "mappings": [
             {
               "type": "value",
               "options": {
-                "0": {"text": "Off", "color": "grey"},
-                "1": {"text": "Low power", "color": "yellow"},
-                "2": {"text": "Fault", "color": "red"},
-                "3": {"text": "Bulk", "color": "blue"},
-                "4": {"text": "Absorption", "color": "green"},
-                "5": {"text": "Float", "color": "light-green"},
-                "6": {"text": "Storage", "color": "dark-green"},
-                "7": {"text": "Equalize", "color": "orange"}
+                "0": {
+                  "text": "Off",
+                  "color": "grey"
+                },
+                "1": {
+                  "text": "Low power",
+                  "color": "yellow"
+                },
+                "2": {
+                  "text": "Fault",
+                  "color": "red"
+                },
+                "3": {
+                  "text": "Bulk",
+                  "color": "blue"
+                },
+                "4": {
+                  "text": "Absorption",
+                  "color": "green"
+                },
+                "5": {
+                  "text": "Float",
+                  "color": "light-green"
+                },
+                "6": {
+                  "text": "Storage",
+                  "color": "dark-green"
+                },
+                "7": {
+                  "text": "Equalize",
+                  "color": "orange"
+                }
               }
             }
           ]
@@ -251,11 +460,20 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["daly-bms", "mppt", "solar", "victron"],
+  "tags": [
+    "daly-bms",
+    "mppt",
+    "solar",
+    "victron"
+  ],
   "templating": {
     "list": [
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "Daly Metrics (redb)",
+          "value": "daly-metrics"
+        },
         "hide": 0,
         "includeAll": false,
         "multi": false,
@@ -268,7 +486,10 @@
       }
     ]
   },
-  "time": {"from": "now-6h", "to": "now"},
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Venus MPPT — Chargeurs Solaires",

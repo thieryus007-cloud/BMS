@@ -186,31 +186,58 @@ else
 fi
 
 # ── 7.bis Déploiement dashboards Grafana ────────────────────────────────────
-# Provisioning Grafana : datasource (daly-metrics.yaml) + dashboards JSON.
+# Provisioning Grafana : datasource (daly-metrics.yaml) + 15 dashboards JSON.
 # Le provider contrib/grafana/provisioning/dashboards/daly-bms.yaml pointe vers
 # /var/lib/grafana/dashboards — on synchronise les 15 dashboards depuis le repo.
 if systemctl list-unit-files grafana-server.service &>/dev/null; then
     step "Synchronisation provisioning Grafana…"
-    # Supprimer l'ancienne datasource VictoriaMetrics si présente
+
+    # Nettoyage des anciennes datasources obsolètes
     sudo rm -f /etc/grafana/provisioning/datasources/victoriametrics.yaml
+    sudo rm -f /etc/grafana/provisioning/datasources/redb.yaml
+
+    # Datasource (daly-metrics.yaml → redb via daly-bms-server PromQL)
     if [[ -d contrib/grafana/provisioning/datasources ]]; then
-        sudo install -d -m 755 /etc/grafana/provisioning/datasources
-        sudo cp contrib/grafana/provisioning/datasources/*.yaml /etc/grafana/provisioning/datasources/
+        sudo install -d -m 755 -o root -g grafana /etc/grafana/provisioning/datasources
+        sudo install -m 644 -o root -g grafana \
+            contrib/grafana/provisioning/datasources/*.yaml \
+            /etc/grafana/provisioning/datasources/
     fi
+
+    # Provider dashboards (daly-bms.yaml → /var/lib/grafana/dashboards)
     if [[ -d contrib/grafana/provisioning/dashboards ]]; then
-        sudo install -d -m 755 /etc/grafana/provisioning/dashboards
-        sudo cp contrib/grafana/provisioning/dashboards/*.yaml /etc/grafana/provisioning/dashboards/
+        sudo install -d -m 755 -o root -g grafana /etc/grafana/provisioning/dashboards
+        sudo install -m 644 -o root -g grafana \
+            contrib/grafana/provisioning/dashboards/*.yaml \
+            /etc/grafana/provisioning/dashboards/
     fi
+
+    # Dashboards JSON — nettoyage complet puis copie des 15
     if [[ -d contrib/grafana/dashboards ]]; then
-        sudo install -d -m 755 /var/lib/grafana/dashboards
-        sudo cp contrib/grafana/dashboards/*.json /var/lib/grafana/dashboards/
+        sudo install -d -m 755 -o grafana -g grafana /var/lib/grafana/dashboards
+        # Supprimer les anciens dashboards (évite les fichiers fantômes)
+        sudo rm -f /var/lib/grafana/dashboards/*.json
+        sudo install -m 644 -o grafana -g grafana \
+            contrib/grafana/dashboards/*.json \
+            /var/lib/grafana/dashboards/
         N_DASH=$(ls contrib/grafana/dashboards/*.json 2>/dev/null | wc -l)
         info "Dashboards Grafana synchronisés : $N_DASH fichier(s)"
     fi
+
+    # Reload / restart Grafana pour prise en compte
     if systemctl is-active --quiet grafana-server; then
         sudo systemctl reload grafana-server 2>/dev/null \
             || sudo systemctl restart grafana-server
         info "grafana-server reloaded"
+    else
+        warn "grafana-server non actif — démarrage…"
+        sudo systemctl start grafana-server 2>/dev/null || true
+        sleep 2
+        if systemctl is-active --quiet grafana-server; then
+            info "grafana-server démarré"
+        else
+            warn "grafana-server ne démarre pas — voir : journalctl -u grafana-server -n 30"
+        fi
     fi
 else
     info "Grafana non installé — skip provisioning"
@@ -285,8 +312,23 @@ if (( ${#MISSING[@]} > 0 )); then
 fi
 
 echo ""
-if [[ -x scripts/grafana-redb-switch.sh ]]; then
-    step "État backends de lecture :"
-    sudo scripts/grafana-redb-switch.sh status 2>/dev/null \
-        | grep -E "default_backend|url =|Services|Health" || true
+step "État des services :"
+for svc in daly-bms energy-manager grafana-server mosquitto-broker; do
+    if systemctl list-unit-files "${svc}.service" &>/dev/null; then
+        STATUS=$(systemctl is-active "$svc" 2>/dev/null || echo "absent")
+        if [[ "$STATUS" == "active" ]]; then
+            info "$svc : actif"
+        else
+            warn "$svc : $STATUS"
+        fi
+    fi
+done
+
+# Healthcheck Grafana si actif
+if systemctl is-active --quiet grafana-server 2>/dev/null; then
+    if curl -sf http://localhost:3000/api/health -o /dev/null --max-time 3; then
+        info "Grafana healthcheck OK (http://$(hostname -I 2>/dev/null | awk '{print $1}'):3000)"
+    else
+        warn "Grafana healthcheck échoué — voir : journalctl -u grafana-server -n 30"
+    fi
 fi
