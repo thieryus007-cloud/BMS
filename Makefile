@@ -72,7 +72,6 @@ check-armv7-deps:
 		(echo "→ Ajout cible $(TARGET_ARMV7)..." && rustup target add $(TARGET_ARMV7))
 	@which $(CROSS_LINKER_ARMV7) >/dev/null 2>&1 || \
 		(echo "❌ $(CROSS_LINKER_ARMV7) manquant. Installer:" && \
-		 echo "  Debian/Ubuntu: sudo apt install gcc-arm-linux-gnueabihf" && \
 		 exit 1)
 	@echo "✓ Dépendances ARMv7 OK"
 
@@ -82,7 +81,6 @@ check-musl-deps:
 		(echo "→ Ajout cible $(TARGET_MUSL)..." && rustup target add $(TARGET_MUSL))
 	@which $(CROSS_LINKER_MUSL) >/dev/null 2>&1 || \
 		(echo "❌ $(CROSS_LINKER_MUSL) manquant. Installer:" && \
-		 echo "  Debian/Ubuntu: sudo apt install musl-tools aarch64-linux-gnu" && \
 		 exit 1)
 	@echo "✓ Dépendances ARM64-musl OK"
 
@@ -287,13 +285,14 @@ GRAFANA_PROV_DIR       ?= /etc/grafana/provisioning
 grafana-install:
 	sudo apt-get install -y apt-transport-https wget gnupg2
 	sudo mkdir -p /etc/apt/keyrings
-	wget -q -O - https://apt.grafana.com/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/grafana.gpg
+	wget -q -O - https://apt.grafana.com/gpg.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/grafana.gpg
 	echo 'deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main' | sudo tee /etc/apt/sources.list.d/grafana.list
 	sudo apt-get update && sudo apt-get install -y grafana
 	sudo mkdir -p $(GRAFANA_DASHBOARDS_DIR)
 	sudo systemctl daemon-reload
 	sudo systemctl enable grafana-server
-	sudo systemctl start grafana-server
+	sudo systemctl reset-failed grafana-server 2>/dev/null || true
+	sudo systemctl restart grafana-server
 	@echo "✓ Grafana installé — http://192.168.1.141:3000 (admin/admin)"
 
 # Déploie provisioning + 15 dashboards (exécuter sur Pi5, depuis ~/Daly-BMS-Rust)
