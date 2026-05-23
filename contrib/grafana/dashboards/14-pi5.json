@@ -1,7 +1,7 @@
 {
-  "__inputs": [],
-  "__requires": [],
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "description": "Monitoring système du Raspberry Pi5 : CPU, mémoire, disque, température, charge réseau, uptime et état des services.",
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -13,7 +13,12 @@
       "id": 1,
       "type": "row",
       "title": "Ressources système",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "collapsed": false,
       "panels": []
     },
@@ -21,18 +26,35 @@
       "id": 2,
       "type": "gauge",
       "title": "CPU",
-      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_cpu_percent",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "showThresholdLabels": false,
         "showThresholdMarkers": true,
         "orientation": "auto"
@@ -45,9 +67,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"value": null, "color": "green"},
-              {"value": 70, "color": "orange"},
-              {"value": 90, "color": "red"}
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 70,
+                "color": "orange"
+              },
+              {
+                "value": 90,
+                "color": "red"
+              }
             ]
           },
           "mappings": []
@@ -59,18 +90,35 @@
       "id": 3,
       "type": "gauge",
       "title": "Mémoire",
-      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_memory_percent",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "showThresholdLabels": false,
         "showThresholdMarkers": true,
         "orientation": "auto"
@@ -83,9 +131,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"value": null, "color": "green"},
-              {"value": 70, "color": "orange"},
-              {"value": 90, "color": "red"}
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 70,
+                "color": "orange"
+              },
+              {
+                "value": 90,
+                "color": "red"
+              }
             ]
           },
           "mappings": []
@@ -97,18 +154,35 @@
       "id": 4,
       "type": "gauge",
       "title": "Disque",
-      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_disk_percent",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "showThresholdLabels": false,
         "showThresholdMarkers": true,
         "orientation": "auto"
@@ -121,9 +195,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"value": null, "color": "green"},
-              {"value": 70, "color": "orange"},
-              {"value": 90, "color": "red"}
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 70,
+                "color": "orange"
+              },
+              {
+                "value": 90,
+                "color": "red"
+              }
             ]
           },
           "mappings": []
@@ -135,18 +218,35 @@
       "id": 5,
       "type": "stat",
       "title": "Température CPU",
-      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_cpu_temp_c",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -158,9 +258,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"value": null, "color": "green"},
-              {"value": 60, "color": "orange"},
-              {"value": 80, "color": "red"}
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 60,
+                "color": "orange"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
             ]
           },
           "mappings": []
@@ -172,7 +281,12 @@
       "id": 6,
       "type": "row",
       "title": "CPU & Mémoire (historique)",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 7},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
       "collapsed": false,
       "panels": []
     },
@@ -180,24 +294,47 @@
       "id": 7,
       "type": "timeseries",
       "title": "Utilisation CPU",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_cpu_percent",
           "legendFormat": "CPU (%)",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -206,24 +343,47 @@
       "id": 8,
       "type": "timeseries",
       "title": "Utilisation Mémoire",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_memory_percent",
           "legendFormat": "Mémoire (%)",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -232,7 +392,12 @@
       "id": 9,
       "type": "row",
       "title": "Charge & Réseau",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
       "collapsed": false,
       "panels": []
     },
@@ -240,36 +405,65 @@
       "id": 10,
       "type": "timeseries",
       "title": "Charge système (load average)",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 17},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_load_avg{window=\"1m\"}",
           "legendFormat": "Load 1m",
           "refId": "A"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_load_avg{window=\"5m\"}",
           "legendFormat": "Load 5m",
           "refId": "B"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_load_avg{window=\"15m\"}",
           "legendFormat": "Load 15m",
           "refId": "C"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -278,30 +472,56 @@
       "id": 11,
       "type": "timeseries",
       "title": "Réseau (bps)",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 17},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_net_rx_bps",
           "legendFormat": "RX (bps)",
           "refId": "A"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_net_tx_bps",
           "legendFormat": "TX (bps)",
           "refId": "B"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "bps",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -310,7 +530,12 @@
       "id": 12,
       "type": "row",
       "title": "État Services",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 25},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
       "collapsed": false,
       "panels": []
     },
@@ -318,18 +543,35 @@
       "id": 13,
       "type": "stat",
       "title": "Uptime",
-      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 26},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_uptime_secs",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -338,7 +580,15 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
           "mappings": []
         },
         "overrides": []
@@ -348,18 +598,35 @@
       "id": 14,
       "type": "stat",
       "title": "Port RS485",
-      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 26},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_serial_port_ok",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -368,13 +635,27 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
           "mappings": [
             {
               "type": "value",
               "options": {
-                "0": {"text": "ERREUR", "color": "red"},
-                "1": {"text": "OK", "color": "green"}
+                "0": {
+                  "text": "ERREUR",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "OK",
+                  "color": "green"
+                }
               }
             }
           ]
@@ -386,18 +667,35 @@
       "id": 15,
       "type": "stat",
       "title": "Température CPU actuelle",
-      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 26},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_cpu_temp_c",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -409,9 +707,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"value": null, "color": "green"},
-              {"value": 60, "color": "orange"},
-              {"value": 80, "color": "red"}
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 60,
+                "color": "orange"
+              },
+              {
+                "value": 80,
+                "color": "red"
+              }
             ]
           },
           "mappings": []
@@ -423,30 +730,57 @@
       "id": 16,
       "type": "timeseries",
       "title": "Services systemd actifs",
-      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 30},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "pi5_service_active",
           "legendFormat": "{{name}}",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false},
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          },
           "mappings": [
             {
               "type": "value",
               "options": {
-                "0": {"text": "ARRÊTÉ"},
-                "1": {"text": "ACTIF"}
+                "0": {
+                  "text": "ARRÊTÉ"
+                },
+                "1": {
+                  "text": "ACTIF"
+                }
               }
             }
           ]
@@ -457,11 +791,19 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["daly-bms", "system", "pi5"],
+  "tags": [
+    "daly-bms",
+    "system",
+    "pi5"
+  ],
   "templating": {
     "list": [
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "Daly Metrics (redb)",
+          "value": "daly-metrics"
+        },
         "hide": 0,
         "includeAll": false,
         "multi": false,
@@ -474,7 +816,10 @@
       }
     ]
   },
-  "time": {"from": "now-6h", "to": "now"},
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Pi5 — Monitoring Système",

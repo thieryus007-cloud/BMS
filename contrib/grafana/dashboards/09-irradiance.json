@@ -1,7 +1,7 @@
 {
-  "__inputs": [],
-  "__requires": [],
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "description": "Irradiance solaire mesurée par le capteur PRALRAN (addr 0x05) en W/m²",
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -13,7 +13,12 @@
       "id": 1,
       "type": "row",
       "title": "Irradiance",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "collapsed": false,
       "panels": []
     },
@@ -21,18 +26,35 @@
       "id": 2,
       "type": "stat",
       "title": "Irradiance actuelle",
-      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "irradiance_wm2",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -44,10 +66,22 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"value": null, "color": "grey"},
-              {"value": 50, "color": "yellow"},
-              {"value": 400, "color": "orange"},
-              {"value": 800, "color": "red"}
+              {
+                "value": null,
+                "color": "grey"
+              },
+              {
+                "value": 50,
+                "color": "yellow"
+              },
+              {
+                "value": 400,
+                "color": "orange"
+              },
+              {
+                "value": 800,
+                "color": "red"
+              }
             ]
           },
           "mappings": []
@@ -59,24 +93,47 @@
       "id": 3,
       "type": "timeseries",
       "title": "Irradiance temps réel",
-      "gridPos": {"h": 6, "w": 16, "x": 8, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 16,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "irradiance_wm2",
           "legendFormat": "Irradiance (W/m²)",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "wm2",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -85,24 +142,47 @@
       "id": 4,
       "type": "timeseries",
       "title": "Historique irradiance",
-      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 7},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "irradiance_wm2",
           "legendFormat": "Irradiance (W/m²)",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "wm2",
-          "custom": {"lineWidth": 1, "fillOpacity": 30, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 30,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -110,11 +190,20 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["daly-bms", "irradiance", "solar", "meteo"],
+  "tags": [
+    "daly-bms",
+    "irradiance",
+    "solar",
+    "meteo"
+  ],
   "templating": {
     "list": [
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "Daly Metrics (redb)",
+          "value": "daly-metrics"
+        },
         "hide": 0,
         "includeAll": false,
         "multi": false,
@@ -127,7 +216,10 @@
       }
     ]
   },
-  "time": {"from": "now-6h", "to": "now"},
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Irradiance Solaire — Capteur PRALRAN",

@@ -47,6 +47,17 @@
 make build-venus-v7 && make install-venus-v7
 ```
 
+### Grafana (Pi5, port 3000)
+
+| Quand | Commande |
+|-------|----------|
+| Installer Grafana | `sudo bash scripts/setup-grafana.sh --nvme` |
+| Déployer dashboards | Inclus dans `bash scripts/deploy-pi5.sh` |
+| Redémarrer Grafana | `sudo systemctl restart grafana-server` |
+| Logs Grafana | `journalctl -u grafana-server -f` |
+| Healthcheck | `curl -s http://localhost:3000/api/health` |
+| Supprimer dossier vide | Via UI Grafana : Dashboards → dossier → Delete |
+
 ### Workflow complet
 ```
 1. Claude Code → git add + commit + push
@@ -57,6 +68,7 @@ make build-venus-v7 && make install-venus-v7
 3d. Config NanoPi       : scp nanoPi/config-nanopi.toml root@192.168.1.120:/data/daly-bms/config.toml && ssh root@192.168.1.120 "svc -t /service/dbus-mqtt-venus"
 3e. energy-manager code : make build-energy-arm → sudo systemctl stop energy-manager → sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ → sudo systemctl start energy-manager
 3f. Config seule (energy): sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart energy-manager
+3g. Grafana dashboards  : bash scripts/deploy-pi5.sh (ou manuellement : sudo cp contrib/grafana/dashboards/*.json /var/lib/grafana/dashboards/ && sudo systemctl restart grafana-server)
 ```
 
 ---
@@ -70,6 +82,7 @@ Pi5 (192.168.1.141, pi5compute)
   daly-bms-server (systemd, :8080)
     ├── RS485 /dev/ttyUSB0 → 2 BMS + 3 ET112 + 1 PRALRAN
     ├── REST API + WebSocket :8080
+    ├── PromQL compat (/api/v1/query, /api/v1/query_range) ← Grafana datasource
     ├── MQTT subscribe/publish → 127.0.0.1:1883 (broker local)
     └── metrics-store (redb à /mnt/nvme/daly-bms/metrics.redb)
   energy-manager (systemd, :8081)
@@ -77,6 +90,10 @@ Pi5 (192.168.1.141, pi5compute)
     ├── Logique solaire, DEYE, chauffe-eau, charge, météo
     ├── WebSocket live events :8081/live
     └── publication MQTT → consommée par daly-bms-server (writes metrics-store)
+  grafana-server (systemd, :3000)
+    ├── Datasource : "Daly Metrics (redb)" → http://127.0.0.1:8080 (UID: daly-metrics)
+    ├── 15 dashboards provisionés dans /var/lib/grafana/dashboards/
+    └── Données NVMe optionnel (/mnt/nvme/grafana)
 
 NanoPi (192.168.1.120, root)
   dbus-mqtt-venus (runit /service/dbus-mqtt-venus)
@@ -135,6 +152,12 @@ crates/energy-manager/rules/            ← règles `.grl` (rust-rule-engine) :
 crates/dbus-mqtt-venus/src/             ← bridge MQTT→D-Bus NanoPi
 contrib/daly-bms.service                ← unité systemd daly-bms-server
 contrib/energy-manager.service          ← unité systemd energy-manager
+contrib/grafana/                        ← provisioning Grafana complet
+  dashboards/01-bms.json … 15-energy-manager.json  ← 15 dashboards JSON
+  provisioning/datasources/daly-metrics.yaml        ← datasource PromQL → :8080
+  provisioning/dashboards/daly-bms.yaml             ← provider → /var/lib/grafana/dashboards
+scripts/setup-grafana.sh                ← installation Grafana (première fois)
+scripts/deploy-pi5.sh                   ← déploiement complet (binaires + Grafana + validation)
 ```
 
 **IMPORTANT** : Le service lit `/etc/daly-bms/config.toml`, PAS `~/Daly-BMS-Rust/Config.toml`.
@@ -293,6 +316,10 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | `missing field energy_manager` | `sudo cp Config.toml /etc/daly-bms/config.toml` — section `[energy_manager]` absente |
 | energy-manager ne reçoit pas MQTT | Vérifier `portal_id` dans Config.toml et que Mosquitto est accessible sur `mqtt.host` |
 | LG ThinQ ne répond pas | Vérifier `LG_BEARER_TOKEN` et `LG_API_KEY` dans `/etc/daly-bms/.env` |
+| Grafana dossier vide "No items" | Dashboards au mauvais format (export vs provisioning) — `__inputs`/`__requires` doivent être absents, datasource UID = `daly-metrics` |
+| Grafana ne démarre pas | `journalctl -u grafana-server -n 50` — souvent YAML provisioning invalide |
+| Grafana "datasource not found" | Vérifier `/etc/grafana/provisioning/datasources/daly-metrics.yaml` présent, supprimer `victoriametrics.yaml` si résiduel |
+| Grafana ancien dossier "PV Solaire" vide | Supprimer manuellement via UI Grafana (Dashboards → PV Solaire → Delete) |
 
 ---
 
@@ -311,6 +338,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 11. Broker MQTT = Mosquitto natif systemd (`mosquitto-broker.service`). Plus de Docker — config dans `contrib/mosquitto/mosquitto.conf`, déployée vers `/etc/mosquitto/mosquitto.conf`. Toujours valider avec `sudo /usr/local/bin/verify-no-loop.sh` après modif des topics bridge.
 12. Secrets : ne jamais committer `.env`.
 13. **Source de vérité métrique** : les valeurs mesurées par Victron (D-Bus/MQTT) et lues sur RS485 sont **prioritaires sur tout calcul dérivé**. Ne jamais remplacer une mesure firmware par un V×I recalculé, ni écraser un champ direct par un agrégat système. Les sommes (`solar_total = mppt+pvinv`) sont OK car ce sont des agrégats explicites, pas des recalculs d'une valeur déjà disponible.
+14. **Dashboards Grafana** : les 15 JSON dans `contrib/grafana/dashboards/` doivent être au format **provisioning** (pas export). Ne jamais inclure `__inputs`/`__requires`. Le datasource UID doit être `daly-metrics` (pas `${datasource}`). `scripts/deploy-pi5.sh` déploie automatiquement.
 
 ---
 
@@ -324,3 +352,4 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Debug MQTT | `MQTT_DEBUGGING_GUIDE.md` |
 | Debug onduleur / SmartShunt | `DEBUG_ONDULEUR_SMARTSHUNT.md` |
 | Guide energy-manager — modifier/ajouter/retirer une fonctionnalité | `docs/energy-manager-guide.md` |
+| Grafana — 15 dashboards (liste, métriques, provisioning) | `contrib/grafana/` + `scripts/setup-grafana.sh` |

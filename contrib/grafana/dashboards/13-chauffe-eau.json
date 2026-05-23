@@ -1,7 +1,7 @@
 {
-  "__inputs": [],
-  "__requires": [],
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "description": "Monitoring du chauffe-eau LG ThinQ : températures actuelle et cible, mode de fonctionnement, historique.",
   "editable": true,
   "fiscalYearStartMonth": 0,
@@ -13,7 +13,12 @@
       "id": 1,
       "type": "row",
       "title": "Températures",
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "collapsed": false,
       "panels": []
     },
@@ -21,18 +26,35 @@
       "id": 2,
       "type": "stat",
       "title": "Température eau actuelle",
-      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "wh_current_temp_c",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -44,10 +66,22 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"value": null, "color": "blue"},
-              {"value": 40, "color": "green"},
-              {"value": 55, "color": "orange"},
-              {"value": 65, "color": "red"}
+              {
+                "value": null,
+                "color": "blue"
+              },
+              {
+                "value": 40,
+                "color": "green"
+              },
+              {
+                "value": 55,
+                "color": "orange"
+              },
+              {
+                "value": 65,
+                "color": "red"
+              }
             ]
           },
           "mappings": []
@@ -59,18 +93,35 @@
       "id": 3,
       "type": "stat",
       "title": "Température cible",
-      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "wh_target_temp_c",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -79,7 +130,15 @@
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
-          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
           "mappings": []
         },
         "overrides": []
@@ -89,18 +148,35 @@
       "id": 4,
       "type": "stat",
       "title": "Mode opérationnel",
-      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 1},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "wh_mode",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "orientation": "auto",
         "textMode": "auto",
         "colorMode": "background",
@@ -109,7 +185,15 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
           "mappings": []
         },
         "overrides": []
@@ -119,30 +203,56 @@
       "id": 5,
       "type": "timeseries",
       "title": "Températures historique",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 7},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "wh_current_temp_c",
           "legendFormat": "Temp. actuelle (°C)",
           "refId": "A"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "wh_target_temp_c",
           "legendFormat": "Temp. cible (°C)",
           "refId": "B"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -151,24 +261,47 @@
       "id": 6,
       "type": "timeseries",
       "title": "Mode de fonctionnement",
-      "gridPos": {"h": 6, "w": 24, "x": 0, "y": 15},
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
           "expr": "wh_mode",
           "legendFormat": "Mode",
           "refId": "A"
         }
       ],
       "options": {
-        "tooltip": {"mode": "multi", "sort": "none"},
-        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
         },
         "overrides": []
       }
@@ -176,11 +309,19 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["daly-bms", "water-heater", "lg"],
+  "tags": [
+    "daly-bms",
+    "water-heater",
+    "lg"
+  ],
   "templating": {
     "list": [
       {
-        "current": {},
+        "current": {
+          "selected": true,
+          "text": "Daly Metrics (redb)",
+          "value": "daly-metrics"
+        },
         "hide": 0,
         "includeAll": false,
         "multi": false,
@@ -193,7 +334,10 @@
       }
     ]
   },
-  "time": {"from": "now-6h", "to": "now"},
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Chauffe-eau LG ThinQ",
