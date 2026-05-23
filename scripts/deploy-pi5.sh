@@ -187,10 +187,12 @@ fi
 
 # ── 7.bis Déploiement dashboards Grafana ────────────────────────────────────
 # Provisioning Grafana : datasource (daly-metrics.yaml) + dashboards JSON.
-# Le provider grafana/provisioning/dashboards/daly-bms.yaml pointe vers
-# /var/lib/grafana/dashboards — on synchronise depuis le repo.
+# Le provider contrib/grafana/provisioning/dashboards/daly-bms.yaml pointe vers
+# /var/lib/grafana/dashboards — on synchronise les 15 dashboards depuis le repo.
 if systemctl list-unit-files grafana-server.service &>/dev/null; then
     step "Synchronisation provisioning Grafana…"
+    # Supprimer l'ancienne datasource VictoriaMetrics si présente
+    sudo rm -f /etc/grafana/provisioning/datasources/victoriametrics.yaml
     if [[ -d contrib/grafana/provisioning/datasources ]]; then
         sudo install -d -m 755 /etc/grafana/provisioning/datasources
         sudo cp contrib/grafana/provisioning/datasources/*.yaml /etc/grafana/provisioning/datasources/
