@@ -1,10 +1,8 @@
 {
   "__inputs": [],
   "__requires": [],
-  "annotations": {
-    "list": []
-  },
-  "description": "Monitoring des compteurs d'énergie WiFi Shelly EM : puissance, courant, tension, énergie et signal WiFi.",
+  "annotations": {"list": []},
+  "description": "Monitoring des compteurs énergie WiFi Shelly EM : puissance, courant, tension, facteur de puissance, énergie et signal WiFi.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
