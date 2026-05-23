@@ -297,9 +297,10 @@ grafana-update-dashboards:
 	ssh $(PI_HOST) "sudo cp /tmp/0*.json /tmp/1*.json $(GRAFANA_DASHBOARDS_DIR)/ 2>/dev/null; sudo systemctl reload grafana-server"
 	@echo "✓ Dashboards JSON mis à jour sur $(PI_HOST)"
 
-# Installe Grafana OSS sur Pi5 (ARM64) depuis les dépôts officiels
+# Installe Grafana OSS sur Pi5 (ARM64) depuis les dépôts officiels Grafana
+# Raspberry Pi OS (Debian) — pas besoin de software-properties-common
 grafana-install:
-	ssh $(PI_HOST) "sudo apt-get install -y apt-transport-https software-properties-common wget && \
+	ssh $(PI_HOST) "sudo apt-get install -y apt-transport-https wget gnupg2 && \
 	  sudo mkdir -p /etc/apt/keyrings && \
 	  wget -q -O - https://apt.grafana.com/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/grafana.gpg && \
 	  echo 'deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main' | sudo tee /etc/apt/sources.list.d/grafana.list && \
