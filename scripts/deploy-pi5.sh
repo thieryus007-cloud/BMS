@@ -202,6 +202,7 @@ if systemctl list-unit-files grafana-server.service &>/dev/null; then
         sudo install -m 644 -o root -g grafana \
             contrib/grafana/provisioning/datasources/*.yaml \
             /etc/grafana/provisioning/datasources/
+        info "Datasource daly-metrics.yaml déployée"
     fi
 
     # Provider dashboards (daly-bms.yaml → /var/lib/grafana/dashboards)
@@ -210,6 +211,7 @@ if systemctl list-unit-files grafana-server.service &>/dev/null; then
         sudo install -m 644 -o root -g grafana \
             contrib/grafana/provisioning/dashboards/*.yaml \
             /etc/grafana/provisioning/dashboards/
+        info "Provider daly-bms.yaml déployé"
     fi
 
     # Dashboards JSON — nettoyage complet puis copie des 15
@@ -220,27 +222,30 @@ if systemctl list-unit-files grafana-server.service &>/dev/null; then
         sudo install -m 644 -o grafana -g grafana \
             contrib/grafana/dashboards/*.json \
             /var/lib/grafana/dashboards/
-        N_DASH=$(ls contrib/grafana/dashboards/*.json 2>/dev/null | wc -l)
+        N_DASH=$(ls /var/lib/grafana/dashboards/*.json 2>/dev/null | wc -l)
         info "Dashboards Grafana synchronisés : $N_DASH fichier(s)"
     fi
 
-    # Reload / restart Grafana pour prise en compte
+    # Restart Grafana (reload ne recharge pas toujours le provisioning)
+    sudo systemctl restart grafana-server
+    sleep 3
+
     if systemctl is-active --quiet grafana-server; then
-        sudo systemctl reload grafana-server 2>/dev/null \
-            || sudo systemctl restart grafana-server
-        info "grafana-server reloaded"
-    else
-        warn "grafana-server non actif — démarrage…"
-        sudo systemctl start grafana-server 2>/dev/null || true
-        sleep 2
-        if systemctl is-active --quiet grafana-server; then
-            info "grafana-server démarré"
-        else
-            warn "grafana-server ne démarre pas — voir : journalctl -u grafana-server -n 30"
+        info "grafana-server actif"
+        # Vérification : compter les dashboards chargés via l'API Grafana
+        GRAFANA_DASHBOARDS=$(curl -sf http://localhost:3000/api/search?type=dash-db 2>/dev/null \
+            | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
+        info "Dashboards visibles dans Grafana : $GRAFANA_DASHBOARDS"
+        if [[ "$GRAFANA_DASHBOARDS" == "0" || "$GRAFANA_DASHBOARDS" == "?" ]]; then
+            warn "Aucun dashboard visible — vérifier les logs :"
+            journalctl -u grafana-server --since "30 seconds ago" --no-pager 2>/dev/null \
+                | grep -iE "error|warn|provision|dashboard" | tail -10
         fi
+    else
+        warn "grafana-server ne démarre pas — voir : journalctl -u grafana-server -n 30"
     fi
 else
-    info "Grafana non installé — skip provisioning"
+    info "Grafana non installé — skip provisioning (installer avec : bash scripts/setup-grafana.sh --nvme)"
 fi
 
 # ── 8. Validation API ────────────────────────────────────────────────────────
