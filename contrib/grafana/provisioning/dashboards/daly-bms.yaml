@@ -1,10 +1,10 @@
 apiVersion: 1
 
 providers:
-  - name: 'Daly-BMS PV'
+  - name: 'Daly-BMS'
     orgId: 1
-    folder: 'PV Solaire'
-    folderUid: pv-solaire
+    folder: 'Daly-BMS'
+    folderUid: daly-bms-folder
     type: file
     disableDeletion: false
     updateIntervalSeconds: 60

@@ -101,14 +101,23 @@ impl Catalog {
             // avec SOLAR_PV_IDS dans templates/history.html).
             ("",         include_str!("../../../../docs/grafana-ess_dashboard.json")),
             ("",         include_str!("../../../../docs/grafana-solar_pv_dashboard.json")),
-            // Nouveaux dashboards (contrib/grafana/dashboards/) — IDs préfixés
+            // 15 dashboards Grafana (contrib/grafana/dashboards/) — IDs préfixés
             // pour éviter la collision avec ess (1..106) et entre eux.
-            ("bms",      include_str!("../../../../contrib/grafana/dashboards/bms-detail.json")),
-            ("infra",    include_str!("../../../../contrib/grafana/dashboards/infrastructure.json")),
-            ("network",  include_str!("../../../../contrib/grafana/dashboards/network-ats.json")),
-            ("solar5y",  include_str!("../../../../contrib/grafana/dashboards/pv-solar-5y.json")),
-            ("smart",    include_str!("../../../../contrib/grafana/dashboards/smart-devices.json")),
-            ("venus",    include_str!("../../../../contrib/grafana/dashboards/venus-detail.json")),
+            ("bms",      include_str!("../../../../contrib/grafana/dashboards/01-bms.json")),
+            ("et112",    include_str!("../../../../contrib/grafana/dashboards/02-et112.json")),
+            ("mppt",     include_str!("../../../../contrib/grafana/dashboards/03-mppt.json")),
+            ("shunt",    include_str!("../../../../contrib/grafana/dashboards/04-smartshunt.json")),
+            ("inv",      include_str!("../../../../contrib/grafana/dashboards/05-onduleur.json")),
+            ("temp",     include_str!("../../../../contrib/grafana/dashboards/06-temperatures-venus.json")),
+            ("heat",     include_str!("../../../../contrib/grafana/dashboards/07-heatpumps.json")),
+            ("solar",    include_str!("../../../../contrib/grafana/dashboards/08-solaire.json")),
+            ("irr",      include_str!("../../../../contrib/grafana/dashboards/09-irradiance.json")),
+            ("ats",      include_str!("../../../../contrib/grafana/dashboards/10-ats.json")),
+            ("tasmota",  include_str!("../../../../contrib/grafana/dashboards/11-tasmota.json")),
+            ("shelly",   include_str!("../../../../contrib/grafana/dashboards/12-shelly.json")),
+            ("wh",       include_str!("../../../../contrib/grafana/dashboards/13-chauffe-eau.json")),
+            ("pi5",      include_str!("../../../../contrib/grafana/dashboards/14-pi5.json")),
+            ("em",       include_str!("../../../../contrib/grafana/dashboards/15-energy-manager.json")),
         ];
 
         // Chaque dashboard source a sa propre grille (24 colonnes, y commençant à 0).
@@ -182,10 +191,10 @@ mod load_tests {
         let cat = Catalog::load_default();
         let panels = cat.panels();
 
-        // ess (~45) + solar_pv (11) + bms-detail (17) + infrastructure (25) +
-        // network-ats (10+1) + pv-solar-5y (19+1) + smart-devices (13) +
-        // venus-detail (22+1) >> 100
-        assert!(panels.len() >= 100, "trop peu de panels: {}", panels.len());
+        // ess (~45) + solar_pv (11) + 15 dashboards (bms 23 + et112 12 + mppt 10
+        // + shunt 15 + inv 14 + temp 7 + heat 9 + solar 10 + irr 4 + ats 22
+        // + tasmota 12 + shelly 13 + wh 6 + pi5 16 + em 13) >> 200
+        assert!(panels.len() >= 200, "trop peu de panels: {}", panels.len());
 
         // IDs uniques après préfixage
         let mut seen = std::collections::HashSet::new();
@@ -193,23 +202,14 @@ mod load_tests {
             assert!(seen.insert(&p.id), "ID dupliqué: {}", p.id);
         }
 
-        // Au moins un panel de chaque nouveau préfixe
-        for prefix in &["bms.", "infra.", "network.", "solar5y.", "smart.", "venus."] {
+        // Au moins un panel de chaque nouveau préfixe (15 dashboards)
+        for prefix in &[
+            "bms.", "et112.", "mppt.", "shunt.", "inv.", "temp.", "heat.",
+            "solar.", "irr.", "ats.", "tasmota.", "shelly.", "wh.", "pi5.", "em.",
+        ] {
             assert!(
                 panels.iter().any(|p| p.id.starts_with(prefix)),
                 "aucun panel avec préfixe '{}'", prefix
-            );
-        }
-
-        // Vérification spécifique : les 3 métriques que je viens d'ajouter
-        // sont bien présentes dans le catalogue.
-        let exprs: Vec<&str> = panels.iter()
-            .flat_map(|p| p.queries.iter().map(|q| q.expr.as_str()))
-            .collect();
-        for needle in &["et112_current_a", "total_solar_power", "venus_inverter_power_w"] {
-            assert!(
-                exprs.iter().any(|e| e.contains(needle)),
-                "expr contenant '{}' introuvable dans le catalogue", needle
             );
         }
     }

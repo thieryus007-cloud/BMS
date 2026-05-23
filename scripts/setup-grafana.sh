@@ -3,19 +3,19 @@
 # setup-grafana.sh
 # ----------------------------------------------------------------------------
 # Installation et configuration complète de Grafana sur Raspberry Pi 5 (aarch64)
-# pour le monitoring PV solaire avec VictoriaMetrics.
+# pour le monitoring PV solaire avec daly-bms-server (redb PromQL).
 #
 # Cible :  Raspberry Pi 5 — Raspberry Pi OS 64 bits — user pi5compute
 # Source : ~/Daly-BMS-Rust  (lance via : bash scripts/setup-grafana.sh)
 #
 # Fonctionnalités :
 #   - Installe Grafana OSS depuis le dépôt officiel (ARM64)
-#   - Provisionne automatiquement la datasource VictoriaMetrics
-#   - Provisionne automatiquement le dashboard "PV Solaire 5 ans"
+#   - Provisionne automatiquement la datasource daly-bms-server (redb PromQL)
+#   - Provisionne automatiquement les 15 dashboards Grafana
 #   - Option --nvme : stocke les données Grafana sur le NVMe (/mnt/nvme/grafana)
 #     → la SD card ne porte que le binaire (~150 Mo)
 #   - Configure le pare-feu (si UFW actif) et le port 3000
-#   - Vérifie la connectivité à VictoriaMetrics (http://127.0.0.1:8428)
+#   - Vérifie la connectivité à daly-bms-server (http://127.0.0.1:8080)
 #   - Idempotent : peut être relancé sans casser une install existante
 #
 # Options :
@@ -23,7 +23,7 @@
 #   --data-path=PATH : chemin custom pour les données Grafana (remplace --nvme)
 #   --port=N         : change le port Grafana (défaut 3000)
 #   --admin-pwd=PASS : définit le mot de passe admin initial
-#   --vm-url=URL     : URL VictoriaMetrics (défaut http://127.0.0.1:8428)
+#   --api-url=URL    : URL daly-bms-server (défaut http://127.0.0.1:8080)
 #   --no-firewall    : désactive l'ajout de règle UFW
 #   --renderer       : installe grafana-image-renderer + chromium (~300 Mo)
 #   --uninstall      : désinstalle Grafana et nettoie la configuration
@@ -47,7 +47,7 @@ error() { echo -e "${RED}[!!]${NC} $*" >&2; exit 1; }
 # ── Paramètres par défaut ─────────────────────────────────────────────────────
 GRAFANA_PORT="3000"
 ADMIN_PWD=""
-VM_URL="http://127.0.0.1:8428"
+VM_URL="http://127.0.0.1:8080"
 GRAFANA_DATA_PATH=""          # vide = /var/lib/grafana (défaut Grafana)
 INSTALL_RENDERER=false
 SKIP_FIREWALL=false
@@ -64,7 +64,7 @@ for arg in "$@"; do
         --uninstall)      UNINSTALL=true ;;
         --port=*)         GRAFANA_PORT="${arg#*=}" ;;
         --admin-pwd=*)    ADMIN_PWD="${arg#*=}" ;;
-        --vm-url=*)       VM_URL="${arg#*=}" ;;
+        --api-url=*)      VM_URL="${arg#*=}" ;;
         --data-path=*)    GRAFANA_DATA_PATH="${arg#*=}" ;;
         -h|--help)
             sed -n '3,38p' "$0"
@@ -102,6 +102,7 @@ if $UNINSTALL; then
     $SUDO systemctl disable grafana-server 2>/dev/null || true
     $SUDO apt-get remove -y grafana 2>/dev/null || true
     $SUDO rm -f /etc/grafana/provisioning/datasources/victoriametrics.yaml
+    $SUDO rm -f /etc/grafana/provisioning/datasources/daly-metrics.yaml
     $SUDO rm -f /etc/grafana/provisioning/dashboards/daly-bms.yaml
     $SUDO rm -rf /var/lib/grafana/dashboards
     if [[ -n "$GRAFANA_DATA_PATH" ]]; then
@@ -205,44 +206,41 @@ if [[ -n "$GRAFANA_DATA_PATH" ]]; then
     fi
 fi
 
-# ── 5. Vérification accès VictoriaMetrics ────────────────────────────────────
-step "Vérification VictoriaMetrics: $VM_URL …"
-if curl -sf "$VM_URL/health" -o /dev/null --max-time 5; then
-    info "VictoriaMetrics répond sur $VM_URL"
+# ── 5. Vérification accès daly-bms-server (backend PromQL) ───────────────────
+step "Vérification daly-bms-server: $VM_URL …"
+if curl -sf "$VM_URL/-/healthy" -o /dev/null --max-time 5; then
+    info "daly-bms-server répond sur $VM_URL"
 else
-    warn "VictoriaMetrics injoignable sur $VM_URL — Grafana sera installé mais la"
-    warn "datasource montrera une erreur tant que VictoriaMetrics n'est pas démarré."
-    warn "Vérifiez:  systemctl status victoriametrics"
+    warn "daly-bms-server injoignable sur $VM_URL — Grafana sera installé mais la"
+    warn "datasource montrera une erreur tant que le service n'est pas démarré."
+    warn "Vérifiez:  systemctl status daly-bms"
 fi
 
-# ── 6. Provisioning datasource + dashboard ───────────────────────────────────
+# ── 6. Provisioning datasource + dashboards ──────────────────────────────────
 step "Déploiement du provisioning Grafana…"
 
 [[ -d "$GRAFANA_PROVISION_SRC" ]] || error "Dossier ${GRAFANA_PROVISION_SRC} introuvable (make sync ?)"
 
-# Datasource
-$SUDO install -m 0644 -o root -g grafana \
-    "${GRAFANA_PROVISION_SRC}/provisioning/datasources/victoriametrics.yaml" \
-    /etc/grafana/provisioning/datasources/victoriametrics.yaml
+# Supprimer l'ancienne datasource VictoriaMetrics si présente
+$SUDO rm -f /etc/grafana/provisioning/datasources/victoriametrics.yaml
 
-if [[ "$VM_URL" != "http://127.0.0.1:8428" ]]; then
-    $SUDO sed -i "s|http://127.0.0.1:8428|${VM_URL}|g" \
-        /etc/grafana/provisioning/datasources/victoriametrics.yaml
-    info "Datasource patchée → $VM_URL"
-fi
+# Datasource (redb via daly-bms-server PromQL)
+$SUDO install -m 0644 -o root -g grafana \
+    "${GRAFANA_PROVISION_SRC}/provisioning/datasources/daly-metrics.yaml" \
+    /etc/grafana/provisioning/datasources/daly-metrics.yaml
 
 # Provider dashboards
 $SUDO install -m 0644 -o root -g grafana \
     "${GRAFANA_PROVISION_SRC}/provisioning/dashboards/daly-bms.yaml" \
     /etc/grafana/provisioning/dashboards/daly-bms.yaml
 
-# Dossier dashboards (dans /var/lib/grafana — petits fichiers JSON, OK sur SD)
+# Dossier dashboards — 15 dashboards (dans /var/lib/grafana — petits fichiers JSON, OK sur SD)
 $SUDO install -d -o grafana -g grafana -m 0755 /var/lib/grafana/dashboards
-$SUDO install -m 0644 -o grafana -g grafana \
-    "${GRAFANA_PROVISION_SRC}/dashboards/pv-solar-5y.json" \
-    /var/lib/grafana/dashboards/pv-solar-5y.json
-
-info "Provisioning déployé"
+for dash in "${GRAFANA_PROVISION_SRC}"/dashboards/*.json; do
+    $SUDO install -m 0644 -o grafana -g grafana "$dash" /var/lib/grafana/dashboards/
+done
+N_DASH=$(ls "${GRAFANA_PROVISION_SRC}"/dashboards/*.json 2>/dev/null | wc -l)
+info "Provisioning déployé ($N_DASH dashboards)"
 
 # ── 7. Configuration grafana.ini (port, admin) ───────────────────────────────
 patch_ini_key() {
@@ -333,8 +331,8 @@ ${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━
 
   URL          : http://${IP:-localhost}:${GRAFANA_PORT}
   Login        : admin / admin  (changer à la 1ʳᵉ connexion)
-  Datasource   : VictoriaMetrics → ${VM_URL}  (provisionnée)
-  Dashboard    : "PV Solaire - Monitoring & Comparaison 5 Ans" (dossier PV Solaire)
+  Datasource   : Daly Metrics (redb) → ${VM_URL}  (provisionnée)
+  Dashboards   : 15 dashboards Grafana (dossier Daly-BMS)
 ${NVME_NOTE}
   Logs         : journalctl -u grafana-server -f
   Config       : /etc/grafana/grafana.ini

@@ -27,7 +27,7 @@
 # =============================================================================
 set -euo pipefail
 
-GRAFANA_DS="/etc/grafana/provisioning/datasources/victoriametrics.yaml"
+GRAFANA_DS="/etc/grafana/provisioning/datasources/daly-metrics.yaml"
 DALYBMS_CONF="/etc/daly-bms/config.toml"
 BACKUP_ROOT="/var/backups/migration-redb"
 DALYBMS_URL_HEALTHY="http://127.0.0.1:8080/-/healthy"
