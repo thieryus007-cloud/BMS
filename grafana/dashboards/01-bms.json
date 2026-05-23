@@ -1,0 +1,634 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": {"list": []},
+  "description": "Supervision des batteries Daly BMS — SOC, tensions, courants, cellules, températures, alarmes",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "État Général",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "gauge",
+      "title": "SOC — BMS-360Ah",
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_soc{bms_id=\"0x01\"}",
+          "legendFormat": "SOC BMS-360Ah",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"value": null, "color": "red"},
+              {"value": 20, "color": "orange"},
+              {"value": 50, "color": "green"}
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "SOC — BMS-320Ah",
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_soc{bms_id=\"0x02\"}",
+          "legendFormat": "SOC BMS-320Ah",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"value": null, "color": "red"},
+              {"value": 20, "color": "orange"},
+              {"value": 50, "color": "green"}
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "SOH BMS-360Ah",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_soh{bms_id=\"0x01\"}",
+          "legendFormat": "SOH BMS-360Ah",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "SOH BMS-320Ah",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_soh{bms_id=\"0x02\"}",
+          "legendFormat": "SOH BMS-320Ah",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Capacité restante 360Ah",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_capacity_remaining_ah{bms_id=\"0x01\"}",
+          "legendFormat": "Cap restante 360Ah",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amph",
+          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Capacité restante 320Ah",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_capacity_remaining_ah{bms_id=\"0x02\"}",
+          "legendFormat": "Cap restante 320Ah",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amph",
+          "thresholds": {"mode": "absolute", "steps": [{"value": null, "color": "green"}]},
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Tension / Courant / Puissance",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Tension Pack",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 10},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_voltage{bms_id=~\"$bms_id\"}",
+          "legendFormat": "BMS {{bms_id}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Courant",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_current{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Courant {{bms_id}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amp",
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Puissance",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_power{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Puissance {{bms_id}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Cellules",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 26},
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Tensions des cellules — BMS-360Ah",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 27},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_cell_voltage{bms_id=\"0x01\"}",
+          "legendFormat": "Cellule {{cell}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mvolt",
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Tensions des cellules — BMS-320Ah",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 35},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_cell_voltage{bms_id=\"0x02\"}",
+          "legendFormat": "Cellule {{cell}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mvolt",
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Delta cellules (max-min)",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 43},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_cell_delta_mv{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Delta {{bms_id}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mvolt",
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Équilibrage actif",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 43},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_balancing_active{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Balancing {{bms_id}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "type": "row",
+      "title": "Températures",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 49},
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Températures BMS",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 50},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_temp_max{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Temp Max {{bms_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_temp_min{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Temp Min {{bms_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_mos_temp_c{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Temp MOSFET {{bms_id}}",
+          "refId": "C"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 19,
+      "type": "row",
+      "title": "MOSFET & Limites",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 58},
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "États MOSFET",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 59},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_charge_mos{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Charge MOS {{bms_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_discharge_mos{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Discharge MOS {{bms_id}}",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Limites de charge",
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 59},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_max_charge_current{bms_id=~\"$bms_id\"}",
+          "legendFormat": "I max charge {{bms_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_max_discharge_current{bms_id=~\"$bms_id\"}",
+          "legendFormat": "I max décharge {{bms_id}}",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "tooltip": {"mode": "multi", "sort": "none"},
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amp",
+          "custom": {"lineWidth": 1, "fillOpacity": 10, "drawStyle": "line", "spanNulls": false}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 22,
+      "type": "row",
+      "title": "Alarmes",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 65},
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Alarmes actives",
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 66},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_alarm_low_voltage{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Basse tension {{bms_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_alarm_high_voltage{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Haute tension {{bms_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_alarm_low_soc{bms_id=~\"$bms_id\"}",
+          "legendFormat": "SOC faible {{bms_id}}",
+          "refId": "C"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "bms_alarm_cell_imbalance{bms_id=~\"$bms_id\"}",
+          "legendFormat": "Déséquilibre {{bms_id}}",
+          "refId": "D"
+        }
+      ],
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"value": null, "color": "green"},
+              {"value": 1, "color": "red"}
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["daly-bms", "battery"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "name": "datasource",
+        "label": "Datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "definition": "label_values(bms_voltage, bms_id)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "bms_id",
+        "label": "BMS",
+        "query": {"query": "label_values(bms_voltage, bms_id)", "refId": "A"},
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "BMS — Batteries Daly",
+  "uid": "daly-bms-01",
+  "version": 1
+}
