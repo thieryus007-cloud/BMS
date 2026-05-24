@@ -78,7 +78,7 @@ def ts_panel(pid, title, targets_list, gridPos, unit="short", fill=10, draw="lin
 # ── ECharts bar chart JS code ─────────────────────────────────────────────
 BAR_CODE = textwrap.dedent(r"""
 const cells = [];
-for (const frame of data.series) {
+for (const frame of context.panel.data.series) {
   const vf = frame.fields.find(f => f.type === 'number');
   if (!vf || !vf.labels || !vf.labels.cell) continue;
   const cn = parseInt(vf.labels.cell, 10);
@@ -146,7 +146,7 @@ BOXPLOT_CODE = textwrap.dedent(r"""
 const cellData = {};
 const balanceData = {};
 
-for (const frame of data.series) {
+for (const frame of context.panel.data.series) {
   const vf = frame.fields.find(f => f.type === 'number');
   if (!vf || !vf.labels || !vf.labels.cell) continue;
   const cell = vf.labels.cell;
@@ -442,14 +442,14 @@ dashboard = {
         "list": [
             {
                 "name": "bms_id",
-                "type": "custom",
+                "type": "query",
                 "label": "Batterie",
-                "current": {"text": "BMS-360Ah (0x01)", "value": "0x01", "selected": True},
-                "options": [
-                    {"text": "BMS-360Ah (0x01)", "value": "0x01", "selected": True},
-                    {"text": "BMS-320Ah (0x02)", "value": "0x02", "selected": False}
-                ],
-                "query": "0x01 : BMS-360Ah (0x01), 0x02 : BMS-320Ah (0x02)",
+                "current": {},
+                "datasource": {"type": "prometheus", "uid": "daly-metrics"},
+                "definition": "label_values(bms_voltage, bms_id)",
+                "query": {"query": "label_values(bms_voltage, bms_id)", "refId": "A"},
+                "refresh": 2,
+                "sort": 1,
                 "hide": 0,
                 "includeAll": False,
                 "multi": False
