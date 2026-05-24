@@ -1,0 +1,1871 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Detail batterie BMS Daly — KPIs, tensions cellules (ECharts), distribution, historique",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "BMS Overview",
+      "url": "/d/bms-batteries-daly/bms-batteries-daly",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": false
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "KPIs principaux",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Tension pack",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_voltage{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "blue"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Courant",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_current{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amp",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "blue"
+              },
+              {
+                "value": 0,
+                "color": "green"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Puissance",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_power{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "text"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "gauge",
+      "title": "SOC",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_soc{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "red"
+              },
+              {
+                "value": 15,
+                "color": "orange"
+              },
+              {
+                "value": 25,
+                "color": "yellow"
+              },
+              {
+                "value": 40,
+                "color": "green"
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "SOH",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_soh{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "red"
+              },
+              {
+                "value": 70,
+                "color": "yellow"
+              },
+              {
+                "value": 85,
+                "color": "green"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "T° max",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_temp_max{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 35,
+                "color": "yellow"
+              },
+              {
+                "value": 45,
+                "color": "red"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Δ cellules (mV)",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_cell_delta_mv{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 50,
+                "color": "yellow"
+              },
+              {
+                "value": 100,
+                "color": "red"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Capacite SOC",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_capacity_remaining_ah{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amph",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "text"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Cap. BMS",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_reported_capacity_ah{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amph",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "text"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Autonomie",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_time_to_go_secs{bms_id=\"$bms_id\"} / 3600",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "text"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Cycles",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_charge_cycles{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "text"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Cellules",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "count(bms_cell_voltage{bms_id=\"$bms_id\"})",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "text"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "row",
+      "title": "MOS & Extremes cellules",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "MOS Charge",
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 0,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_charge_mos{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "CHG ✗",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "CHG ✓",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "MOS Decharge",
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 4,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_discharge_mos{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DCH ✗",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "DCH ✓",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Cell Min",
+      "gridPos": {
+        "h": 3,
+        "w": 8,
+        "x": 8,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_min_cell_voltage{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "red"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 3
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Cell Max",
+      "gridPos": {
+        "h": 3,
+        "w": 8,
+        "x": 16,
+        "y": 10
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_max_cell_voltage{bms_id=\"$bms_id\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "yellow"
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 3
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 19,
+      "type": "row",
+      "title": "Tensions cellules (instantane)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 20,
+      "type": "volkovlabs-echarts-panel",
+      "title": "Tensions cellules",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_cell_voltage{bms_id=\"$bms_id\"}",
+          "legendFormat": "C{{cell}}",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "renderer": "svg",
+        "getOption": "const cells = [];\nfor (const frame of data.series) {\n  const vf = frame.fields.find(f => f.type === 'number');\n  if (!vf || !vf.labels || !vf.labels.cell) continue;\n  const cn = parseInt(vf.labels.cell, 10);\n  const vals = vf.values;\n  const lv = vals.length > 0 ? vals[vals.length - 1] : null;\n  if (lv === null || lv === undefined || isNaN(lv)) continue;\n  cells.push({ num: cn, name: 'C' + cn, value: lv });\n}\ncells.sort((a, b) => a.num - b.num);\nif (cells.length === 0) return {};\n\nlet minV = Infinity, maxV = -Infinity;\ncells.forEach(c => { if (c.value < minV) minV = c.value; if (c.value > maxV) maxV = c.value; });\nconst avg = cells.reduce((s, c) => s + c.value, 0) / cells.length;\nconst deltaMv = (maxV - minV) * 1000;\nconst yMin = Math.max(minV - 0.030, 2.5);\nconst yMax = Math.min(maxV + 0.030, 4.3);\nconst deltaColor = deltaMv > 100 ? '#f85149' : deltaMv > 50 ? '#e3b341' : '#3fb950';\n\nconst categories = cells.map(c => c.name);\nconst barData = cells.map(c => {\n  const isMin = Math.abs(c.value - minV) < 0.0001;\n  const isMax = Math.abs(c.value - maxV) < 0.0001;\n  const color = isMin ? '#f85149' : isMax ? '#3fb950' : '#58a6ff';\n  const label = isMin ? 'MIN' : isMax ? 'MAX' : '';\n  return {\n    value: c.value,\n    itemStyle: { color: color, borderRadius: [3, 3, 0, 0] },\n    label: { show: !!label, formatter: label, position: 'top', fontSize: 9, fontWeight: 'bold', color: color }\n  };\n});\n\nreturn {\n  backgroundColor: 'transparent',\n  animation: false,\n  title: { text: 'Δ = ' + deltaMv.toFixed(0) + ' mV', right: '1%', top: '2%',\n           textStyle: { color: deltaColor, fontSize: 12, fontWeight: 'bold' } },\n  tooltip: { trigger: 'axis', formatter: '{b}: {c} V',\n             backgroundColor: '#161b22', borderColor: '#30363d',\n             textStyle: { color: '#c9d1d9', fontSize: 11 } },\n  grid: { left: '1%', right: '5%', top: '14%', bottom: '8%', containLabel: true },\n  xAxis: { type: 'category', data: categories,\n            axisLabel: { color: '#8b949e', fontSize: 10 },\n            axisLine: { lineStyle: { color: '#30363d' } } },\n  yAxis: { type: 'value',\n            min: parseFloat(yMin.toFixed(3)), max: parseFloat(yMax.toFixed(3)),\n            splitNumber: 4,\n            axisLabel: { color: '#8b949e', formatter: '{value} V', fontSize: 10 },\n            splitLine: { lineStyle: { color: '#21262d', type: 'dashed' } } },\n  series: [{\n    type: 'bar', data: barData, barMaxWidth: 28,\n    markLine: {\n      silent: true, symbol: 'none',\n      data: [{ yAxis: parseFloat(avg.toFixed(4)),\n               lineStyle: { color: '#e3b341', type: 'dashed', width: 1.5 },\n               label: { show: true, formatter: 'moy ' + avg.toFixed(3) + ' V',\n                        color: '#e3b341', fontSize: 9, position: 'insideEndTop' } }]\n    }\n  }]\n};",
+        "themeEditor": {
+          "config": "{}",
+          "height": 0
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "Distribution historique par cellule",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 22,
+      "type": "volkovlabs-echarts-panel",
+      "title": "Distribution historique",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_cell_voltage{bms_id=\"$bms_id\"}",
+          "legendFormat": "C{{cell}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_cell_balancing{bms_id=\"$bms_id\"}",
+          "legendFormat": "Bal {{cell}}",
+          "refId": "B",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "renderer": "svg",
+        "getOption": "const cellData = {};\nconst balanceData = {};\n\nfor (const frame of data.series) {\n  const vf = frame.fields.find(f => f.type === 'number');\n  if (!vf || !vf.labels || !vf.labels.cell) continue;\n  const cell = vf.labels.cell;\n  if (frame.refId === 'B') {\n    const vals = vf.values;\n    balanceData[cell] = vals.length > 0 && vals[vals.length - 1] > 0.5;\n    continue;\n  }\n  const vals = Array.from(vf.values).filter(v => v !== null && v !== undefined && !isNaN(v));\n  if (vals.length > 0) cellData[cell] = vals;\n}\n\nconst keys = Object.keys(cellData).map(k => ({ num: parseInt(k, 10), key: k })).sort((a, b) => a.num - b.num);\nif (keys.length === 0) return {};\n\nlet curMin = { cell: '', val: Infinity };\nlet curMax = { cell: '', val: -Infinity };\nkeys.forEach(c => {\n  const v = cellData[c.key];\n  const last = v[v.length - 1];\n  if (last < curMin.val) curMin = { cell: c.key, val: last };\n  if (last > curMax.val) curMax = { cell: c.key, val: last };\n});\n\nfunction pct(sorted, p) {\n  const i = (p / 100) * (sorted.length - 1);\n  const lo = Math.floor(i), hi = Math.ceil(i);\n  return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);\n}\n\nconst categories = [];\nconst boxD = [];\nconst scatterD = [];\n\nkeys.forEach(c => {\n  const vals = cellData[c.key].slice().sort((a, b) => a - b);\n  const n = vals.length;\n  const mn = vals[0], mx = vals[n - 1];\n  const q1 = pct(vals, 25), md = pct(vals, 50), q3 = pct(vals, 75);\n  const isMin = c.key === curMin.cell;\n  const isMax = c.key === curMax.cell;\n  const fill = isMin ? 'rgba(248,81,73,0.25)' : isMax ? 'rgba(63,185,80,0.25)' : 'rgba(88,166,255,0.15)';\n  const border = isMin ? '#f85149' : isMax ? '#3fb950' : '#58a6ff';\n  categories.push('C' + c.num);\n  boxD.push({ value: [mn, q1, md, q3, mx], itemStyle: { color: fill, borderColor: border, borderWidth: 2 } });\n  if (balanceData[c.key]) {\n    scatterD.push({ value: ['C' + c.num, mx + (mx - mn) * 0.08 + 0.001] });\n  }\n});\n\nconst sampleCount = cellData[keys[0].key] ? cellData[keys[0].key].length : 0;\nreturn {\n  backgroundColor: 'transparent',\n  animation: false,\n  title: { text: 'Distribution par cellule (' + sampleCount + ' points)',\n           textStyle: { color: '#8b949e', fontSize: 11, fontWeight: 'normal' }, top: '2%' },\n  tooltip: { trigger: 'item', backgroundColor: '#161b22', borderColor: '#30363d',\n             textStyle: { color: '#c9d1d9', fontSize: 11 } },\n  grid: { left: '1%', right: '2%', top: '14%', bottom: '8%', containLabel: true },\n  xAxis: { type: 'category', data: categories,\n            axisLabel: { color: '#8b949e', fontSize: 10 },\n            axisLine: { lineStyle: { color: '#30363d' } } },\n  yAxis: { type: 'value', scale: true,\n            axisLabel: { color: '#8b949e', formatter: '{value} V', fontSize: 10 },\n            splitLine: { lineStyle: { color: '#21262d', type: 'dashed' } } },\n  series: [\n    { type: 'boxplot', data: boxD, boxWidth: ['20%', '45%'],\n      itemStyle: { color: 'rgba(88,166,255,0.15)', borderColor: '#58a6ff', borderWidth: 1.5 },\n      emphasis: { itemStyle: { color: 'rgba(88,166,255,0.30)', borderColor: '#58a6ff', borderWidth: 2 } } },\n    { type: 'scatter', data: scatterD, symbol: 'diamond', symbolSize: 10,\n      itemStyle: { color: '#e3b341' }, z: 10,\n      label: { show: true, formatter: '⚡', position: 'top', fontSize: 10, color: '#e3b341' } }\n  ]\n};",
+        "themeEditor": {
+          "config": "{}",
+          "height": 0
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 23,
+      "type": "row",
+      "title": "Historique temporel",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Tension Pack",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_voltage{bms_id=\"$bms_id\"}",
+          "legendFormat": "Tension",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Courant",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_current{bms_id=\"$bms_id\"}",
+          "legendFormat": "Courant",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amp",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Puissance",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_power{bms_id=\"$bms_id\"}",
+          "legendFormat": "Puissance",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Tensions cellules individuelles",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_cell_voltage{bms_id=\"$bms_id\"}",
+          "legendFormat": "C{{cell}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Delta cellules (max-min)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 62
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_cell_delta_mv{bms_id=\"$bms_id\"}",
+          "legendFormat": "Delta",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "Equilibrage actif",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 62
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_balancing_active{bms_id=\"$bms_id\"}",
+          "legendFormat": "Balancing",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bool",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Temperatures",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Temperatures BMS",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 71
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_temp_max{bms_id=\"$bms_id\"}",
+          "legendFormat": "T° max",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_temp_min{bms_id=\"$bms_id\"}",
+          "legendFormat": "T° min",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_mos_temp_c{bms_id=\"$bms_id\"}",
+          "legendFormat": "T° MOSFET",
+          "refId": "C"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 32,
+      "type": "row",
+      "title": "MOSFET & Alarmes",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 79
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "Etats MOSFET",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 80
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_charge_mos{bms_id=\"$bms_id\"}",
+          "legendFormat": "Charge MOS",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_discharge_mos{bms_id=\"$bms_id\"}",
+          "legendFormat": "Discharge MOS",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bool",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "Limites de charge",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 80
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_max_charge_current{bms_id=\"$bms_id\"}",
+          "legendFormat": "Max Charge (A)",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_max_discharge_current{bms_id=\"$bms_id\"}",
+          "legendFormat": "Max Discharge (A)",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amp",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 35,
+      "type": "stat",
+      "title": "Alarmes actives",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 86
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_alarm_low_voltage{bms_id=\"$bms_id\"}",
+          "legendFormat": "Low Voltage",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_alarm_high_voltage{bms_id=\"$bms_id\"}",
+          "legendFormat": "High Voltage",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_alarm_low_soc{bms_id=\"$bms_id\"}",
+          "legendFormat": "Low Soc",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_alarm_cell_imbalance{bms_id=\"$bms_id\"}",
+          "legendFormat": "Cell Imbalance",
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_alarm_high_temp{bms_id=\"$bms_id\"}",
+          "legendFormat": "High Temp",
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_alarm_low_temp{bms_id=\"$bms_id\"}",
+          "legendFormat": "Low Temp",
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_alarm_high_charge_current{bms_id=\"$bms_id\"}",
+          "legendFormat": "High Charge Current",
+          "refId": "G"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_alarm_high_discharge_current{bms_id=\"$bms_id\"}",
+          "legendFormat": "High Discharge Current",
+          "refId": "H"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "red"
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OK",
+                  "color": "green"
+                },
+                "1": {
+                  "text": "ALARME",
+                  "color": "red"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": [
+    "daly-bms",
+    "battery",
+    "detail",
+    "echarts"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "bms_id",
+        "type": "custom",
+        "label": "Batterie",
+        "current": {
+          "text": "BMS-360Ah (0x01)",
+          "value": "0x01",
+          "selected": true
+        },
+        "options": [
+          {
+            "text": "BMS-360Ah (0x01)",
+            "value": "0x01",
+            "selected": true
+          },
+          {
+            "text": "BMS-320Ah (0x02)",
+            "value": "0x02",
+            "selected": false
+          }
+        ],
+        "query": "0x01 : BMS-360Ah (0x01), 0x02 : BMS-320Ah (0x02)",
+        "hide": 0,
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "BMS — Detail Batterie",
+  "uid": "bms-detail-battery",
+  "version": 1,
+  "refresh": "30s"
+}
