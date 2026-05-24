@@ -555,7 +555,7 @@ shelly_deye_channel  = 0
 tasmota_waterheater_id = "tongou_3BC764"
 # SmartShunt device instance sur Venus OS — vérifier avec :
 #   ssh root@192.168.1.120 "dbus -y | grep battery"
-smartshunt_instance  = 290             # à ajuster selon dbus-spy
+smartshunt_instance  = 274             # VRM ID 274 (Battery Monitor)
 
 # --- Open-Meteo (météo locale) ---
 [energy_manager.open_meteo]
