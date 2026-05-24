@@ -2,7 +2,7 @@
 # =============================================================================
 # scripts/fix-grafana.sh
 #
-# Réparation et déploiement définitif des 15 dashboards Grafana.
+# Réparation et déploiement de tous les dashboards Grafana.
 #
 # Stratégie : import via l'API HTTP Grafana (contourne le bug
 # "restricted database access" du provisioning fichier Grafana 11+).
@@ -121,8 +121,10 @@ else
     info "Dossier Daly-BMS existe (id=$FOLDER_ID)"
 fi
 
-# ── 7. Importer les 15 dashboards via API ───────────────────────────────────
-step "Import des 15 dashboards via API…"
+DASH_COUNT=$(ls -1 "$DASHBOARD_DIR"/*.json 2>/dev/null | wc -l)
+
+# ── 7. Importer les dashboards via API ──────────────────────────────────────
+step "Import des $DASH_COUNT dashboards via API…"
 IMPORTED=0
 FAILED=0
 for json_file in "$DASHBOARD_DIR"/*.json; do
@@ -203,7 +205,7 @@ systemctl reload grafana-server 2>/dev/null || systemctl restart grafana-server
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo ""
 echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  Grafana — 15 dashboards déployés${NC}"
+echo -e "${GREEN}  Grafana — $IMPORTED dashboards déployés${NC}"
 echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
 echo ""
 echo "  URL        : http://${IP:-localhost}:3000"
