@@ -137,7 +137,7 @@ pub struct VictronConfig {
     /// Tasmota device ID for water heater relay (e.g. "tongou_3BC764")
     #[serde(default)]
     pub tasmota_waterheater_id: String,
-    /// SmartShunt device instance on Venus OS (e.g. 290)
+    /// SmartShunt device instance on Venus OS (VRM ID 274)
     #[serde(default = "default_smartshunt_instance")]
     pub smartshunt_instance: u32,
 }
@@ -146,7 +146,7 @@ fn default_vebus_instance() -> u32 { 275 }
 fn default_mppt1_instance() -> u32 { 273 }
 fn default_mppt2_instance() -> u32 { 289 }
 fn default_pvinv_instance() -> u32 { 32 }
-fn default_smartshunt_instance() -> u32 { 290 }
+fn default_smartshunt_instance() -> u32 { 274 }
 
 // ---------------------------------------------------------------------------
 // Open-Meteo

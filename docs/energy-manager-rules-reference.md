@@ -451,7 +451,7 @@ Les valeurs `ats_position` et `ats_state` restent à leur défaut (0) dans Energ
 
 **`[energy_manager.victron]`** :
 - portal_id (**obligatoire**)
-- vebus_instance (275), mppt1 (273), mppt2 (289), pvinverter (32), smartshunt (290)
+- vebus_instance (275), mppt1 (273), mppt2 (289), pvinverter (32), smartshunt (274)
 - shelly_deye_id, shelly_deye_channel
 - tasmota_waterheater_id
 
