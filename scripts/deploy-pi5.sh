@@ -185,88 +185,33 @@ else
     error "energy-manager n'a pas démarré — vérifier : journalctl -u energy-manager -n 50"
 fi
 
-# ── 7.bis Déploiement dashboards Grafana ────────────────────────────────────
-# Provisioning Grafana : datasource (daly-metrics.yaml) + 15 dashboards JSON.
-# Le provider daly-bms.yaml pointe vers /var/lib/grafana/dashboards.
+# ── 7.bis Déploiement Grafana ────────────────────────────────────────────────
+# Datasource provisionnée par fichier, dashboards importés via API
+# (contourne le bug "restricted database access" de Grafana 11+).
 if systemctl list-unit-files grafana-server.service &>/dev/null; then
-    step "Synchronisation provisioning Grafana…"
+    step "Déploiement Grafana (datasource + dashboards)…"
 
-    # Arrêter Grafana pendant le provisioning pour éviter les conflits DB
-    sudo systemctl stop grafana-server 2>/dev/null || true
-
-    # ── Nettoyage complet des résidus ──
-    # Anciennes datasources obsolètes
+    # Nettoyage des anciennes datasources
     sudo rm -f /etc/grafana/provisioning/datasources/victoriametrics.yaml
     sudo rm -f /etc/grafana/provisioning/datasources/redb.yaml
-    # Ancien provider résiduel (pointait vers /etc/grafana/dashboards)
-    sudo rm -f /etc/grafana/provisioning/dashboards/dashboards.yaml
-    # Anciens dashboards dans le mauvais répertoire
-    sudo rm -rf /etc/grafana/dashboards
-
-    # ── Datasource (daly-metrics.yaml) ──
+    # Datasource (fonctionne par fichier)
     sudo install -d -m 755 -o root -g grafana /etc/grafana/provisioning/datasources
     sudo install -m 644 -o root -g grafana \
         contrib/grafana/provisioning/datasources/daly-metrics.yaml \
         /etc/grafana/provisioning/datasources/
-    info "Datasource daly-metrics.yaml déployée"
+    # Supprimer le provisioning fichier des dashboards (bug Grafana 11+)
+    sudo rm -f /etc/grafana/provisioning/dashboards/daly-bms.yaml
+    sudo rm -f /etc/grafana/provisioning/dashboards/dashboards.yaml
+    sudo rm -rf /etc/grafana/dashboards
+    info "Datasource provisionnée, providers dashboards nettoyés"
 
-    # ── Provider dashboards (daly-bms.yaml → /var/lib/grafana/dashboards) ──
-    # Un seul provider — daly-bms.yaml — pour éviter les doublons
-    sudo install -d -m 755 -o root -g grafana /etc/grafana/provisioning/dashboards
-    # Nettoyer tout autre provider résiduel
-    sudo find /etc/grafana/provisioning/dashboards -name '*.yaml' -o -name '*.yml' \
-        | xargs -r sudo rm -f
-    sudo install -m 644 -o root -g grafana \
-        contrib/grafana/provisioning/dashboards/daly-bms.yaml \
-        /etc/grafana/provisioning/dashboards/
-    info "Provider daly-bms.yaml déployé (unique)"
-
-    # ── Dashboards JSON — 15 fichiers ──
-    sudo install -d -m 755 -o grafana -g grafana /var/lib/grafana/dashboards
-    sudo rm -f /var/lib/grafana/dashboards/*.json
-    sudo install -m 644 -o grafana -g grafana \
-        contrib/grafana/dashboards/*.json \
-        /var/lib/grafana/dashboards/
-    N_DASH=$(ls /var/lib/grafana/dashboards/*.json 2>/dev/null | wc -l)
-    info "Dashboards JSON copiés : $N_DASH fichier(s)"
-
-    # ── Réparer les permissions de la base Grafana ──
-    # Si NVMe utilisé, la DB est dans /mnt/nvme/grafana/data/
-    for DB_DIR in /mnt/nvme/grafana/data /var/lib/grafana; do
-        if [[ -f "$DB_DIR/grafana.db" ]]; then
-            sudo chown grafana:grafana "$DB_DIR/grafana.db"
-            sudo chmod 644 "$DB_DIR/grafana.db"
-            info "Permissions DB Grafana réparées ($DB_DIR/grafana.db)"
-        fi
-    done
-    # Réparer ownership récursif du data dir
-    for DATA_DIR in /mnt/nvme/grafana /var/lib/grafana; do
-        if [[ -d "$DATA_DIR" ]]; then
-            sudo chown -R grafana:grafana "$DATA_DIR"
-        fi
-    done
-
-    # ── Démarrer Grafana ──
-    sudo systemctl start grafana-server
+    # Redémarrer pour prendre en compte la datasource
+    sudo systemctl restart grafana-server
     sleep 4
 
     if systemctl is-active --quiet grafana-server; then
-        info "grafana-server actif"
-        # Vérifier les erreurs de provisioning
-        PROV_ERRORS=$(journalctl -u grafana-server --since "10 seconds ago" --no-pager 2>/dev/null \
-            | grep -c "restricted database access" || echo 0)
-        if [[ "$PROV_ERRORS" -gt 0 ]]; then
-            warn "Grafana signale 'restricted database access' — tentative de réinitialisation…"
-            sudo systemctl stop grafana-server
-            # Supprimer le cache provisioning pour forcer un rechargement propre
-            for CACHE_DIR in /mnt/nvme/grafana/data /var/lib/grafana; do
-                sudo rm -f "$CACHE_DIR/file-collections" 2>/dev/null || true
-                sudo rm -f "$CACHE_DIR/ds"               2>/dev/null || true
-            done
-            sudo systemctl start grafana-server
-            sleep 4
-        fi
-        info "Grafana opérationnel — http://$(hostname -I 2>/dev/null | awk '{print $1}'):3000"
+        info "grafana-server actif — import des dashboards via API…"
+        sudo bash scripts/fix-grafana.sh 2>&1 | tail -25
     else
         warn "grafana-server ne démarre pas — voir : journalctl -u grafana-server -n 30"
     fi

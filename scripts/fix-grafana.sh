@@ -2,11 +2,15 @@
 # =============================================================================
 # scripts/fix-grafana.sh
 #
-# Réparation complète de Grafana : nettoie le provisioning résiduel,
-# réinitialise la base SQLite, et redéploie les 15 dashboards.
+# Réparation et déploiement définitif des 15 dashboards Grafana.
+#
+# Stratégie : import via l'API HTTP Grafana (contourne le bug
+# "restricted database access" du provisioning fichier Grafana 11+).
+# La datasource reste provisionnée par fichier (pas affectée par ce bug).
 #
 # Usage :
 #   sudo bash scripts/fix-grafana.sh
+#   sudo bash scripts/fix-grafana.sh --password MyPass123
 # =============================================================================
 set -euo pipefail
 
@@ -16,144 +20,197 @@ step()  { echo -e "${CYAN}[>>]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[!!]${NC} $*"; }
 error() { echo -e "${RED}[XX]${NC} $*" >&2; exit 1; }
 
-[[ $EUID -eq 0 ]] || error "Ce script doit être exécuté en root : sudo bash $0"
+[[ $EUID -eq 0 ]] || error "Ce script doit être exécuté en root : sudo $0"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# ── 1. Arrêter Grafana ──────────────────────────────────────────────────────
-step "Arrêt de grafana-server…"
-systemctl stop grafana-server 2>/dev/null || true
-sleep 1
-info "grafana-server arrêté"
-
-# ── 2. Identifier le data dir Grafana ────────────────────────────────────────
-GRAFANA_DATA=""
-for candidate in /mnt/nvme/grafana/data /var/lib/grafana; do
-    if [[ -d "$candidate" ]]; then
-        GRAFANA_DATA="$candidate"
-        break
-    fi
+ADMIN_PWD="admin"
+for arg in "$@"; do
+    case "$arg" in
+        --password=*) ADMIN_PWD="${arg#*=}" ;;
+    esac
 done
-[[ -n "$GRAFANA_DATA" ]] || error "Data dir Grafana introuvable"
-info "Data dir Grafana : $GRAFANA_DATA"
 
-# ── 3. Sauvegarder puis supprimer la base SQLite corrompue ──────────────────
-step "Réinitialisation de la base Grafana…"
-if [[ -f "$GRAFANA_DATA/grafana.db" ]]; then
-    BACKUP="$GRAFANA_DATA/grafana.db.backup-$(date +%Y%m%d_%H%M%S)"
-    cp "$GRAFANA_DATA/grafana.db" "$BACKUP"
-    info "Backup → $BACKUP"
-    rm -f "$GRAFANA_DATA/grafana.db"
-    rm -f "$GRAFANA_DATA/grafana.db-wal"
-    rm -f "$GRAFANA_DATA/grafana.db-shm"
-    info "Base SQLite supprimée (sera recréée au démarrage)"
-else
-    info "Pas de base SQLite existante"
+GRAFANA_URL="http://localhost:3000"
+GRAFANA_AUTH="admin:${ADMIN_PWD}"
+DASHBOARD_DIR="$REPO_ROOT/contrib/grafana/dashboards"
+
+# ── 1. S'assurer que Grafana tourne ─────────────────────────────────────────
+step "Vérification que Grafana est démarré…"
+if ! systemctl is-active --quiet grafana-server; then
+    systemctl start grafana-server
+    sleep 5
 fi
-
-# ── 4. Nettoyer TOUT le provisioning résiduel ───────────────────────────────
-step "Nettoyage du provisioning…"
-
-# Datasources — supprimer TOUT puis remettre uniquement daly-metrics
-rm -f /etc/grafana/provisioning/datasources/*.yaml
-rm -f /etc/grafana/provisioning/datasources/*.yml
-install -d -m 755 -o root -g grafana /etc/grafana/provisioning/datasources
-install -m 644 -o root -g grafana \
-    "$REPO_ROOT/contrib/grafana/provisioning/datasources/daly-metrics.yaml" \
-    /etc/grafana/provisioning/datasources/
-info "Datasource : daly-metrics.yaml (unique)"
-
-# Dashboards provider — supprimer TOUT puis remettre uniquement daly-bms
-rm -f /etc/grafana/provisioning/dashboards/*.yaml
-rm -f /etc/grafana/provisioning/dashboards/*.yml
-install -d -m 755 -o root -g grafana /etc/grafana/provisioning/dashboards
-install -m 644 -o root -g grafana \
-    "$REPO_ROOT/contrib/grafana/provisioning/dashboards/daly-bms.yaml" \
-    /etc/grafana/provisioning/dashboards/
-info "Provider : daly-bms.yaml (unique)"
-
-# Supprimer le faux répertoire /etc/grafana/dashboards (ancien résidu)
-rm -rf /etc/grafana/dashboards
-
-# ── 5. Déployer les 15 dashboards JSON ──────────────────────────────────────
-step "Déploiement des 15 dashboards…"
-install -d -m 755 -o grafana -g grafana /var/lib/grafana/dashboards
-rm -f /var/lib/grafana/dashboards/*.json
-install -m 644 -o grafana -g grafana \
-    "$REPO_ROOT/contrib/grafana/dashboards/"*.json \
-    /var/lib/grafana/dashboards/
-N_DASH=$(ls /var/lib/grafana/dashboards/*.json 2>/dev/null | wc -l)
-info "$N_DASH dashboards copiés dans /var/lib/grafana/dashboards/"
-
-# ── 6. Réparer les permissions ──────────────────────────────────────────────
-step "Réparation des permissions…"
-chown -R grafana:grafana "$GRAFANA_DATA"
-chown -R grafana:grafana /var/lib/grafana/dashboards
-info "Permissions OK"
-
-# ── 7. Vérification du provisioning ─────────────────────────────────────────
-step "Vérification pré-démarrage…"
-echo "  Datasources :"
-ls -la /etc/grafana/provisioning/datasources/
-echo "  Providers :"
-ls -la /etc/grafana/provisioning/dashboards/
-echo "  Dashboards :"
-ls /var/lib/grafana/dashboards/ | head -20
-echo ""
-
-# ── 8. Démarrer Grafana ─────────────────────────────────────────────────────
-step "Démarrage de grafana-server…"
-systemctl start grafana-server
-sleep 5
-
 if ! systemctl is-active --quiet grafana-server; then
     error "grafana-server ne démarre pas — voir : journalctl -u grafana-server -n 50"
 fi
 info "grafana-server actif"
 
-# ── 9. Vérifier le provisioning dans les logs ───────────────────────────────
-step "Vérification des logs de démarrage…"
-LOGS=$(journalctl -u grafana-server --since "15 seconds ago" --no-pager 2>/dev/null)
+# ── 2. Réinitialiser le mot de passe admin ──────────────────────────────────
+step "Réinitialisation du mot de passe admin…"
+grafana-cli admin reset-admin-password "$ADMIN_PWD" 2>/dev/null || true
+sleep 2
+info "Mot de passe admin = $ADMIN_PWD"
 
-# Compter les dashboards provisionnés
-PROV_OK=$(echo "$LOGS" | grep -c "provisioning.*dashboard" || echo "0")
-PROV_ERR=$(echo "$LOGS" | grep -c "restricted database access" || echo "0")
+# ── 3. Attendre que l'API soit prête ────────────────────────────────────────
+step "Attente de l'API Grafana…"
+for i in $(seq 1 15); do
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        -u "$GRAFANA_AUTH" "$GRAFANA_URL/api/health" 2>/dev/null || echo "000")
+    if [[ "$HTTP_CODE" == "200" ]]; then
+        break
+    fi
+    if [[ $i -eq 15 ]]; then
+        error "API Grafana injoignable après 15 tentatives (HTTP $HTTP_CODE)"
+    fi
+    sleep 2
+done
+info "API Grafana opérationnelle"
 
-if [[ "$PROV_ERR" -gt 0 ]]; then
-    warn "$PROV_ERR erreurs 'restricted database access' détectées"
-    warn "Logs :"
-    echo "$LOGS" | grep -i "restricted\|error\|warn" | tail -10
+# ── 4. Déployer la datasource (par fichier — ça fonctionne) ────────────────
+step "Déploiement datasource daly-metrics.yaml…"
+rm -f /etc/grafana/provisioning/datasources/victoriametrics.yaml
+rm -f /etc/grafana/provisioning/datasources/redb.yaml
+install -d -m 755 -o root -g grafana /etc/grafana/provisioning/datasources
+install -m 644 -o root -g grafana \
+    "$REPO_ROOT/contrib/grafana/provisioning/datasources/daly-metrics.yaml" \
+    /etc/grafana/provisioning/datasources/
+info "Datasource provisionnée"
+
+# ── 5. Supprimer le provisioning fichier des dashboards ─────────────────────
+# On supprime le provider YAML pour éviter le conflit entre provisioning
+# fichier (qui échoue) et API import (qui fonctionne).
+step "Suppression du provisioning fichier des dashboards…"
+rm -f /etc/grafana/provisioning/dashboards/daly-bms.yaml
+rm -f /etc/grafana/provisioning/dashboards/dashboards.yaml
+rm -rf /etc/grafana/dashboards
+info "Provisioning fichier désactivé"
+
+# ── 6. Créer/trouver le dossier "Daly-BMS" via API ─────────────────────────
+step "Création du dossier Daly-BMS…"
+FOLDER_UID="daly-bms-folder"
+FOLDER_RESPONSE=$(curl -s -u "$GRAFANA_AUTH" \
+    "$GRAFANA_URL/api/folders/$FOLDER_UID" 2>/dev/null)
+FOLDER_ID=$(echo "$FOLDER_RESPONSE" | python3 -c "
+import json,sys
+try:
+    d = json.load(sys.stdin)
+    if 'id' in d and d.get('uid') == '$FOLDER_UID':
+        print(d['id'])
+    else:
+        print('')
+except: print('')
+" 2>/dev/null)
+
+if [[ -z "$FOLDER_ID" ]]; then
+    FOLDER_RESPONSE=$(curl -s -u "$GRAFANA_AUTH" \
+        -H "Content-Type: application/json" \
+        -X POST "$GRAFANA_URL/api/folders" \
+        -d "{\"uid\":\"$FOLDER_UID\",\"title\":\"Daly-BMS\"}" 2>/dev/null)
+    FOLDER_ID=$(echo "$FOLDER_RESPONSE" | python3 -c "
+import json,sys
+try: print(json.load(sys.stdin).get('id',''))
+except: print('')
+" 2>/dev/null)
+    if [[ -z "$FOLDER_ID" ]]; then
+        error "Impossible de créer le dossier Daly-BMS : $FOLDER_RESPONSE"
+    fi
+    info "Dossier Daly-BMS créé (id=$FOLDER_ID)"
 else
-    info "Aucune erreur de provisioning"
+    info "Dossier Daly-BMS existe (id=$FOLDER_ID)"
 fi
 
-# ── 10. Test API (credentials par défaut après reset) ───────────────────────
-step "Test API Grafana (admin/admin)…"
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -u admin:admin http://localhost:3000/api/search 2>/dev/null || echo "000")
-if [[ "$HTTP_CODE" == "200" ]]; then
-    VISIBLE=$(curl -s -u admin:admin 'http://localhost:3000/api/search?type=dash-db' 2>/dev/null \
-        | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
-    info "Dashboards visibles via API : $VISIBLE"
-elif [[ "$HTTP_CODE" == "401" ]]; then
-    warn "API retourne 401 — mot de passe admin modifié"
-    warn "Pour le réinitialiser : sudo grafana-cli admin reset-admin-password admin"
+# ── 7. Importer les 15 dashboards via API ───────────────────────────────────
+step "Import des 15 dashboards via API…"
+IMPORTED=0
+FAILED=0
+for json_file in "$DASHBOARD_DIR"/*.json; do
+    BASENAME=$(basename "$json_file")
+
+    # Construire le payload d'import API
+    PAYLOAD=$(python3 -c "
+import json, sys
+with open('$json_file') as f:
+    dash = json.load(f)
+# Forcer id=null pour que Grafana le crée/mette à jour par uid
+dash['id'] = None
+payload = {
+    'dashboard': dash,
+    'folderUid': '$FOLDER_UID',
+    'overwrite': True,
+    'message': 'Deployed by fix-grafana.sh'
+}
+print(json.dumps(payload))
+" 2>/dev/null)
+
+    if [[ -z "$PAYLOAD" ]]; then
+        echo -e "  ${RED}FAIL${NC} $BASENAME (erreur lecture JSON)"
+        FAILED=$((FAILED+1))
+        continue
+    fi
+
+    RESPONSE=$(curl -s -u "$GRAFANA_AUTH" \
+        -H "Content-Type: application/json" \
+        -X POST "$GRAFANA_URL/api/dashboards/db" \
+        -d "$PAYLOAD" 2>/dev/null)
+
+    STATUS=$(echo "$RESPONSE" | python3 -c "
+import json,sys
+try:
+    d = json.load(sys.stdin)
+    print(d.get('status','') or d.get('slug','ok'))
+except: print('error')
+" 2>/dev/null)
+
+    if [[ "$STATUS" == "success" || "$STATUS" != "error" ]]; then
+        TITLE=$(echo "$RESPONSE" | python3 -c "
+import json,sys
+try: print(json.load(sys.stdin).get('slug','?'))
+except: print('?')
+" 2>/dev/null)
+        echo -e "  ${GREEN}OK${NC}   $BASENAME → $TITLE"
+        IMPORTED=$((IMPORTED+1))
+    else
+        MSG=$(echo "$RESPONSE" | python3 -c "
+import json,sys
+try: print(json.load(sys.stdin).get('message','?'))
+except: print('?')
+" 2>/dev/null)
+        echo -e "  ${RED}FAIL${NC} $BASENAME : $MSG"
+        FAILED=$((FAILED+1))
+    fi
+done
+
+echo ""
+if [[ $FAILED -eq 0 ]]; then
+    info "Tous les $IMPORTED dashboards importés avec succès"
 else
-    warn "API retourne HTTP $HTTP_CODE"
+    warn "$IMPORTED importés, $FAILED en échec"
 fi
+
+# ── 8. Vérification finale ──────────────────────────────────────────────────
+step "Vérification finale…"
+VISIBLE=$(curl -s -u "$GRAFANA_AUTH" \
+    "$GRAFANA_URL/api/search?type=dash-db&folderIds=$FOLDER_ID" 2>/dev/null \
+    | python3 -c "import json,sys; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "?")
+info "Dashboards visibles dans le dossier Daly-BMS : $VISIBLE"
+
+# Recharger Grafana pour prendre en compte la datasource
+systemctl reload grafana-server 2>/dev/null || systemctl restart grafana-server
 
 # ── Résumé ──────────────────────────────────────────────────────────────────
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo ""
 echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  Grafana réparé${NC}"
+echo -e "${GREEN}  Grafana — 15 dashboards déployés${NC}"
 echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
 echo ""
-echo "  URL       : http://${IP:-localhost}:3000"
-echo "  Login     : admin / admin (mot de passe par défaut après reset)"
-echo "  Dossier   : Daly-BMS (15 dashboards)"
-echo "  Datasource: Daly Metrics (redb) → http://127.0.0.1:8080"
+echo "  URL        : http://${IP:-localhost}:3000"
+echo "  Login      : admin / $ADMIN_PWD"
+echo "  Dossier    : Daly-BMS ($VISIBLE dashboards)"
+echo "  Datasource : Daly Metrics (redb) → http://127.0.0.1:8080"
 echo ""
-echo "  Si le mot de passe a été changé :"
-echo "    sudo grafana-cli admin reset-admin-password admin"
+echo "  Re-déployer les dashboards :"
+echo "    sudo bash scripts/fix-grafana.sh"
 echo ""
