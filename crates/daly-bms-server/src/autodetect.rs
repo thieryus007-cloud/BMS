@@ -14,9 +14,7 @@ use tracing::{debug, info, warn};
 /// Retourne le nom du port ET le port déjà ouvert pour éviter une double
 /// ouverture (problème "Accès refusé" sur Windows).
 ///
-/// Timeout par port : 500 ms (un Daly répond normalement en < 200 ms).
-/// Ce port est réutilisé en production — 500 ms est cohérent avec le timeout
-/// nominal des drivers BMS/ET112/ATS et évite de l'infliger au SharedBus global.
+/// Timeout par port : 800 ms (un Daly répond normalement en < 200 ms).
 pub async fn find_daly_port(baud: u32) -> Option<(String, Arc<DalyPort>)> {
     let ports = match tokio_serial::available_ports() {
         Ok(p) => p,
@@ -41,7 +39,7 @@ pub async fn find_daly_port(baud: u32) -> Option<(String, Arc<DalyPort>)> {
         let name = port_info.port_name.clone();
         debug!("Test port {} ...", name);
 
-        let port = match DalyPort::open(&name, baud, 500) {
+        let port = match DalyPort::open(&name, baud, 800) {
             Ok(p) => p,
             Err(e) => {
                 debug!("{} : ouverture impossible ({})", name, e);
