@@ -120,7 +120,9 @@ pub async fn poll_loop<F, E>(
                     );
                     on_error(device.address, PollErrorKind::Timeout, "timeout".to_string());
                 }
-                Err(DalyError::Serial(e)) => {
+                Err(e @ (DalyError::Serial(_) | DalyError::Io(_))) => {
+                    // DalyError::Serial = erreur serialport ; DalyError::Io = erreur std::io
+                    // Les deux indiquent un problème de port — même traitement.
                     consecutive_serial_errors += 1;
                     let msg = e.to_string();
                     on_error(device.address, PollErrorKind::Serial, msg.clone());

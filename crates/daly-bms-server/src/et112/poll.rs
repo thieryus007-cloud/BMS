@@ -27,9 +27,21 @@ use super::types::Et112Snapshot;
 use crate::config::Et112DeviceConfig;
 use chrono::Local;
 use rs485_bus::{modbus_rtu, SharedBus};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
+
+/// Timeout nominal pour une réponse ET112 (ms).
+const FULL_TIMEOUT_MS: u64 = 500;
+
+/// Timeout réduit utilisé quand le ET112 ne répond pas (ms).
+/// Libère le mutex RS485 plus vite pour ne pas bloquer BMS/ATS/Irradiance.
+/// Calculé : req (8 oct) + resp (37 oct) à 9600 baud ≈ 47 ms + traitement ≈ 50 ms → ×3 = 150 ms.
+const FAST_TIMEOUT_MS: u64 = 150;
+
+/// Nombre d'échecs consécutifs avant de passer au timeout réduit.
+const FAST_TIMEOUT_AFTER: u32 = 3;
 
 /// Décode deux registres Modbus ET112 en INT32 signé (little-endian word order).
 ///
@@ -67,11 +79,29 @@ where
         "ET112 polling démarré (bus RS485 unifié)"
     );
 
+    // Compteurs d'échecs consécutifs par adresse — pilotent le timeout adaptatif.
+    let mut consecutive_errors: HashMap<u8, u32> = HashMap::new();
+
     loop {
         for dev in &devices {
             let address = dev.parsed_address();
-            match poll_device(&bus, address, dev).await {
+            let errors = consecutive_errors.entry(address).or_insert(0);
+            let timeout_ms = if *errors >= FAST_TIMEOUT_AFTER {
+                FAST_TIMEOUT_MS
+            } else {
+                FULL_TIMEOUT_MS
+            };
+
+            match poll_device(&bus, address, dev, timeout_ms).await {
                 Ok(snap) => {
+                    if *errors >= FAST_TIMEOUT_AFTER {
+                        info!(
+                            addr = format!("{:#04x}", address),
+                            name = %dev.name,
+                            "ET112 de nouveau en ligne — timeout restauré à {}ms", FULL_TIMEOUT_MS
+                        );
+                    }
+                    *errors = 0;
                     debug!(
                         addr  = format!("{:#04x}", address),
                         name  = %dev.name,
@@ -82,13 +112,17 @@ where
                     on_snapshot(snap);
                 }
                 Err(e) => {
+                    *errors += 1;
                     let msg = format!("{:#}", e);
-                    warn!(
-                        addr = format!("{:#04x}", address),
-                        name = %dev.name,
-                        "ET112 erreur lecture : {}",
-                        msg
-                    );
+                    if *errors == 1 || *errors == FAST_TIMEOUT_AFTER || errors.is_multiple_of(10) {
+                        warn!(
+                            addr    = format!("{:#04x}", address),
+                            name    = %dev.name,
+                            errors  = *errors,
+                            timeout = timeout_ms,
+                            "ET112 erreur lecture : {}", msg
+                        );
+                    }
                     on_result(address, &dev.name, Err(msg));
                 }
             }
@@ -99,62 +133,57 @@ where
 }
 
 /// Interroge un ET112 et retourne un snapshot complet.
+///
+/// `timeout_ms` permet de passer un timeout réduit quand le ET112 est connu absent,
+/// afin de libérer le mutex RS485 rapidement pour les autres drivers.
 async fn poll_device(
     bus: &SharedBus,
     address: u8,
     dev: &Et112DeviceConfig,
+    timeout_ms: u64,
 ) -> anyhow::Result<Et112Snapshot> {
+
+    /// Envoie une requête FC04 et lit la réponse avec un timeout explicite.
+    async fn transact_fc04(
+        bus: &SharedBus,
+        address: u8,
+        start_reg: u16,
+        count: u16,
+        timeout_ms: u64,
+        label: &str,
+    ) -> anyhow::Result<Vec<u16>> {
+        let req = modbus_rtu::build_fc04(address, start_reg, count);
+        let resp_len = modbus_rtu::response_len(count);
+        let mut guard = bus.acquire().await;
+        guard.flush_rx();
+        guard.write_all(&req).await
+            .map_err(|e| anyhow::anyhow!("ET112 {:#04x} {label} TX: {e}", address))?;
+        guard.inter_frame_delay().await;
+        let resp = guard.read_exact_with_timeout(resp_len, timeout_ms).await
+            .ok_or_else(|| anyhow::anyhow!("ET112 {:#04x} {label}: Timeout ({timeout_ms} ms)", address))?
+            .map_err(|e| anyhow::anyhow!("ET112 {:#04x} {label} RX: {e}", address))?;
+        modbus_rtu::parse_read_response(address, 0x04, &resp)
+            .map_err(|e| anyhow::anyhow!("ET112 {:#04x} parse {label}: {e}", address))
+    }
+
     // ── Bloc 1 : 0x0000–0x000F → 16 registres ────────────────────────────────
     // Tension, courant, puissances (active/apparente/réactive), facteur de puissance,
     // (2 registres réservés), fréquence (INT16 au registre 0x000F)
-    let req1 = modbus_rtu::build_fc04(address, 0x0000, 16);
-    let resp1 = bus
-        .transact(&req1, modbus_rtu::response_len(16))
-        .await
-        .map_err(|e| anyhow::anyhow!("ET112 {:#04x} bloc1: {}", address, e))?;
-    let regs1 = modbus_rtu::parse_read_response(address, 0x04, &resp1)
-        .map_err(|e| anyhow::anyhow!("ET112 {:#04x} parse bloc1: {}", address, e))?;
-
+    let regs1 = transact_fc04(bus, address, 0x0000, 16, timeout_ms, "bloc1").await?;
     if regs1.len() < 16 {
-        anyhow::bail!(
-            "ET112 {:#04x} bloc1 trop court ({} registres)",
-            address,
-            regs1.len()
-        );
+        anyhow::bail!("ET112 {:#04x} bloc1 trop court ({} registres)", address, regs1.len());
     }
 
     // ── Bloc 2 : 0x0010–0x0011 → 2 registres (énergie import, INT32) ─────────
-    let req2 = modbus_rtu::build_fc04(address, 0x0010, 2);
-    let resp2 = bus
-        .transact(&req2, modbus_rtu::response_len(2))
-        .await
-        .map_err(|e| anyhow::anyhow!("ET112 {:#04x} bloc2: {}", address, e))?;
-    let regs2 = modbus_rtu::parse_read_response(address, 0x04, &resp2)
-        .map_err(|e| anyhow::anyhow!("ET112 {:#04x} parse bloc2: {}", address, e))?;
-
+    let regs2 = transact_fc04(bus, address, 0x0010, 2, timeout_ms, "bloc2").await?;
     if regs2.len() < 2 {
-        anyhow::bail!(
-            "ET112 {:#04x} bloc2 trop court ({} registres)",
-            address,
-            regs2.len()
-        );
+        anyhow::bail!("ET112 {:#04x} bloc2 trop court ({} registres)", address, regs2.len());
     }
 
     // ── Bloc 3 : 0x0020–0x0021 → 2 registres (énergie export, INT32) ─────────
-    let req3 = modbus_rtu::build_fc04(address, 0x0020, 2);
-    let resp3 = bus
-        .transact(&req3, modbus_rtu::response_len(2))
-        .await
-        .map_err(|e| anyhow::anyhow!("ET112 {:#04x} bloc3: {}", address, e))?;
-    let regs3 = modbus_rtu::parse_read_response(address, 0x04, &resp3)
-        .map_err(|e| anyhow::anyhow!("ET112 {:#04x} parse bloc3: {}", address, e))?;
-
+    let regs3 = transact_fc04(bus, address, 0x0020, 2, timeout_ms, "bloc3").await?;
     if regs3.len() < 2 {
-        anyhow::bail!(
-            "ET112 {:#04x} bloc3 trop court ({} registres)",
-            address,
-            regs3.len()
-        );
+        anyhow::bail!("ET112 {:#04x} bloc3 trop court ({} registres)", address, regs3.len());
     }
 
     // ── Décodage INT32 little-endian word order ────────────────────────────────
