@@ -23,7 +23,8 @@ use tokio::sync::Mutex;
 use tracing::trace;
 
 /// Timeout du flush RX (drain des octets résiduels avant émission).
-const FLUSH_TIMEOUT_MS: u64 = 10;
+/// 50 ms pour absorber les trames parasites laissées par un appareil hors tension.
+const FLUSH_TIMEOUT_MS: u64 = 50;
 
 // =============================================================================
 // SharedBus

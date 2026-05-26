@@ -52,6 +52,18 @@ use tracing::{debug, info, warn};
 /// Validé sur matériel CHINT NXZB — requis pour éviter les timeouts.
 const INTER_REG_DELAY_MS: u64 = 90;
 
+/// Timeout nominal pour une réponse ATS (ms).
+const FULL_TIMEOUT_MS: u64 = 500;
+
+/// Timeout réduit utilisé quand l'ATS ne répond pas (ms).
+/// Libère le mutex RS485 plus vite pour ne pas bloquer BMS/ET112.
+/// Calculé : trame Req (8 oct) + trame Resp (7 oct) à 9600 baud ≈ 16 ms,
+/// + traitement CHINT ~20 ms → marge ×3 = 80 ms.
+const FAST_TIMEOUT_MS: u64 = 80;
+
+/// Nombre d'échecs consécutifs avant de passer au timeout réduit.
+const FAST_TIMEOUT_AFTER: u32 = 3;
+
 /// Longueur de réponse FC=06 (écho requête).
 const FC06_RESPONSE_LEN: usize = 8;
 
@@ -60,18 +72,25 @@ const FC06_RESPONSE_LEN: usize = 8;
 // =============================================================================
 
 /// Lit un seul registre Modbus et retourne sa valeur, ou None en cas d'erreur.
-async fn read_reg(bus: &SharedBus, addr: u8, reg: u16) -> Option<u16> {
+///
+/// `timeout_ms` permet de passer un timeout réduit quand l'ATS est connu absent,
+/// afin de libérer le mutex RS485 rapidement pour les autres drivers (BMS, ET112).
+async fn read_reg(bus: &SharedBus, addr: u8, reg: u16, timeout_ms: u64) -> Option<u16> {
     let req = modbus_rtu::build_fc03(addr, reg, 1);
     let resp_len = modbus_rtu::response_len(1);
 
     tokio::time::sleep(Duration::from_millis(INTER_REG_DELAY_MS)).await;
 
-    match bus.transact(&req, resp_len).await {
-        Ok(resp) => match modbus_rtu::parse_read_response(addr, 0x03, &resp) {
+    let mut guard = bus.acquire().await;
+    guard.flush_rx().await;
+    guard.write_all(&req).await.ok()?;
+    guard.inter_frame_delay().await;
+    match guard.read_exact_with_timeout(resp_len, timeout_ms).await {
+        Some(Ok(resp)) => match modbus_rtu::parse_read_response(addr, 0x03, &resp) {
             Ok(regs) if !regs.is_empty() => Some(regs[0]),
             _ => None,
         },
-        Err(_) => None,
+        _ => None,
     }
 }
 
@@ -141,7 +160,15 @@ where
     let mut consecutive_errors: u32 = 0;
 
     loop {
-        match poll_ats(&bus, addr, &cfg.name, &model).await {
+        // Après FAST_TIMEOUT_AFTER échecs consécutifs, utiliser un timeout réduit
+        // pour ne pas bloquer le mutex RS485 (BMS/ET112) pendant 500 ms à chaque essai.
+        let timeout_ms = if consecutive_errors >= FAST_TIMEOUT_AFTER {
+            FAST_TIMEOUT_MS
+        } else {
+            FULL_TIMEOUT_MS
+        };
+
+        match poll_ats(&bus, addr, &cfg.name, &model, timeout_ms).await {
             Ok(snap) => {
                 debug!(
                     addr   = format!("{:#04x}", addr),
@@ -150,6 +177,12 @@ where
                     v2a    = snap.v2a,
                     "ATS snapshot OK"
                 );
+                if consecutive_errors >= FAST_TIMEOUT_AFTER {
+                    info!(
+                        addr = format!("{:#04x}", addr),
+                        "ATS de nouveau en ligne — timeout restauré à {}ms", FULL_TIMEOUT_MS
+                    );
+                }
                 consecutive_errors = 0;
                 on_result(addr, &cfg.name, Ok(()));
                 on_snapshot(snap);
@@ -157,10 +190,11 @@ where
             Err(e) => {
                 consecutive_errors += 1;
                 let msg = format!("{:#}", e);
-                if consecutive_errors == 1 || consecutive_errors.is_multiple_of(10) {
+                if consecutive_errors == 1 || consecutive_errors == FAST_TIMEOUT_AFTER || consecutive_errors.is_multiple_of(10) {
                     warn!(
-                        addr   = format!("{:#04x}", addr),
-                        errors = consecutive_errors,
+                        addr    = format!("{:#04x}", addr),
+                        errors  = consecutive_errors,
+                        timeout = timeout_ms,
                         "ATS erreur lecture : {}", msg
                     );
                 }
@@ -178,7 +212,7 @@ where
 
 async fn detect_model(bus: &SharedBus, addr: u8) -> String {
     tokio::time::sleep(Duration::from_millis(INTER_REG_DELAY_MS)).await;
-    match read_reg(bus, addr, 0x2065).await {
+    match read_reg(bus, addr, 0x2065, FULL_TIMEOUT_MS).await {
         Some(_) => "MN".to_string(),
         None    => "BN".to_string(),
     }
@@ -189,28 +223,29 @@ async fn detect_model(bus: &SharedBus, addr: u8) -> String {
 // =============================================================================
 
 async fn poll_ats(
-    bus:   &SharedBus,
-    addr:  u8,
-    name:  &str,
-    model: &str,
+    bus:        &SharedBus,
+    addr:       u8,
+    name:       &str,
+    model:      &str,
+    timeout_ms: u64,
 ) -> anyhow::Result<AtsSnapshot> {
 
     // ── Tensions source 1 ────────────────────────────────────────────────────
-    let v1a = read_reg(bus, addr, 0x0006).await.ok_or_else(|| anyhow::anyhow!("Timeout 0x0006 (v1a)"))? as f32;
-    let v1b = read_reg(bus, addr, 0x0007).await.unwrap_or(0) as f32;
-    let v1c = read_reg(bus, addr, 0x0008).await.unwrap_or(0) as f32;
+    let v1a = read_reg(bus, addr, 0x0006, timeout_ms).await.ok_or_else(|| anyhow::anyhow!("Timeout 0x0006 (v1a)"))? as f32;
+    let v1b = read_reg(bus, addr, 0x0007, timeout_ms).await.unwrap_or(0) as f32;
+    let v1c = read_reg(bus, addr, 0x0008, timeout_ms).await.unwrap_or(0) as f32;
 
     // ── Tensions source 2 ────────────────────────────────────────────────────
-    let v2a = read_reg(bus, addr, 0x0009).await.unwrap_or(0) as f32;
-    let v2b = read_reg(bus, addr, 0x000A).await.unwrap_or(0) as f32;
-    let v2c = read_reg(bus, addr, 0x000B).await.unwrap_or(0) as f32;
+    let v2a = read_reg(bus, addr, 0x0009, timeout_ms).await.unwrap_or(0) as f32;
+    let v2b = read_reg(bus, addr, 0x000A, timeout_ms).await.unwrap_or(0) as f32;
+    let v2c = read_reg(bus, addr, 0x000B, timeout_ms).await.unwrap_or(0) as f32;
 
     // ── Version SW ───────────────────────────────────────────────────────────
-    let sw_version = read_reg(bus, addr, 0x000C).await.unwrap_or(0) as f32 / 100.0;
+    let sw_version = read_reg(bus, addr, 0x000C, timeout_ms).await.unwrap_or(0) as f32 / 100.0;
 
     // ── Fréquences (MN seulement) ─────────────────────────────────────────
     let (freq1_hz, freq2_hz) = if model == "MN" {
-        match read_reg(bus, addr, 0x000D).await {
+        match read_reg(bus, addr, 0x000D, timeout_ms).await {
             Some(freq) => (Some(((freq >> 8) & 0xFF) as u8), Some((freq & 0xFF) as u8)),
             None       => (None, None),
         }
@@ -219,16 +254,16 @@ async fn poll_ats(
     };
 
     // ── Tensions max enregistrées ─────────────────────────────────────────
-    let max1_v = read_reg(bus, addr, 0x000F).await.unwrap_or(0);
-    let max2_v = read_reg(bus, addr, 0x0012).await.unwrap_or(0);
+    let max1_v = read_reg(bus, addr, 0x000F, timeout_ms).await.unwrap_or(0);
+    let max2_v = read_reg(bus, addr, 0x0012, timeout_ms).await.unwrap_or(0);
 
     // ── Compteurs & runtime ───────────────────────────────────────────────
-    let cnt1      = read_reg(bus, addr, 0x0015).await.unwrap_or(0);
-    let cnt2      = read_reg(bus, addr, 0x0016).await.unwrap_or(0);
-    let runtime_h = read_reg(bus, addr, 0x0017).await.unwrap_or(0);
+    let cnt1      = read_reg(bus, addr, 0x0015, timeout_ms).await.unwrap_or(0);
+    let cnt2      = read_reg(bus, addr, 0x0016, timeout_ms).await.unwrap_or(0);
+    let runtime_h = read_reg(bus, addr, 0x0017, timeout_ms).await.unwrap_or(0);
 
     // ── Statut tensions phases (0x004F) ───────────────────────────────────
-    let pwr = read_reg(bus, addr, 0x004F).await.unwrap_or(0);
+    let pwr = read_reg(bus, addr, 0x004F, timeout_ms).await.unwrap_or(0);
     let s1a = PhaseStatus::from_bits(((pwr >> 8)  & 0x03) as u8);
     let s1b = PhaseStatus::from_bits(((pwr >> 10) & 0x03) as u8);
     let s1c = PhaseStatus::from_bits(((pwr >> 12) & 0x03) as u8);
@@ -242,7 +277,7 @@ async fn poll_ats(
     // bit 1 = Mode           : 1=Auto, 0=Manuel
     // bit 8 = Télécommande   : 1=active, 0=inactive
     // bits 5-7 = Code défaut
-    let sw = read_reg(bus, addr, 0x0050).await.unwrap_or(0);
+    let sw = read_reg(bus, addr, 0x0050, timeout_ms).await.unwrap_or(0);
     let sw1_raw    = (sw & 0x0008) != 0;
     let sw2_raw    = (sw & 0x0010) != 0;
     let middle_off = !sw1_raw && !sw2_raw;
@@ -261,23 +296,23 @@ async fn poll_ats(
     };
 
     // ── Config Modbus (optionnel) ─────────────────────────────────────────
-    let modbus_addr     = read_reg(bus, addr, 0x0100).await;
-    let modbus_baud_code = read_reg(bus, addr, 0x0101).await;
+    let modbus_addr      = read_reg(bus, addr, 0x0100, timeout_ms).await;
+    let modbus_baud_code = read_reg(bus, addr, 0x0101, timeout_ms).await;
 
     // ── T1 et T2 — tous modèles (Qwen reference : toujours lus, BN et MN) ──
-    let t1_s = read_reg(bus, addr, 0x2069).await;
-    let t2_s = read_reg(bus, addr, 0x206A).await;
+    let t1_s = read_reg(bus, addr, 0x2069, timeout_ms).await;
+    let t2_s = read_reg(bus, addr, 0x206A, timeout_ms).await;
 
     // ── Registres MN uniquement ───────────────────────────────────────────
     let (operation_mode, uv1, uv2, ov1, ov2, t3_s, t4_s) = if model == "MN" {
         (
-            read_reg(bus, addr, 0x206D).await.map(OperationMode::from_u16),
-            read_reg(bus, addr, 0x2065).await,
-            read_reg(bus, addr, 0x2066).await,
-            read_reg(bus, addr, 0x2067).await,
-            read_reg(bus, addr, 0x2068).await,
-            read_reg(bus, addr, 0x206B).await,
-            read_reg(bus, addr, 0x206C).await,
+            read_reg(bus, addr, 0x206D, timeout_ms).await.map(OperationMode::from_u16),
+            read_reg(bus, addr, 0x2065, timeout_ms).await,
+            read_reg(bus, addr, 0x2066, timeout_ms).await,
+            read_reg(bus, addr, 0x2067, timeout_ms).await,
+            read_reg(bus, addr, 0x2068, timeout_ms).await,
+            read_reg(bus, addr, 0x206B, timeout_ms).await,
+            read_reg(bus, addr, 0x206C, timeout_ms).await,
         )
     } else {
         (None, None, None, None, None, None, None)

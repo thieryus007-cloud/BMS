@@ -34,7 +34,7 @@ impl Default for PollConfig {
             interval_ms:       1000,
             retries:           3,
             backoff_initial_ms: 2000,
-            backoff_max_ms:    30_000,
+            backoff_max_ms:     5_000,
         }
     }
 }
@@ -74,6 +74,8 @@ pub async fn poll_loop<F, E>(
     let on_snapshot = Arc::new(on_snapshot);
     let on_error = Arc::new(on_error);
     let mut backoff_ms = config.backoff_initial_ms;
+    // Erreurs série consécutives — backoff exponentiel seulement à partir de 2
+    let mut consecutive_serial_errors: u32 = 0;
     // Cache des versions firmware (lues une seule fois par BMS)
     let mut fw_cache: HashMap<u8, (String, String)> = HashMap::new();
 
@@ -106,6 +108,7 @@ pub async fn poll_loop<F, E>(
             match poll_device(&manager.port, device, &config, fw_sw, fw_hw).await {
                 Ok(snapshot) => {
                     backoff_ms = config.backoff_initial_ms; // reset backoff
+                    consecutive_serial_errors = 0;
                     on_snapshot(snapshot);
                 }
                 Err(DalyError::Timeout { .. }) => {
@@ -116,11 +119,26 @@ pub async fn poll_loop<F, E>(
                     on_error(device.address, PollErrorKind::Timeout, "timeout".to_string());
                 }
                 Err(DalyError::Serial(e)) => {
+                    consecutive_serial_errors += 1;
                     let msg = e.to_string();
-                    error!("Erreur port série : {} — backoff {}ms", e, backoff_ms);
-                    on_error(device.address, PollErrorKind::Serial, msg);
-                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                    backoff_ms = (backoff_ms * 2).min(config.backoff_max_ms);
+                    on_error(device.address, PollErrorKind::Serial, msg.clone());
+                    if consecutive_serial_errors >= 2 {
+                        // Erreur persistante — backoff exponentiel (max 5s)
+                        error!(
+                            bms = format!("{:#04x}", device.address),
+                            consecutive = consecutive_serial_errors,
+                            "Erreur port série persistante : {} — backoff {}ms", e, backoff_ms
+                        );
+                        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                        backoff_ms = (backoff_ms * 2).min(config.backoff_max_ms);
+                    } else {
+                        // Première erreur — probablement transitoire (bruit électrique)
+                        warn!(
+                            bms = format!("{:#04x}", device.address),
+                            "Erreur port série transitoire : {} — retry 200ms", e
+                        );
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                    }
                     break; // sortir de la boucle devices et réessayer le cycle
                 }
                 Err(e) => {
