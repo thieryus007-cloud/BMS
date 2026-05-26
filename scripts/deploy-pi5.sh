@@ -77,7 +77,21 @@ else
     info "$CONF existe déjà — préservé (pas d'écrasement)"
 fi
 
-# ── 3.bis Auto-réparation des flags critiques (post-Phase 5.1) ───────────────
+# ── 3.bis Auto-réparation : port série vide → /dev/ttyUSB0 ──────────────────
+# Un port vide déclenche l'auto-détection qui échoue si le BMS ne répond pas
+# dans la fenêtre de scan au démarrage. Le port est fixe sur ce Pi5.
+step "Vérification port série…"
+SERIAL_PORT=$(awk '/^\[serial\]/,/^\[/' "$CONF" \
+    | grep -E '^port' | sed -E 's/.*=\s*"([^"]*)".*/\1/' | head -1)
+if [[ -z "$SERIAL_PORT" ]]; then
+    warn "[serial].port vide — réparation : /dev/ttyUSB0"
+    sudo sed -i '/^\[serial\]/,/^\[/{s|^port = ""|port = "/dev/ttyUSB0"|}' "$CONF"
+    info "[serial].port forcé à /dev/ttyUSB0 ✓"
+else
+    info "[serial].port = $SERIAL_PORT ✓"
+fi
+
+# ── 3.ter Auto-réparation des flags critiques (post-Phase 5.1) ───────────────
 # metrics-store est maintenant la SEULE TSDB de lecture — si elle est
 # désactivée par accident (cp Config.toml, sed mal ciblé, etc.), le service
 # n'a plus de backend et le dashboard custom + Grafana retournent vide.
