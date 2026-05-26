@@ -112,6 +112,8 @@ pub async fn poll_loop<F, E>(
                     on_snapshot(snapshot);
                 }
                 Err(DalyError::Timeout { .. }) => {
+                    // Timeout = port série fonctionnel, juste le BMS qui ne répond pas
+                    consecutive_serial_errors = 0;
                     warn!(
                         bms = format!("{:#04x}", device.address),
                         "Timeout — BMS peut-être hors ligne"
@@ -142,6 +144,8 @@ pub async fn poll_loop<F, E>(
                     break; // sortir de la boucle devices et réessayer le cycle
                 }
                 Err(e) => {
+                    // CRC/trame invalide = port série fonctionnel (bruit ou réponse corrompue)
+                    consecutive_serial_errors = 0;
                     let msg = format!("{:?}", e);
                     warn!(
                         bms = format!("{:#04x}", device.address),

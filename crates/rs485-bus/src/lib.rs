@@ -20,11 +20,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
+use tokio_serial::{ClearBuffer, SerialPort};
 use tracing::trace;
-
-/// Timeout du flush RX (drain des octets résiduels avant émission).
-/// 50 ms pour absorber les trames parasites laissées par un appareil hors tension.
-const FLUSH_TIMEOUT_MS: u64 = 50;
 
 // =============================================================================
 // SharedBus
@@ -93,7 +90,7 @@ impl SharedBus {
     /// Pour des transactions complexes (Daly multi-trame), utiliser [`acquire()`].
     pub async fn transact(&self, tx: &[u8], resp_len: usize) -> anyhow::Result<Vec<u8>> {
         let mut guard = self.acquire().await;
-        guard.flush_rx().await;
+        guard.flush_rx();
         guard.write_all(tx).await
             .map_err(|e| anyhow::anyhow!("TX erreur : {}", e))?;
         guard.inter_frame_delay().await;
@@ -121,13 +118,12 @@ pub struct BusGuard<'a> {
 
 impl<'a> BusGuard<'a> {
     /// Vide le buffer RX (drain les octets résiduels d'une transaction précédente).
-    pub async fn flush_rx(&mut self) {
-        let mut tmp = [0u8; 256];
-        let _ = tokio::time::timeout(
-            Duration::from_millis(FLUSH_TIMEOUT_MS),
-            self.port.read(&mut tmp),
-        )
-        .await;
+    ///
+    /// Utilise `clear(ClearBuffer::Input)` — opération noyau non-bloquante (tcflush).
+    /// N'ajoute aucune latence quand le bus est calme, contrairement à une lecture
+    /// avec timeout.
+    pub fn flush_rx(&mut self) {
+        let _ = self.port.clear(ClearBuffer::Input);
     }
 
     /// Écrit tous les octets dans le port + flush.
