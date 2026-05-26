@@ -109,7 +109,7 @@ impl DalyPort {
         // Acquérir le verrou exclusif pour toute la transaction
         let mut guard = self.bus.acquire().await;
 
-        guard.flush_rx().await;
+        guard.flush_rx();
         guard.write_all(req_bytes).await?; // std::io::Error → DalyError::Io via #[from]
         guard.inter_frame_delay().await;
 
@@ -205,7 +205,7 @@ impl DalyPort {
         let request = RequestFrame::read(bms_address, cmd);
 
         let mut guard = self.bus.acquire().await;
-        guard.flush_rx().await;
+        guard.flush_rx();
 
         let req_bytes = request.as_bytes();
         trace!(

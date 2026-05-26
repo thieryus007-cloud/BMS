@@ -82,7 +82,7 @@ async fn read_reg(bus: &SharedBus, addr: u8, reg: u16, timeout_ms: u64) -> Optio
     tokio::time::sleep(Duration::from_millis(INTER_REG_DELAY_MS)).await;
 
     let mut guard = bus.acquire().await;
-    guard.flush_rx().await;
+    guard.flush_rx();
     guard.write_all(&req).await.ok()?;
     guard.inter_frame_delay().await;
     match guard.read_exact_with_timeout(resp_len, timeout_ms).await {
@@ -153,8 +153,9 @@ where
         "ATS CHINT polling démarré (lecture registre par registre)"
     );
 
-    // Détection du modèle au démarrage
-    let model = detect_model(&bus, addr).await;
+    // Détection du modèle au démarrage (peut retourner "BN" si l'ATS est hors tension).
+    // Sera redétecté dès que l'ATS revient en ligne après une absence prolongée.
+    let mut model = detect_model(&bus, addr).await;
     info!(addr = format!("{:#04x}", addr), model = %model, "Modèle ATS détecté");
 
     let mut consecutive_errors: u32 = 0;
@@ -178,10 +179,11 @@ where
                     "ATS snapshot OK"
                 );
                 if consecutive_errors >= FAST_TIMEOUT_AFTER {
-                    info!(
-                        addr = format!("{:#04x}", addr),
-                        "ATS de nouveau en ligne — timeout restauré à {}ms", FULL_TIMEOUT_MS
-                    );
+                    // L'ATS revient en ligne après une absence — redétecter le modèle
+                    // car detect_model() au démarrage avait peut-être échoué (ATS absent).
+                    info!(addr = format!("{:#04x}", addr), "ATS de nouveau en ligne — redétection du modèle");
+                    model = detect_model(&bus, addr).await;
+                    info!(addr = format!("{:#04x}", addr), model = %model, "Modèle ATS redétecté");
                 }
                 consecutive_errors = 0;
                 on_result(addr, &cfg.name, Ok(()));
@@ -231,7 +233,7 @@ async fn poll_ats(
 ) -> anyhow::Result<AtsSnapshot> {
 
     // ── Tensions source 1 ────────────────────────────────────────────────────
-    let v1a = read_reg(bus, addr, 0x0006, timeout_ms).await.ok_or_else(|| anyhow::anyhow!("Timeout 0x0006 (v1a)"))? as f32;
+    let v1a = read_reg(bus, addr, 0x0006, timeout_ms).await.ok_or_else(|| anyhow::anyhow!("Erreur lecture 0x0006 (v1a)"))? as f32;
     let v1b = read_reg(bus, addr, 0x0007, timeout_ms).await.unwrap_or(0) as f32;
     let v1c = read_reg(bus, addr, 0x0008, timeout_ms).await.unwrap_or(0) as f32;
 
