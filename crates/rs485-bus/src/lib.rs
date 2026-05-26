@@ -102,6 +102,29 @@ impl SharedBus {
             .ok_or_else(|| anyhow::anyhow!("Timeout ({} ms) — aucune réponse", self.timeout_ms))?
             .map_err(|e| anyhow::anyhow!("RX erreur : {}", e))
     }
+
+    /// Transaction avec timeout explicite : flush + TX + délai inter-trame + RX exact.
+    ///
+    /// Identique à [`transact()`] mais avec un timeout de réception paramétrable.
+    /// Permet à un driver d'utiliser un timeout inférieur au timeout global du bus,
+    /// afin de libérer le Mutex RS485 rapidement quand l'appareil est hors tension.
+    pub async fn transact_with_timeout(
+        &self,
+        tx: &[u8],
+        resp_len: usize,
+        timeout_ms: u64,
+    ) -> anyhow::Result<Vec<u8>> {
+        let mut guard = self.acquire().await;
+        guard.flush_rx().await;
+        guard.write_all(tx).await
+            .map_err(|e| anyhow::anyhow!("TX erreur : {}", e))?;
+        guard.inter_frame_delay().await;
+        guard
+            .read_exact_with_timeout(resp_len, timeout_ms)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Timeout ({} ms) — aucune réponse", timeout_ms))?
+            .map_err(|e| anyhow::anyhow!("RX erreur : {}", e))
+    }
 }
 
 // =============================================================================

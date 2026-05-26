@@ -52,6 +52,12 @@ use tracing::{debug, info, warn};
 /// Validé sur matériel CHINT NXZB — requis pour éviter les timeouts.
 const INTER_REG_DELAY_MS: u64 = 90;
 
+/// Timeout de réception pour une réponse ATS (ms).
+/// L'ATS répond en < 30 ms à 9600 baud — 150 ms donne une marge ×5.
+/// Inférieur au timeout global du bus (500 ms) : libère le Mutex RS485
+/// ~3× plus vite quand l'ATS est hors tension, sans impacter BMS ni ET112.
+const ATS_TIMEOUT_MS: u64 = 150;
+
 /// Longueur de réponse FC=06 (écho requête).
 const FC06_RESPONSE_LEN: usize = 8;
 
@@ -66,7 +72,7 @@ async fn read_reg(bus: &SharedBus, addr: u8, reg: u16) -> Option<u16> {
 
     tokio::time::sleep(Duration::from_millis(INTER_REG_DELAY_MS)).await;
 
-    match bus.transact(&req, resp_len).await {
+    match bus.transact_with_timeout(&req, resp_len, ATS_TIMEOUT_MS).await {
         Ok(resp) => match modbus_rtu::parse_read_response(addr, 0x03, &resp) {
             Ok(regs) if !regs.is_empty() => Some(regs[0]),
             _ => None,
