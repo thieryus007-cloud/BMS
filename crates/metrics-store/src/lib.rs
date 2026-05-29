@@ -731,4 +731,37 @@ mod tests {
         }
         let _ = std::fs::remove_file(&path);
     }
+
+    /// Revue Gemini PR #521 : `increase` sur tier raw doit gérer un reset
+    /// *intermédiaire* (au milieu de la fenêtre), pas seulement aux bornes.
+    /// Valide de bout en bout le re-routage (chargement de tous les points).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn increase_handles_intermediate_reset_e2e() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("midreset");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 8, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let w = store.writer();
+            // Compteur avec reset au milieu : 10, 20, 5, 15.
+            for (i, v) in [10.0, 20.0, 5.0, 15.0].into_iter().enumerate() {
+                w.write(Sample::new("cnt", 100_000 + i as i64 * 1_000, v)).await.unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let e = parse_and_validate("increase(cnt[10s])").unwrap();
+            let v = ev.eval_instant(&e, 103_000).unwrap();
+            assert_eq!(v.len(), 1);
+            // (20-10) + reset(5) + (15-5) = 25, pas l'ancien (15-10)=5.
+            assert!((v[0].value - 25.0).abs() < 1e-9, "increase mid-reset = {}", v[0].value);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
 }
