@@ -213,12 +213,7 @@ pub async fn ats_send_raw(
     Json(body): Json<SendRawBody>,
 ) -> impl IntoResponse {
     // Décoder la trame hex
-    let hex = body.frame_hex.replace([' ', ':'], "");
-    let frame: Vec<u8> = match (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| ()))
-        .collect::<Result<Vec<_>, _>>()
-    {
+    let frame: Vec<u8> = match decode_hex_frame(&body.frame_hex) {
         Ok(v) => v,
         Err(_) => {
             return (
@@ -338,4 +333,56 @@ fn ats_addr(state: &AppState) -> u8 {
         .as_ref()
         .map(|c| c.address)
         .unwrap_or(6)
+}
+
+/// Décode une trame Modbus hexadécimale fournie par l'utilisateur.
+///
+/// Les espaces et `:` sont ignorés. Retourne `Err(())` si la chaîne contient un
+/// caractère non hexadécimal, n'est pas ASCII, ou a un nombre impair de chiffres.
+///
+/// La garde longueur paire + ASCII est indispensable : sans elle, une longueur
+/// impaire (ou un caractère multi-octets) ferait déborder/couper `&hex[i..i + 2]`
+/// et provoquerait un panic du handler au lieu d'un retour d'erreur propre.
+fn decode_hex_frame(frame_hex: &str) -> Result<Vec<u8>, ()> {
+    let hex = frame_hex.replace([' ', ':'], "");
+    if !hex.is_ascii() || hex.len() % 2 != 0 {
+        return Err(());
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| ()))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_hex_frame;
+
+    #[test]
+    fn decode_valid_frame_with_separators() {
+        assert_eq!(decode_hex_frame("01 06 00 00"), Ok(vec![0x01, 0x06, 0x00, 0x00]));
+        assert_eq!(decode_hex_frame("01:06:00:00"), Ok(vec![0x01, 0x06, 0x00, 0x00]));
+        assert_eq!(decode_hex_frame("010600FF"), Ok(vec![0x01, 0x06, 0x00, 0xFF]));
+        assert_eq!(decode_hex_frame(""), Ok(vec![]));
+    }
+
+    #[test]
+    fn reject_odd_length_without_panic() {
+        // Avant le correctif : panic par dépassement de tranche.
+        assert_eq!(decode_hex_frame("010"), Err(()));
+        assert_eq!(decode_hex_frame("1"), Err(()));
+    }
+
+    #[test]
+    fn reject_non_ascii_without_panic() {
+        // Caractère multi-octets : couperait une frontière UTF-8 → panic.
+        assert_eq!(decode_hex_frame("0é"), Err(()));
+        assert_eq!(decode_hex_frame("café"), Err(()));
+    }
+
+    #[test]
+    fn reject_non_hex_digits() {
+        assert_eq!(decode_hex_frame("zz"), Err(()));
+        assert_eq!(decode_hex_frame("01gg"), Err(()));
+    }
 }
