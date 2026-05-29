@@ -15,9 +15,11 @@
 //! - 7 j < range ≤ 90 j → `TABLE_HOURLY`
 //! - > 90 j → `TABLE_DAILY`
 //!
-//! Pour `increase` sur tier compacté, on utilise `last_bucket.last -
-//! first_bucket.first` (correct pour les compteurs monotones — c'est
-//! le cas de `et112_energy_*` qui sont nos seuls usages réels).
+//! Pour `increase`/`rate`, on utilise `last - first` (sur points raw ou
+//! bornes `first/last` des buckets compactés). Un reset de compteur
+//! (`last < first`) est traité comme une remise à zéro → on retient `last`
+//! (cf. `counter_increase`). Correct pour nos compteurs monotones
+//! (`et112_energy_*`), qui ne reset qu'au remplacement matériel.
 //!
 //! ## Optimisations mémoire (cf. docs/memory-leak-investigation.md §12)
 //! L'Evaluator est scopé per-request et porte trois caches partagés sur
@@ -518,8 +520,12 @@ fn apply_range_fn_raw(name: &str, pts: &[(i64, f64)], range_ms: i64) -> Option<f
         };
     }
     Some(match name {
-        "increase" | "delta" => pts.last().unwrap().1 - pts.first().unwrap().1,
-        "rate" => (pts.last().unwrap().1 - pts.first().unwrap().1) / (range_ms as f64 / 1000.0),
+        "increase" => counter_increase(pts.first().unwrap().1, pts.last().unwrap().1),
+        "delta" => pts.last().unwrap().1 - pts.first().unwrap().1,
+        "rate" => {
+            counter_increase(pts.first().unwrap().1, pts.last().unwrap().1)
+                / (range_ms as f64 / 1000.0)
+        }
         "avg_over_time" => pts.iter().map(|p| p.1).sum::<f64>() / pts.len() as f64,
         "sum_over_time" => pts.iter().map(|p| p.1).sum::<f64>(),
         "min_over_time" => pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min),
@@ -528,6 +534,23 @@ fn apply_range_fn_raw(name: &str, pts: &[(i64, f64)], range_ms: i64) -> Option<f
         "last_over_time" => pts.last().unwrap().1,
         _ => return None,
     })
+}
+
+/// Augmentation d'un compteur entre `first` et `last`, avec gestion d'un
+/// reset (le compteur a été remis à zéro entre les deux bornes).
+///
+/// PromQL traite `increase`/`rate` comme des compteurs monotones : si
+/// `last < first`, on suppose une réinitialisation et on retient `last`
+/// (équivalent à un reset à 0 puis remontée jusqu'à `last`). Limitation
+/// connue : avec seulement les deux bornes, un reset *suivi* d'une remontée
+/// au-dessus de `first` n'est pas détectable — acceptable pour nos compteurs
+/// d'énergie (`et112_energy_*`), qui ne reset qu'au remplacement du compteur.
+fn counter_increase(first: f64, last: f64) -> f64 {
+    if last < first {
+        last
+    } else {
+        last - first
+    }
 }
 
 /// Variante de [`apply_range_fn_raw`] limitée aux fonctions qui n'ont besoin
@@ -540,8 +563,10 @@ fn apply_range_fn_endpoints(
 ) -> Option<f64> {
     let ((_, first_v), (_, last_v)) = fl?;
     Some(match name {
-        "increase" | "delta" => last_v - first_v,
-        "rate" => (last_v - first_v) / (range_ms as f64 / 1000.0),
+        "increase" => counter_increase(first_v, last_v),
+        // `delta` cible les jauges (peut décroître) → pas de gestion de reset.
+        "delta" => last_v - first_v,
+        "rate" => counter_increase(first_v, last_v) / (range_ms as f64 / 1000.0),
         "last_over_time" => last_v,
         _ => return None,
     })
@@ -564,9 +589,12 @@ fn apply_range_fn_buckets(
     }
     let total_sum: f64 = buckets.iter().map(|(_, b)| b.sum).sum();
     Some(match name {
-        "increase" | "delta" => buckets.last().unwrap().1.last - buckets.first().unwrap().1.first,
+        "increase" => {
+            counter_increase(buckets.first().unwrap().1.first, buckets.last().unwrap().1.last)
+        }
+        "delta" => buckets.last().unwrap().1.last - buckets.first().unwrap().1.first,
         "rate" => {
-            (buckets.last().unwrap().1.last - buckets.first().unwrap().1.first)
+            counter_increase(buckets.first().unwrap().1.first, buckets.last().unwrap().1.last)
                 / (range_ms as f64 / 1000.0)
         }
         "avg_over_time" => total_sum / total_cnt as f64,

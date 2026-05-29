@@ -29,6 +29,22 @@ use crate::tables::{
 
 const META_KEY_NEXT_SERIES_ID: &str = "next_series_id";
 
+/// Cache d'identité de série → `series_id`, keyé par fingerprint `u64`.
+/// La valeur conserve `(metric, labels, series_id)` pour la vérification
+/// anti-collision (cf. `commit_batch`).
+type SeriesCache = LruCache<u64, (String, LabelVec, u32)>;
+
+/// Fingerprint d'une série calculé sans allocation à partir de références.
+/// Sensible à l'ordre des labels (deux ordres ⇒ deux entrées de cache qui
+/// résolvent vers le même `series_id` via la clé canonique `series_by_key`).
+fn series_fingerprint(metric: &str, labels: &LabelVec) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    metric.hash(&mut h);
+    labels.hash(&mut h);
+    h.finish()
+}
+
 /// Taille max du cache LRU.
 ///
 /// 50k est volontairement large pour éviter un churn excessif tout en
@@ -159,7 +175,11 @@ pub(crate) fn spawn(
 }
 
 fn run(db: Arc<Database>, mut rx: mpsc::Receiver<WriterMsg>, cfg: WriterConfig) -> Result<()> {
-    let mut series_cache: LruCache<(String, LabelVec), u32> = LruCache::new(
+    // Cache keyé par fingerprint u64 calculé depuis des références (zéro
+    // allocation/clone sur cache-hit, le cas nominal). La valeur stocke
+    // l'identité `(metric, labels)` pour pouvoir détecter une collision de
+    // hash (astronomiquement rare) et retomber sur le lookup canonique.
+    let mut series_cache: SeriesCache = LruCache::new(
         NonZeroUsize::new(SERIES_CACHE_CAPACITY).unwrap(),
     );
 
@@ -225,7 +245,7 @@ fn load_next_id(db: &Database) -> Result<u32> {
 fn commit_batch(
     db: &Database,
     batch: &[Sample],
-    cache: &mut LruCache<(String, LabelVec), u32>,
+    cache: &mut SeriesCache,
     next_id: &mut u32,
 ) -> Result<()> {
     let wtx = db.begin_write()?;
@@ -240,15 +260,22 @@ fn commit_batch(
         let mut t_smeta = wtx.open_table(TABLE_SERIES_META)?;
 
         for s in batch {
-            // P1 : clé de cache bon marché — (metric, labels bruts), sans
-            // sérialisation JSON ni BTreeMap. Le `canonical_json` (coûteux)
-            // n'est calculé que sur cache-miss, pour la clé persistée. Deux
-            // ordres de labels différents produisent deux entrées de cache
-            // mais résolvent vers le **même** series_id via la clé canonique
-            // de `series_by_key` — aucun doublon de série possible.
-            let cache_key = (s.metric.clone(), s.labels.clone());
+            // P1 : fingerprint u64 calculé depuis des références — aucune
+            // allocation ni clone sur cache-hit (le cas nominal >99%). Le
+            // `canonical_json` (coûteux) et les clones ne se produisent que
+            // sur cache-miss. La vérification d'identité ci-dessous garantit
+            // qu'une collision de hash (extrêmement rare) ne renvoie jamais
+            // un mauvais `series_id` : on retombe alors sur le lookup
+            // canonique. Deux ordres de labels différents produisent deux
+            // entrées de cache mais résolvent vers le **même** series_id via
+            // la clé canonique de `series_by_key`.
+            let fp = series_fingerprint(&s.metric, &s.labels);
+            let cached_id = match cache.get(&fp) {
+                Some((m, l, id)) if m == &s.metric && l == &s.labels => Some(*id),
+                _ => None, // miss ou collision de hash
+            };
 
-            let series_id = if let Some(&id) = cache.get(&cache_key) {
+            let series_id = if let Some(id) = cached_id {
                 id
             } else {
                 let labels_json = canonical_json(&s.labels);
@@ -286,7 +313,9 @@ fn commit_batch(
                     id
                 };
 
-                cache.put(cache_key, id);
+                // Clone uniquement sur miss : stocke l'identité pour la
+                // vérification anti-collision des hits futurs.
+                cache.put(fp, (s.metric.clone(), s.labels.clone(), id));
 
                 id
             };
