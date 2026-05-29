@@ -23,6 +23,8 @@
 | Taille base redb | `du -sh /mnt/nvme/daly-bms/metrics.redb` |
 | Nb séries en base | `curl -s http://localhost:8080/api/v1/redb/series \| jq '.data \| length'` |
 | Healthcheck backend | `curl -s http://localhost:8080/-/healthy` |
+| Diag pic réseau (capture immédiate) | `sudo bash scripts/netdiag.sh` |
+| Diag pic réseau (veille auto-capture) | `sudo bash scripts/netdiag.sh --watch` → rapport `/tmp/netdiag-*.txt` |
 | Logs energy-manager | `journalctl -u energy-manager -f` |
 | Compiler energy-manager | `make build-energy-arm` |
 | Déployer energy-manager | `sudo systemctl stop energy-manager && sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ && sudo systemctl start energy-manager` |
