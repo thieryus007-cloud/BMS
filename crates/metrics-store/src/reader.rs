@@ -137,6 +137,11 @@ fn query_range_raw_inner(
     from_ms: i64,
     to_ms: i64,
 ) -> Result<Vec<(i64, f64)>> {
+    // Intervalle inversé → résultat vide (évite un panic redb sur bornes
+    // de range décroissantes).
+    if from_ms > to_ms {
+        return Ok(Vec::new());
+    }
     let t = rtx.open_table(TABLE_RAW)?;
     let k_lo = enc_skey(series_id, from_ms);
     let k_hi = enc_skey(series_id, to_ms);
@@ -155,6 +160,10 @@ fn last_point_in_range_inner(
     from_ms: i64,
     to_ms: i64,
 ) -> Result<Option<(i64, f64)>> {
+    // Garde anti-panic : bornes inversées → aucun point.
+    if from_ms > to_ms {
+        return Ok(None);
+    }
     let t = rtx.open_table(TABLE_RAW)?;
     let k_lo = enc_skey(series_id, from_ms);
     let k_hi = enc_skey(series_id, to_ms);
@@ -176,6 +185,10 @@ fn first_last_in_range_inner(
     from_ms: i64,
     to_ms: i64,
 ) -> Result<Option<((i64, f64), (i64, f64))>> {
+    // Garde anti-panic : bornes inversées → aucun point.
+    if from_ms > to_ms {
+        return Ok(None);
+    }
     let t = rtx.open_table(TABLE_RAW)?;
     let k_lo = enc_skey(series_id, from_ms);
     let k_hi = enc_skey(series_id, to_ms);
@@ -208,6 +221,9 @@ fn query_range_buckets_inner(
     to_ms: i64,
     tier: Tier,
 ) -> Result<Vec<(i64, AggBucket)>> {
+    if from_ms > to_ms {
+        return Ok(Vec::new());
+    }
     let table = match tier {
         Tier::Raw => anyhow::bail!("query_range_buckets: Tier::Raw non supporté"),
         Tier::Hourly => TABLE_HOURLY,

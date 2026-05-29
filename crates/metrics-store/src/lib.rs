@@ -648,4 +648,87 @@ mod tests {
         }
         let _ = std::fs::remove_file(&path);
     }
+
+    /// Revue Gemini : `increase`/`rate` doivent gérer un reset de compteur
+    /// (`last < first`) au lieu de renvoyer une valeur négative.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn increase_rate_handle_counter_reset() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("reset");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 8, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let w = store.writer();
+            // Compteur qui se réinitialise : 80 puis 5 (reset matériel).
+            w.write(Sample::new("energy_reset", 100_000, 80.0)).await.unwrap();
+            w.write(Sample::new("energy_reset", 101_000, 5.0)).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+
+            // increase : reset → on retient `last` (5), pas 5-80 = -75.
+            let e = parse_and_validate("increase(energy_reset[10s])").unwrap();
+            let v = ev.eval_instant(&e, 101_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 5.0).abs() < 1e-9, "increase reset = {}", v[0].value);
+            assert!(v[0].value >= 0.0, "increase ne doit jamais être négatif");
+
+            // rate : 5 / 10 s = 0.5 (jamais négatif).
+            let e = parse_and_validate("rate(energy_reset[10s])").unwrap();
+            let v = ev.eval_instant(&e, 101_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 0.5).abs() < 1e-9, "rate reset = {}", v[0].value);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Revue Gemini : un intervalle inversé (`from > to`) ne doit pas paniquer
+    /// dans `redb::range` — résultat vide / `None`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn inverted_interval_does_not_panic() {
+        let path = tmp_db_path("inverted");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 8, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let w = store.writer();
+            for ts in 1000..1005 {
+                w.write(Sample::new("g", ts, ts as f64)).await.unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let sid = reader.lookup_series_id("g", "{}").unwrap().unwrap();
+
+            // Bornes inversées → vide, pas de panic.
+            assert!(reader.query_range_raw(sid, 2000, 1000).unwrap().is_empty());
+
+            let rtx = reader.begin_read().unwrap();
+            assert!(reader
+                .last_point_in_range_with_tx(&rtx, sid, 2000, 1000)
+                .unwrap()
+                .is_none());
+            assert!(reader
+                .first_last_in_range_with_tx(&rtx, sid, 2000, 1000)
+                .unwrap()
+                .is_none());
+            assert!(reader
+                .query_range_buckets_with_tx(&rtx, sid, 2000, 1000, Tier::Hourly)
+                .unwrap()
+                .is_empty());
+
+            // Sanity : intervalle normal renvoie bien les points.
+            assert_eq!(reader.query_range_raw(sid, 1000, 1004).unwrap().len(), 5);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
 }
