@@ -140,6 +140,11 @@ impl<'r> Evaluator<'r> {
         if end_ms < start_ms {
             return Err(PromQlError::Execution("end < start".into()));
         }
+        // M1 : le cache est keyé par adresse mémoire de `VectorSelector`.
+        // On le vide avant toute évaluation pour qu'une réutilisation de
+        // l'Evaluator sur une autre expression (dont un nœud aurait été
+        // réalloué à la même adresse) ne renvoie jamais un résultat périmé.
+        self.match_cache.borrow_mut().clear();
         let mut by_labels: BTreeMap<Arc<Labels>, Vec<(i64, f64)>> = BTreeMap::new();
         // Sentinelle pour les valeurs scalaires (labels vides). Partagée
         // sur tous les steps scalaires pour éviter N allocations.
@@ -179,6 +184,10 @@ impl<'r> Evaluator<'r> {
 
     /// Évalue `expr` à un instant unique (équivalent `/api/v1/query`).
     pub fn eval_instant(&self, expr: &Expr, t_ms: i64) -> Result<Vec<InstantSample>, PromQlError> {
+        // M1 : cf. note dans `eval_range` — invalide le cache keyé par
+        // pointeur avant toute évaluation pour éviter un faux positif
+        // d'adresse mémoire réutilisée.
+        self.match_cache.borrow_mut().clear();
         match self.eval_at(expr, t_ms)? {
             Value::Scalar(v) => Ok(vec![InstantSample { labels: Arc::new(Labels::new()), value: v }]),
             Value::Vector(s) => Ok(s),
@@ -233,12 +242,14 @@ impl<'r> Evaluator<'r> {
         let rtx = self.txn()?;
         let mut out = Vec::with_capacity(matched.len());
         for (sid, labels) in matched.iter() {
-            let pts = self
+            // P2 : seul le dernier point de la fenêtre de lookback est
+            // nécessaire — scan inverse au lieu de matérialiser tout le Vec.
+            let last = self
                 .reader
-                .query_range_raw_with_tx(rtx, *sid, t - self.lookback_ms, t)
+                .last_point_in_range_with_tx(rtx, *sid, t - self.lookback_ms, t)
                 .map_err(|e| PromQlError::Execution(e.to_string()))?;
-            if let Some((_, v)) = pts.last() {
-                out.push(InstantSample { labels: labels.clone(), value: *v });
+            if let Some((_, v)) = last {
+                out.push(InstantSample { labels: labels.clone(), value: v });
             }
         }
         Ok(Value::Vector(out))
@@ -328,8 +339,18 @@ impl<'r> Evaluator<'r> {
         let matched = self.match_series(vs)?;
         let rtx = self.txn()?;
         let mut out = Vec::with_capacity(matched.len());
+        // P2 : `increase`/`rate`/`delta`/`last_over_time` n'utilisent que les
+        // bornes de la fenêtre → on évite de charger tous les points.
+        let endpoints_only = matches!(name, "increase" | "rate" | "delta" | "last_over_time");
         for (sid, labels) in matched.iter() {
             let value_opt = match tier {
+                Tier::Raw if endpoints_only => {
+                    let fl = self
+                        .reader
+                        .first_last_in_range_with_tx(rtx, *sid, win_start, t)
+                        .map_err(|e| PromQlError::Execution(e.to_string()))?;
+                    apply_range_fn_endpoints(name, fl, range_ms)
+                }
                 Tier::Raw => {
                     let pts = self
                         .reader
@@ -509,6 +530,23 @@ fn apply_range_fn_raw(name: &str, pts: &[(i64, f64)], range_ms: i64) -> Option<f
     })
 }
 
+/// Variante de [`apply_range_fn_raw`] limitée aux fonctions qui n'ont besoin
+/// que du premier et du dernier point de la fenêtre. Sémantique identique à
+/// `apply_range_fn_raw` pour `increase`/`rate`/`delta`/`last_over_time`.
+fn apply_range_fn_endpoints(
+    name: &str,
+    fl: Option<((i64, f64), (i64, f64))>,
+    range_ms: i64,
+) -> Option<f64> {
+    let ((_, first_v), (_, last_v)) = fl?;
+    Some(match name {
+        "increase" | "delta" => last_v - first_v,
+        "rate" => (last_v - first_v) / (range_ms as f64 / 1000.0),
+        "last_over_time" => last_v,
+        _ => return None,
+    })
+}
+
 fn apply_range_fn_buckets(
     name: &str,
     buckets: &[(i64, AggBucket)],
@@ -560,7 +598,9 @@ fn align_and_op(
             (l, s.value)
         })
         .collect();
-    let mut out = Vec::new();
+    // P4 : pré-dimensionne le résultat (au plus min(|lhs|, |rhs|) paires
+    // alignées) pour éviter les réallocations successives du Vec.
+    let mut out = Vec::with_capacity(lhs.len().min(rhs_idx.len()));
     for s in lhs {
         let mut key = (*s.labels).clone();
         key.remove("__name__");

@@ -79,32 +79,71 @@ impl Default for WriterConfig {
     }
 }
 
+/// Message interne du canal writer.
+///
+/// `Shutdown` est une sentinelle in-band qui permet d'arrêter proprement le
+/// thread writer **même si des `Writer` clones survivent** côté appelant
+/// (sinon le canal mpsc resterait ouvert et `blocking_recv` ne retournerait
+/// jamais `None` → le `join()` dans `Inner::drop` bloquerait pour toujours).
+/// Cf. correctif R2.
+///
+/// `Sample` n'est volontairement pas boxé : ce serait une allocation par
+/// écriture sur le chemin chaud d'ingestion. La variante `Shutdown` (rare)
+/// justifie l'écart de taille.
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum WriterMsg {
+    Sample(Sample),
+    Shutdown,
+}
+
+/// Reconstruit l'erreur publique `SendError<Sample>` à partir de l'erreur
+/// interne, en préservant la signature historique de l'API.
+fn map_send_err(e: mpsc::error::SendError<WriterMsg>) -> mpsc::error::SendError<Sample> {
+    match e.0 {
+        WriterMsg::Sample(s) => mpsc::error::SendError(s),
+        // Inatteignable : `Writer` n'envoie jamais `Shutdown`.
+        WriterMsg::Shutdown => unreachable!("Writer n'émet jamais Shutdown"),
+    }
+}
+
+fn map_try_send_err(
+    e: mpsc::error::TrySendError<WriterMsg>,
+) -> mpsc::error::TrySendError<Sample> {
+    use mpsc::error::TrySendError;
+    match e {
+        TrySendError::Full(WriterMsg::Sample(s)) => TrySendError::Full(s),
+        TrySendError::Closed(WriterMsg::Sample(s)) => TrySendError::Closed(s),
+        // Inatteignable : `Writer` n'envoie jamais `Shutdown`.
+        _ => unreachable!("Writer n'émet jamais Shutdown"),
+    }
+}
+
 /// Handle clonable côté producteur.
 #[derive(Clone)]
 pub struct Writer {
-    pub(crate) tx: mpsc::Sender<Sample>,
+    pub(crate) tx: mpsc::Sender<WriterMsg>,
 }
 
 impl Writer {
     pub async fn write(&self, sample: Sample) -> Result<(), mpsc::error::SendError<Sample>> {
-        self.tx.send(sample).await
+        self.tx.send(WriterMsg::Sample(sample)).await.map_err(map_send_err)
     }
 
     pub fn try_write(&self, sample: Sample) -> Result<(), mpsc::error::TrySendError<Sample>> {
-        self.tx.try_send(sample)
+        self.tx.try_send(WriterMsg::Sample(sample)).map_err(map_try_send_err)
     }
 
     pub fn blocking_write(&self, sample: Sample) -> Result<(), mpsc::error::SendError<Sample>> {
-        self.tx.blocking_send(sample)
+        self.tx.blocking_send(WriterMsg::Sample(sample)).map_err(map_send_err)
     }
 }
 
 /// Démarre le thread writer. Retourne son `JoinHandle` (le caller peut
 /// l'attendre lors d'un shutdown propre ; en pratique le service tourne
 /// jusqu'à `SIGTERM` systemd).
-pub fn spawn(
+pub(crate) fn spawn(
     db: Arc<Database>,
-    rx: mpsc::Receiver<Sample>,
+    rx: mpsc::Receiver<WriterMsg>,
     cfg: WriterConfig,
 ) -> thread::JoinHandle<()> {
     thread::Builder::new()
@@ -119,33 +158,40 @@ pub fn spawn(
         .expect("spawn writer thread")
 }
 
-fn run(db: Arc<Database>, mut rx: mpsc::Receiver<Sample>, cfg: WriterConfig) -> Result<()> {
-    let mut series_cache: LruCache<(String, String), u32> = LruCache::new(
+fn run(db: Arc<Database>, mut rx: mpsc::Receiver<WriterMsg>, cfg: WriterConfig) -> Result<()> {
+    let mut series_cache: LruCache<(String, LabelVec), u32> = LruCache::new(
         NonZeroUsize::new(SERIES_CACHE_CAPACITY).unwrap(),
     );
 
     let mut next_id = load_next_id(&db).context("load_next_id")?;
 
     loop {
-        let batch = drain(&mut rx, &cfg);
+        let (batch, stop) = drain(&mut rx, &cfg);
 
-        if batch.is_empty() {
-            return Ok(()); // channel fermé
+        if !batch.is_empty() {
+            if let Err(e) = commit_batch(&db, &batch, &mut series_cache, &mut next_id) {
+                tracing::error!(error = %e, samples = batch.len(), "commit_batch a échoué");
+            }
         }
 
-        if let Err(e) = commit_batch(&db, &batch, &mut series_cache, &mut next_id) {
-            tracing::error!(error = %e, samples = batch.len(), "commit_batch a échoué");
+        if stop {
+            return Ok(()); // channel fermé ou Shutdown reçu
         }
     }
 }
 
-fn drain(rx: &mut mpsc::Receiver<Sample>, cfg: &WriterConfig) -> Vec<Sample> {
+/// Draine un batch. Retourne `(batch, stop)` où `stop` indique que le canal
+/// est fermé ou qu'un `Shutdown` a été reçu — le batch collecté (les samples
+/// déjà en file) est tout de même commité avant l'arrêt, sans perte.
+fn drain(rx: &mut mpsc::Receiver<WriterMsg>, cfg: &WriterConfig) -> (Vec<Sample>, bool) {
     let mut batch = Vec::with_capacity(cfg.batch_max);
 
-    // Premier sample : on bloque jusqu'à réception (ou shutdown).
+    // Premier message : on bloque jusqu'à réception (sommeil efficace, pas
+    // de busy-poll quand la file est vide).
     match rx.blocking_recv() {
-        Some(s) => batch.push(s),
-        None => return batch,
+        Some(WriterMsg::Sample(s)) => batch.push(s),
+        Some(WriterMsg::Shutdown) => return (batch, true),
+        None => return (batch, true), // canal fermé
     }
 
     let deadline = Instant::now() + Duration::from_millis(cfg.flush_ms);
@@ -153,13 +199,18 @@ fn drain(rx: &mut mpsc::Receiver<Sample>, cfg: &WriterConfig) -> Vec<Sample> {
 
     while batch.len() < cfg.batch_max && Instant::now() < deadline {
         match rx.try_recv() {
-            Ok(s) => batch.push(s),
-            Err(mpsc::error::TryRecvError::Empty) => thread::sleep(idle),
-            Err(mpsc::error::TryRecvError::Disconnected) => break,
+            Ok(WriterMsg::Sample(s)) => batch.push(s),
+            Ok(WriterMsg::Shutdown) => return (batch, true),
+            Err(mpsc::error::TryRecvError::Empty) => {
+                // M3 : ne jamais dormir au-delà de la deadline de flush.
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                thread::sleep(idle.min(remaining));
+            }
+            Err(mpsc::error::TryRecvError::Disconnected) => return (batch, true),
         }
     }
 
-    batch
+    (batch, false)
 }
 
 fn load_next_id(db: &Database) -> Result<u32> {
@@ -174,10 +225,13 @@ fn load_next_id(db: &Database) -> Result<u32> {
 fn commit_batch(
     db: &Database,
     batch: &[Sample],
-    cache: &mut LruCache<(String, String), u32>,
+    cache: &mut LruCache<(String, LabelVec), u32>,
     next_id: &mut u32,
 ) -> Result<()> {
     let wtx = db.begin_write()?;
+    // R1 : on mémorise l'état d'allocation d'ID au début du batch pour
+    // pouvoir restaurer l'état mémoire à l'identique si le commit échoue.
+    let next_id_start = *next_id;
     let mut next_id_dirty = false;
 
     {
@@ -186,17 +240,25 @@ fn commit_batch(
         let mut t_smeta = wtx.open_table(TABLE_SERIES_META)?;
 
         for s in batch {
-            let labels_json = canonical_json(&s.labels);
-            let cache_key = (s.metric.clone(), labels_json.clone());
+            // P1 : clé de cache bon marché — (metric, labels bruts), sans
+            // sérialisation JSON ni BTreeMap. Le `canonical_json` (coûteux)
+            // n'est calculé que sur cache-miss, pour la clé persistée. Deux
+            // ordres de labels différents produisent deux entrées de cache
+            // mais résolvent vers le **même** series_id via la clé canonique
+            // de `series_by_key` — aucun doublon de série possible.
+            let cache_key = (s.metric.clone(), s.labels.clone());
 
             let series_id = if let Some(&id) = cache.get(&cache_key) {
                 id
             } else {
+                let labels_json = canonical_json(&s.labels);
                 let lookup_key = make_lookup_key(&s.metric, &labels_json);
 
                 // Lookup avant insert : on extrait la valeur du guard
                 // immédiatement pour libérer l'emprunt immutable sur `t_skey`
                 // avant d'appeler `.insert()` (sinon borrow checker fail).
+                // NB : au sein de la même write-tx, ce `get` voit les inserts
+                // précédents du batch (déduplication intra-batch correcte).
                 let existing = t_skey.get(&lookup_key[..])?.map(|g| g.value());
 
                 let id = if let Some(id) = existing {
@@ -213,7 +275,7 @@ fn commit_batch(
 
                     let meta = SeriesMeta {
                         metric: s.metric.clone(),
-                        labels_json: labels_json.clone(),
+                        labels_json,
                         first_seen_ms: s.ts_ms,
                         last_seen_ms: s.ts_ms,
                     };
@@ -239,7 +301,17 @@ fn commit_batch(
         }
     }
 
-    wtx.commit()?;
+    // R1 : si le commit échoue, la transaction (inserts series_by_key /
+    // series_meta inclus) est annulée. Le cache contiendrait alors des
+    // series_id jamais persistés → futurs points raw orphelins. On purge
+    // donc le cache et on restaure `next_id` pour rester cohérent avec la
+    // base. Le cache n'est qu'une optimisation : il sera repeuplé depuis la
+    // base au batch suivant.
+    if let Err(e) = wtx.commit() {
+        *next_id = next_id_start;
+        cache.clear();
+        return Err(e.into());
+    }
 
     Ok(())
 }
