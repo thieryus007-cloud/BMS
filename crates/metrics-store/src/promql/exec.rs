@@ -15,11 +15,14 @@
 //! - 7 j < range ≤ 90 j → `TABLE_HOURLY`
 //! - > 90 j → `TABLE_DAILY`
 //!
-//! Pour `increase`/`rate`, on utilise `last - first` (sur points raw ou
-//! bornes `first/last` des buckets compactés). Un reset de compteur
-//! (`last < first`) est traité comme une remise à zéro → on retient `last`
-//! (cf. `counter_increase`). Correct pour nos compteurs monotones
-//! (`et112_energy_*`), qui ne reset qu'au remplacement matériel.
+//! Pour `increase`/`rate`, on somme les incréments par paire adjacente :
+//! sur points raw via `windows(2)` (`raw_counter_increase`), sur buckets
+//! compactés au sein de chaque bucket et entre buckets adjacents
+//! (`buckets_counter_increase`). Un reset (`cur < prev`) est traité comme
+//! une remise à zéro. La somme télescope vers `last - first` pour un
+//! compteur monotone (cas normal), et gère les resets intermédiaires.
+//! Limite résiduelle sur tier compacté : un reset interne à un bucket
+//! horaire/journalier reste invisible (points raw déjà purgés).
 //!
 //! ## Optimisations mémoire (cf. docs/memory-leak-investigation.md §12)
 //! L'Evaluator est scopé per-request et porte trois caches partagés sur
@@ -341,9 +344,13 @@ impl<'r> Evaluator<'r> {
         let matched = self.match_series(vs)?;
         let rtx = self.txn()?;
         let mut out = Vec::with_capacity(matched.len());
-        // P2 : `increase`/`rate`/`delta`/`last_over_time` n'utilisent que les
-        // bornes de la fenêtre → on évite de charger tous les points.
-        let endpoints_only = matches!(name, "increase" | "rate" | "delta" | "last_over_time");
+        // P2 : `delta` (différence de jauge) et `last_over_time` n'ont besoin
+        // que des bornes → on évite de charger toute la fenêtre. `increase` et
+        // `rate` chargent tous les points pour sommer les incréments par paire
+        // et gérer correctement les resets de compteur intermédiaires (revue
+        // Gemini PR #521) — leur somme télescope vers `last - first` pour un
+        // compteur monotone, donc aucun changement sur les données normales.
+        let endpoints_only = matches!(name, "delta" | "last_over_time");
         for (sid, labels) in matched.iter() {
             let value_opt = match tier {
                 Tier::Raw if endpoints_only => {
@@ -520,12 +527,9 @@ fn apply_range_fn_raw(name: &str, pts: &[(i64, f64)], range_ms: i64) -> Option<f
         };
     }
     Some(match name {
-        "increase" => counter_increase(pts.first().unwrap().1, pts.last().unwrap().1),
+        "increase" => raw_counter_increase(pts),
         "delta" => pts.last().unwrap().1 - pts.first().unwrap().1,
-        "rate" => {
-            counter_increase(pts.first().unwrap().1, pts.last().unwrap().1)
-                / (range_ms as f64 / 1000.0)
-        }
+        "rate" => raw_counter_increase(pts) / (range_ms as f64 / 1000.0),
         "avg_over_time" => pts.iter().map(|p| p.1).sum::<f64>() / pts.len() as f64,
         "sum_over_time" => pts.iter().map(|p| p.1).sum::<f64>(),
         "min_over_time" => pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min),
@@ -536,37 +540,55 @@ fn apply_range_fn_raw(name: &str, pts: &[(i64, f64)], range_ms: i64) -> Option<f
     })
 }
 
-/// Augmentation d'un compteur entre `first` et `last`, avec gestion d'un
-/// reset (le compteur a été remis à zéro entre les deux bornes).
-///
-/// PromQL traite `increase`/`rate` comme des compteurs monotones : si
-/// `last < first`, on suppose une réinitialisation et on retient `last`
-/// (équivalent à un reset à 0 puis remontée jusqu'à `last`). Limitation
-/// connue : avec seulement les deux bornes, un reset *suivi* d'une remontée
-/// au-dessus de `first` n'est pas détectable — acceptable pour nos compteurs
-/// d'énergie (`et112_energy_*`), qui ne reset qu'au remplacement du compteur.
-fn counter_increase(first: f64, last: f64) -> f64 {
-    if last < first {
-        last
+/// Augmentation d'un compteur entre deux valeurs adjacentes `prev` → `cur`,
+/// avec gestion d'un reset (remise à zéro) : si `cur < prev`, on suppose un
+/// reset et on retient `cur` (équivalent à un reset à 0 puis remontée).
+fn counter_increase(prev: f64, cur: f64) -> f64 {
+    if cur < prev {
+        cur
     } else {
-        last - first
+        cur - prev
     }
 }
 
-/// Variante de [`apply_range_fn_raw`] limitée aux fonctions qui n'ont besoin
-/// que du premier et du dernier point de la fenêtre. Sémantique identique à
-/// `apply_range_fn_raw` pour `increase`/`rate`/`delta`/`last_over_time`.
+/// Augmentation totale d'un compteur sur une série de points raw, en sommant
+/// les incréments **par paire adjacente** (`windows(2)`). Détecte donc les
+/// resets intermédiaires au sein de la fenêtre, pas seulement aux bornes
+/// (revue Gemini PR #521). Pour un compteur monotone, la somme télescope
+/// vers `last - first`.
+fn raw_counter_increase(pts: &[(i64, f64)]) -> f64 {
+    pts.windows(2).map(|w| counter_increase(w[0].1, w[1].1)).sum()
+}
+
+/// Augmentation totale d'un compteur sur des buckets compactés, en gérant les
+/// resets à la fois **au sein** de chaque bucket (`first` → `last`) et **entre**
+/// buckets adjacents (`prev.last` → `cur.first`). Télescope vers
+/// `last_bucket.last - first_bucket.first` pour un compteur monotone.
+fn buckets_counter_increase(buckets: &[(i64, AggBucket)]) -> f64 {
+    let mut total = 0.0;
+    let mut prev_last: Option<f64> = None;
+    for (_, b) in buckets {
+        if let Some(pl) = prev_last {
+            total += counter_increase(pl, b.first);
+        }
+        total += counter_increase(b.first, b.last);
+        prev_last = Some(b.last);
+    }
+    total
+}
+
+/// Fonctions de fenêtre qui n'ont besoin que des bornes : `delta` (différence
+/// de jauge, peut être négative — pas de gestion de reset) et `last_over_time`.
+/// `increase`/`rate` passent désormais par le chemin complet pour gérer les
+/// resets intermédiaires (cf. `apply_range_fn_raw`).
 fn apply_range_fn_endpoints(
     name: &str,
     fl: Option<((i64, f64), (i64, f64))>,
-    range_ms: i64,
+    _range_ms: i64,
 ) -> Option<f64> {
     let ((_, first_v), (_, last_v)) = fl?;
     Some(match name {
-        "increase" => counter_increase(first_v, last_v),
-        // `delta` cible les jauges (peut décroître) → pas de gestion de reset.
         "delta" => last_v - first_v,
-        "rate" => counter_increase(first_v, last_v) / (range_ms as f64 / 1000.0),
         "last_over_time" => last_v,
         _ => return None,
     })
@@ -589,14 +611,9 @@ fn apply_range_fn_buckets(
     }
     let total_sum: f64 = buckets.iter().map(|(_, b)| b.sum).sum();
     Some(match name {
-        "increase" => {
-            counter_increase(buckets.first().unwrap().1.first, buckets.last().unwrap().1.last)
-        }
+        "increase" => buckets_counter_increase(buckets),
         "delta" => buckets.last().unwrap().1.last - buckets.first().unwrap().1.first,
-        "rate" => {
-            counter_increase(buckets.first().unwrap().1.first, buckets.last().unwrap().1.last)
-                / (range_ms as f64 / 1000.0)
-        }
+        "rate" => buckets_counter_increase(buckets) / (range_ms as f64 / 1000.0),
         "avg_over_time" => total_sum / total_cnt as f64,
         "sum_over_time" => total_sum,
         "min_over_time" => buckets.iter().map(|(_, b)| b.min).fold(f64::INFINITY, f64::min),
@@ -637,4 +654,55 @@ fn align_and_op(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pts(vals: &[f64]) -> Vec<(i64, f64)> {
+        vals.iter().enumerate().map(|(i, v)| (i as i64 * 1000, *v)).collect()
+    }
+
+    #[test]
+    fn raw_counter_increase_monotonic_telescopes() {
+        // Compteur monotone → somme des incréments = last - first.
+        assert_eq!(raw_counter_increase(&pts(&[10.0, 20.0, 30.0])), 20.0);
+        assert_eq!(raw_counter_increase(&pts(&[0.0, 90.0])), 90.0);
+    }
+
+    #[test]
+    fn raw_counter_increase_handles_intermediate_reset() {
+        // Scénario de la revue Gemini : [10, 20, 5, 15] → (20-10)+5+(15-5)=25.
+        assert_eq!(raw_counter_increase(&pts(&[10.0, 20.0, 5.0, 15.0])), 25.0);
+    }
+
+    #[test]
+    fn raw_counter_increase_edge_cases() {
+        assert_eq!(raw_counter_increase(&pts(&[])), 0.0);
+        assert_eq!(raw_counter_increase(&pts(&[42.0])), 0.0);
+    }
+
+    fn bucket(first: f64, last: f64) -> AggBucket {
+        AggBucket { avg: 0.0, min: 0.0, max: 0.0, sum: 0.0, first, last, cnt: 1 }
+    }
+
+    #[test]
+    fn buckets_counter_increase_monotonic_telescopes() {
+        let bs = vec![(0, bucket(0.0, 10.0)), (1, bucket(10.0, 25.0))];
+        // within b1 (10) + between (0) + within b2 (15) = 25 = last.last - first.first.
+        assert_eq!(buckets_counter_increase(&bs), 25.0);
+    }
+
+    #[test]
+    fn buckets_counter_increase_handles_reset_between_and_within() {
+        // Reset entre buckets : b1 monte à 20, b2 repart de 0 → 5.
+        let bs = vec![(0, bucket(0.0, 20.0)), (1, bucket(0.0, 5.0))];
+        // within b1 (20) + between counter(20→0)=0 + within b2 (5) = 25.
+        assert_eq!(buckets_counter_increase(&bs), 25.0);
+
+        // Reset au sein d'un bucket (first > last).
+        let bs = vec![(0, bucket(20.0, 5.0))];
+        assert_eq!(buckets_counter_increase(&bs), 5.0);
+    }
 }
