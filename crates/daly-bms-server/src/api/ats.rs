@@ -340,17 +340,24 @@ fn ats_addr(state: &AppState) -> u8 {
 /// Les espaces et `:` sont ignorés. Retourne `Err(())` si la chaîne contient un
 /// caractère non hexadécimal, n'est pas ASCII, ou a un nombre impair de chiffres.
 ///
-/// La garde longueur paire + ASCII est indispensable : sans elle, une longueur
-/// impaire (ou un caractère multi-octets) ferait déborder/couper `&hex[i..i + 2]`
-/// et provoquerait un panic du handler au lieu d'un retour d'erreur propre.
+/// Le décodage opère directement sur les octets via `chunks_exact(2)` : aucune
+/// indexation de tranche `&str` n'est faite, donc aucun risque de panic sur une
+/// frontière UTF-8. La garde de parité reste indispensable car `chunks_exact`
+/// ignorerait silencieusement un octet final isolé (longueur impaire).
 fn decode_hex_frame(frame_hex: &str) -> Result<Vec<u8>, ()> {
     let hex = frame_hex.replace([' ', ':'], "");
     if !hex.is_ascii() || hex.len() % 2 != 0 {
         return Err(());
     }
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| ()))
+    let to_val = |c: u8| match c {
+        b'0'..=b'9' => Ok(c - b'0'),
+        b'a'..=b'f' => Ok(c - b'a' + 10),
+        b'A'..=b'F' => Ok(c - b'A' + 10),
+        _ => Err(()),
+    };
+    hex.as_bytes()
+        .chunks_exact(2)
+        .map(|chunk| Ok((to_val(chunk[0])? << 4) | to_val(chunk[1])?))
         .collect()
 }
 
