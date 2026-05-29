@@ -56,6 +56,35 @@ impl Reader {
         query_range_raw_inner(rtx, series_id, from_ms, to_ms)
     }
 
+    /// Dernier point `(ts, value)` de `[from_ms, to_ms]` (le plus récent).
+    ///
+    /// Évite de matérialiser toute la fenêtre quand seul le dernier point
+    /// est nécessaire (instant vector selector PromQL). Scan inverse O(1)
+    /// au lieu d'allouer un `Vec` de toute la fenêtre de lookback.
+    pub fn last_point_in_range_with_tx(
+        &self,
+        rtx: &ReadTransaction,
+        series_id: u32,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<Option<(i64, f64)>> {
+        last_point_in_range_inner(rtx, series_id, from_ms, to_ms)
+    }
+
+    /// Premier et dernier point de `[from_ms, to_ms]`. Utilisé par
+    /// `increase` / `rate` / `delta` / `last_over_time` qui n'ont besoin que
+    /// des deux bornes — évite de charger toute la fenêtre.
+    #[allow(clippy::type_complexity)]
+    pub fn first_last_in_range_with_tx(
+        &self,
+        rtx: &ReadTransaction,
+        series_id: u32,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<Option<((i64, f64), (i64, f64))>> {
+        first_last_in_range_inner(rtx, series_id, from_ms, to_ms)
+    }
+
     /// Range scan sur les tables compactées (hourly/daily). Renvoie les
     /// `AggBucket` désérialisés.
     pub fn query_range_buckets(
@@ -120,6 +149,58 @@ fn query_range_raw_inner(
     Ok(out)
 }
 
+fn last_point_in_range_inner(
+    rtx: &ReadTransaction,
+    series_id: u32,
+    from_ms: i64,
+    to_ms: i64,
+) -> Result<Option<(i64, f64)>> {
+    let t = rtx.open_table(TABLE_RAW)?;
+    let k_lo = enc_skey(series_id, from_ms);
+    let k_hi = enc_skey(series_id, to_ms);
+    let mut range = t.range::<&[u8]>(&k_lo[..]..=&k_hi[..])?;
+    match range.next_back() {
+        Some(entry) => {
+            let (k, v) = entry?;
+            let (_sid, ts) = dec_skey(k.value());
+            Ok(Some((ts, v.value())))
+        }
+        None => Ok(None),
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn first_last_in_range_inner(
+    rtx: &ReadTransaction,
+    series_id: u32,
+    from_ms: i64,
+    to_ms: i64,
+) -> Result<Option<((i64, f64), (i64, f64))>> {
+    let t = rtx.open_table(TABLE_RAW)?;
+    let k_lo = enc_skey(series_id, from_ms);
+    let k_hi = enc_skey(series_id, to_ms);
+    let mut range = t.range::<&[u8]>(&k_lo[..]..=&k_hi[..])?;
+    let first = match range.next() {
+        Some(entry) => {
+            let (k, v) = entry?;
+            let (_sid, ts) = dec_skey(k.value());
+            (ts, v.value())
+        }
+        None => return Ok(None),
+    };
+    // `next_back` sur l'itérateur déjà avancé : renvoie le dernier point
+    // restant, ou `None` s'il n'y avait qu'un seul élément (alors last=first).
+    let last = match range.next_back() {
+        Some(entry) => {
+            let (k, v) = entry?;
+            let (_sid, ts) = dec_skey(k.value());
+            (ts, v.value())
+        }
+        None => first,
+    };
+    Ok(Some((first, last)))
+}
+
 fn query_range_buckets_inner(
     rtx: &ReadTransaction,
     series_id: u32,
@@ -139,8 +220,17 @@ fn query_range_buckets_inner(
     for entry in t.range::<&[u8]>(&k_lo[..]..=&k_hi[..])? {
         let (k, v) = entry?;
         let (_sid, ts) = dec_skey(k.value());
-        let bucket: AggBucket = bincode::deserialize(v.value())?;
-        out.push((ts, bucket));
+        // M2 : un bucket corrompu ne doit pas avorter toute la requête —
+        // on le journalise et on le saute (dégradation gracieuse).
+        match bincode::deserialize::<AggBucket>(v.value()) {
+            Ok(bucket) => out.push((ts, bucket)),
+            Err(e) => tracing::warn!(
+                series_id = _sid,
+                ts,
+                error = %e,
+                "metrics-store: bucket corrompu ignoré"
+            ),
+        }
     }
     Ok(out)
 }
@@ -150,8 +240,16 @@ fn list_series_inner(rtx: &ReadTransaction) -> Result<Vec<(u32, SeriesMeta)>> {
     let mut out = Vec::new();
     for entry in t.iter()? {
         let (k, v) = entry?;
-        let meta: SeriesMeta = bincode::deserialize(v.value())?;
-        out.push((k.value(), meta));
+        // M2 : skip-and-log un meta corrompu plutôt que d'avorter le dump
+        // complet du catalogue.
+        match bincode::deserialize::<SeriesMeta>(v.value()) {
+            Ok(meta) => out.push((k.value(), meta)),
+            Err(e) => tracing::warn!(
+                series_id = k.value(),
+                error = %e,
+                "metrics-store: SeriesMeta corrompu ignoré"
+            ),
+        }
     }
     Ok(out)
 }

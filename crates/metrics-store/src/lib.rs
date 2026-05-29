@@ -84,16 +84,35 @@ impl Default for TierPolicy {
 
 struct Inner {
     db: Arc<Database>,
-    writer_tx: parking_lot::Mutex<Option<mpsc::Sender<Sample>>>,
+    writer_tx: parking_lot::Mutex<Option<mpsc::Sender<writer::WriterMsg>>>,
     writer_handle: parking_lot::Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl Drop for Inner {
     fn drop(&mut self) {
-        // 1. Ferme le canal en libérant le `Sender` (les `Writer` clones
-        //    encore vivants côté caller maintiennent le canal ouvert ; on
-        //    documente que le store doit être dropé en dernier).
-        self.writer_tx.lock().take();
+        // 1. Signale l'arrêt au thread writer via une sentinelle in-band.
+        //    Contrairement à la simple fermeture du canal, cela arrête le
+        //    writer **même si des `Writer` clones survivent** côté appelant
+        //    (sinon `blocking_recv` ne retournerait jamais `None` et le
+        //    `join()` ci-dessous bloquerait indéfiniment — correctif R2).
+        if let Some(tx) = self.writer_tx.lock().take() {
+            // `try_send` (non bloquant) : `Drop` peut s'exécuter dans un
+            // runtime tokio où `blocking_send` paniquerait. Si la file est
+            // pleine, on laisse au writer le temps de drainer puis on
+            // réessaie (borné à ~100 ms) avant de relâcher le `Sender`.
+            let mut msg = writer::WriterMsg::Shutdown;
+            for _ in 0..50 {
+                match tx.try_send(msg) {
+                    Ok(()) => break,
+                    Err(mpsc::error::TrySendError::Closed(_)) => break,
+                    Err(mpsc::error::TrySendError::Full(m)) => {
+                        msg = m;
+                        thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                }
+            }
+            drop(tx);
+        }
         // 2. Attend la fin du thread writer pour relâcher le lock redb
         //    avant le `Drop` de `Arc<Database>`. Sans ce join, une
         //    réouverture immédiate de la base échouerait avec "Database
@@ -130,7 +149,7 @@ impl MetricsStore {
             tx.commit()?;
         }
 
-        let (writer_tx, writer_rx) = mpsc::channel::<Sample>(opts.writer_queue_depth);
+        let (writer_tx, writer_rx) = mpsc::channel::<writer::WriterMsg>(opts.writer_queue_depth);
         let writer_handle = writer::spawn(db.clone(), writer_rx, opts.writer);
 
         Ok(Self {
@@ -500,6 +519,133 @@ mod tests {
             assert!(id_c >= 3, "id_c={id_c} doit être ≥ 3 (pas de réutilisation)");
         }
 
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// R2 : dropper le store alors qu'un `Writer` clone survit ne doit PAS
+    /// bloquer indéfiniment (sentinelle `Shutdown` in-band).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn drop_store_with_live_writer_clone_does_not_hang() {
+        let path = tmp_db_path("r2");
+        let _ = std::fs::remove_file(&path);
+
+        let opts = Options {
+            writer: WriterConfig { batch_max: 4, flush_ms: 20, poll_idle_ms: 2 },
+            ..Options::default()
+        };
+        let store = MetricsStore::open(&path, opts).expect("open");
+        let w = store.writer();
+        w.write(Sample::new("x", 1, 1.0)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+
+        // Drop dans un thread bloquant, borné par timeout : en cas de
+        // régression R2 le `join()` resterait bloqué > 5 s.
+        let res = tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::task::spawn_blocking(move || drop(store)),
+        )
+        .await;
+        assert!(res.is_ok(), "drop(store) a bloqué malgré un Writer clone vivant — régression R2");
+
+        // Le clone survit et reste utilisable sans paniquer (les writes vont
+        // au néant après arrêt du writer — best-effort).
+        let _ = w.try_write(Sample::new("x", 2, 2.0));
+        drop(w);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// R4 : une seconde passe de compaction sur une heure déjà compactée doit
+    /// FUSIONNER avec le bucket existant, pas l'écraser.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn compaction_merges_existing_bucket_not_overwrite() {
+        use crate::tiering::{compact_raw_to_hourly, HOURLY_MS};
+
+        let path = tmp_db_path("r4");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 1, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let w = store.writer();
+
+            // 3 points dans l'heure 0.
+            for ts in [0_i64, 1000, 2000] {
+                w.write(Sample::new("p", ts, 10.0)).await.unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let s1 = compact_raw_to_hourly(&store.inner.db, 3000).unwrap();
+            assert_eq!(s1.buckets_written, 1);
+            assert_eq!(s1.points_purged, 3);
+
+            // 2 points supplémentaires DANS LA MÊME heure 0, après compaction.
+            w.write(Sample::new("p", 2500, 20.0)).await.unwrap();
+            w.write(Sample::new("p", 2800, 20.0)).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let s2 = compact_raw_to_hourly(&store.inner.db, 3000).unwrap();
+            assert_eq!(s2.buckets_written, 1);
+            assert_eq!(s2.points_purged, 2);
+
+            let reader = store.reader();
+            let sid = reader.lookup_series_id("p", "{}").unwrap().unwrap();
+            let hourly = reader
+                .query_range_buckets(sid, 0, HOURLY_MS, Tier::Hourly)
+                .unwrap();
+            assert_eq!(hourly.len(), 1);
+            let b = hourly[0].1;
+            // Fusion : 3 + 2 = 5 points, somme 30 + 40 = 70 (pas écrasé à 2/40).
+            assert_eq!(b.cnt, 5, "bucket écrasé au lieu d'être fusionné (R4)");
+            assert!((b.sum - 70.0).abs() < 1e-9, "sum={}", b.sum);
+            assert_eq!(b.min, 10.0);
+            assert_eq!(b.max, 20.0);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// M1 : réutiliser un `Evaluator` pour deux requêtes instant différentes
+    /// ne doit pas renvoyer un résultat périmé (cache keyé par pointeur vidé
+    /// au début de chaque évaluation).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn evaluator_reuse_distinct_instant_queries() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("m1");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let w = store.writer();
+            for i in 0..10_i64 {
+                let ts = 100_000 + i * 1_000;
+                w.write(Sample::new("bms_v", ts, 1.0 + i as f64 / 10.0).with_label("bms_id", "1"))
+                    .await
+                    .unwrap();
+                w.write(Sample::new("bms_v", ts, 2.0 + i as f64 / 10.0).with_label("bms_id", "2"))
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+
+            // 1ʳᵉ requête : tous les bms_v → 2 séries.
+            let e1 = parse_and_validate("bms_v").unwrap();
+            let v1 = ev.eval_instant(&e1, 109_000).unwrap();
+            assert_eq!(v1.len(), 2);
+
+            // 2ᵉ requête sur le MÊME Evaluator, sélecteur plus restrictif → 1 série.
+            let e2 = parse_and_validate(r#"bms_v{bms_id="1"}"#).unwrap();
+            let v2 = ev.eval_instant(&e2, 109_000).unwrap();
+            assert_eq!(v2.len(), 1, "résultat périmé du cache pointeur (régression M1)");
+            assert!((v2[0].value - 1.9).abs() < 1e-9);
+        }
         let _ = std::fs::remove_file(&path);
     }
 }

@@ -17,7 +17,7 @@ use anyhow::Result;
 use redb::{Database, ReadableDatabase, ReadableTable};
 use tokio::task::JoinHandle;
 
-use crate::encoding::{dec_skey, enc_skey};
+use crate::encoding::{dec_skey, enc_skey, SKEY_LEN};
 use crate::tables::{AggBucket, TABLE_DAILY, TABLE_HOURLY, TABLE_RAW};
 use crate::TierPolicy;
 
@@ -128,8 +128,10 @@ pub struct CompactionStats {
 
 /// `raw → hourly` : agrège tous les points raw `ts < cutoff_ms`.
 pub fn compact_raw_to_hourly(db: &Database, cutoff_ms: i64) -> Result<CompactionStats> {
-    // 1. Phase lecture — agrège en mémoire.
+    // 1. Phase lecture — agrège en mémoire. On mémorise le ts maximum
+    //    réellement lu (`max_ts_read`) pour borner la purge (correctif R3).
     let mut buckets: HashMap<(u32, i64), AggBucketBuilder> = HashMap::new();
+    let mut max_ts_read = i64::MIN;
     {
         let rtx = db.begin_read()?;
         let t_raw = rtx.open_table(TABLE_RAW)?;
@@ -138,6 +140,9 @@ pub fn compact_raw_to_hourly(db: &Database, cutoff_ms: i64) -> Result<Compaction
             let (sid, ts) = dec_skey(k.value());
             if ts >= cutoff_ms {
                 continue;
+            }
+            if ts > max_ts_read {
+                max_ts_read = ts;
             }
             let bucket = bucket_floor(ts, HOURLY_MS);
             buckets
@@ -152,14 +157,21 @@ pub fn compact_raw_to_hourly(db: &Database, cutoff_ms: i64) -> Result<Compaction
         return Ok(CompactionStats::default());
     }
 
-    // 2. Phase écriture des buckets — transaction unique.
+    // 2. Phase écriture des buckets — transaction unique. R4 : si un bucket
+    //    existe déjà à cette clé (compaction partielle antérieure), on le
+    //    fusionne au lieu de l'écraser (sinon perte des données déjà agrégées).
     {
         let wtx = db.begin_write()?;
         {
             let mut t_hour = wtx.open_table(TABLE_HOURLY)?;
-            for ((sid, b), builder) in buckets.into_iter() {
-                let agg = builder.finalize();
+            for ((sid, b), mut builder) in buckets.into_iter() {
                 let key = enc_skey(sid, b);
+                if let Some(existing) = t_hour.get(&key[..])? {
+                    let prev: AggBucket = bincode::deserialize(existing.value())?;
+                    drop(existing);
+                    builder.merge_bucket(&prev, b);
+                }
+                let agg = builder.finalize();
                 let bytes = bincode::serialize(&agg)?;
                 t_hour.insert(&key[..], &bytes[..])?;
             }
@@ -167,9 +179,11 @@ pub fn compact_raw_to_hourly(db: &Database, cutoff_ms: i64) -> Result<Compaction
         wtx.commit()?;
     }
 
-    // 3. Phase purge des raws compactés — transaction séparée pour ne pas
-    //    bloquer trop longtemps les écritures concurrentes.
-    let points_purged = purge_raw_before(db, cutoff_ms)?;
+    // 3. Phase purge — transaction(s) séparée(s), bornée à `max_ts_read`
+    //    (R3 : un point inséré tardivement avec un ts dans
+    //    `]max_ts_read, cutoff[` survit pour la prochaine passe au lieu
+    //    d'être purgé sans avoir été agrégé). Purge par lots (P3).
+    let points_purged = purge_raw_before(db, max_ts_read.saturating_add(1))?;
 
     Ok(CompactionStats { buckets_written, points_purged })
 }
@@ -177,6 +191,7 @@ pub fn compact_raw_to_hourly(db: &Database, cutoff_ms: i64) -> Result<Compaction
 /// `hourly → daily` : agrège tous les buckets horaires `ts < cutoff_ms`.
 pub fn compact_hourly_to_daily(db: &Database, cutoff_ms: i64) -> Result<CompactionStats> {
     let mut buckets: HashMap<(u32, i64), AggBucketBuilder> = HashMap::new();
+    let mut max_ts_read = i64::MIN;
     {
         let rtx = db.begin_read()?;
         let t_hour = rtx.open_table(TABLE_HOURLY)?;
@@ -185,6 +200,9 @@ pub fn compact_hourly_to_daily(db: &Database, cutoff_ms: i64) -> Result<Compacti
             let (sid, ts) = dec_skey(k.value());
             if ts >= cutoff_ms {
                 continue;
+            }
+            if ts > max_ts_read {
+                max_ts_read = ts;
             }
             let bucket = bucket_floor(ts, DAILY_MS);
             let hourly: AggBucket = bincode::deserialize(v.value())?;
@@ -200,13 +218,19 @@ pub fn compact_hourly_to_daily(db: &Database, cutoff_ms: i64) -> Result<Compacti
         return Ok(CompactionStats::default());
     }
 
+    // R4 : fusionne avec le bucket journalier existant le cas échéant.
     {
         let wtx = db.begin_write()?;
         {
             let mut t_day = wtx.open_table(TABLE_DAILY)?;
-            for ((sid, b), builder) in buckets.into_iter() {
-                let agg = builder.finalize();
+            for ((sid, b), mut builder) in buckets.into_iter() {
                 let key = enc_skey(sid, b);
+                if let Some(existing) = t_day.get(&key[..])? {
+                    let prev: AggBucket = bincode::deserialize(existing.value())?;
+                    drop(existing);
+                    builder.merge_bucket(&prev, b);
+                }
+                let agg = builder.finalize();
                 let bytes = bincode::serialize(&agg)?;
                 t_day.insert(&key[..], &bytes[..])?;
             }
@@ -214,37 +238,93 @@ pub fn compact_hourly_to_daily(db: &Database, cutoff_ms: i64) -> Result<Compacti
         wtx.commit()?;
     }
 
-    let points_purged = purge_hourly_before(db, cutoff_ms)?;
+    // R3 + P3 : purge bornée au max lu, par lots.
+    let points_purged = purge_hourly_before(db, max_ts_read.saturating_add(1))?;
 
     Ok(CompactionStats { buckets_written, points_purged })
 }
 
+/// Nombre max de clés supprimées par transaction de purge.
+///
+/// P3 : redb est mono-writer ; une purge en une seule transaction sur des
+/// millions de points gèlerait l'ingestion pendant toute sa durée. On
+/// découpe donc la suppression en lots bornés, en relâchant le write-lock
+/// entre chaque commit pour laisser le thread writer intercaler ses batchs.
+const PURGE_CHUNK: usize = 10_000;
+
+/// Collecte (transaction lecture) les clés `< cutoff_ms`, puis les supprime
+/// par lots bornés (transactions écriture courtes). Évite à la fois de tenir
+/// un write-lock long (P3) et un `extract_if` global.
+fn collect_keys_before(
+    rtx: &redb::ReadTransaction,
+    table: redb::TableDefinition<&[u8], f64>,
+    cutoff_ms: i64,
+) -> Result<Vec<[u8; SKEY_LEN]>> {
+    let t = rtx.open_table(table)?;
+    let mut keys = Vec::new();
+    for entry in t.iter()? {
+        let (k, _v) = entry?;
+        let kb = k.value();
+        let (_, ts) = dec_skey(kb);
+        if ts < cutoff_ms {
+            let mut arr = [0u8; SKEY_LEN];
+            arr.copy_from_slice(kb);
+            keys.push(arr);
+        }
+    }
+    Ok(keys)
+}
+
 fn purge_raw_before(db: &Database, cutoff_ms: i64) -> Result<usize> {
-    let wtx = db.begin_write()?;
-    let removed = {
-        let mut t_raw = wtx.open_table(TABLE_RAW)?;
-        let iter = t_raw.extract_if(|k, _v| {
-            let (_, ts) = dec_skey(k);
-            ts < cutoff_ms
-        })?;
-        iter.count()
+    let keys = {
+        let rtx = db.begin_read()?;
+        collect_keys_before(&rtx, TABLE_RAW, cutoff_ms)?
     };
-    wtx.commit()?;
-    Ok(removed)
+    let total = keys.len();
+    for chunk in keys.chunks(PURGE_CHUNK) {
+        let wtx = db.begin_write()?;
+        {
+            let mut t_raw = wtx.open_table(TABLE_RAW)?;
+            for k in chunk {
+                t_raw.remove(&k[..])?;
+            }
+        }
+        wtx.commit()?;
+    }
+    Ok(total)
 }
 
 fn purge_hourly_before(db: &Database, cutoff_ms: i64) -> Result<usize> {
-    let wtx = db.begin_write()?;
-    let removed = {
-        let mut t_hour = wtx.open_table(TABLE_HOURLY)?;
-        let iter = t_hour.extract_if(|k, _v| {
-            let (_, ts) = dec_skey(k);
-            ts < cutoff_ms
-        })?;
-        iter.count()
+    // Collecte des clés à supprimer (lecture). La valeur de TABLE_HOURLY est
+    // `&[u8]` ; on n'inspecte que la clé, donc on itère directement ici.
+    let keys: Vec<[u8; SKEY_LEN]> = {
+        let rtx = db.begin_read()?;
+        let t = rtx.open_table(TABLE_HOURLY)?;
+        let mut keys = Vec::new();
+        for entry in t.iter()? {
+            let (k, _v) = entry?;
+            let kb = k.value();
+            let (_, ts) = dec_skey(kb);
+            if ts < cutoff_ms {
+                let mut arr = [0u8; SKEY_LEN];
+                arr.copy_from_slice(kb);
+                keys.push(arr);
+            }
+        }
+        keys
     };
-    wtx.commit()?;
-    Ok(removed)
+    let total = keys.len();
+    for chunk in keys.chunks(PURGE_CHUNK) {
+        let wtx = db.begin_write()?;
+        {
+            let mut t_hour = wtx.open_table(TABLE_HOURLY)?;
+            for k in chunk {
+                t_hour.remove(&k[..])?;
+            }
+        }
+        wtx.commit()?;
+    }
+    Ok(total)
 }
 
 fn now_ms() -> i64 {
@@ -263,8 +343,13 @@ pub fn spawn_maintenance(
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let interval = Duration::from_secs(interval_hours.max(1) * 3600);
+        // M4 : première passe peu après le démarrage (60 s, le temps que le
+        // service finisse de booter) au lieu d'attendre un intervalle
+        // complet — sinon un service qui redémarre plus souvent que
+        // `interval_hours` ne compacterait jamais et la table raw croîtrait
+        // sans borne.
+        tokio::time::sleep(Duration::from_secs(60)).await;
         loop {
-            tokio::time::sleep(interval).await;
             let now = now_ms();
             let cutoff_raw = now - policy.raw_retention_days as i64 * DAILY_MS;
             let cutoff_hourly = now - policy.hourly_retention_days as i64 * DAILY_MS;
@@ -298,6 +383,8 @@ pub fn spawn_maintenance(
                 Ok(Err(e)) => tracing::error!(error = %e, "compact hourly→daily failed"),
                 Err(e) => tracing::error!(error = %e, "spawn_blocking hourly→daily panicked"),
             }
+
+            tokio::time::sleep(interval).await;
         }
     })
 }
