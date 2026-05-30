@@ -850,6 +850,12 @@ fn round_to(v: f64, to_nearest: f64) -> f64 {
 /// fixée à `intercept_time_ms` (en ms). Renvoie `(pente_par_seconde, ordonnée
 /// à intercept_time)`. Utilisé par `deriv` et `predict_linear`.
 fn linear_regression(pts: &[(i64, f64)], intercept_time_ms: i64) -> (f64, f64) {
+    // Garde défensive : slice vide → pas de régression possible. Les appelants
+    // actuels garantissent ≥ 2 points, mais on évite tout panic (`pts[0]`,
+    // `pts.len() - 1`) pour un futur appelant (revue Gemini PR #528).
+    if pts.is_empty() {
+        return (0.0, 0.0);
+    }
     let n = pts.len() as f64;
     let (mut sum_x, mut sum_y, mut sum_xy, mut sum_x2) = (0.0, 0.0, 0.0, 0.0);
     for (ts, v) in pts {
