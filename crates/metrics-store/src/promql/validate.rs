@@ -3,7 +3,7 @@
 
 use promql_parser::parser::{
     AggregateExpr, BinaryExpr, Call, Expr, MatrixSelector, ParenExpr, SubqueryExpr, UnaryExpr,
-    VectorSelector,
+    VectorMatchCardinality, VectorSelector,
 };
 
 use super::error::PromQlError;
@@ -70,6 +70,12 @@ fn validate_aggregate(a: &AggregateExpr) -> Result<(), PromQlError> {
     if a.param.is_some() {
         return unsupported(&format!("parameterized aggregator: {op_str}"));
     }
+    // Phase 1 : tant que le groupement n'est pas implémenté (Phase 2),
+    // `by`/`without` est silencieusement ignoré par l'évaluateur et renvoie
+    // une valeur collapsée fausse → on rejette explicitement.
+    if a.modifier.is_some() {
+        return unsupported("aggregation grouping (by/without) — non encore supporté");
+    }
     validate(&a.expr)
 }
 
@@ -81,6 +87,15 @@ fn validate_binary(b: &BinaryExpr) -> Result<(), PromQlError> {
     if let Some(m) = &b.modifier {
         if m.return_bool {
             return unsupported("bool modifier");
+        }
+        // L'évaluateur n'implémente que l'alignement exact tous-labels
+        // (`OneToOne` sans `on`/`ignoring`). Un matching non trivial
+        // (`on(...)`, `ignoring(...)`, `group_left`, `group_right`) serait
+        // silencieusement ignoré → on le rejette.
+        if m.matching.is_some() || !matches!(m.card, VectorMatchCardinality::OneToOne) {
+            return unsupported(
+                "vector matching (on/ignoring/group_left/group_right) — non supporté",
+            );
         }
     }
     validate(&b.lhs)?;
@@ -178,5 +193,17 @@ mod tests {
     #[test]
     fn rejects_offset_modifier() {
         ko("foo offset 5m", "offset");
+    }
+
+    #[test]
+    fn rejects_aggregation_grouping() {
+        ko("sum by (bms_id)(bms_voltage)", "grouping");
+        ko("sum without (x)(m)", "grouping");
+    }
+
+    #[test]
+    fn rejects_vector_matching() {
+        ko("a / on(x) b", "vector matching");
+        ko("a * on(x) group_left b", "vector matching");
     }
 }
