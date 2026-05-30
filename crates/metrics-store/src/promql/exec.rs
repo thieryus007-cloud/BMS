@@ -850,12 +850,13 @@ fn round_to(v: f64, to_nearest: f64) -> f64 {
 /// fixée à `intercept_time_ms` (en ms). Renvoie `(pente_par_seconde, ordonnée
 /// à intercept_time)`. Utilisé par `deriv` et `predict_linear`.
 fn linear_regression(pts: &[(i64, f64)], intercept_time_ms: i64) -> (f64, f64) {
-    // Garde défensive : slice vide → régression indéfinie. Les appelants
-    // actuels garantissent ≥ 2 points, mais on évite tout panic (`pts[0]`,
-    // `pts.len() - 1`) pour un futur appelant. On renvoie `NaN` (état indéfini,
-    // convention Prometheus) plutôt que 0 qui masquerait l'erreur (revue Gemini
-    // PR #528).
-    if pts.is_empty() {
+    // Garde défensive : une régression linéaire exige ≥ 2 points (sinon la
+    // pente est indéfinie). Les appelants garantissent déjà ce minimum, mais on
+    // évite tout panic (`pts[0]`, `pts.len() - 1`) et on renvoie `NaN` (état
+    // indéfini, convention Prometheus) plutôt que 0 qui masquerait l'erreur
+    // (revue Gemini PR #528). NB : le cas ≥ 2 points de même timestamp est
+    // traité plus bas (pente 0, ordonnée = moyenne).
+    if pts.len() < 2 {
         return (f64::NAN, f64::NAN);
     }
     let n = pts.len() as f64;
@@ -1493,9 +1494,11 @@ mod tests {
         let (slope, intercept) = linear_regression(&pts, 0);
         assert_eq!(slope, 0.0);
         assert!((intercept - 20.0).abs() < 1e-9);
-        // Slice vide → (NaN, NaN) (état indéfini, pas de panic).
+        // < 2 points → (NaN, NaN) (régression indéfinie, pas de panic).
         let (s, i) = linear_regression(&[], 0);
         assert!(s.is_nan() && i.is_nan());
+        let (s1, i1) = linear_regression(&[(1_000, 42.0)], 0);
+        assert!(s1.is_nan() && i1.is_nan());
     }
 
     #[test]
