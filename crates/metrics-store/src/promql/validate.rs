@@ -22,9 +22,15 @@ pub const SUPPORTED_RANGE_FUNCS: &[&str] = &[
     "last_over_time",
 ];
 
-/// Fonctions instantanées (`f(vec)` ou `f(vec, scalar)`).
-pub const SUPPORTED_INSTANT_FUNCS: &[&str] =
-    &["abs", "clamp_min", "clamp_max", "ceil", "floor", "round"];
+/// Fonctions instantanées (`f(vec)` ou `f(vec, scalar…)`).
+pub const SUPPORTED_INSTANT_FUNCS: &[&str] = &[
+    "abs", "clamp_min", "clamp_max", "clamp", "ceil", "floor", "round", "sqrt", "exp", "ln",
+    "log2", "log10", "sgn",
+];
+
+/// Fonctions de manipulation de labels (`f(vec, "str", …)`) — arguments string
+/// autorisés uniquement pour ces fonctions.
+pub const SUPPORTED_LABEL_FUNCS: &[&str] = &["label_replace", "label_join"];
 
 /// Opérateurs d'agrégation instant supportés (sans paramètre).
 pub const SUPPORTED_AGGREGATORS: &[&str] = &["sum", "max", "min", "avg", "count"];
@@ -122,8 +128,27 @@ fn validate_call(c: &Call) -> Result<(), PromQlError> {
     let name = c.func.name;
     let is_range = SUPPORTED_RANGE_FUNCS.contains(&name);
     let is_instant = SUPPORTED_INSTANT_FUNCS.contains(&name);
-    if !is_range && !is_instant {
+    let is_label = SUPPORTED_LABEL_FUNCS.contains(&name);
+    if !is_range && !is_instant && !is_label {
         return unsupported(&format!("function: {name}"));
+    }
+    if is_label {
+        // `label_replace`/`label_join` : 1er arg = vecteur instantané (validé),
+        // arguments suivants = string literals (autorisés uniquement ici).
+        let first = c
+            .args
+            .args
+            .first()
+            .ok_or_else(|| PromQlError::Unsupported(format!("{name}: argument manquant")))?;
+        validate(first)?;
+        for arg in &c.args.args[1..] {
+            if !matches!(arg.as_ref(), Expr::StringLiteral(_)) {
+                return unsupported(&format!(
+                    "{name}: les arguments après le vecteur doivent être des chaînes"
+                ));
+            }
+        }
+        return Ok(());
     }
     for arg in &c.args.args {
         validate(arg)?;
@@ -182,6 +207,29 @@ mod tests {
     }
 
     #[test]
+    fn accepts_math_functions() {
+        ok("sqrt(bms_v)");
+        ok("exp(bms_v)");
+        ok("ln(bms_v)");
+        ok("log2(bms_v)");
+        ok("log10(bms_v)");
+        ok("sgn(bms_v)");
+        ok("clamp(bms_v, 0, 100)");
+    }
+
+    #[test]
+    fn accepts_label_functions() {
+        ok(r#"label_replace(bms_v, "pack", "$1", "bms_id", "(.*)")"#);
+        ok(r#"label_join(bms_v, "combo", "-", "bms_id", "phase")"#);
+    }
+
+    #[test]
+    fn rejects_bare_string_literal() {
+        // Une chaîne nue (hors argument de fonction de labels) reste rejetée.
+        ko(r#""foo""#, "string literal");
+    }
+
+    #[test]
     fn rejects_subquery() {
         ko(
             r#"avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])"#,
@@ -192,7 +240,8 @@ mod tests {
     #[test]
     fn rejects_unsupported_function() {
         ko("histogram_quantile(0.95, foo)", "function: histogram_quantile");
-        ko("label_replace(foo, \"a\", \"b\", \"c\", \"d\")", "function: label_replace");
+        ko("vector(1)", "function: vector");
+        ko("deriv(foo[5m])", "function: deriv");
     }
 
     #[test]

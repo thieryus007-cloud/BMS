@@ -1216,6 +1216,11 @@ fausse. Toujours **pas** de set ops `unless`/`and`/`or`.
 - **`topk(k, vec)` / `bottomk(k, vec)`** (Phase 3b) — labels d'origine
   conservés, support optionnel de `by (…)`.
 - **`irate(m[w])`** (Phase 3c) — taux instantané sur les 2 derniers points.
+- **Math instant** (Phase 4) : `sqrt exp ln log2 log10 sgn clamp(v,min,max)`
+  (en plus de `abs clamp_min clamp_max ceil floor round`).
+- **Manipulation de labels** (Phase 4) : `label_replace(v,dst,repl,src,regex)`
+  (regex ancrée, expansion `$1`/`${name}`) et `label_join(v,dst,sep,src…)`.
+  Seules fonctions à accepter des arguments string.
 
 **Subqueries** : une seule occurrence — `[24h:1m]` dans le panel 43
 (`grafana-ess_dashboard.json`, calcul du proxy de cyclage batterie) :

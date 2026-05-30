@@ -20,6 +20,7 @@ parking_lot = "0.12"
 promql-parser = "0.9.0"
 clap        = { workspace = true }
 lru = "0.18"
+regex       = "1"
 
 [dev-dependencies]
 criterion   = { version = "0.5", features = ["html_reports"] }

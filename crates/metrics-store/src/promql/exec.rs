@@ -48,9 +48,10 @@ use std::time::Duration;
 use promql_parser::label::MatchOp;
 use promql_parser::parser::{
     AggregateExpr, BinaryExpr, Call, Expr, LabelModifier, MatrixSelector, NumberLiteral, ParenExpr,
-    UnaryExpr, VectorSelector,
+    StringLiteral, UnaryExpr, VectorSelector,
 };
 use redb::ReadTransaction;
+use regex::Regex;
 
 use crate::reader::Reader;
 use crate::tables::{AggBucket, SeriesMeta, Tier};
@@ -478,6 +479,23 @@ impl<'r> Evaluator<'r> {
 
     fn eval_call(&self, c: &Call, t: i64) -> Result<Value, PromQlError> {
         let name = c.func.name;
+        // Fonctions de labels (`label_replace`/`label_join`) : arguments string
+        // → routage dédié (ne passent pas par l'évaluation scalaire des args).
+        if name == "label_replace" || name == "label_join" {
+            let inner = match self.eval_at(c.args.args[0].as_ref(), t)? {
+                Value::Vector(v) => v,
+                Value::Scalar(_) => {
+                    return Err(PromQlError::Execution(format!(
+                        "{name}: le premier argument doit être un vecteur instantané"
+                    )))
+                }
+            };
+            return if name == "label_replace" {
+                label_replace(inner, c)
+            } else {
+                label_join(inner, c)
+            };
+        }
         // Fonctions à fenêtre : 1er arg = MatrixSelector.
         if let Some(first) = c.args.first() {
             if let Expr::MatrixSelector(MatrixSelector { vs, range }) = first.as_ref() {
@@ -589,6 +607,18 @@ impl<'r> Evaluator<'r> {
                     .map(|s| InstantSample { labels: s.labels, value: s.value.min(k) })
                     .collect()
             }
+            "clamp" => {
+                let min = scalar_arg(c, 1, t, self)?;
+                let max = scalar_arg(c, 2, t, self)?;
+                inner
+                    .into_iter()
+                    .map(|s| InstantSample { labels: s.labels, value: clamp_val(s.value, min, max) })
+                    .collect()
+            }
+            "sqrt" | "exp" | "ln" | "log2" | "log10" | "sgn" => inner
+                .into_iter()
+                .map(|s| InstantSample { labels: s.labels, value: unary_math(name, s.value) })
+                .collect(),
             other => {
                 return Err(PromQlError::Unsupported(format!("instant fn {other}")))
             }
@@ -610,6 +640,8 @@ impl<'r> Evaluator<'r> {
             "round" => s.round(),
             "clamp_min" => s.max(scalar_arg(c, 1, t, self)?),
             "clamp_max" => s.min(scalar_arg(c, 1, t, self)?),
+            "clamp" => clamp_val(s, scalar_arg(c, 1, t, self)?, scalar_arg(c, 2, t, self)?),
+            "sqrt" | "exp" | "ln" | "log2" | "log10" | "sgn" => unary_math(name, s),
             other => return Err(PromQlError::Unsupported(format!("instant fn {other}"))),
         })
     }
@@ -853,6 +885,113 @@ fn align_and_op(
     out
 }
 
+/// Fonctions mathématiques unaires (`sqrt exp ln log2 log10 sgn`). `NaN` se
+/// propage naturellement (sauf `sgn` qui le renvoie explicitement).
+fn unary_math(name: &str, v: f64) -> f64 {
+    match name {
+        "sqrt" => v.sqrt(),
+        "exp" => v.exp(),
+        "ln" => v.ln(),
+        "log2" => v.log2(),
+        "log10" => v.log10(),
+        // `sgn` : 1 si >0, -1 si <0, 0 si ==0, NaN si NaN (sémantique Prometheus,
+        // différente de `f64::signum` qui renvoie ±1 pour 0).
+        "sgn" => {
+            if v.is_nan() {
+                f64::NAN
+            } else if v > 0.0 {
+                1.0
+            } else if v < 0.0 {
+                -1.0
+            } else {
+                0.0
+            }
+        }
+        _ => f64::NAN,
+    }
+}
+
+/// `clamp(v, min, max)` : borne `v` dans `[min, max]`. Renvoie `NaN` si
+/// `min > max` (sémantique Prometheus).
+fn clamp_val(v: f64, min: f64, max: f64) -> f64 {
+    if min > max {
+        f64::NAN
+    } else {
+        v.max(min).min(max)
+    }
+}
+
+/// Extrait l'argument string littéral d'indice `idx` d'un appel de fonction.
+/// La validation (`validate_call`) garantit déjà que ces arguments sont des
+/// `StringLiteral` pour `label_replace`/`label_join`.
+fn string_arg(c: &Call, idx: usize) -> Result<String, PromQlError> {
+    match c.args.args.get(idx).map(|a| a.as_ref()) {
+        Some(Expr::StringLiteral(StringLiteral { val })) => Ok(val.clone()),
+        _ => Err(PromQlError::Execution(format!(
+            "argument string #{idx} attendu"
+        ))),
+    }
+}
+
+/// `label_replace(v, dst, replacement, src, regex)` : si `regex` (ancrée sur la
+/// chaîne entière) matche la valeur du label `src`, le label `dst` reçoit
+/// `replacement` (avec expansion des groupes `$1`/`${name}`). Si la valeur
+/// résultante est vide, `dst` est retiré. Sinon le sample est inchangé.
+fn label_replace(inner: Vec<InstantSample>, c: &Call) -> Result<Value, PromQlError> {
+    let dst = string_arg(c, 1)?;
+    let repl = string_arg(c, 2)?;
+    let src = string_arg(c, 3)?;
+    let regex_src = string_arg(c, 4)?;
+    // Prometheus ancre le regex sur toute la valeur du label (full match).
+    let re = Regex::new(&format!("^(?:{regex_src})$"))
+        .map_err(|e| PromQlError::Execution(format!("label_replace: regex invalide: {e}")))?;
+    let mut out = Vec::with_capacity(inner.len());
+    for s in inner {
+        let src_val = s.labels.get(&src).map(String::as_str).unwrap_or("");
+        if let Some(caps) = re.captures(src_val) {
+            let mut expanded = String::new();
+            caps.expand(&repl, &mut expanded);
+            let mut labels = (*s.labels).clone();
+            if expanded.is_empty() {
+                labels.remove(&dst);
+            } else {
+                labels.insert(dst.clone(), expanded);
+            }
+            out.push(InstantSample { labels: Arc::new(labels), value: s.value });
+        } else {
+            out.push(s);
+        }
+    }
+    Ok(Value::Vector(out))
+}
+
+/// `label_join(v, dst, separator, src_1, …, src_n)` : concatène les valeurs des
+/// labels sources avec `separator` dans le label `dst`. Valeur vide → `dst`
+/// retiré.
+fn label_join(inner: Vec<InstantSample>, c: &Call) -> Result<Value, PromQlError> {
+    let dst = string_arg(c, 1)?;
+    let sep = string_arg(c, 2)?;
+    let srcs: Vec<String> = (3..c.args.args.len())
+        .map(|i| string_arg(c, i))
+        .collect::<Result<_, _>>()?;
+    let mut out = Vec::with_capacity(inner.len());
+    for s in inner {
+        let joined = srcs
+            .iter()
+            .map(|l| s.labels.get(l).map(String::as_str).unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join(&sep);
+        let mut labels = (*s.labels).clone();
+        if joined.is_empty() {
+            labels.remove(&dst);
+        } else {
+            labels.insert(dst.clone(), joined);
+        }
+        out.push(InstantSample { labels: Arc::new(labels), value: s.value });
+    }
+    Ok(Value::Vector(out))
+}
+
 /// Renvoie la fonction de comparaison associée à un opérateur, ou `None` si
 /// l'opérateur n'est pas une comparaison.
 fn cmp_fn(op: &str) -> Option<fn(f64, f64) -> bool> {
@@ -900,14 +1039,19 @@ fn align_and_compare(
     return_bool: bool,
 ) -> Vec<InstantSample> {
     // `drop_name` réutilise l'Arc quand `__name__` est absent, et n'alloue
-    // qu'un Arc refcount=1 sinon (try_unwrap récupère alors le BTreeMap sans
-    // re-cloner). Côté lhs on conserve l'Arc pour le réinjecter en sortie.
+    // qu'un Arc refcount=1 sinon. On déstructure `s` puis on droppe `labels`
+    // avant `try_unwrap` : sans cela l'Arc original resterait vivant
+    // (refcount ≥ 2) et `try_unwrap` échouerait toujours, re-clonant le
+    // BTreeMap (revue Gemini PR #528). Côté lhs on conserve l'Arc pour le
+    // réinjecter en sortie.
     let rhs_idx: BTreeMap<Labels, f64> = rhs
         .into_iter()
         .map(|s| {
-            let l = drop_name(&s.labels);
+            let InstantSample { labels, value } = s;
+            let l = drop_name(&labels);
+            drop(labels);
             let l = Arc::try_unwrap(l).unwrap_or_else(|arc| (*arc).clone());
-            (l, s.value)
+            (l, value)
         })
         .collect();
     let mut out = Vec::with_capacity(lhs.len().min(rhs_idx.len()));
