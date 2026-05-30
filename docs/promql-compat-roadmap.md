@@ -366,8 +366,24 @@ dynamiques, échelles log, normalisation).
 | 3c | irate | ½ j | faible | basse | ✅ fait |
 | 4a | Math instant (sqrt/exp/ln/log/sgn/clamp) | ¼ j | faible | moyenne | ✅ fait |
 | 4b | label_replace / label_join | ½ j | faible | **haute** | ✅ fait |
+| 5 (P2) | deriv, predict_linear, quantile/stddev/stdvar_over_time | ½ j | moyen | moyenne | ✅ fait |
+| 5 (P3) | absent, changes, resets + fix `round(v,to_nearest)` | ½ j | faible | moyenne | ✅ fait |
 
-**Ordre recommandé** : 1 → 2 → (3a/3b/3c à la demande) → 4 (avant dashboards sophistiqués).
+**Ordre recommandé** : 1 → 2 → (3a/3b/3c à la demande) → 4 → 5 (avant dashboards sophistiqués).
+
+### Phase 5 — notes d'implémentation
+- `eval_call` localise le `MatrixSelector` **n'importe où** dans les args (gère
+  `quantile_over_time(φ, m[w])` dont la matrice est le 2ᵉ arg) ; le scalaire
+  éventuel (`φ`, durée `predict_linear`) est extrait comme « 1er arg non-matrice ».
+- `deriv`/`predict_linear` : régression linéaire moindres carrés
+  (`linear_regression`, origine x = `intercept_time`). `predict_linear` ancre
+  l'ordonnée à l'instant d'éval et renvoie `slope*T + intercept`.
+- `absent` : routé à part (a besoin des matchers du sélecteur) ; renvoie 1 sample
+  étiqueté des matchers `=` quand la série est absente.
+- Tier compacté : approximations documentées (cf. §6.5 du plan de migration).
+- **Restants (P4, à la demande)** : `histogram_quantile`, `holt_winters`,
+  trigo (`sin/cos/…`), `sort`/`sort_desc`, `scalar`/`vector`, fonctions date,
+  set ops `and/or/unless`, vector matching, `{__name__=~…}`.
 
 ### Définition de « terminé » par PR
 - [ ] `cargo test -p metrics-store` vert (unitaires + golden + coverage 16 dashboards).

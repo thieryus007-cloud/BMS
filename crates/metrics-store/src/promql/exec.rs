@@ -496,11 +496,19 @@ impl<'r> Evaluator<'r> {
                 label_join(inner, c)
             };
         }
-        // Fonctions à fenêtre : 1er arg = MatrixSelector.
-        if let Some(first) = c.args.first() {
-            if let Expr::MatrixSelector(MatrixSelector { vs, range }) = first.as_ref() {
-                return self.eval_range_call(name, vs, range, t);
-            }
+        // `absent(v)` : sémantique spéciale (1 sample si v est vide, sinon vide)
+        // — nécessite les matchers du sélecteur pour construire les labels.
+        if name == "absent" {
+            return self.eval_absent(c, t);
+        }
+        // Fonctions à fenêtre : le MatrixSelector peut être le 1er argument
+        // (`rate(m[5m])`, `predict_linear(m[1h], 3600)`) ou le 2e
+        // (`quantile_over_time(0.95, m[1d])`). On le localise n'importe où.
+        if let Some((vs, range)) = c.args.args.iter().find_map(|a| match a.as_ref() {
+            Expr::MatrixSelector(MatrixSelector { vs, range }) => Some((vs, range)),
+            _ => None,
+        }) {
+            return self.eval_range_call(name, vs, range, c, t);
         }
         // Fonctions instantanées : 1er arg = vecteur, args suivants = scalaires.
         let inner = match self.eval_at(c.args.args[0].as_ref(), t)? {
@@ -510,17 +518,60 @@ impl<'r> Evaluator<'r> {
         self.apply_instant_fn(name, inner, c, t)
     }
 
+    /// `absent(v)` : renvoie un vecteur vide si `v` a des éléments, sinon un
+    /// unique sample à `1` étiqueté avec les matchers d'égalité du sélecteur
+    /// (utile pour l'alerting « série absente »).
+    fn eval_absent(&self, c: &Call, t: i64) -> Result<Value, PromQlError> {
+        let non_empty = match self.eval_at(c.args.args[0].as_ref(), t)? {
+            Value::Vector(v) => !v.is_empty(),
+            Value::Scalar(_) => true,
+        };
+        if non_empty {
+            return Ok(Value::Vector(vec![]));
+        }
+        let mut labels = Labels::new();
+        if let Expr::VectorSelector(vs) = c.args.args[0].as_ref() {
+            for m in &vs.matchers.matchers {
+                if matches!(m.op, MatchOp::Equal) && m.name != "__name__" {
+                    labels.insert(m.name.clone(), m.value.clone());
+                }
+            }
+        }
+        Ok(Value::Vector(vec![InstantSample { labels: Arc::new(labels), value: 1.0 }]))
+    }
+
     fn eval_range_call(
         &self,
         name: &str,
         vs: &VectorSelector,
         range: &Duration,
+        c: &Call,
         t: i64,
     ) -> Result<Value, PromQlError> {
         let range_ms = range.as_millis() as i64;
         let win_start = t - range_ms;
         let tier = tier_for_range(range_ms);
         let matched = self.match_series(vs)?;
+        // Paramètre scalaire éventuel = 1er argument qui n'est pas le
+        // MatrixSelector (`predict_linear(m, T)` → T ; `quantile_over_time(φ, m)`
+        // → φ). Évalué une seule fois.
+        let param: Option<f64> = {
+            let mut p = None;
+            for a in &c.args.args {
+                if !matches!(a.as_ref(), Expr::MatrixSelector(_)) {
+                    match self.eval_at(a, t)? {
+                        Value::Scalar(v) => p = Some(v),
+                        Value::Vector(_) => {
+                            return Err(PromQlError::Execution(format!(
+                                "{name}: paramètre scalaire attendu"
+                            )))
+                        }
+                    }
+                    break;
+                }
+            }
+            p
+        };
         let rtx = self.txn()?;
         let mut out = Vec::with_capacity(matched.len());
         // P2 : `delta` (différence de jauge) et `last_over_time` n'ont besoin
@@ -552,14 +603,14 @@ impl<'r> Evaluator<'r> {
                         .reader
                         .query_range_raw_with_tx(rtx, *sid, win_start, t)
                         .map_err(|e| PromQlError::Execution(e.to_string()))?;
-                    apply_range_fn_raw(name, &pts, range_ms)
+                    apply_range_fn_raw(name, &pts, range_ms, t, param)
                 }
                 Tier::Hourly | Tier::Daily => {
                     let buckets = self
                         .reader
                         .query_range_buckets_with_tx(rtx, *sid, win_start, t, tier)
                         .map_err(|e| PromQlError::Execution(e.to_string()))?;
-                    apply_range_fn_buckets(name, &buckets, range_ms)
+                    apply_range_fn_buckets(name, &buckets, range_ms, t, param)
                 }
             };
             if let Some(v) = value_opt {
@@ -589,10 +640,15 @@ impl<'r> Evaluator<'r> {
                 .into_iter()
                 .map(|s| InstantSample { labels: s.labels, value: s.value.floor() })
                 .collect(),
-            "round" => inner
-                .into_iter()
-                .map(|s| InstantSample { labels: s.labels, value: s.value.round() })
-                .collect(),
+            "round" => {
+                // 2e argument optionnel `to_nearest` (défaut 1) — était
+                // auparavant ignoré (résultat faux silencieux).
+                let to_nearest = scalar_arg_opt(c, 1, t, self)?.unwrap_or(1.0);
+                inner
+                    .into_iter()
+                    .map(|s| InstantSample { labels: s.labels, value: round_to(s.value, to_nearest) })
+                    .collect()
+            }
             "clamp_min" => {
                 let k = scalar_arg(c, 1, t, self)?;
                 inner
@@ -637,7 +693,7 @@ impl<'r> Evaluator<'r> {
             "abs" => s.abs(),
             "ceil" => s.ceil(),
             "floor" => s.floor(),
-            "round" => s.round(),
+            "round" => round_to(s, scalar_arg_opt(c, 1, t, self)?.unwrap_or(1.0)),
             "clamp_min" => s.max(scalar_arg(c, 1, t, self)?),
             "clamp_max" => s.min(scalar_arg(c, 1, t, self)?),
             "clamp" => clamp_val(s, scalar_arg(c, 1, t, self)?, scalar_arg(c, 2, t, self)?),
@@ -720,23 +776,127 @@ fn scalar_arg(c: &Call, idx: usize, t: i64, ev: &Evaluator) -> Result<f64, PromQ
     }
 }
 
-fn apply_range_fn_raw(name: &str, pts: &[(i64, f64)], range_ms: i64) -> Option<f64> {
+/// Variante optionnelle de `scalar_arg` : `Ok(None)` si l'argument est absent.
+fn scalar_arg_opt(
+    c: &Call,
+    idx: usize,
+    t: i64,
+    ev: &Evaluator,
+) -> Result<Option<f64>, PromQlError> {
+    if c.args.args.get(idx).is_none() {
+        return Ok(None);
+    }
+    scalar_arg(c, idx, t, ev).map(Some)
+}
+
+/// Arrondi PromQL au plus proche multiple de `to_nearest` (`round(v, tn)`),
+/// demi-vers-le-haut comme Prometheus (`floor(v/tn + 0.5) * tn`).
+fn round_to(v: f64, to_nearest: f64) -> f64 {
+    let tn = if to_nearest == 0.0 { 1.0 } else { to_nearest };
+    (v / tn + 0.5).floor() * tn
+}
+
+/// Régression linéaire par moindres carrés sur `pts`, avec l'origine de l'axe x
+/// fixée à `intercept_time_ms` (en ms). Renvoie `(pente_par_seconde, ordonnée
+/// à intercept_time)`. Utilisé par `deriv` et `predict_linear`.
+fn linear_regression(pts: &[(i64, f64)], intercept_time_ms: i64) -> (f64, f64) {
+    let n = pts.len() as f64;
+    let (mut sum_x, mut sum_y, mut sum_xy, mut sum_x2) = (0.0, 0.0, 0.0, 0.0);
+    for (ts, v) in pts {
+        let x = (*ts - intercept_time_ms) as f64 / 1000.0;
+        sum_x += x;
+        sum_y += v;
+        sum_xy += x * v;
+        sum_x2 += x * x;
+    }
+    let cov_xy = sum_xy - sum_x * sum_y / n;
+    let var_x = sum_x2 - sum_x * sum_x / n;
+    let slope = cov_xy / var_x;
+    let intercept = sum_y / n - slope * sum_x / n;
+    (slope, intercept)
+}
+
+/// Variance de population (`Σ(x-µ)²/n`) sur une série de valeurs.
+fn variance_pop(values: &[f64]) -> f64 {
+    let n = values.len() as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n
+}
+
+/// φ-quantile avec interpolation linéaire (sémantique Prometheus). `φ<0` →
+/// `-Inf`, `φ>1` → `+Inf`. `values` doit être non vide.
+fn quantile_value(phi: f64, mut values: Vec<f64>) -> f64 {
+    if phi.is_nan() {
+        return f64::NAN;
+    }
+    if phi < 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    if phi > 1.0 {
+        return f64::INFINITY;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = values.len();
+    let rank = phi * (n - 1) as f64;
+    let lower = rank.floor() as usize;
+    let upper = rank.ceil() as usize;
+    let weight = rank - lower as f64;
+    values[lower] * (1.0 - weight) + values[upper] * weight
+}
+
+/// Nombre de changements de valeur entre points consécutifs (`changes`). Deux
+/// `NaN` consécutifs ne comptent pas comme un changement (sémantique Prometheus).
+fn changes_count(values: &[f64]) -> f64 {
+    values
+        .windows(2)
+        .filter(|w| w[0] != w[1] && !(w[0].is_nan() && w[1].is_nan()))
+        .count() as f64
+}
+
+/// Nombre de resets de compteur (`resets`) : transitions où la valeur décroît.
+fn resets_count(values: &[f64]) -> f64 {
+    values.windows(2).filter(|w| w[1] < w[0]).count() as f64
+}
+
+fn apply_range_fn_raw(
+    name: &str,
+    pts: &[(i64, f64)],
+    range_ms: i64,
+    eval_t: i64,
+    param: Option<f64>,
+) -> Option<f64> {
     if pts.is_empty() {
         return match name {
             "count_over_time" => Some(0.0),
+            "changes" | "resets" => Some(0.0),
             _ => None,
         };
     }
+    // Fonctions nécessitant ≥ 2 points (régression / dérivée).
+    if matches!(name, "deriv" | "predict_linear") && pts.len() < 2 {
+        return None;
+    }
+    let vals: Vec<f64> = pts.iter().map(|p| p.1).collect();
     Some(match name {
         "increase" => raw_counter_increase(pts),
         "delta" => pts.last().unwrap().1 - pts.first().unwrap().1,
         "rate" => raw_counter_increase(pts) / (range_ms as f64 / 1000.0),
-        "avg_over_time" => pts.iter().map(|p| p.1).sum::<f64>() / pts.len() as f64,
-        "sum_over_time" => pts.iter().map(|p| p.1).sum::<f64>(),
-        "min_over_time" => pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min),
-        "max_over_time" => pts.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max),
-        "count_over_time" => pts.len() as f64,
+        "deriv" => linear_regression(pts, pts[0].0).0,
+        "predict_linear" => {
+            let (slope, intercept) = linear_regression(pts, eval_t);
+            slope * param? + intercept
+        }
+        "changes" => changes_count(&vals),
+        "resets" => resets_count(&vals),
+        "avg_over_time" => vals.iter().sum::<f64>() / vals.len() as f64,
+        "sum_over_time" => vals.iter().sum::<f64>(),
+        "min_over_time" => vals.iter().copied().fold(f64::INFINITY, f64::min),
+        "max_over_time" => vals.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        "count_over_time" => vals.len() as f64,
         "last_over_time" => pts.last().unwrap().1,
+        "stdvar_over_time" => variance_pop(&vals),
+        "stddev_over_time" => variance_pop(&vals).sqrt(),
+        "quantile_over_time" => quantile_value(param?, vals),
         _ => return None,
     })
 }
@@ -812,12 +972,57 @@ fn apply_range_fn_buckets(
     name: &str,
     buckets: &[(i64, AggBucket)],
     range_ms: i64,
+    eval_t: i64,
+    param: Option<f64>,
 ) -> Option<f64> {
     if buckets.is_empty() {
         return match name {
             "count_over_time" => Some(0.0),
+            "changes" | "resets" => Some(0.0),
             _ => None,
         };
+    }
+    // Fonctions statistiques / régression sur tier compacté : les points raw
+    // sont purgés. Approximation documentée — on opère sur les valeurs
+    // représentatives des buckets (`avg` pour régression/stats ; séquence
+    // `first,last` pour changes/resets). Précis sur tier raw, approché ici.
+    match name {
+        "deriv" | "predict_linear" => {
+            if buckets.len() < 2 {
+                return None;
+            }
+            let pts: Vec<(i64, f64)> = buckets.iter().map(|(ts, b)| (*ts, b.avg)).collect();
+            return Some(if name == "deriv" {
+                linear_regression(&pts, pts[0].0).0
+            } else {
+                let (slope, intercept) = linear_regression(&pts, eval_t);
+                slope * param? + intercept
+            });
+        }
+        "stdvar_over_time" | "stddev_over_time" | "quantile_over_time" => {
+            let vals: Vec<f64> = buckets.iter().map(|(_, b)| b.avg).collect();
+            return Some(match name {
+                "stdvar_over_time" => variance_pop(&vals),
+                "stddev_over_time" => variance_pop(&vals).sqrt(),
+                _ => quantile_value(param?, vals),
+            });
+        }
+        "changes" | "resets" => {
+            // Séquence first→last de chaque bucket (capture le net intra-bucket
+            // et les transitions inter-buckets ; les oscillations internes sont
+            // invisibles).
+            let mut seq = Vec::with_capacity(buckets.len() * 2);
+            for (_, b) in buckets {
+                seq.push(b.first);
+                seq.push(b.last);
+            }
+            return Some(if name == "changes" {
+                changes_count(&seq)
+            } else {
+                resets_count(&seq)
+            });
+        }
+        _ => {}
     }
     // `irate` sur tier compacté : mal défini (points raw purgés). Choix retenu
     // (cf. roadmap §3c) : approximer avec les `last` des deux derniers buckets,
@@ -1190,5 +1395,45 @@ mod tests {
         assert_eq!(unary_math("sgn", -0.0), 0.0);
         assert!(unary_math("sgn", f64::NAN).is_nan());
         assert_eq!(unary_math("sqrt", 9.0), 3.0);
+    }
+
+    #[test]
+    fn round_to_honors_to_nearest() {
+        assert!((round_to(1.27, 0.1) - 1.3).abs() < 1e-9);
+        assert!((round_to(1.24, 0.1) - 1.2).abs() < 1e-9);
+        assert_eq!(round_to(2.5, 1.0), 3.0); // demi-vers-le-haut
+        assert_eq!(round_to(7.0, 5.0), 5.0);
+        assert_eq!(round_to(8.0, 5.0), 10.0);
+        assert_eq!(round_to(42.0, 0.0), 42.0); // to_nearest=0 → défaut 1
+    }
+
+    #[test]
+    fn linear_regression_pente_et_ordonnee() {
+        // y = 10 + 2*(t en s) à partir de t=0, pas de 1 s.
+        let pts: Vec<(i64, f64)> = (0..5).map(|i| (i * 1000, 10.0 + 2.0 * i as f64)).collect();
+        let (slope, intercept) = linear_regression(&pts, 0);
+        assert!((slope - 2.0).abs() < 1e-9);
+        assert!((intercept - 10.0).abs() < 1e-9);
+        // deriv = pente quelle que soit l'origine.
+        let (slope2, _) = linear_regression(&pts, pts[0].0);
+        assert!((slope2 - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn quantile_value_interpolation() {
+        let v = vec![1.0, 2.0, 3.0, 4.0];
+        assert_eq!(quantile_value(0.0, v.clone()), 1.0);
+        assert_eq!(quantile_value(1.0, v.clone()), 4.0);
+        assert_eq!(quantile_value(0.5, v.clone()), 2.5);
+        assert!(quantile_value(-0.1, v.clone()) == f64::NEG_INFINITY);
+        assert!(quantile_value(1.1, v) == f64::INFINITY);
+    }
+
+    #[test]
+    fn variance_changes_resets() {
+        assert!((variance_pop(&[2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) - 4.0).abs() < 1e-9);
+        assert_eq!(changes_count(&[1.0, 1.0, 2.0, 2.0, 3.0]), 2.0);
+        assert_eq!(changes_count(&[f64::NAN, f64::NAN]), 0.0); // 2 NaN consécutifs
+        assert_eq!(resets_count(&[0.0, 5.0, 10.0, 2.0, 8.0]), 1.0); // un seul reset (10→2)
     }
 }
