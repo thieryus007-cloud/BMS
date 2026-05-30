@@ -14,18 +14,25 @@ pub const SUPPORTED_RANGE_FUNCS: &[&str] = &[
     "rate",
     "irate",
     "delta",
+    "deriv",
+    "predict_linear",
+    "changes",
+    "resets",
     "avg_over_time",
     "sum_over_time",
     "min_over_time",
     "max_over_time",
     "count_over_time",
     "last_over_time",
+    "stddev_over_time",
+    "stdvar_over_time",
+    "quantile_over_time",
 ];
 
 /// Fonctions instantanées (`f(vec)` ou `f(vec, scalar…)`).
 pub const SUPPORTED_INSTANT_FUNCS: &[&str] = &[
     "abs", "clamp_min", "clamp_max", "clamp", "ceil", "floor", "round", "sqrt", "exp", "ln",
-    "log2", "log10", "sgn",
+    "log2", "log10", "sgn", "absent",
 ];
 
 /// Fonctions de manipulation de labels (`f(vec, "str", …)`) — arguments string
@@ -218,6 +225,21 @@ mod tests {
     }
 
     #[test]
+    fn accepts_p2_p3_functions() {
+        // P2
+        ok("deriv(bms_v[10m])");
+        ok("predict_linear(bms_soc[1h], 3600)");
+        ok("quantile_over_time(0.95, bms_v[1d])");
+        ok("stddev_over_time(bms_v[1h])");
+        ok("stdvar_over_time(bms_v[1h])");
+        // P3
+        ok("changes(bms_status[1h])");
+        ok("resets(bms_uptime[1d])");
+        ok(r#"absent(bms_v{bms_id="1"})"#);
+        ok("round(bms_v, 0.1)");
+    }
+
+    #[test]
     fn accepts_label_functions() {
         ok(r#"label_replace(bms_v, "pack", "$1", "bms_id", "(.*)")"#);
         ok(r#"label_join(bms_v, "combo", "-", "bms_id", "phase")"#);
@@ -241,7 +263,7 @@ mod tests {
     fn rejects_unsupported_function() {
         ko("histogram_quantile(0.95, foo)", "function: histogram_quantile");
         ko("vector(1)", "function: vector");
-        ko("deriv(foo[5m])", "function: deriv");
+        ko("idelta(foo[5m])", "function: idelta");
     }
 
     #[test]

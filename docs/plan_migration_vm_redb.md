@@ -1217,10 +1217,18 @@ fausse. Toujours **pas** de set ops `unless`/`and`/`or`.
   conservés, support optionnel de `by (…)`.
 - **`irate(m[w])`** (Phase 3c) — taux instantané sur les 2 derniers points.
 - **Math instant** (Phase 4) : `sqrt exp ln log2 log10 sgn clamp(v,min,max)`
-  (en plus de `abs clamp_min clamp_max ceil floor round`).
+  (en plus de `abs clamp_min clamp_max ceil floor round`). `round(v,to_nearest)`
+  honore désormais le 2ᵉ argument (demi-vers-le-haut).
 - **Manipulation de labels** (Phase 4) : `label_replace(v,dst,repl,src,regex)`
   (regex ancrée, expansion `$1`/`${name}`) et `label_join(v,dst,sep,src…)`.
   Seules fonctions à accepter des arguments string.
+- **Prédiction / stats** (Phase 5, P2) : `deriv`, `predict_linear(v[w],T)`,
+  `quantile_over_time(φ,v[w])`, `stddev_over_time`, `stdvar_over_time`.
+- **Alerting / compteurs** (Phase 5, P3) : `absent(v)` (labels = matchers
+  d'égalité), `changes(v[w])`, `resets(v[w])`.
+- Sur tier compacté, `deriv`/`predict_linear`/`stddev`/`stdvar`/`quantile_over_time`
+  opèrent sur les `avg` des buckets et `changes`/`resets` sur la séquence
+  `first,last` (approximation documentée — exact sur tier raw, ≤ 7 j).
 
 **Subqueries** : une seule occurrence — `[24h:1m]` dans le panel 43
 (`grafana-ess_dashboard.json`, calcul du proxy de cyclage batterie) :

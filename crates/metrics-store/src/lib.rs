@@ -591,6 +591,84 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_p2_p3_functions() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_p2p3");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // soc : droite décroissante 100,90,…,10 sur 10 pts (pas 1 s) → pente -10/s.
+            // status : 0,0,1,1,2 → 2 changements. cnt : 0,5,10,2,8 → 1 reset.
+            for i in 0..10_i64 {
+                let ts = 100_000 + i * 1_000;
+                writer
+                    .write(Sample::new("soc", ts, 100.0 - 10.0 * i as f64))
+                    .await
+                    .unwrap();
+            }
+            for (i, v) in [0.0, 0.0, 1.0, 1.0, 2.0].iter().enumerate() {
+                writer
+                    .write(Sample::new("status", 100_000 + i as i64 * 1_000, *v))
+                    .await
+                    .unwrap();
+            }
+            for (i, v) in [0.0, 5.0, 10.0, 2.0, 8.0].iter().enumerate() {
+                writer
+                    .write(Sample::new("cnt", 100_000 + i as i64 * 1_000, *v))
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let at = 109_000;
+            let scalar = |q: &str| {
+                let expr = parse_and_validate(q).unwrap();
+                let v = ev.eval_instant(&expr, at).unwrap();
+                assert_eq!(v.len(), 1, "{q}");
+                v[0].value
+            };
+
+            // deriv ≈ -10/s
+            assert!((scalar("deriv(soc[10s])") - (-10.0)).abs() < 1e-6);
+            // predict_linear : à t=109s soc=10, pente -10 → +5 s ⇒ 10-50 = -40
+            assert!((scalar("predict_linear(soc[10s], 5)") - (-40.0)).abs() < 1e-6);
+            // quantile_over_time 0.5 sur [10..100] → médiane 55
+            assert!((scalar("quantile_over_time(0.5, soc[10s])") - 55.0).abs() < 1e-9);
+            // stddev_over_time > 0
+            assert!(scalar("stddev_over_time(soc[10s])") > 0.0);
+            // changes(status) = 2
+            assert!((scalar("changes(status[10s])") - 2.0).abs() < 1e-9);
+            // resets(cnt) = 1
+            assert!((scalar("resets(cnt[10s])") - 1.0).abs() < 1e-9);
+
+            // absent : série existante → vecteur vide
+            let expr = parse_and_validate("absent(soc)").unwrap();
+            assert_eq!(ev.eval_instant(&expr, at).unwrap().len(), 0);
+            // absent : série inexistante → 1 sample à 1 avec labels du matcher
+            let expr = parse_and_validate(r#"absent(missing_metric{site="A"})"#).unwrap();
+            let v = ev.eval_instant(&expr, at).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 1.0).abs() < 1e-9);
+            assert_eq!(v[0].labels.get("site").map(String::as_str), Some("A"));
+
+            // round(v, 0.1) honore to_nearest (105.0 reste 105.0 ; vérifie via soc=100)
+            let expr = parse_and_validate("round(soc, 0.1)").unwrap();
+            let v = ev.eval_instant(&expr, 100_000).unwrap();
+            assert!((v[0].value - 100.0).abs() < 1e-9);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn promql_math_and_label_functions() {
         use crate::promql::{parse_and_validate, Evaluator};
 
