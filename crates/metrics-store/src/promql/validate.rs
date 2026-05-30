@@ -32,6 +32,9 @@ pub const SUPPORTED_AGGREGATORS: &[&str] = &["sum", "max", "min", "avg", "count"
 /// aligné — §6.5).
 pub const SUPPORTED_BINOPS: &[&str] = &["+", "-", "*", "/"];
 
+/// Opérateurs de comparaison supportés (filtre, ou 0/1 avec `bool`).
+pub const SUPPORTED_CMP_OPS: &[&str] = &["==", "!=", ">", "<", ">=", "<="];
+
 pub fn validate(expr: &Expr) -> Result<(), PromQlError> {
     match expr {
         Expr::NumberLiteral(_) => Ok(()),
@@ -76,11 +79,15 @@ fn validate_aggregate(a: &AggregateExpr) -> Result<(), PromQlError> {
 
 fn validate_binary(b: &BinaryExpr) -> Result<(), PromQlError> {
     let op_str = b.op.to_string();
-    if !SUPPORTED_BINOPS.contains(&op_str.as_str()) {
+    let is_arith = SUPPORTED_BINOPS.contains(&op_str.as_str());
+    let is_cmp = SUPPORTED_CMP_OPS.contains(&op_str.as_str());
+    if !is_arith && !is_cmp {
         return unsupported(&format!("binary operator: {op_str}"));
     }
     if let Some(m) = &b.modifier {
-        if m.return_bool {
+        // `bool` n'est valide que sur une comparaison (filtre → 0/1). Sur un
+        // opérateur arithmétique il reste rejeté.
+        if m.return_bool && !is_cmp {
             return unsupported("bool modifier");
         }
         // L'évaluateur n'implémente que l'alignement exact tous-labels
@@ -176,8 +183,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_comparison_operator() {
-        ko("foo > 5", "binary operator: >");
+    fn accepts_comparison_operators() {
+        ok("foo > 5");
+        ok("foo >= 5");
+        ok("foo < 5");
+        ok("foo <= 5");
+        ok("foo == 5");
+        ok("foo != 5");
+        ok("foo > bool 5"); // `bool` se place après l'opérateur en PromQL
+        ok("foo > bar"); // vec/vec aligné
+        // NB : `bool` sur un opérateur arithmétique (`foo + 5 bool`) est
+        // rejeté directement par le parser (ParseError), pas par la
+        // validation — la garde `return_bool && !is_cmp` reste défensive.
     }
 
     #[test]

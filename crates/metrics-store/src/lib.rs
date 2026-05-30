@@ -591,6 +591,75 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_comparison_operators() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_cmp");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // bms_v{bms_id=1}=1, {bms_id=2}=2, {bms_id=3}=3
+            let ts = 100_000;
+            for id in 1..=3_i64 {
+                writer
+                    .write(
+                        Sample::new("bms_v", ts, id as f64)
+                            .with_label("bms_id", &id.to_string()),
+                    )
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let at = 100_000;
+            let eval = |q: &str| {
+                let expr = parse_and_validate(q).unwrap();
+                ev.eval_instant(&expr, at).unwrap()
+            };
+
+            // Filtre : bms_v > 1.5 → 2 samples (2 et 3), valeurs inchangées.
+            let mut v = eval("bms_v > 1.5");
+            v.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+            assert!((v[1].value - 3.0).abs() < 1e-9);
+            // __name__ retiré.
+            assert!(v.iter().all(|s| !s.labels.contains_key("__name__")));
+
+            // bool : bms_v > bool 1.5 → 3 samples, valeurs 0/1.
+            let v = eval("bms_v > bool 1.5");
+            assert_eq!(v.len(), 3);
+            let ones = v.iter().filter(|s| (s.value - 1.0).abs() < 1e-9).count();
+            let zeros = v.iter().filter(|s| s.value.abs() < 1e-9).count();
+            assert_eq!(ones, 2);
+            assert_eq!(zeros, 1);
+
+            // Égalité : bms_v == 2 → 1 sample.
+            let v = eval("bms_v == 2");
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+
+            // vec/vec aligné : bms_v >= bms_v → tous conservés (3), valeur lhs.
+            let v = eval("bms_v >= bms_v");
+            assert_eq!(v.len(), 3);
+
+            // vec/vec bool : bms_v < bool bms_v → 3 samples tous à 0.
+            let v = eval("bms_v < bool bms_v");
+            assert_eq!(v.len(), 3);
+            assert!(v.iter().all(|s| s.value.abs() < 1e-9));
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn writer_persists_next_series_id_across_reopen() {
         let path = tmp_db_path("reopen");
         let _ = std::fs::remove_file(&path);

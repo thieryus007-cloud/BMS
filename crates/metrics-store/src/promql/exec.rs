@@ -264,6 +264,11 @@ impl<'r> Evaluator<'r> {
         let lhs = self.eval_at(&b.lhs, t)?;
         let rhs = self.eval_at(&b.rhs, t)?;
         let op = b.op.to_string();
+        // Comparaisons (`== != > < >= <=`) : logique dédiée (filtre vs `bool`).
+        if let Some(cmp) = cmp_fn(&op) {
+            let return_bool = b.modifier.as_ref().map(|m| m.return_bool).unwrap_or(false);
+            return self.eval_comparison(lhs, rhs, cmp, return_bool);
+        }
         let scalar_fn: fn(f64, f64) -> f64 = match op.as_str() {
             "+" => |a, b| a + b,
             "-" => |a, b| a - b,
@@ -286,6 +291,60 @@ impl<'r> Evaluator<'r> {
             (Value::Vector(lhs), Value::Vector(rhs)) => Ok(Value::Vector(align_and_op(
                 lhs, rhs, scalar_fn,
             ))),
+        }
+    }
+
+    /// Évalue une comparaison (`== != > < >= <=`).
+    ///
+    /// - **sans `bool`** : filtre — seuls les samples dont la condition est
+    ///   vraie sont conservés, **valeur inchangée**.
+    /// - **avec `bool`** : tous les samples sont conservés, valeur = `1.0`/`0.0`.
+    ///
+    /// `__name__` est toujours retiré (sémantique de comparaison, §3a). Toute
+    /// comparaison impliquant un `NaN` est fausse.
+    fn eval_comparison(
+        &self,
+        lhs: Value,
+        rhs: Value,
+        cmp: fn(f64, f64) -> bool,
+        return_bool: bool,
+    ) -> Result<Value, PromQlError> {
+        // Applique la comparaison à un sample vecteur contre une valeur
+        // scalaire. `lhs_is_vec` indique l'ordre des opérandes.
+        let map_sample = |s: InstantSample, other: f64, lhs_is_vec: bool| -> Option<InstantSample> {
+            let (a, b) = if lhs_is_vec { (s.value, other) } else { (other, s.value) };
+            let cond = cmp_truth(cmp, a, b);
+            if return_bool {
+                Some(InstantSample {
+                    labels: drop_name(&s.labels),
+                    value: if cond { 1.0 } else { 0.0 },
+                })
+            } else if cond {
+                Some(InstantSample { labels: drop_name(&s.labels), value: s.value })
+            } else {
+                None
+            }
+        };
+        match (lhs, rhs) {
+            (Value::Scalar(a), Value::Scalar(c)) => {
+                // Le parser PromQL exige `bool` pour scalar/scalar — garde
+                // défensive si jamais on arrivait ici sans.
+                if !return_bool {
+                    return Err(PromQlError::Execution(
+                        "comparaison scalar/scalar requiert le modifier bool".into(),
+                    ));
+                }
+                Ok(Value::Scalar(if cmp_truth(cmp, a, c) { 1.0 } else { 0.0 }))
+            }
+            (Value::Vector(v), Value::Scalar(c)) => Ok(Value::Vector(
+                v.into_iter().filter_map(|s| map_sample(s, c, true)).collect(),
+            )),
+            (Value::Scalar(a), Value::Vector(v)) => Ok(Value::Vector(
+                v.into_iter().filter_map(|s| map_sample(s, a, false)).collect(),
+            )),
+            (Value::Vector(lhs), Value::Vector(rhs)) => {
+                Ok(Value::Vector(align_and_compare(lhs, rhs, cmp, return_bool)))
+            }
         }
     }
 
@@ -706,6 +765,79 @@ fn align_and_op(
         key.remove("__name__");
         if let Some(&rval) = rhs_idx.get(&key) {
             out.push(InstantSample { labels: Arc::new(key), value: op(s.value, rval) });
+        }
+    }
+    out
+}
+
+/// Renvoie la fonction de comparaison associée à un opérateur, ou `None` si
+/// l'opérateur n'est pas une comparaison.
+fn cmp_fn(op: &str) -> Option<fn(f64, f64) -> bool> {
+    Some(match op {
+        "==" => |a, b| a == b,
+        "!=" => |a, b| a != b,
+        ">" => |a, b| a > b,
+        "<" => |a, b| a < b,
+        ">=" => |a, b| a >= b,
+        "<=" => |a, b| a <= b,
+        _ => return None,
+    })
+}
+
+/// Applique une comparaison en traitant tout `NaN` comme « condition fausse »
+/// (y compris pour `!=`, où IEEE renverrait `true`). Conforme à la sémantique
+/// PromQL où une comparaison impliquant `NaN` est toujours fausse.
+fn cmp_truth(cmp: fn(f64, f64) -> bool, a: f64, b: f64) -> bool {
+    if a.is_nan() || b.is_nan() {
+        false
+    } else {
+        cmp(a, b)
+    }
+}
+
+/// Retire `__name__` des labels d'un sample sans cloner inutilement quand il
+/// est déjà absent.
+fn drop_name(labels: &Arc<Labels>) -> Arc<Labels> {
+    if labels.contains_key("__name__") {
+        let mut l = (**labels).clone();
+        l.remove("__name__");
+        Arc::new(l)
+    } else {
+        labels.clone()
+    }
+}
+
+/// Aligne deux vecteurs par labels (hors `__name__`) et applique une
+/// comparaison par paire. En mode filtre, seuls les samples vrais sont
+/// conservés (valeur du lhs) ; en mode `bool`, tous sont conservés (1.0/0.0).
+fn align_and_compare(
+    lhs: Vec<InstantSample>,
+    rhs: Vec<InstantSample>,
+    cmp: fn(f64, f64) -> bool,
+    return_bool: bool,
+) -> Vec<InstantSample> {
+    let rhs_idx: BTreeMap<Labels, f64> = rhs
+        .into_iter()
+        .map(|s| {
+            let mut l = (*s.labels).clone();
+            l.remove("__name__");
+            (l, s.value)
+        })
+        .collect();
+    let mut out = Vec::with_capacity(lhs.len().min(rhs_idx.len()));
+    for s in lhs {
+        let mut key = (*s.labels).clone();
+        key.remove("__name__");
+        if let Some(&rval) = rhs_idx.get(&key) {
+            let cond = cmp_truth(cmp, s.value, rval);
+            if return_bool {
+                out.push(InstantSample {
+                    labels: Arc::new(key),
+                    value: if cond { 1.0 } else { 0.0 },
+                });
+            } else if cond {
+                out.push(InstantSample { labels: Arc::new(key), value: s.value });
+            }
         }
     }
     out
