@@ -470,6 +470,13 @@ pub fn write_venus_smartshunt(writer: &Writer, rl: &RateLimiter, shunt: &VenusSm
         push(writer, rl, MIN_WRITE_INTERVAL,
              Sample::new("venus_shunt_current_a", ts, v as f64),
              "venus_shunt_current_a");
+        // Valeur absolue dérivée |I| — alimente le panel "Taux de Cyclage 24h".
+        // L'ancienne subquery `abs(avg(clamp_min(I,0))) + abs(avg(clamp_max(I,0)))`
+        // se simplifie exactement en `avg(|I|)` (cf. plan §6.5, décision (a)),
+        // donc le panel utilise désormais `avg_over_time(venus_shunt_current_abs[24h])`.
+        push(writer, rl, MIN_WRITE_INTERVAL,
+             Sample::new("venus_shunt_current_abs", ts, (v as f64).abs()),
+             "venus_shunt_current_abs");
     }
     if let Some(v) = shunt.power_w {
         push(writer, rl, MIN_WRITE_INTERVAL,

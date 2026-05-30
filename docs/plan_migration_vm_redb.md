@@ -1220,6 +1220,14 @@ ECharts, soit (b) ajouter un cas spécial `[Xh:Ym]` qui pré-bucketize en
 mémoire avant la fonction `*_over_time`. La complexité de (b) (~1 j) est
 disproportionnée pour un panel. **Retenir (a).**
 
+> **✅ Implémenté (2026-05)** : le numérateur se simplifie exactement —
+> `abs(avg(clamp_min(I,0))) + abs(avg(clamp_max(I,0)))` = `avg(clamp_min(I,0) −
+> clamp_max(I,0))` = `avg(|I|)`. On émet donc la métrique dérivée
+> `venus_shunt_current_abs = |I|` (cf. `write_venus_smartshunt`) et le panel 43
+> devient `avg_over_time(venus_shunt_current_abs[24h]) * 24 / 680 * 100` —
+> supporté nativement, sans subquery, exact (et plus précis que le
+> sous-échantillonnage 1 min puisqu'on agrège tous les points bruts).
+
 **Offset, label_replace, label_join, vector(), scalar()** : aucune
 occurrence — rejetés sans implémentation.
 

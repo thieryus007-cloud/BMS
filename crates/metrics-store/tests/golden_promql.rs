@@ -36,7 +36,10 @@ fn extract_exprs(json_src: &str) -> Vec<(u64, String)> {
 /// supportée par le shim (cf. plan §6.5). Toute autre expression doit
 /// passer la validation.
 const KNOWN_UNSUPPORTED_PANELS: &[u64] = &[
-    43, // subquery `[24h:1m]` — décision (a) du plan : à réécrire côté JS
+    // (vide) — le panel 43 (ex-subquery `[24h:1m]`) a été réécrit en
+    // `avg_over_time(venus_shunt_current_abs[24h]) * 24/680*100` (décision (a)
+    // du plan §6.5), via la métrique dérivée |I|. Plus aucune expression non
+    // supportée dans les dashboards embarqués.
 ];
 
 #[test]
