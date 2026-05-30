@@ -591,6 +591,75 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_math_and_label_functions() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_mathlabel");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // bms_v{bms_id="1",phase="a"} = 4.0
+            let ts = 100_000;
+            writer
+                .write(
+                    Sample::new("bms_v", ts, 4.0)
+                        .with_label("bms_id", "1")
+                        .with_label("phase", "a"),
+                )
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let at = 100_000;
+            let eval = |q: &str| {
+                let expr = parse_and_validate(q).unwrap();
+                ev.eval_instant(&expr, at).unwrap()
+            };
+
+            // sqrt(4) = 2
+            let v = eval("sqrt(bms_v)");
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+
+            // clamp(4, 0, 2) = 2
+            let v = eval("clamp(bms_v, 0, 2)");
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+            // clamp avec min > max → NaN
+            let v = eval("clamp(bms_v, 5, 1)");
+            assert!(v[0].value.is_nan());
+
+            // sgn(4) = 1
+            let v = eval("sgn(bms_v)");
+            assert!((v[0].value - 1.0).abs() < 1e-9);
+
+            // label_replace : crée pack="P1" depuis bms_id, valeur inchangée.
+            let v = eval(r#"label_replace(bms_v, "pack", "P$1", "bms_id", "(.*)")"#);
+            assert_eq!(v.len(), 1);
+            assert_eq!(v[0].labels.get("pack").map(String::as_str), Some("P1"));
+            assert!((v[0].value - 4.0).abs() < 1e-9);
+            // labels d'origine préservés.
+            assert_eq!(v[0].labels.get("bms_id").map(String::as_str), Some("1"));
+
+            // label_replace sans match → série inchangée (pas de label ajouté).
+            let v = eval(r#"label_replace(bms_v, "pack", "X", "bms_id", "zzz")"#);
+            assert!(!v[0].labels.contains_key("pack"));
+
+            // label_join : combo = "1-a"
+            let v = eval(r#"label_join(bms_v, "combo", "-", "bms_id", "phase")"#);
+            assert_eq!(v[0].labels.get("combo").map(String::as_str), Some("1-a"));
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn promql_irate() {
         use crate::promql::{parse_and_validate, Evaluator};
 

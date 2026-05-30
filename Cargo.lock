@@ -1838,6 +1838,7 @@ dependencies = [
  "parking_lot",
  "promql-parser",
  "redb",
+ "regex",
  "serde",
  "serde_json",
  "smallvec",

@@ -1,11 +1,13 @@
 # PromQL compatibility roadmap — metrics-store
 
-> **✅ ÉTAT : toutes les phases (1, 2, 3a, 3b, 3c) sont implémentées et
-> testées.** Le sous-ensemble PromQL supporté inclut désormais le groupement
-> `by`/`without`, les comparaisons (+ `bool`), `topk`/`bottomk` et `irate`,
-> en plus du rejet explicite du vector matching non trivial. Voir la matrice
-> de compat mise à jour dans `docs/plan_migration_vm_redb.md` §6.4-6.5. Le
-> document ci-dessous reste comme référence de conception.
+> **✅ ÉTAT : phases 1, 2, 3a, 3b, 3c + Phase 4 (math & labels) implémentées
+> et testées.** Le sous-ensemble PromQL supporté inclut désormais le
+> groupement `by`/`without`, les comparaisons (+ `bool`), `topk`/`bottomk`,
+> `irate`, les fonctions math (`sqrt exp ln log2 log10 sgn clamp`) et la
+> manipulation de labels (`label_replace`, `label_join`), en plus du rejet
+> explicite du vector matching non trivial. Voir la matrice de compat à jour
+> dans `docs/plan_migration_vm_redb.md` §6.4-6.5. Le document ci-dessous reste
+> comme référence de conception.
 
 > **But du document** : plan d'implémentation **autoportant** pour élargir la
 > compatibilité PromQL du moteur `metrics-store` (le shim que Grafana
@@ -324,6 +326,35 @@ point → pas de valeur.
 
 ---
 
+## Phase 4 — Fonctions math & manipulation de labels
+
+**Objectif** : préparer les dashboards plus sophistiqués à venir (légendes
+dynamiques, échelles log, normalisation).
+
+### 4a — Math instant
+- `validate.rs` : ajouter `sqrt exp ln log2 log10 sgn clamp` à
+  `SUPPORTED_INSTANT_FUNCS`.
+- `exec.rs` : helper `unary_math` (propagation NaN naturelle ; `sgn` renvoie
+  -1/0/1/NaN à la Prometheus) + `clamp_val` (NaN si `min > max`). Branché dans
+  `apply_instant_fn` (vecteur) et `apply_instant_scalar` (scalaire).
+
+### 4b — Labels
+- `validate.rs` : `SUPPORTED_LABEL_FUNCS = [label_replace, label_join]` ;
+  `validate_call` valide le 1er arg (vecteur) et **autorise les `StringLiteral`**
+  pour les arguments suivants (seul endroit où une string est acceptée). NB :
+  `promql-parser` type-check déjà la signature → un mauvais type donne une
+  `ParseError`.
+- `exec.rs` : routage dédié dans `eval_call` (les args string ne sont pas
+  évaluables). `label_replace` utilise la crate `regex` (ancrage `^(?:…)$`,
+  expansion `$1`/`${name}` via `Captures::expand`) ; valeur vide ⇒ label retiré.
+  `label_join` concatène les labels source avec le séparateur.
+- Dépendance : `regex = "1"` (déjà présente transitivement via promql-parser).
+
+**Tests** : `sqrt/clamp/sgn`, `label_replace` (match, non-match, label retiré),
+`label_join`. **PR** : `feat(promql): math functions + label_replace/label_join`.
+
+---
+
 ## Récapitulatif
 
 | Phase | Contenu | Effort | Risque | Priorité | État |
@@ -333,8 +364,10 @@ point → pas de valeur.
 | 3a | Comparaisons + bool | ½–1 j | moyen | moyenne | ✅ fait |
 | 3b | topk/bottomk | ½ j | faible | moyenne | ✅ fait |
 | 3c | irate | ½ j | faible | basse | ✅ fait |
+| 4a | Math instant (sqrt/exp/ln/log/sgn/clamp) | ¼ j | faible | moyenne | ✅ fait |
+| 4b | label_replace / label_join | ½ j | faible | **haute** | ✅ fait |
 
-**Ordre recommandé** : 1 → 2 → (3a/3b/3c à la demande).
+**Ordre recommandé** : 1 → 2 → (3a/3b/3c à la demande) → 4 (avant dashboards sophistiqués).
 
 ### Définition de « terminé » par PR
 - [ ] `cargo test -p metrics-store` vert (unitaires + golden + coverage 16 dashboards).
