@@ -27,11 +27,27 @@ Sélection automatique selon la plage Grafana :
 - `7 j – 90 j` → tier Hourly
 - `> 90 j` → tier Daily
 
-**Fonctions PromQL supportées :**
-`sum`, `max`, `min`, `avg`, `count`, `increase`, `rate`, `delta`,
-`avg_over_time`, `sum_over_time`, `min_over_time`, `max_over_time`,
-`count_over_time`, `last_over_time`, `abs`, `clamp_min`, `clamp_max`,
-`ceil`, `floor`, `round`
+**Fonctions PromQL supportées** (étendues via la roadmap promql-compat —
+cf. `docs/promql-compat-roadmap.md`) :
+
+- **Agrégation** : `sum max min avg count` (avec `by`/`without`),
+  `topk` `bottomk`
+- **Opérateurs** : `+ - * /` ; comparaisons `== != > < >= <=` (filtre ou
+  `bool`)
+- **Fenêtre** : `increase rate irate delta deriv predict_linear changes
+  resets avg_over_time sum_over_time min_over_time max_over_time
+  count_over_time last_over_time stddev_over_time stdvar_over_time
+  quantile_over_time`
+- **Instant / math** : `abs clamp clamp_min clamp_max ceil floor round
+  sqrt exp ln log2 log10 sgn`
+- **Labels** : `label_replace` `label_join`
+- **Absence** : `absent` (vecteur instant) / `absent_over_time` (range)
+
+**Non supporté** (rejeté en `bad_data`) : subqueries `[r:s]`, `offset`, `@`,
+set ops `and`/`or`/`unless`, vector matching `on`/`ignoring`/`group_left|right`,
+`%` `^`, `quantile`/`stddev`/`stdvar`/`group`/`count_values`,
+`histogram_quantile`, `holt_winters`, `idelta`, `sort`/`sort_desc`,
+`scalar`/`vector`, fonctions date/temps, trigonométrie, `{__name__=~"…"}`.
 
 ---
 

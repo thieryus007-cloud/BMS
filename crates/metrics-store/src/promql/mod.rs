@@ -5,8 +5,11 @@
 //! Pipeline :
 //! 1. **parse** : délégué à [`promql_parser::parser::parse`].
 //! 2. **validate** ([`validate::validate`]) : rejette les constructions
-//!    non supportées (subqueries, comparaisons, set ops, fonctions hors
-//!    liste blanche). Liste blanche calibrée sur le golden set §6.5.
+//!    non supportées (subqueries, `offset`/`@`, set ops `and/or/unless`,
+//!    vector matching `on/ignoring/group_left/right`, fonctions hors liste
+//!    blanche). Liste blanche étendue au-delà du golden set §6.5 (cf.
+//!    `docs/promql-compat-roadmap.md` : comparaisons, `by/without`,
+//!    `topk/bottomk`, `irate`, math, labels, prédiction/stats, `absent`).
 //! 3. **execute** ([`exec::Evaluator`]) : évalue l'AST sur une plage
 //!    `(start, end, step)` en interrogeant le `Reader`. Sélection
 //!    automatique de la table (raw/hourly/daily) selon §6.3.

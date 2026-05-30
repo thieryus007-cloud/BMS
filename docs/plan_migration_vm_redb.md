@@ -1224,8 +1224,8 @@ fausse. Toujours **pas** de set ops `unless`/`and`/`or`.
   Seules fonctions à accepter des arguments string.
 - **Prédiction / stats** (Phase 5, P2) : `deriv`, `predict_linear(v[w],T)`,
   `quantile_over_time(φ,v[w])`, `stddev_over_time`, `stdvar_over_time`.
-- **Alerting / compteurs** (Phase 5, P3) : `absent(v)` (labels = matchers
-  d'égalité), `changes(v[w])`, `resets(v[w])`.
+- **Alerting / compteurs** (Phase 5, P3) : `absent(v)` / `absent_over_time(v[w])`
+  (labels = matchers d'égalité du sélecteur), `changes(v[w])`, `resets(v[w])`.
 - Sur tier compacté, `deriv`/`predict_linear`/`stddev`/`stdvar`/`quantile_over_time`
   opèrent sur les `avg` des buckets et `changes`/`resets` sur la séquence
   `first,last` (approximation documentée — exact sur tier raw, ≤ 7 j).
