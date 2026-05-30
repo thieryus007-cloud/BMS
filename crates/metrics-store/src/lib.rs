@@ -591,6 +591,70 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_topk_bottomk() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_topk");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // bms_v : {bms_id=1}=1 .. {bms_id=4}=4
+            let ts = 100_000;
+            for id in 1..=4_i64 {
+                writer
+                    .write(
+                        Sample::new("bms_v", ts, id as f64)
+                            .with_label("bms_id", &id.to_string()),
+                    )
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let at = 100_000;
+            let eval = |q: &str| {
+                let expr = parse_and_validate(q).unwrap();
+                ev.eval_instant(&expr, at).unwrap()
+            };
+
+            // topk(1, bms_v) → 1 sample (le max = 4), labels d'origine conservés.
+            let v = eval("topk(1, bms_v)");
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 4.0).abs() < 1e-9);
+            assert_eq!(v[0].labels.get("bms_id").map(String::as_str), Some("4"));
+            // topk conserve __name__.
+            assert_eq!(
+                v[0].labels.get("__name__").map(String::as_str),
+                Some("bms_v")
+            );
+
+            // bottomk(2, bms_v) → 2 samples (1 et 2).
+            let mut v = eval("bottomk(2, bms_v)");
+            v.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 1.0).abs() < 1e-9);
+            assert!((v[1].value - 2.0).abs() < 1e-9);
+
+            // topk(10, bms_v) → tronque à la taille réelle (4).
+            let v = eval("topk(10, bms_v)");
+            assert_eq!(v.len(), 4);
+
+            // topk(0, bms_v) → vide.
+            let v = eval("topk(0, bms_v)");
+            assert_eq!(v.len(), 0);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn promql_comparison_operators() {
         use crate::promql::{parse_and_validate, Evaluator};
 

@@ -394,6 +394,53 @@ impl<'r> Evaluator<'r> {
             g
         };
 
+        // topk/bottomk : sélection des k samples extrêmes par groupe. Les
+        // labels d'origine (y compris `__name__`) sont CONSERVÉS — on ne
+        // collapse pas, on ne fait que filtrer/trier.
+        if op == "topk" || op == "bottomk" {
+            let k_val = match &a.param {
+                Some(p) => match self.eval_at(p, t)? {
+                    Value::Scalar(v) => v,
+                    Value::Vector(_) => {
+                        return Err(PromQlError::Execution(
+                            "le paramètre de topk/bottomk doit être scalaire".into(),
+                        ))
+                    }
+                },
+                None => {
+                    return Err(PromQlError::Execution(
+                        "topk/bottomk requiert un paramètre k".into(),
+                    ))
+                }
+            };
+            // k négatif ou NaN → aucun sample.
+            let k = if k_val.is_nan() || k_val < 0.0 { 0 } else { k_val as usize };
+            let descending = op == "topk";
+            // Partitionne par clé de groupe (clé seulement pour le découpage —
+            // les samples de sortie gardent leurs labels d'origine).
+            let mut groups: BTreeMap<Labels, Vec<InstantSample>> = BTreeMap::new();
+            for s in inner {
+                groups.entry(group_key(&s.labels)).or_default().push(s);
+            }
+            let mut out = Vec::new();
+            for (_, mut samples) in groups {
+                samples.sort_by(|x, y| {
+                    let ord = x
+                        .value
+                        .partial_cmp(&y.value)
+                        .unwrap_or(std::cmp::Ordering::Equal);
+                    if descending {
+                        ord.reverse()
+                    } else {
+                        ord
+                    }
+                });
+                samples.truncate(k);
+                out.extend(samples);
+            }
+            return Ok(Value::Vector(out));
+        }
+
         struct Acc {
             sum: f64,
             min: f64,
