@@ -2135,7 +2135,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(abs(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])) + abs(avg_over_time(clamp_max(venus_shunt_current_a,0)[24h:1m]))) * 24 / 680 * 100",
+          "expr": "avg_over_time(venus_shunt_current_abs[24h]) * 24 / 680 * 100",
           "refId": "A"
         }
       ],
