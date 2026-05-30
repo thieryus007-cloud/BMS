@@ -63,10 +63,12 @@ fn solar_pv_dashboard_coverage() {
 /// Seul `$bms_id` est réellement utilisé (matcher regex), mais on couvre
 /// aussi les variables d'intervalle au cas où une future édition en ajoute.
 fn sanitize_grafana_vars(expr: &str) -> String {
-    expr.replace("$__rate_interval", "5m")
-        .replace("${__rate_interval}", "5m")
-        .replace("$__interval", "5m")
+    // Remplacer les formes avec accolades `${...}` avant les formes nues
+    // `$...` (convention spécifique→général, défensif).
+    expr.replace("${__rate_interval}", "5m")
+        .replace("$__rate_interval", "5m")
         .replace("${__interval}", "5m")
+        .replace("$__interval", "5m")
         .replace("$__range", "24h")
         .replace("${bms_id}", ".*")
         .replace("$bms_id", ".*")
@@ -97,12 +99,7 @@ fn provisioned_grafana_dashboards_coverage() {
             total += 1;
             let sanitized = sanitize_grafana_vars(&expr);
             if let Err(e) = parse_and_validate(&sanitized) {
-                let msg = match e {
-                    PromQlError::ParseError(s) => format!("parse: {s}"),
-                    PromQlError::Unsupported(s) => format!("unsupported: {s}"),
-                    PromQlError::Execution(s) => format!("exec: {s}"),
-                };
-                failures.push((fname.clone(), panel_id, expr, msg));
+                failures.push((fname.clone(), panel_id, expr, e.to_string()));
             }
         }
     }
