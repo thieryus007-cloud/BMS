@@ -27,6 +27,7 @@ pub const SUPPORTED_RANGE_FUNCS: &[&str] = &[
     "stddev_over_time",
     "stdvar_over_time",
     "quantile_over_time",
+    "absent_over_time",
 ];
 
 /// Fonctions instantanées (`f(vec)` ou `f(vec, scalar…)`).
@@ -236,6 +237,7 @@ mod tests {
         ok("changes(bms_status[1h])");
         ok("resets(bms_uptime[1d])");
         ok(r#"absent(bms_v{bms_id="1"})"#);
+        ok(r#"absent_over_time(bms_v{bms_id="1"}[5m])"#);
         ok("round(bms_v, 0.1)");
     }
 
