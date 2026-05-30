@@ -47,8 +47,8 @@ use std::time::Duration;
 
 use promql_parser::label::MatchOp;
 use promql_parser::parser::{
-    AggregateExpr, BinaryExpr, Call, Expr, MatrixSelector, NumberLiteral, ParenExpr, UnaryExpr,
-    VectorSelector,
+    AggregateExpr, BinaryExpr, Call, Expr, LabelModifier, MatrixSelector, NumberLiteral, ParenExpr,
+    UnaryExpr, VectorSelector,
 };
 use redb::ReadTransaction;
 
@@ -264,6 +264,11 @@ impl<'r> Evaluator<'r> {
         let lhs = self.eval_at(&b.lhs, t)?;
         let rhs = self.eval_at(&b.rhs, t)?;
         let op = b.op.to_string();
+        // Comparaisons (`== != > < >= <=`) : logique dédiée (filtre vs `bool`).
+        if let Some(cmp) = cmp_fn(&op) {
+            let return_bool = b.modifier.as_ref().map(|m| m.return_bool).unwrap_or(false);
+            return self.eval_comparison(lhs, rhs, cmp, return_bool);
+        }
         let scalar_fn: fn(f64, f64) -> f64 = match op.as_str() {
             "+" => |a, b| a + b,
             "-" => |a, b| a - b,
@@ -289,6 +294,60 @@ impl<'r> Evaluator<'r> {
         }
     }
 
+    /// Évalue une comparaison (`== != > < >= <=`).
+    ///
+    /// - **sans `bool`** : filtre — seuls les samples dont la condition est
+    ///   vraie sont conservés, **valeur inchangée**.
+    /// - **avec `bool`** : tous les samples sont conservés, valeur = `1.0`/`0.0`.
+    ///
+    /// `__name__` est toujours retiré (sémantique de comparaison, §3a). Toute
+    /// comparaison impliquant un `NaN` est fausse.
+    fn eval_comparison(
+        &self,
+        lhs: Value,
+        rhs: Value,
+        cmp: fn(f64, f64) -> bool,
+        return_bool: bool,
+    ) -> Result<Value, PromQlError> {
+        // Applique la comparaison à un sample vecteur contre une valeur
+        // scalaire. `lhs_is_vec` indique l'ordre des opérandes.
+        let map_sample = |s: InstantSample, other: f64, lhs_is_vec: bool| -> Option<InstantSample> {
+            let (a, b) = if lhs_is_vec { (s.value, other) } else { (other, s.value) };
+            let cond = cmp_truth(cmp, a, b);
+            if return_bool {
+                Some(InstantSample {
+                    labels: drop_name(&s.labels),
+                    value: if cond { 1.0 } else { 0.0 },
+                })
+            } else if cond {
+                Some(InstantSample { labels: drop_name(&s.labels), value: s.value })
+            } else {
+                None
+            }
+        };
+        match (lhs, rhs) {
+            (Value::Scalar(a), Value::Scalar(c)) => {
+                // Le parser PromQL exige `bool` pour scalar/scalar — garde
+                // défensive si jamais on arrivait ici sans.
+                if !return_bool {
+                    return Err(PromQlError::Execution(
+                        "comparaison scalar/scalar requiert le modifier bool".into(),
+                    ));
+                }
+                Ok(Value::Scalar(if cmp_truth(cmp, a, c) { 1.0 } else { 0.0 }))
+            }
+            (Value::Vector(v), Value::Scalar(c)) => Ok(Value::Vector(
+                v.into_iter().filter_map(|s| map_sample(s, c, true)).collect(),
+            )),
+            (Value::Scalar(a), Value::Vector(v)) => Ok(Value::Vector(
+                v.into_iter().filter_map(|s| map_sample(s, a, false)).collect(),
+            )),
+            (Value::Vector(lhs), Value::Vector(rhs)) => {
+                Ok(Value::Vector(align_and_compare(lhs, rhs, cmp, return_bool)))
+            }
+        }
+    }
+
     fn eval_aggregate(&self, a: &AggregateExpr, t: i64) -> Result<Value, PromQlError> {
         let inner = match self.eval_at(&a.expr, t)? {
             Value::Vector(v) => v,
@@ -298,21 +357,123 @@ impl<'r> Evaluator<'r> {
             return Ok(Value::Vector(vec![]));
         }
         let op = a.op.to_string();
-        let value = match op.as_str() {
-            "sum" => inner.iter().map(|s| s.value).sum::<f64>(),
-            "max" => inner
-                .iter()
-                .map(|s| s.value)
-                .fold(f64::NEG_INFINITY, f64::max),
-            "min" => inner.iter().map(|s| s.value).fold(f64::INFINITY, f64::min),
-            "avg" => inner.iter().map(|s| s.value).sum::<f64>() / inner.len() as f64,
-            "count" => inner.len() as f64,
-            other => return Err(PromQlError::Unsupported(format!("aggregator {other}"))),
+
+        // Noms de labels du modifier (promql_parser::label::Labels { labels:
+        // Vec<String> }) — à ne pas confondre avec exec::Labels (BTreeMap).
+        let grp_names: Vec<String> = match &a.modifier {
+            Some(m) => m.labels().labels.clone(),
+            None => Vec::new(),
         };
-        Ok(Value::Vector(vec![InstantSample {
-            labels: Arc::new(Labels::new()),
-            value,
-        }]))
+
+        // Clé de groupe : sous-ensemble des labels d'un sample selon le
+        // modifier. `__name__` est toujours retiré (sémantique d'agrégation).
+        let group_key = |labels: &Labels| -> Labels {
+            let mut g = Labels::new();
+            match &a.modifier {
+                // Sans modifier : 1 seul groupe, labels vides (collapse total).
+                None => {}
+                // by (...) : ne garder que les labels listés.
+                Some(LabelModifier::Include(_)) => {
+                    for k in &grp_names {
+                        if let Some(v) = labels.get(k) {
+                            g.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+                // without (...) : garder tous les labels SAUF ceux listés et
+                // `__name__`.
+                Some(LabelModifier::Exclude(_)) => {
+                    for (k, v) in labels.iter() {
+                        if k == "__name__" || grp_names.contains(k) {
+                            continue;
+                        }
+                        g.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            g
+        };
+
+        // topk/bottomk : sélection des k samples extrêmes par groupe. Les
+        // labels d'origine (y compris `__name__`) sont CONSERVÉS — on ne
+        // collapse pas, on ne fait que filtrer/trier.
+        if op == "topk" || op == "bottomk" {
+            let k_val = match &a.param {
+                Some(p) => match self.eval_at(p, t)? {
+                    Value::Scalar(v) => v,
+                    Value::Vector(_) => {
+                        return Err(PromQlError::Execution(
+                            "le paramètre de topk/bottomk doit être scalaire".into(),
+                        ))
+                    }
+                },
+                None => {
+                    return Err(PromQlError::Execution(
+                        "topk/bottomk requiert un paramètre k".into(),
+                    ))
+                }
+            };
+            // k négatif ou NaN → aucun sample.
+            let k = if k_val.is_nan() || k_val < 0.0 { 0 } else { k_val as usize };
+            let descending = op == "topk";
+            // Partitionne par clé de groupe (clé seulement pour le découpage —
+            // les samples de sortie gardent leurs labels d'origine).
+            let mut groups: BTreeMap<Labels, Vec<InstantSample>> = BTreeMap::new();
+            for s in inner {
+                groups.entry(group_key(&s.labels)).or_default().push(s);
+            }
+            let mut out = Vec::new();
+            for (_, mut samples) in groups {
+                samples.sort_by(|x, y| {
+                    let ord = x
+                        .value
+                        .partial_cmp(&y.value)
+                        .unwrap_or(std::cmp::Ordering::Equal);
+                    if descending {
+                        ord.reverse()
+                    } else {
+                        ord
+                    }
+                });
+                samples.truncate(k);
+                out.extend(samples);
+            }
+            return Ok(Value::Vector(out));
+        }
+
+        struct Acc {
+            sum: f64,
+            min: f64,
+            max: f64,
+            cnt: u64,
+        }
+        // BTreeMap comme clé de groupe ⇒ ordre de sortie déterministe.
+        let mut groups: BTreeMap<Labels, Acc> = BTreeMap::new();
+        for s in &inner {
+            let e = groups.entry(group_key(&s.labels)).or_insert(Acc {
+                sum: 0.0,
+                min: f64::INFINITY,
+                max: f64::NEG_INFINITY,
+                cnt: 0,
+            });
+            e.sum += s.value;
+            e.min = e.min.min(s.value);
+            e.max = e.max.max(s.value);
+            e.cnt += 1;
+        }
+        let mut out = Vec::with_capacity(groups.len());
+        for (labels, acc) in groups {
+            let value = match op.as_str() {
+                "sum" => acc.sum,
+                "min" => acc.min,
+                "max" => acc.max,
+                "avg" => acc.sum / acc.cnt as f64,
+                "count" => acc.cnt as f64,
+                other => return Err(PromQlError::Unsupported(format!("aggregator {other}"))),
+            };
+            out.push(InstantSample { labels: Arc::new(labels), value });
+        }
+        Ok(Value::Vector(out))
     }
 
     fn eval_call(&self, c: &Call, t: i64) -> Result<Value, PromQlError> {
@@ -353,6 +514,14 @@ impl<'r> Evaluator<'r> {
         let endpoints_only = matches!(name, "delta" | "last_over_time");
         for (sid, labels) in matched.iter() {
             let value_opt = match tier {
+                // `irate` (tier raw) : taux instantané sur les 2 derniers points.
+                Tier::Raw if name == "irate" => {
+                    let lt = self
+                        .reader
+                        .last_two_in_range_with_tx(rtx, *sid, win_start, t)
+                        .map_err(|e| PromQlError::Execution(e.to_string()))?;
+                    apply_irate_last_two(lt)
+                }
                 Tier::Raw if endpoints_only => {
                     let fl = self
                         .reader
@@ -577,6 +746,19 @@ fn buckets_counter_increase(buckets: &[(i64, AggBucket)]) -> f64 {
     total
 }
 
+/// `irate` (tier raw) : taux instantané sur les **deux derniers points** de la
+/// fenêtre : `counter_increase(prev, last) / Δt_secondes`. Gère le reset de
+/// compteur via `counter_increase`. Renvoie `None` s'il y a moins de 2 points
+/// ou si `Δt == 0`.
+fn apply_irate_last_two(lt: Option<((i64, f64), (i64, f64))>) -> Option<f64> {
+    let (prev, last) = lt?;
+    let dt = (last.0 - prev.0) as f64 / 1000.0;
+    if dt <= 0.0 {
+        return None;
+    }
+    Some(counter_increase(prev.1, last.1) / dt)
+}
+
 /// Fonctions de fenêtre qui n'ont besoin que des bornes : `delta` (différence
 /// de jauge, peut être négative — pas de gestion de reset) et `last_over_time`.
 /// `increase`/`rate` passent désormais par le chemin complet pour gérer les
@@ -604,6 +786,21 @@ fn apply_range_fn_buckets(
             "count_over_time" => Some(0.0),
             _ => None,
         };
+    }
+    // `irate` sur tier compacté : mal défini (points raw purgés). Choix retenu
+    // (cf. roadmap §3c) : approximer avec les `last` des deux derniers buckets,
+    // sur leur écart de timestamps de bucket. Requiert ≥ 2 buckets.
+    if name == "irate" {
+        if buckets.len() < 2 {
+            return None;
+        }
+        let prev = &buckets[buckets.len() - 2];
+        let last = &buckets[buckets.len() - 1];
+        let dt = (last.0 - prev.0) as f64 / 1000.0;
+        if dt <= 0.0 {
+            return None;
+        }
+        return Some(counter_increase(prev.1.last, last.1.last) / dt);
     }
     let total_cnt: u32 = buckets.iter().map(|(_, b)| b.cnt).sum();
     if total_cnt == 0 {
@@ -651,6 +848,79 @@ fn align_and_op(
         key.remove("__name__");
         if let Some(&rval) = rhs_idx.get(&key) {
             out.push(InstantSample { labels: Arc::new(key), value: op(s.value, rval) });
+        }
+    }
+    out
+}
+
+/// Renvoie la fonction de comparaison associée à un opérateur, ou `None` si
+/// l'opérateur n'est pas une comparaison.
+fn cmp_fn(op: &str) -> Option<fn(f64, f64) -> bool> {
+    Some(match op {
+        "==" => |a, b| a == b,
+        "!=" => |a, b| a != b,
+        ">" => |a, b| a > b,
+        "<" => |a, b| a < b,
+        ">=" => |a, b| a >= b,
+        "<=" => |a, b| a <= b,
+        _ => return None,
+    })
+}
+
+/// Applique une comparaison en traitant tout `NaN` comme « condition fausse »
+/// (y compris pour `!=`, où IEEE renverrait `true`). Conforme à la sémantique
+/// PromQL où une comparaison impliquant `NaN` est toujours fausse.
+fn cmp_truth(cmp: fn(f64, f64) -> bool, a: f64, b: f64) -> bool {
+    if a.is_nan() || b.is_nan() {
+        false
+    } else {
+        cmp(a, b)
+    }
+}
+
+/// Retire `__name__` des labels d'un sample sans cloner inutilement quand il
+/// est déjà absent.
+fn drop_name(labels: &Arc<Labels>) -> Arc<Labels> {
+    if labels.contains_key("__name__") {
+        let mut l = (**labels).clone();
+        l.remove("__name__");
+        Arc::new(l)
+    } else {
+        labels.clone()
+    }
+}
+
+/// Aligne deux vecteurs par labels (hors `__name__`) et applique une
+/// comparaison par paire. En mode filtre, seuls les samples vrais sont
+/// conservés (valeur du lhs) ; en mode `bool`, tous sont conservés (1.0/0.0).
+fn align_and_compare(
+    lhs: Vec<InstantSample>,
+    rhs: Vec<InstantSample>,
+    cmp: fn(f64, f64) -> bool,
+    return_bool: bool,
+) -> Vec<InstantSample> {
+    let rhs_idx: BTreeMap<Labels, f64> = rhs
+        .into_iter()
+        .map(|s| {
+            let mut l = (*s.labels).clone();
+            l.remove("__name__");
+            (l, s.value)
+        })
+        .collect();
+    let mut out = Vec::with_capacity(lhs.len().min(rhs_idx.len()));
+    for s in lhs {
+        let mut key = (*s.labels).clone();
+        key.remove("__name__");
+        if let Some(&rval) = rhs_idx.get(&key) {
+            let cond = cmp_truth(cmp, s.value, rval);
+            if return_bool {
+                out.push(InstantSample {
+                    labels: Arc::new(key),
+                    value: if cond { 1.0 } else { 0.0 },
+                });
+            } else if cond {
+                out.push(InstantSample { labels: Arc::new(key), value: s.value });
+            }
         }
     }
     out
@@ -704,5 +974,28 @@ mod tests {
         // Reset au sein d'un bucket (first > last).
         let bs = vec![(0, bucket(20.0, 5.0))];
         assert_eq!(buckets_counter_increase(&bs), 5.0);
+    }
+
+    #[test]
+    fn irate_last_two_local_slope() {
+        // 2 points à 2 s d'écart : (10 → 30) / 2 s = 10/s.
+        let lt = Some(((0_i64, 10.0), (2_000_i64, 30.0)));
+        assert_eq!(apply_irate_last_two(lt), Some(10.0));
+    }
+
+    #[test]
+    fn irate_last_two_handles_reset() {
+        // Reset : last < prev → counter_increase renvoie last (5) ; /1 s = 5.
+        let lt = Some(((0_i64, 20.0), (1_000_i64, 5.0)));
+        assert_eq!(apply_irate_last_two(lt), Some(5.0));
+    }
+
+    #[test]
+    fn irate_last_two_edge_cases() {
+        // Moins de 2 points → None.
+        assert_eq!(apply_irate_last_two(None), None);
+        // Δt == 0 → None (évite division par zéro).
+        let lt = Some(((1_000_i64, 1.0), (1_000_i64, 2.0)));
+        assert_eq!(apply_irate_last_two(lt), None);
     }
 }

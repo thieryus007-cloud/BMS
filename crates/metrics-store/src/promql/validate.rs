@@ -3,7 +3,7 @@
 
 use promql_parser::parser::{
     AggregateExpr, BinaryExpr, Call, Expr, MatrixSelector, ParenExpr, SubqueryExpr, UnaryExpr,
-    VectorSelector,
+    VectorMatchCardinality, VectorSelector,
 };
 
 use super::error::PromQlError;
@@ -12,6 +12,7 @@ use super::error::PromQlError;
 pub const SUPPORTED_RANGE_FUNCS: &[&str] = &[
     "increase",
     "rate",
+    "irate",
     "delta",
     "avg_over_time",
     "sum_over_time",
@@ -25,12 +26,18 @@ pub const SUPPORTED_RANGE_FUNCS: &[&str] = &[
 pub const SUPPORTED_INSTANT_FUNCS: &[&str] =
     &["abs", "clamp_min", "clamp_max", "ceil", "floor", "round"];
 
-/// Opérateurs d'agrégation instant supportés.
+/// Opérateurs d'agrégation instant supportés (sans paramètre).
 pub const SUPPORTED_AGGREGATORS: &[&str] = &["sum", "max", "min", "avg", "count"];
+
+/// Agrégateurs paramétrés supportés (`op(k, vec)`).
+pub const PARAMETERIZED_AGGREGATORS: &[&str] = &["topk", "bottomk"];
 
 /// Opérateurs binaires arithmétiques supportés (vec×scalar et vec×vec
 /// aligné — §6.5).
 pub const SUPPORTED_BINOPS: &[&str] = &["+", "-", "*", "/"];
+
+/// Opérateurs de comparaison supportés (filtre, ou 0/1 avec `bool`).
+pub const SUPPORTED_CMP_OPS: &[&str] = &["==", "!=", ">", "<", ">=", "<="];
 
 pub fn validate(expr: &Expr) -> Result<(), PromQlError> {
     match expr {
@@ -63,24 +70,47 @@ fn validate_vector_selector(vs: &VectorSelector) -> Result<(), PromQlError> {
 
 fn validate_aggregate(a: &AggregateExpr) -> Result<(), PromQlError> {
     let op_str = a.op.to_string();
-    if !SUPPORTED_AGGREGATORS.contains(&op_str.as_str()) {
+    let is_plain = SUPPORTED_AGGREGATORS.contains(&op_str.as_str());
+    let is_param = PARAMETERIZED_AGGREGATORS.contains(&op_str.as_str());
+    if !is_plain && !is_param {
         return unsupported(&format!("aggregator: {op_str}"));
     }
-    // `topk`, `bottomk`, `quantile` ont un paramètre — non supportés.
-    if a.param.is_some() {
+    // `topk`/`bottomk` exigent un paramètre `k` ; les autres (`quantile`, …)
+    // ne sont pas supportés et les agrégateurs simples n'en acceptent pas.
+    if is_param && a.param.is_none() {
+        return unsupported(&format!("aggregator {op_str} requires a parameter"));
+    }
+    if is_plain && a.param.is_some() {
         return unsupported(&format!("parameterized aggregator: {op_str}"));
     }
+    if let Some(p) = &a.param {
+        validate(p)?;
+    }
+    // Le groupement `by`/`without` est supporté par l'évaluateur (Phase 2).
     validate(&a.expr)
 }
 
 fn validate_binary(b: &BinaryExpr) -> Result<(), PromQlError> {
     let op_str = b.op.to_string();
-    if !SUPPORTED_BINOPS.contains(&op_str.as_str()) {
+    let is_arith = SUPPORTED_BINOPS.contains(&op_str.as_str());
+    let is_cmp = SUPPORTED_CMP_OPS.contains(&op_str.as_str());
+    if !is_arith && !is_cmp {
         return unsupported(&format!("binary operator: {op_str}"));
     }
     if let Some(m) = &b.modifier {
-        if m.return_bool {
+        // `bool` n'est valide que sur une comparaison (filtre → 0/1). Sur un
+        // opérateur arithmétique il reste rejeté.
+        if m.return_bool && !is_cmp {
             return unsupported("bool modifier");
+        }
+        // L'évaluateur n'implémente que l'alignement exact tous-labels
+        // (`OneToOne` sans `on`/`ignoring`). Un matching non trivial
+        // (`on(...)`, `ignoring(...)`, `group_left`, `group_right`) serait
+        // silencieusement ignoré → on le rejette.
+        if m.matching.is_some() || !matches!(m.card, VectorMatchCardinality::OneToOne) {
+            return unsupported(
+                "vector matching (on/ignoring/group_left/group_right) — non supporté",
+            );
         }
     }
     validate(&b.lhs)?;
@@ -166,8 +196,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_comparison_operator() {
-        ko("foo > 5", "binary operator: >");
+    fn accepts_comparison_operators() {
+        ok("foo > 5");
+        ok("foo >= 5");
+        ok("foo < 5");
+        ok("foo <= 5");
+        ok("foo == 5");
+        ok("foo != 5");
+        ok("foo > bool 5"); // `bool` se place après l'opérateur en PromQL
+        ok("foo > bar"); // vec/vec aligné
+        // NB : `bool` sur un opérateur arithmétique (`foo + 5 bool`) est
+        // rejeté directement par le parser (ParseError), pas par la
+        // validation — la garde `return_bool && !is_cmp` reste défensive.
     }
 
     #[test]
@@ -178,5 +218,32 @@ mod tests {
     #[test]
     fn rejects_offset_modifier() {
         ko("foo offset 5m", "offset");
+    }
+
+    #[test]
+    fn accepts_topk_bottomk() {
+        ok("topk(3, bms_v)");
+        ok("bottomk(1, et112_power_w)");
+        ok("topk(2, bms_v) by (bms_id)");
+    }
+
+    #[test]
+    fn rejects_unsupported_parameterized_aggregator() {
+        ko("quantile(0.9, bms_v)", "aggregator: quantile");
+        ko("count_values(\"v\", bms_v)", "aggregator: count_values");
+    }
+
+    #[test]
+    fn accepts_aggregation_grouping() {
+        ok("sum by (bms_id)(bms_voltage)");
+        ok("sum without (x)(m)");
+        ok("avg by (address)(et112_power_w)");
+        ok("count without (phase)(bms_v)");
+    }
+
+    #[test]
+    fn rejects_vector_matching() {
+        ko("a / on(x) b", "vector matching");
+        ko("a * on(x) group_left b", "vector matching");
     }
 }

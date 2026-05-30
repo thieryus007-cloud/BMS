@@ -1154,8 +1154,10 @@ Identique à plan v2 §5.3 :
 ### 6.4 Limites explicites du transpilateur
 
 Comme en v2, on rejette explicitement les fonctions PromQL non utilisées
-(`histogram_*`, `quantile`, `rate` sur compteurs non monotones, sous-requêtes,
-`label_replace`, etc.). L'erreur retournée a la forme Prometheus :
+(`histogram_*`, `quantile`, `count_values`, sous-requêtes `[r:s]`, `offset`,
+`@`, `label_replace`/`label_join`, set ops `and`/`or`/`unless`, vector matching
+`on`/`ignoring`/`group_left`/`group_right`, etc.). L'erreur retournée a la forme
+Prometheus :
 ```json
 {"status":"error","error":"unsupported function: histogram_quantile",
  "errorType":"bad_data"}
@@ -1202,8 +1204,18 @@ panel en introduit, mettre à jour le test `golden_promql_coverage`.
 - vecteur ⊗ vecteur **alignés** (ex: `(yield - exported) / yield`) — join
   par timestamp aligné sur `step_ms` puis op point-à-point.
 
-**Pas** d'opérateur de comparaison (`>`, `<=`), pas de `bool` modifier,
-pas de `unless`/`and`/`or` ensemblistes.
+**Comparaisons** (depuis la roadmap promql-compat Phase 3a) : `== != > < >=
+<=`, en mode filtre (samples vrais conservés, valeur inchangée) ou avec le
+modifier `bool` (1.0/0.0). `__name__` retiré, toute comparaison avec `NaN`
+fausse. Toujours **pas** de set ops `unless`/`and`/`or`.
+
+**Extensions roadmap promql-compat** (au-delà du golden set ci-dessus, cf.
+`docs/promql-compat-roadmap.md`) :
+- **Groupement** `by (…)` / `without (…)` sur `sum max min avg count`
+  (Phase 2).
+- **`topk(k, vec)` / `bottomk(k, vec)`** (Phase 3b) — labels d'origine
+  conservés, support optionnel de `by (…)`.
+- **`irate(m[w])`** (Phase 3c) — taux instantané sur les 2 derniers points.
 
 **Subqueries** : une seule occurrence — `[24h:1m]` dans le panel 43
 (`grafana-ess_dashboard.json`, calcul du proxy de cyclage batterie) :

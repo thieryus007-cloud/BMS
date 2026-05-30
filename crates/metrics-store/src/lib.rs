@@ -488,6 +488,279 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_aggregation_grouping_by_without() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_group");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // 3 séries de `bms_v` :
+            //   {bms_id=1}          = 1
+            //   {bms_id=2}          = 2
+            //   {bms_id=1,phase=a}  = 3
+            let ts = 100_000;
+            writer
+                .write(Sample::new("bms_v", ts, 1.0).with_label("bms_id", "1"))
+                .await
+                .unwrap();
+            writer
+                .write(Sample::new("bms_v", ts, 2.0).with_label("bms_id", "2"))
+                .await
+                .unwrap();
+            writer
+                .write(
+                    Sample::new("bms_v", ts, 3.0)
+                        .with_label("bms_id", "1")
+                        .with_label("phase", "a"),
+                )
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let at = 100_000;
+
+            // Helper : trie les samples par valeur croissante, vérifie l'absence
+            // de `__name__` dans les labels de sortie.
+            let eval_sorted = |q: &str| {
+                let expr = parse_and_validate(q).unwrap();
+                let mut v = ev.eval_instant(&expr, at).unwrap();
+                for s in &v {
+                    assert!(
+                        !s.labels.contains_key("__name__"),
+                        "{q}: __name__ doit être retiré, labels={:?}",
+                        s.labels
+                    );
+                }
+                v.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+                v
+            };
+
+            // sum by (bms_id) → {bms_id=1}=4, {bms_id=2}=2
+            let v = eval_sorted("sum by (bms_id)(bms_v)");
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 2.0).abs() < 1e-9); // bms_id=2
+            assert_eq!(v[0].labels.get("bms_id").map(String::as_str), Some("2"));
+            assert!((v[1].value - 4.0).abs() < 1e-9); // bms_id=1
+            assert_eq!(v[1].labels.get("bms_id").map(String::as_str), Some("1"));
+            // by (...) ne garde que bms_id → pas de phase.
+            assert!(!v[1].labels.contains_key("phase"));
+
+            // avg by (bms_id) → {bms_id=1}=2, {bms_id=2}=2
+            let v = eval_sorted("avg by (bms_id)(bms_v)");
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+            assert!((v[1].value - 2.0).abs() < 1e-9);
+
+            // count by (bms_id) → {bms_id=1}=2, {bms_id=2}=1
+            let v = eval_sorted("count by (bms_id)(bms_v)");
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 1.0).abs() < 1e-9);
+            assert!((v[1].value - 2.0).abs() < 1e-9);
+
+            // max by (bms_id) → {bms_id=1}=3, {bms_id=2}=2
+            let v = eval_sorted("max by (bms_id)(bms_v)");
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+            assert!((v[1].value - 3.0).abs() < 1e-9);
+
+            // sum without (phase) → {bms_id=1}=4, {bms_id=2}=2
+            // (les 2 séries bms_id=1 fusionnent une fois `phase` retiré).
+            let v = eval_sorted("sum without (phase)(bms_v)");
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+            assert_eq!(v[0].labels.get("bms_id").map(String::as_str), Some("2"));
+            assert!((v[1].value - 4.0).abs() < 1e-9);
+            assert_eq!(v[1].labels.get("bms_id").map(String::as_str), Some("1"));
+
+            // sum (sans modifier) → 6 (collapse total, labels vides)
+            let v = eval_sorted("sum(bms_v)");
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 6.0).abs() < 1e-9);
+            assert!(v[0].labels.is_empty());
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_irate() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_irate");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // Compteur croissant : 0,10,20,...,90 par pas de 1 s.
+            // Les 2 derniers points (80 à 8 s, 90 à 9 s) → irate = 10/s.
+            for i in 0..10_i64 {
+                let ts = 100_000 + i * 1_000;
+                writer
+                    .write(Sample::new("energy_wh", ts, i as f64 * 10.0))
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+
+            // irate sur la fenêtre complète → pente locale des 2 derniers points.
+            let expr = parse_and_validate("irate(energy_wh[10s])").unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 10.0).abs() < 1e-9, "got {}", v[0].value);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_topk_bottomk() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_topk");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // bms_v : {bms_id=1}=1 .. {bms_id=4}=4
+            let ts = 100_000;
+            for id in 1..=4_i64 {
+                writer
+                    .write(
+                        Sample::new("bms_v", ts, id as f64)
+                            .with_label("bms_id", &id.to_string()),
+                    )
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let at = 100_000;
+            let eval = |q: &str| {
+                let expr = parse_and_validate(q).unwrap();
+                ev.eval_instant(&expr, at).unwrap()
+            };
+
+            // topk(1, bms_v) → 1 sample (le max = 4), labels d'origine conservés.
+            let v = eval("topk(1, bms_v)");
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 4.0).abs() < 1e-9);
+            assert_eq!(v[0].labels.get("bms_id").map(String::as_str), Some("4"));
+            // topk conserve __name__.
+            assert_eq!(
+                v[0].labels.get("__name__").map(String::as_str),
+                Some("bms_v")
+            );
+
+            // bottomk(2, bms_v) → 2 samples (1 et 2).
+            let mut v = eval("bottomk(2, bms_v)");
+            v.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 1.0).abs() < 1e-9);
+            assert!((v[1].value - 2.0).abs() < 1e-9);
+
+            // topk(10, bms_v) → tronque à la taille réelle (4).
+            let v = eval("topk(10, bms_v)");
+            assert_eq!(v.len(), 4);
+
+            // topk(0, bms_v) → vide.
+            let v = eval("topk(0, bms_v)");
+            assert_eq!(v.len(), 0);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_comparison_operators() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_cmp");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // bms_v{bms_id=1}=1, {bms_id=2}=2, {bms_id=3}=3
+            let ts = 100_000;
+            for id in 1..=3_i64 {
+                writer
+                    .write(
+                        Sample::new("bms_v", ts, id as f64)
+                            .with_label("bms_id", &id.to_string()),
+                    )
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let at = 100_000;
+            let eval = |q: &str| {
+                let expr = parse_and_validate(q).unwrap();
+                ev.eval_instant(&expr, at).unwrap()
+            };
+
+            // Filtre : bms_v > 1.5 → 2 samples (2 et 3), valeurs inchangées.
+            let mut v = eval("bms_v > 1.5");
+            v.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+            assert!((v[1].value - 3.0).abs() < 1e-9);
+            // __name__ retiré.
+            assert!(v.iter().all(|s| !s.labels.contains_key("__name__")));
+
+            // bool : bms_v > bool 1.5 → 3 samples, valeurs 0/1.
+            let v = eval("bms_v > bool 1.5");
+            assert_eq!(v.len(), 3);
+            let ones = v.iter().filter(|s| (s.value - 1.0).abs() < 1e-9).count();
+            let zeros = v.iter().filter(|s| s.value.abs() < 1e-9).count();
+            assert_eq!(ones, 2);
+            assert_eq!(zeros, 1);
+
+            // Égalité : bms_v == 2 → 1 sample.
+            let v = eval("bms_v == 2");
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+
+            // vec/vec aligné : bms_v >= bms_v → tous conservés (3), valeur lhs.
+            let v = eval("bms_v >= bms_v");
+            assert_eq!(v.len(), 3);
+
+            // vec/vec bool : bms_v < bool bms_v → 3 samples tous à 0.
+            let v = eval("bms_v < bool bms_v");
+            assert_eq!(v.len(), 3);
+            assert!(v.iter().all(|s| s.value.abs() < 1e-9));
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn writer_persists_next_series_id_across_reopen() {
         let path = tmp_db_path("reopen");
         let _ = std::fs::remove_file(&path);

@@ -1,5 +1,12 @@
 # PromQL compatibility roadmap — metrics-store
 
+> **✅ ÉTAT : toutes les phases (1, 2, 3a, 3b, 3c) sont implémentées et
+> testées.** Le sous-ensemble PromQL supporté inclut désormais le groupement
+> `by`/`without`, les comparaisons (+ `bool`), `topk`/`bottomk` et `irate`,
+> en plus du rejet explicite du vector matching non trivial. Voir la matrice
+> de compat mise à jour dans `docs/plan_migration_vm_redb.md` §6.4-6.5. Le
+> document ci-dessous reste comme référence de conception.
+
 > **But du document** : plan d'implémentation **autoportant** pour élargir la
 > compatibilité PromQL du moteur `metrics-store` (le shim que Grafana
 > interroge directement). Conçu pour être **repris dans une conversation
@@ -268,7 +275,8 @@ Golden reste vert.
   (scalar/scalar requiert bool, vec/scalar, scalar/vec, vec/vec). Drop `__name__`.
 - Attention NaN (toute comparaison avec NaN est fausse).
 
-**Tests** : `bms_v > 1.5` (filtre), `bms_v > 1.5 bool` (0/1), `bms_v == 2`,
+**Tests** : `bms_v > 1.5` (filtre), `bms_v > bool 1.5` (0/1 — ⚠️ le mot-clé
+`bool` se place **après l'opérateur**, pas après le rhs), `bms_v == 2`,
 vec/vec.
 
 **Effort** ~½–1 j. **PR** : `feat(promql): opérateurs de comparaison + bool`.
@@ -318,13 +326,13 @@ point → pas de valeur.
 
 ## Récapitulatif
 
-| Phase | Contenu | Effort | Risque | Priorité |
-|-------|---------|--------|--------|----------|
-| 1 | Rejet explicite by/without + vector matching | 1–2 h | très faible | **haute** |
-| 2 | Groupement by/without | ½ j | faible | **haute** |
-| 3a | Comparaisons + bool | ½–1 j | moyen | moyenne |
-| 3b | topk/bottomk | ½ j | faible | moyenne |
-| 3c | irate | ½ j | faible | basse |
+| Phase | Contenu | Effort | Risque | Priorité | État |
+|-------|---------|--------|--------|----------|------|
+| 1 | Rejet explicite by/without + vector matching | 1–2 h | très faible | **haute** | ✅ fait |
+| 2 | Groupement by/without | ½ j | faible | **haute** | ✅ fait |
+| 3a | Comparaisons + bool | ½–1 j | moyen | moyenne | ✅ fait |
+| 3b | topk/bottomk | ½ j | faible | moyenne | ✅ fait |
+| 3c | irate | ½ j | faible | basse | ✅ fait |
 
 **Ordre recommandé** : 1 → 2 → (3a/3b/3c à la demande).
 
