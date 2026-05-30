@@ -673,6 +673,11 @@ mod tests {
             // absent_over_time : fenêtre sans point (trop ancienne) → 1 sample
             let expr = parse_and_validate("absent_over_time(soc[10s])").unwrap();
             assert_eq!(ev.eval_instant(&expr, 10_000_000).unwrap().len(), 1);
+            // absent avec argument parenthésé : labels du sélecteur préservés.
+            let expr = parse_and_validate(r#"absent((missing_metric{site="C"}))"#).unwrap();
+            let v = ev.eval_instant(&expr, at).unwrap();
+            assert_eq!(v.len(), 1);
+            assert_eq!(v[0].labels.get("site").map(String::as_str), Some("C"));
 
             // round(v, 0.1) honore to_nearest (105.0 reste 105.0 ; vérifie via soc=100)
             let expr = parse_and_validate("round(soc, 0.1)").unwrap();

@@ -1,14 +1,24 @@
-//! Évaluateur PromQL minimal — couvre le golden set §6.5.
+//! Évaluateur PromQL — couvre le golden set §6.5 + extensions roadmap
+//! promql-compat (cf. `docs/promql-compat-roadmap.md`).
 //!
 //! ## Couverture
 //! - `VectorSelector` (instant) avec matchers `= != =~ !~`
-//! - Arithmétique : `+ - * /` entre vecteurs et scalaires (alignement
-//!   par labels hors `__name__`)
-//! - Agrégations instant : `sum max min avg count`
-//! - Fonctions à fenêtre : `increase rate delta avg_over_time
-//!   sum_over_time min_over_time max_over_time count_over_time
-//!   last_over_time`
-//! - Fonctions instant : `abs clamp_min clamp_max ceil floor round`
+//! - Arithmétique : `+ - * /` (vec×scalar, vec×vec aligné hors `__name__`)
+//! - Comparaisons : `== != > < >= <=` (filtre, ou 0/1 avec `bool`) — Phase 3a
+//! - Agrégations instant : `sum max min avg count` avec `by`/`without`
+//!   (Phase 2) ; `topk`/`bottomk` (Phase 3b, labels d'origine conservés)
+//! - Fonctions à fenêtre : `increase rate irate delta deriv predict_linear
+//!   changes resets avg_over_time sum_over_time min_over_time max_over_time
+//!   count_over_time last_over_time stddev_over_time stdvar_over_time
+//!   quantile_over_time` (`irate` Phase 3c ; deriv/predict_linear/stats Phase 5)
+//! - Fonctions instant : `abs clamp clamp_min clamp_max ceil floor round
+//!   sqrt exp ln log2 log10 sgn` (Phase 4 ; `round(v, to_nearest)` honoré)
+//! - Labels : `label_replace label_join` (Phase 4)
+//! - Absence : `absent` (vecteur instant) / `absent_over_time` (range) — Phase 5
+//!
+//! ## Sémantique des labels
+//! Agrégations (sauf topk/bottomk) et comparaisons **droppent `__name__`** ;
+//! topk/bottomk et les fonctions de fenêtre **conservent** les labels.
 //!
 //! ## Sélection automatique de tier (§6.3)
 //! - matrix range ≤ 7 j → `TABLE_RAW`
@@ -526,7 +536,13 @@ impl<'r> Evaluator<'r> {
     /// Le parser garantit le type de l'argument : `absent` reçoit toujours un
     /// vecteur instantané, `absent_over_time` toujours un `MatrixSelector`.
     fn eval_absent(&self, c: &Call, t: i64) -> Result<Value, PromQlError> {
-        let arg = c.args.args[0].as_ref();
+        // Déroule les parenthèses éventuelles (`absent_over_time((m[5m]))`) pour
+        // que le filtrage du MatrixSelector et l'extraction des labels du
+        // sélecteur fonctionnent (revue Gemini PR #528).
+        let mut arg = c.args.args[0].as_ref();
+        while let Expr::Paren(ParenExpr { expr }) = arg {
+            arg = expr.as_ref();
+        }
         let present = match arg {
             // absent_over_time : présent si ≥ 1 série matchée a un point dans la
             // fenêtre.
@@ -845,10 +861,12 @@ fn linear_regression(pts: &[(i64, f64)], intercept_time_ms: i64) -> (f64, f64) {
     }
     let cov_xy = sum_xy - sum_x * sum_y / n;
     let var_x = sum_x2 - sum_x * sum_x / n;
-    // Garde anti division par zéro : si tous les points partagent le même x
-    // (timestamps identiques), var_x == 0 → pente nulle, ordonnée = moyenne de Y
-    // (sémantique Prometheus). En pratique improbable (ts uniques par série).
-    if var_x == 0.0 {
+    // Garde anti division par zéro : si tous les points partagent le même
+    // timestamp, la variance en x est nulle. On compare directement le premier
+    // et le dernier timestamp (pts trié par ts croissant) — exact et O(1),
+    // contrairement à `var_x == 0.0` qui est instable en flottant (revue Gemini
+    // PR #528). Pente nulle, ordonnée = moyenne de Y (sémantique Prometheus).
+    if pts[0].0 == pts[pts.len() - 1].0 {
         return (0.0, sum_y / n);
     }
     let slope = cov_xy / var_x;
