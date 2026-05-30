@@ -660,6 +660,20 @@ mod tests {
             assert!((v[0].value - 1.0).abs() < 1e-9);
             assert_eq!(v[0].labels.get("site").map(String::as_str), Some("A"));
 
+            // absent_over_time : série présente sur la fenêtre → vide
+            let expr = parse_and_validate("absent_over_time(soc[10s])").unwrap();
+            assert_eq!(ev.eval_instant(&expr, at).unwrap().len(), 0);
+            // absent_over_time : série absente → 1 sample à 1 avec labels du matcher
+            let expr =
+                parse_and_validate(r#"absent_over_time(missing_metric{site="B"}[5m])"#).unwrap();
+            let v = ev.eval_instant(&expr, at).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 1.0).abs() < 1e-9);
+            assert_eq!(v[0].labels.get("site").map(String::as_str), Some("B"));
+            // absent_over_time : fenêtre sans point (trop ancienne) → 1 sample
+            let expr = parse_and_validate("absent_over_time(soc[10s])").unwrap();
+            assert_eq!(ev.eval_instant(&expr, 10_000_000).unwrap().len(), 1);
+
             // round(v, 0.1) honore to_nearest (105.0 reste 105.0 ; vérifie via soc=100)
             let expr = parse_and_validate("round(soc, 0.1)").unwrap();
             let v = ev.eval_instant(&expr, 100_000).unwrap();

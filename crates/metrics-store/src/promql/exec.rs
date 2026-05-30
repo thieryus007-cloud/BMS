@@ -496,9 +496,10 @@ impl<'r> Evaluator<'r> {
                 label_join(inner, c)
             };
         }
-        // `absent(v)` : sémantique spéciale (1 sample si v est vide, sinon vide)
-        // — nécessite les matchers du sélecteur pour construire les labels.
-        if name == "absent" {
+        // `absent(v)` (vecteur instantané) et `absent_over_time(v[range])`
+        // (vecteur de range) : sémantique spéciale (1 sample si la série est
+        // absente, sinon vide) — nécessitent les matchers du sélecteur.
+        if name == "absent" || name == "absent_over_time" {
             return self.eval_absent(c, t);
         }
         // Fonctions à fenêtre : le MatrixSelector peut être le 1er argument
@@ -518,19 +519,52 @@ impl<'r> Evaluator<'r> {
         self.apply_instant_fn(name, inner, c, t)
     }
 
-    /// `absent(v)` : renvoie un vecteur vide si `v` a des éléments, sinon un
-    /// unique sample à `1` étiqueté avec les matchers d'égalité du sélecteur
-    /// (utile pour l'alerting « série absente »).
+    /// `absent(v)` / `absent_over_time(v[range])` : renvoie un vecteur vide si
+    /// la série est présente, sinon un unique sample à `1` étiqueté des matchers
+    /// d'égalité du sélecteur (alerting « série absente »).
+    ///
+    /// Le parser garantit le type de l'argument : `absent` reçoit toujours un
+    /// vecteur instantané, `absent_over_time` toujours un `MatrixSelector`.
     fn eval_absent(&self, c: &Call, t: i64) -> Result<Value, PromQlError> {
-        let non_empty = match self.eval_at(c.args.args[0].as_ref(), t)? {
-            Value::Vector(v) => !v.is_empty(),
-            Value::Scalar(_) => true,
+        let arg = c.args.args[0].as_ref();
+        let present = match arg {
+            // absent_over_time : présent si ≥ 1 série matchée a un point dans la
+            // fenêtre.
+            Expr::MatrixSelector(MatrixSelector { vs, range }) => {
+                let win_start = t - range.as_millis() as i64;
+                let matched = self.match_series(vs)?;
+                let rtx = self.txn()?;
+                let mut any = false;
+                for (sid, _) in matched.iter() {
+                    if self
+                        .reader
+                        .last_point_in_range_with_tx(rtx, *sid, win_start, t)
+                        .map_err(|e| PromQlError::Execution(e.to_string()))?
+                        .is_some()
+                    {
+                        any = true;
+                        break;
+                    }
+                }
+                any
+            }
+            // absent : présent si le vecteur instantané a des éléments.
+            _ => match self.eval_at(arg, t)? {
+                Value::Vector(v) => !v.is_empty(),
+                Value::Scalar(_) => true,
+            },
         };
-        if non_empty {
+        if present {
             return Ok(Value::Vector(vec![]));
         }
+        // Série absente → 1 sample à 1, étiqueté des matchers d'égalité.
+        let vs_opt = match arg {
+            Expr::VectorSelector(vs) => Some(vs),
+            Expr::MatrixSelector(MatrixSelector { vs, .. }) => Some(vs),
+            _ => None,
+        };
         let mut labels = Labels::new();
-        if let Expr::VectorSelector(vs) = c.args.args[0].as_ref() {
+        if let Some(vs) = vs_opt {
             for m in &vs.matchers.matchers {
                 if matches!(m.op, MatchOp::Equal) && m.name != "__name__" {
                     labels.insert(m.name.clone(), m.value.clone());
@@ -811,6 +845,12 @@ fn linear_regression(pts: &[(i64, f64)], intercept_time_ms: i64) -> (f64, f64) {
     }
     let cov_xy = sum_xy - sum_x * sum_y / n;
     let var_x = sum_x2 - sum_x * sum_x / n;
+    // Garde anti division par zéro : si tous les points partagent le même x
+    // (timestamps identiques), var_x == 0 → pente nulle, ordonnée = moyenne de Y
+    // (sémantique Prometheus). En pratique improbable (ts uniques par série).
+    if var_x == 0.0 {
+        return (0.0, sum_y / n);
+    }
     let slope = cov_xy / var_x;
     let intercept = sum_y / n - slope * sum_x / n;
     (slope, intercept)
@@ -1417,6 +1457,16 @@ mod tests {
         // deriv = pente quelle que soit l'origine.
         let (slope2, _) = linear_regression(&pts, pts[0].0);
         assert!((slope2 - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn linear_regression_var_x_zero_guard() {
+        // Tous les points au même timestamp → var_x == 0 : pente 0, ordonnée
+        // = moyenne de Y (pas de NaN/Inf).
+        let pts = vec![(1_000_i64, 10.0), (1_000_i64, 20.0), (1_000_i64, 30.0)];
+        let (slope, intercept) = linear_regression(&pts, 0);
+        assert_eq!(slope, 0.0);
+        assert!((intercept - 20.0).abs() < 1e-9);
     }
 
     #[test]
