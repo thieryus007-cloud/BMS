@@ -488,6 +488,109 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_aggregation_grouping_by_without() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_group");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // 3 séries de `bms_v` :
+            //   {bms_id=1}          = 1
+            //   {bms_id=2}          = 2
+            //   {bms_id=1,phase=a}  = 3
+            let ts = 100_000;
+            writer
+                .write(Sample::new("bms_v", ts, 1.0).with_label("bms_id", "1"))
+                .await
+                .unwrap();
+            writer
+                .write(Sample::new("bms_v", ts, 2.0).with_label("bms_id", "2"))
+                .await
+                .unwrap();
+            writer
+                .write(
+                    Sample::new("bms_v", ts, 3.0)
+                        .with_label("bms_id", "1")
+                        .with_label("phase", "a"),
+                )
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let at = 100_000;
+
+            // Helper : trie les samples par valeur croissante, vérifie l'absence
+            // de `__name__` dans les labels de sortie.
+            let eval_sorted = |q: &str| {
+                let expr = parse_and_validate(q).unwrap();
+                let mut v = ev.eval_instant(&expr, at).unwrap();
+                for s in &v {
+                    assert!(
+                        !s.labels.contains_key("__name__"),
+                        "{q}: __name__ doit être retiré, labels={:?}",
+                        s.labels
+                    );
+                }
+                v.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+                v
+            };
+
+            // sum by (bms_id) → {bms_id=1}=4, {bms_id=2}=2
+            let v = eval_sorted("sum by (bms_id)(bms_v)");
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 2.0).abs() < 1e-9); // bms_id=2
+            assert_eq!(v[0].labels.get("bms_id").map(String::as_str), Some("2"));
+            assert!((v[1].value - 4.0).abs() < 1e-9); // bms_id=1
+            assert_eq!(v[1].labels.get("bms_id").map(String::as_str), Some("1"));
+            // by (...) ne garde que bms_id → pas de phase.
+            assert!(!v[1].labels.contains_key("phase"));
+
+            // avg by (bms_id) → {bms_id=1}=2, {bms_id=2}=2
+            let v = eval_sorted("avg by (bms_id)(bms_v)");
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+            assert!((v[1].value - 2.0).abs() < 1e-9);
+
+            // count by (bms_id) → {bms_id=1}=2, {bms_id=2}=1
+            let v = eval_sorted("count by (bms_id)(bms_v)");
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 1.0).abs() < 1e-9);
+            assert!((v[1].value - 2.0).abs() < 1e-9);
+
+            // max by (bms_id) → {bms_id=1}=3, {bms_id=2}=2
+            let v = eval_sorted("max by (bms_id)(bms_v)");
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+            assert!((v[1].value - 3.0).abs() < 1e-9);
+
+            // sum without (phase) → {bms_id=1}=4, {bms_id=2}=2
+            // (les 2 séries bms_id=1 fusionnent une fois `phase` retiré).
+            let v = eval_sorted("sum without (phase)(bms_v)");
+            assert_eq!(v.len(), 2);
+            assert!((v[0].value - 2.0).abs() < 1e-9);
+            assert_eq!(v[0].labels.get("bms_id").map(String::as_str), Some("2"));
+            assert!((v[1].value - 4.0).abs() < 1e-9);
+            assert_eq!(v[1].labels.get("bms_id").map(String::as_str), Some("1"));
+
+            // sum (sans modifier) → 6 (collapse total, labels vides)
+            let v = eval_sorted("sum(bms_v)");
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 6.0).abs() < 1e-9);
+            assert!(v[0].labels.is_empty());
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn writer_persists_next_series_id_across_reopen() {
         let path = tmp_db_path("reopen");
         let _ = std::fs::remove_file(&path);

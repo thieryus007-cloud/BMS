@@ -47,8 +47,8 @@ use std::time::Duration;
 
 use promql_parser::label::MatchOp;
 use promql_parser::parser::{
-    AggregateExpr, BinaryExpr, Call, Expr, MatrixSelector, NumberLiteral, ParenExpr, UnaryExpr,
-    VectorSelector,
+    AggregateExpr, BinaryExpr, Call, Expr, LabelModifier, MatrixSelector, NumberLiteral, ParenExpr,
+    UnaryExpr, VectorSelector,
 };
 use redb::ReadTransaction;
 
@@ -298,21 +298,76 @@ impl<'r> Evaluator<'r> {
             return Ok(Value::Vector(vec![]));
         }
         let op = a.op.to_string();
-        let value = match op.as_str() {
-            "sum" => inner.iter().map(|s| s.value).sum::<f64>(),
-            "max" => inner
-                .iter()
-                .map(|s| s.value)
-                .fold(f64::NEG_INFINITY, f64::max),
-            "min" => inner.iter().map(|s| s.value).fold(f64::INFINITY, f64::min),
-            "avg" => inner.iter().map(|s| s.value).sum::<f64>() / inner.len() as f64,
-            "count" => inner.len() as f64,
-            other => return Err(PromQlError::Unsupported(format!("aggregator {other}"))),
+
+        // Noms de labels du modifier (promql_parser::label::Labels { labels:
+        // Vec<String> }) — à ne pas confondre avec exec::Labels (BTreeMap).
+        let grp_names: Vec<String> = match &a.modifier {
+            Some(m) => m.labels().labels.clone(),
+            None => Vec::new(),
         };
-        Ok(Value::Vector(vec![InstantSample {
-            labels: Arc::new(Labels::new()),
-            value,
-        }]))
+
+        // Clé de groupe : sous-ensemble des labels d'un sample selon le
+        // modifier. `__name__` est toujours retiré (sémantique d'agrégation).
+        let group_key = |labels: &Labels| -> Labels {
+            let mut g = Labels::new();
+            match &a.modifier {
+                // Sans modifier : 1 seul groupe, labels vides (collapse total).
+                None => {}
+                // by (...) : ne garder que les labels listés.
+                Some(LabelModifier::Include(_)) => {
+                    for k in &grp_names {
+                        if let Some(v) = labels.get(k) {
+                            g.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+                // without (...) : garder tous les labels SAUF ceux listés et
+                // `__name__`.
+                Some(LabelModifier::Exclude(_)) => {
+                    for (k, v) in labels.iter() {
+                        if k == "__name__" || grp_names.contains(k) {
+                            continue;
+                        }
+                        g.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            g
+        };
+
+        struct Acc {
+            sum: f64,
+            min: f64,
+            max: f64,
+            cnt: u64,
+        }
+        // BTreeMap comme clé de groupe ⇒ ordre de sortie déterministe.
+        let mut groups: BTreeMap<Labels, Acc> = BTreeMap::new();
+        for s in &inner {
+            let e = groups.entry(group_key(&s.labels)).or_insert(Acc {
+                sum: 0.0,
+                min: f64::INFINITY,
+                max: f64::NEG_INFINITY,
+                cnt: 0,
+            });
+            e.sum += s.value;
+            e.min = e.min.min(s.value);
+            e.max = e.max.max(s.value);
+            e.cnt += 1;
+        }
+        let mut out = Vec::with_capacity(groups.len());
+        for (labels, acc) in groups {
+            let value = match op.as_str() {
+                "sum" => acc.sum,
+                "min" => acc.min,
+                "max" => acc.max,
+                "avg" => acc.sum / acc.cnt as f64,
+                "count" => acc.cnt as f64,
+                other => return Err(PromQlError::Unsupported(format!("aggregator {other}"))),
+            };
+            out.push(InstantSample { labels: Arc::new(labels), value });
+        }
+        Ok(Value::Vector(out))
     }
 
     fn eval_call(&self, c: &Call, t: i64) -> Result<Value, PromQlError> {

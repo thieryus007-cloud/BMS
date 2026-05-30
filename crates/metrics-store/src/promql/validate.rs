@@ -70,12 +70,7 @@ fn validate_aggregate(a: &AggregateExpr) -> Result<(), PromQlError> {
     if a.param.is_some() {
         return unsupported(&format!("parameterized aggregator: {op_str}"));
     }
-    // Phase 1 : tant que le groupement n'est pas implémenté (Phase 2),
-    // `by`/`without` est silencieusement ignoré par l'évaluateur et renvoie
-    // une valeur collapsée fausse → on rejette explicitement.
-    if a.modifier.is_some() {
-        return unsupported("aggregation grouping (by/without) — non encore supporté");
-    }
+    // Le groupement `by`/`without` est supporté par l'évaluateur (Phase 2).
     validate(&a.expr)
 }
 
@@ -196,9 +191,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_aggregation_grouping() {
-        ko("sum by (bms_id)(bms_voltage)", "grouping");
-        ko("sum without (x)(m)", "grouping");
+    fn accepts_aggregation_grouping() {
+        ok("sum by (bms_id)(bms_voltage)");
+        ok("sum without (x)(m)");
+        ok("avg by (address)(et112_power_w)");
+        ok("count without (phase)(bms_v)");
     }
 
     #[test]
