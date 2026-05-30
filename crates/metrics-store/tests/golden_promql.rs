@@ -58,6 +58,69 @@ fn solar_pv_dashboard_coverage() {
     check_coverage(&exprs);
 }
 
+/// Remplace les variables de template Grafana par des valeurs neutres pour
+/// que l'expression soit du PromQL valide (Grafana les substitue au runtime).
+/// Seul `$bms_id` est réellement utilisé (matcher regex), mais on couvre
+/// aussi les variables d'intervalle au cas où une future édition en ajoute.
+fn sanitize_grafana_vars(expr: &str) -> String {
+    expr.replace("$__rate_interval", "5m")
+        .replace("${__rate_interval}", "5m")
+        .replace("$__interval", "5m")
+        .replace("${__interval}", "5m")
+        .replace("$__range", "24h")
+        .replace("${bms_id}", ".*")
+        .replace("$bms_id", ".*")
+}
+
+/// Couverture des **16 dashboards Grafana provisionnés** (`contrib/grafana/
+/// dashboards/*.json`) servis par le vrai Grafana via le datasource
+/// `daly-metrics`. Toute expression non supportée par le moteur ferait
+/// échouer le panneau côté Grafana → ce test garantit qu'aucune ne passe
+/// inaperçue (garde CI permanente).
+#[test]
+fn provisioned_grafana_dashboards_coverage() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../contrib/grafana/dashboards");
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .expect("dossier dashboards provisionnés introuvable")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().map(|x| x == "json").unwrap_or(false))
+        .collect();
+    files.sort();
+    assert!(!files.is_empty(), "aucun dashboard provisionné trouvé");
+
+    let mut failures: Vec<(String, u64, String, String)> = Vec::new();
+    let mut total = 0usize;
+    for path in &files {
+        let src = std::fs::read_to_string(path).expect("lecture dashboard");
+        let fname = path.file_name().unwrap().to_string_lossy().into_owned();
+        for (panel_id, expr) in extract_exprs(&src) {
+            total += 1;
+            let sanitized = sanitize_grafana_vars(&expr);
+            if let Err(e) = parse_and_validate(&sanitized) {
+                let msg = match e {
+                    PromQlError::ParseError(s) => format!("parse: {s}"),
+                    PromQlError::Unsupported(s) => format!("unsupported: {s}"),
+                    PromQlError::Execution(s) => format!("exec: {s}"),
+                };
+                failures.push((fname.clone(), panel_id, expr, msg));
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        eprintln!("\nExpressions PromQL Grafana non supportées par le moteur :");
+        for (f, id, e, msg) in &failures {
+            eprintln!("  {f} panel {id}:\n    {e}\n    → {msg}");
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} expression(s) non supportée(s) sur {} (Grafana ne serait pas 100% opérationnel)",
+        failures.len(),
+        total
+    );
+}
+
 fn check_coverage(exprs: &[(u64, String)]) {
     let mut unexpected_failures: Vec<(u64, String, String)> = Vec::new();
     let mut unexpected_successes: Vec<(u64, String)> = Vec::new();
