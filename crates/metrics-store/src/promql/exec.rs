@@ -912,9 +912,12 @@ fn unary_math(name: &str, v: f64) -> f64 {
 }
 
 /// `clamp(v, min, max)` : borne `v` dans `[min, max]`. Renvoie `NaN` si
-/// `min > max` (sémantique Prometheus).
+/// `min > max` ou si l'un des arguments est `NaN` (sémantique Prometheus).
 fn clamp_val(v: f64, min: f64, max: f64) -> f64 {
-    if min > max {
+    // `f64::max`/`f64::min` ignorent `NaN` (contrairement à `math.Max`/`math.Min`
+    // de Go utilisés par Prometheus, qui propagent `NaN`). On propage donc
+    // explicitement : sinon `clamp(NaN, min, max)` renverrait `min`.
+    if v.is_nan() || min.is_nan() || max.is_nan() || min > max {
         f64::NAN
     } else {
         v.max(min).min(max)
@@ -951,13 +954,24 @@ fn label_replace(inner: Vec<InstantSample>, c: &Call) -> Result<Value, PromQlErr
         if let Some(caps) = re.captures(src_val) {
             let mut expanded = String::new();
             caps.expand(&repl, &mut expanded);
-            let mut labels = (*s.labels).clone();
-            if expanded.is_empty() {
-                labels.remove(&dst);
+            // Évite de cloner le BTreeMap + allouer un Arc quand le label est
+            // déjà correct (ou déjà absent pour un remplacement vide).
+            let needs_update = if expanded.is_empty() {
+                s.labels.contains_key(&dst)
             } else {
-                labels.insert(dst.clone(), expanded);
+                s.labels.get(&dst).map(String::as_str) != Some(&expanded)
+            };
+            if needs_update {
+                let mut labels = (*s.labels).clone();
+                if expanded.is_empty() {
+                    labels.remove(&dst);
+                } else {
+                    labels.insert(dst.clone(), expanded);
+                }
+                out.push(InstantSample { labels: Arc::new(labels), value: s.value });
+            } else {
+                out.push(s);
             }
-            out.push(InstantSample { labels: Arc::new(labels), value: s.value });
         } else {
             out.push(s);
         }
@@ -981,13 +995,23 @@ fn label_join(inner: Vec<InstantSample>, c: &Call) -> Result<Value, PromQlError>
             .map(|l| s.labels.get(l).map(String::as_str).unwrap_or(""))
             .collect::<Vec<_>>()
             .join(&sep);
-        let mut labels = (*s.labels).clone();
-        if joined.is_empty() {
-            labels.remove(&dst);
+        // Même optimisation que label_replace : pas de clone si rien ne change.
+        let needs_update = if joined.is_empty() {
+            s.labels.contains_key(&dst)
         } else {
-            labels.insert(dst.clone(), joined);
+            s.labels.get(&dst).map(String::as_str) != Some(&joined)
+        };
+        if needs_update {
+            let mut labels = (*s.labels).clone();
+            if joined.is_empty() {
+                labels.remove(&dst);
+            } else {
+                labels.insert(dst.clone(), joined);
+            }
+            out.push(InstantSample { labels: Arc::new(labels), value: s.value });
+        } else {
+            out.push(s);
         }
-        out.push(InstantSample { labels: Arc::new(labels), value: s.value });
     }
     Ok(Value::Vector(out))
 }
@@ -1143,5 +1167,28 @@ mod tests {
         // Δt == 0 → None (évite division par zéro).
         let lt = Some(((1_000_i64, 1.0), (1_000_i64, 2.0)));
         assert_eq!(apply_irate_last_two(lt), None);
+    }
+
+    #[test]
+    fn clamp_val_borne_et_propage_nan() {
+        assert_eq!(clamp_val(5.0, 0.0, 10.0), 5.0);
+        assert_eq!(clamp_val(-3.0, 0.0, 10.0), 0.0);
+        assert_eq!(clamp_val(42.0, 0.0, 10.0), 10.0);
+        // min > max → NaN.
+        assert!(clamp_val(5.0, 10.0, 1.0).is_nan());
+        // v ou bornes NaN → NaN (et NON `min`, cf. revue Gemini PR #528).
+        assert!(clamp_val(f64::NAN, 0.0, 10.0).is_nan());
+        assert!(clamp_val(5.0, f64::NAN, 10.0).is_nan());
+        assert!(clamp_val(5.0, 0.0, f64::NAN).is_nan());
+    }
+
+    #[test]
+    fn unary_math_sgn_semantics() {
+        assert_eq!(unary_math("sgn", 3.0), 1.0);
+        assert_eq!(unary_math("sgn", -3.0), -1.0);
+        assert_eq!(unary_math("sgn", 0.0), 0.0);
+        assert_eq!(unary_math("sgn", -0.0), 0.0);
+        assert!(unary_math("sgn", f64::NAN).is_nan());
+        assert_eq!(unary_math("sqrt", 9.0), 3.0);
     }
 }
