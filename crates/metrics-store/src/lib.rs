@@ -591,6 +591,43 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_irate() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_irate");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // Compteur croissant : 0,10,20,...,90 par pas de 1 s.
+            // Les 2 derniers points (80 à 8 s, 90 à 9 s) → irate = 10/s.
+            for i in 0..10_i64 {
+                let ts = 100_000 + i * 1_000;
+                writer
+                    .write(Sample::new("energy_wh", ts, i as f64 * 10.0))
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+
+            // irate sur la fenêtre complète → pente locale des 2 derniers points.
+            let expr = parse_and_validate("irate(energy_wh[10s])").unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 10.0).abs() < 1e-9, "got {}", v[0].value);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn promql_topk_bottomk() {
         use crate::promql::{parse_and_validate, Evaluator};
 

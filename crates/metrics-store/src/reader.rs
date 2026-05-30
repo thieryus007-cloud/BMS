@@ -85,6 +85,21 @@ impl Reader {
         first_last_in_range_inner(rtx, series_id, from_ms, to_ms)
     }
 
+    /// Les **deux derniers** points `(prev, last)` de `[from_ms, to_ms]` en
+    /// ordre chronologique (`prev.ts < last.ts`). Utilisé par `irate` qui ne
+    /// regarde que les deux derniers échantillons de la fenêtre. Renvoie
+    /// `None` s'il y a moins de 2 points (ou bornes inversées).
+    #[allow(clippy::type_complexity)]
+    pub fn last_two_in_range_with_tx(
+        &self,
+        rtx: &ReadTransaction,
+        series_id: u32,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Result<Option<((i64, f64), (i64, f64))>> {
+        last_two_in_range_inner(rtx, series_id, from_ms, to_ms)
+    }
+
     /// Range scan sur les tables compactées (hourly/daily). Renvoie les
     /// `AggBucket` désérialisés.
     pub fn query_range_buckets(
@@ -212,6 +227,42 @@ fn first_last_in_range_inner(
         None => first,
     };
     Ok(Some((first, last)))
+}
+
+#[allow(clippy::type_complexity)]
+fn last_two_in_range_inner(
+    rtx: &ReadTransaction,
+    series_id: u32,
+    from_ms: i64,
+    to_ms: i64,
+) -> Result<Option<((i64, f64), (i64, f64))>> {
+    // Garde anti-panic : bornes inversées → aucun point.
+    if from_ms > to_ms {
+        return Ok(None);
+    }
+    let t = rtx.open_table(TABLE_RAW)?;
+    let k_lo = enc_skey(series_id, from_ms);
+    let k_hi = enc_skey(series_id, to_ms);
+    let mut range = t.range::<&[u8]>(&k_lo[..]..=&k_hi[..])?;
+    // Scan inverse : on prend les 2 derniers points (le plus récent en
+    // premier), puis on les renvoie en ordre chronologique.
+    let last = match range.next_back() {
+        Some(entry) => {
+            let (k, v) = entry?;
+            let (_sid, ts) = dec_skey(k.value());
+            (ts, v.value())
+        }
+        None => return Ok(None),
+    };
+    let prev = match range.next_back() {
+        Some(entry) => {
+            let (k, v) = entry?;
+            let (_sid, ts) = dec_skey(k.value());
+            (ts, v.value())
+        }
+        None => return Ok(None), // < 2 points
+    };
+    Ok(Some((prev, last)))
 }
 
 fn query_range_buckets_inner(

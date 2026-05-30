@@ -12,6 +12,7 @@ use super::error::PromQlError;
 pub const SUPPORTED_RANGE_FUNCS: &[&str] = &[
     "increase",
     "rate",
+    "irate",
     "delta",
     "avg_over_time",
     "sum_over_time",

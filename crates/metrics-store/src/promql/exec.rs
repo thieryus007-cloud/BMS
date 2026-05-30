@@ -514,6 +514,14 @@ impl<'r> Evaluator<'r> {
         let endpoints_only = matches!(name, "delta" | "last_over_time");
         for (sid, labels) in matched.iter() {
             let value_opt = match tier {
+                // `irate` (tier raw) : taux instantané sur les 2 derniers points.
+                Tier::Raw if name == "irate" => {
+                    let lt = self
+                        .reader
+                        .last_two_in_range_with_tx(rtx, *sid, win_start, t)
+                        .map_err(|e| PromQlError::Execution(e.to_string()))?;
+                    apply_irate_last_two(lt)
+                }
                 Tier::Raw if endpoints_only => {
                     let fl = self
                         .reader
@@ -738,6 +746,19 @@ fn buckets_counter_increase(buckets: &[(i64, AggBucket)]) -> f64 {
     total
 }
 
+/// `irate` (tier raw) : taux instantané sur les **deux derniers points** de la
+/// fenêtre : `counter_increase(prev, last) / Δt_secondes`. Gère le reset de
+/// compteur via `counter_increase`. Renvoie `None` s'il y a moins de 2 points
+/// ou si `Δt == 0`.
+fn apply_irate_last_two(lt: Option<((i64, f64), (i64, f64))>) -> Option<f64> {
+    let (prev, last) = lt?;
+    let dt = (last.0 - prev.0) as f64 / 1000.0;
+    if dt <= 0.0 {
+        return None;
+    }
+    Some(counter_increase(prev.1, last.1) / dt)
+}
+
 /// Fonctions de fenêtre qui n'ont besoin que des bornes : `delta` (différence
 /// de jauge, peut être négative — pas de gestion de reset) et `last_over_time`.
 /// `increase`/`rate` passent désormais par le chemin complet pour gérer les
@@ -765,6 +786,21 @@ fn apply_range_fn_buckets(
             "count_over_time" => Some(0.0),
             _ => None,
         };
+    }
+    // `irate` sur tier compacté : mal défini (points raw purgés). Choix retenu
+    // (cf. roadmap §3c) : approximer avec les `last` des deux derniers buckets,
+    // sur leur écart de timestamps de bucket. Requiert ≥ 2 buckets.
+    if name == "irate" {
+        if buckets.len() < 2 {
+            return None;
+        }
+        let prev = &buckets[buckets.len() - 2];
+        let last = &buckets[buckets.len() - 1];
+        let dt = (last.0 - prev.0) as f64 / 1000.0;
+        if dt <= 0.0 {
+            return None;
+        }
+        return Some(counter_increase(prev.1.last, last.1.last) / dt);
     }
     let total_cnt: u32 = buckets.iter().map(|(_, b)| b.cnt).sum();
     if total_cnt == 0 {
@@ -938,5 +974,28 @@ mod tests {
         // Reset au sein d'un bucket (first > last).
         let bs = vec![(0, bucket(20.0, 5.0))];
         assert_eq!(buckets_counter_increase(&bs), 5.0);
+    }
+
+    #[test]
+    fn irate_last_two_local_slope() {
+        // 2 points à 2 s d'écart : (10 → 30) / 2 s = 10/s.
+        let lt = Some(((0_i64, 10.0), (2_000_i64, 30.0)));
+        assert_eq!(apply_irate_last_two(lt), Some(10.0));
+    }
+
+    #[test]
+    fn irate_last_two_handles_reset() {
+        // Reset : last < prev → counter_increase renvoie last (5) ; /1 s = 5.
+        let lt = Some(((0_i64, 20.0), (1_000_i64, 5.0)));
+        assert_eq!(apply_irate_last_two(lt), Some(5.0));
+    }
+
+    #[test]
+    fn irate_last_two_edge_cases() {
+        // Moins de 2 points → None.
+        assert_eq!(apply_irate_last_two(None), None);
+        // Δt == 0 → None (évite division par zéro).
+        let lt = Some(((1_000_i64, 1.0), (1_000_i64, 2.0)));
+        assert_eq!(apply_irate_last_two(lt), None);
     }
 }
