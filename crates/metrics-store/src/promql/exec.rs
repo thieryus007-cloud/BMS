@@ -899,27 +899,29 @@ fn align_and_compare(
     cmp: fn(f64, f64) -> bool,
     return_bool: bool,
 ) -> Vec<InstantSample> {
+    // `drop_name` réutilise l'Arc quand `__name__` est absent, et n'alloue
+    // qu'un Arc refcount=1 sinon (try_unwrap récupère alors le BTreeMap sans
+    // re-cloner). Côté lhs on conserve l'Arc pour le réinjecter en sortie.
     let rhs_idx: BTreeMap<Labels, f64> = rhs
         .into_iter()
         .map(|s| {
-            let mut l = (*s.labels).clone();
-            l.remove("__name__");
+            let l = drop_name(&s.labels);
+            let l = Arc::try_unwrap(l).unwrap_or_else(|arc| (*arc).clone());
             (l, s.value)
         })
         .collect();
     let mut out = Vec::with_capacity(lhs.len().min(rhs_idx.len()));
     for s in lhs {
-        let mut key = (*s.labels).clone();
-        key.remove("__name__");
-        if let Some(&rval) = rhs_idx.get(&key) {
+        let key = drop_name(&s.labels);
+        if let Some(&rval) = rhs_idx.get(&*key) {
             let cond = cmp_truth(cmp, s.value, rval);
             if return_bool {
                 out.push(InstantSample {
-                    labels: Arc::new(key),
+                    labels: key,
                     value: if cond { 1.0 } else { 0.0 },
                 });
             } else if cond {
-                out.push(InstantSample { labels: Arc::new(key), value: s.value });
+                out.push(InstantSample { labels: key, value: s.value });
             }
         }
     }
