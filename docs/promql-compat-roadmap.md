@@ -6,7 +6,7 @@
 > neuve** : tout le contexte, les fichiers, les formes exactes de l'AST, les
 > esquisses de code et les tests y sont.
 >
-> Branche de travail : `claude/brave-tesla-ESwub` (règle projet : 2 branches
+> Branche de travail : 
 > max, `main` + 1 active). Workflow par phase : commit → push → PR vers `main`
 > → après merge `make sync && bash scripts/deploy-pi5.sh`.
 
