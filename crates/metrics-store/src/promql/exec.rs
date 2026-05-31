@@ -76,10 +76,17 @@ use super::error::PromQlError;
 /// - aucun offset → 0.
 ///
 /// L'appelant calcule donc l'instant effectif `t_eff = t - offset_ms(&vs.offset)`.
+///
+/// Robustesse : conversion `u128 → i64` saturée (`try_into`) et négation saturée
+/// pour éviter toute panique (debug) ou inversion de signe sur des durées
+/// d'offset extrêmes (revue Gemini).
 fn offset_ms(off: &Option<Offset>) -> i64 {
     match off {
-        Some(Offset::Pos(d)) => d.as_millis() as i64,
-        Some(Offset::Neg(d)) => -(d.as_millis() as i64),
+        Some(Offset::Pos(d)) => d.as_millis().try_into().unwrap_or(i64::MAX),
+        Some(Offset::Neg(d)) => {
+            let ms: i64 = d.as_millis().try_into().unwrap_or(i64::MAX);
+            ms.saturating_neg()
+        }
         None => 0,
     }
 }
@@ -271,7 +278,7 @@ impl<'r> Evaluator<'r> {
 
     fn eval_vector_selector(&self, vs: &VectorSelector, t: i64) -> Result<Value, PromQlError> {
         // Modificateur `offset` : on évalue le sélecteur à l'instant décalé.
-        let t_eff = t - offset_ms(&vs.offset);
+        let t_eff = t.saturating_sub(offset_ms(&vs.offset));
         let matched = self.match_series(vs)?;
         let rtx = self.txn()?;
         let mut out = Vec::with_capacity(matched.len());
@@ -280,7 +287,7 @@ impl<'r> Evaluator<'r> {
             // nécessaire — scan inverse au lieu de matérialiser tout le Vec.
             let last = self
                 .reader
-                .last_point_in_range_with_tx(rtx, *sid, t_eff - self.lookback_ms, t_eff)
+                .last_point_in_range_with_tx(rtx, *sid, t_eff.saturating_sub(self.lookback_ms), t_eff)
                 .map_err(|e| PromQlError::Execution(e.to_string()))?;
             if let Some((_, v)) = last {
                 out.push(InstantSample { labels: labels.clone(), value: v });
@@ -567,8 +574,9 @@ impl<'r> Evaluator<'r> {
             Expr::MatrixSelector(MatrixSelector { vs, range }) => {
                 // Modificateur `offset` : fenêtre décalée comme pour les autres
                 // fonctions à fenêtre.
-                let t_eff = t - offset_ms(&vs.offset);
-                let win_start = t_eff - range.as_millis() as i64;
+                let t_eff = t.saturating_sub(offset_ms(&vs.offset));
+                let range_ms: i64 = range.as_millis().try_into().unwrap_or(i64::MAX);
+                let win_start = t_eff.saturating_sub(range_ms);
                 let matched = self.match_series(vs)?;
                 let rtx = self.txn()?;
                 let mut any = false;
@@ -619,10 +627,10 @@ impl<'r> Evaluator<'r> {
         c: &Call,
         t: i64,
     ) -> Result<Value, PromQlError> {
-        let range_ms = range.as_millis() as i64;
+        let range_ms: i64 = range.as_millis().try_into().unwrap_or(i64::MAX);
         // Modificateur `offset` : la fenêtre `[win_start, t_eff]` est décalée.
-        let t_eff = t - offset_ms(&vs.offset);
-        let win_start = t_eff - range_ms;
+        let t_eff = t.saturating_sub(offset_ms(&vs.offset));
+        let win_start = t_eff.saturating_sub(range_ms);
         let tier = tier_for_range(range_ms);
         let matched = self.match_series(vs)?;
         // Paramètre scalaire éventuel = 1er argument qui n'est pas le
