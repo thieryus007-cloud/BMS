@@ -13,7 +13,9 @@
 > **Agrégateurs** : `sum`, `max`, `min`, `avg`, `count` (avec `by (…)` / `without (…)`), `topk(k, …)`, `bottomk(k, …)`.
 > **Opérateurs** : arithmétiques `+ - * /` (vecteur⊗scalaire ou vecteur⊗vecteur **aligné**), comparaisons `== != > < >= <=` (filtre ou `bool`).
 >
-> **Non supporté** : `integrate` et les autres fonctions MetricsQL, les **subqueries** `[Xh:Ym]`, les modifiers `offset` / `@`, le vector matching `on()` / `ignoring()` / `group_left` / `group_right`, les set ops `and` / `or` / `unless`, les agrégateurs paramétrés `quantile` / `count_values`.
+> **Modifier `offset`** (`m offset 5m`, `m[w] offset 1h`, y compris négatif) : **supporté** — décale l'instant d'évaluation à `t − offset`.
+>
+> **Non supporté** : `integrate` et les autres fonctions MetricsQL, les **subqueries** `[Xh:Ym]`, le modifier `@`, le vector matching `on()` / `ignoring()` / `group_left` / `group_right`, les set ops `and` / `or` / `unless`, les agrégateurs paramétrés `quantile` / `count_values`.
 
 ---
 
@@ -164,7 +166,7 @@ Puis dans la requête :
 ### ⚠️ Points de vigilance
 
 1. **Fenêtre glissante vs jour calendaire**  
-   `[24h]` calcule sur les dernières 24h glissantes. Pour un jour calendaire (minuit → maintenant), il faut calculer un `offset` dynamique côté client — le modifier `offset` n'étant pas supporté par le shim, ajustez la borne `start`/`end` de `query_range` côté appelant.
+   `[24h]` calcule sur les dernières 24h glissantes. Le modifier `offset` est supporté (`m[24h] offset 24h` = la veille glissante). Pour un jour **calendaire** exact (minuit → maintenant), `offset` à durée fixe ne suffit pas : ajustez les bornes `start`/`end` de `query_range` côté appelant.
 
 2. **Précision**  
    L'approximation par `avg_over_time` est fiable si votre intervalle d'écriture est ≤ 30s (cf. throttles plus bas).

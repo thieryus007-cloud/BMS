@@ -487,6 +487,75 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_offset_modifier() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_offset");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let writer = store.writer();
+
+            // bms_v{bms_id=1} : 10 pts 1.0..1.9 (ts 100_000..109_000)
+            // energy_wh        : monotone 0..90 par pas de 10
+            for i in 0..10_i64 {
+                let ts = 100_000 + i * 1_000;
+                writer
+                    .write(Sample::new("bms_v", ts, 1.0 + i as f64 / 10.0).with_label("bms_id", "1"))
+                    .await
+                    .unwrap();
+                writer
+                    .write(Sample::new("energy_wh", ts, i as f64 * 10.0))
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+
+            // Référence sans offset à t=109_000 → 1.9
+            let expr = parse_and_validate(r#"bms_v{bms_id="1"}"#).unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert!((v[0].value - 1.9).abs() < 1e-9);
+
+            // offset 5s : évalue à t-5s = 104_000 → 1.4
+            let expr = parse_and_validate(r#"bms_v{bms_id="1"} offset 5s"#).unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 1.4).abs() < 1e-9, "offset instant got {}", v[0].value);
+
+            // offset négatif (vers le futur) : à t=104_000 offset -5s = 109_000 → 1.9
+            let expr = parse_and_validate(r#"bms_v{bms_id="1"} offset -5s"#).unwrap();
+            let v = ev.eval_instant(&expr, 104_000).unwrap();
+            assert!((v[0].value - 1.9).abs() < 1e-9, "offset neg got {}", v[0].value);
+
+            // increase sans offset sur [10s] à 109_000 → 90
+            let expr = parse_and_validate("increase(energy_wh[10s])").unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert!((v[0].value - 90.0).abs() < 1e-9, "increase got {}", v[0].value);
+
+            // increase avec offset 5s : fenêtre décalée [94_000, 104_000] → 40
+            let expr = parse_and_validate("increase(energy_wh[10s] offset 5s)").unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 40.0).abs() < 1e-9, "increase offset got {}", v[0].value);
+
+            // Différence N vs décalé (motif comparaison périodes) : 1.9 - 1.4 = 0.5
+            let expr =
+                parse_and_validate(r#"bms_v{bms_id="1"} - (bms_v{bms_id="1"} offset 5s)"#).unwrap();
+            let v = ev.eval_instant(&expr, 109_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 0.5).abs() < 1e-9, "offset diff got {}", v[0].value);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn promql_aggregation_grouping_by_without() {
         use crate::promql::{parse_and_validate, Evaluator};
 

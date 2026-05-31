@@ -73,9 +73,8 @@ pub fn validate(expr: &Expr) -> Result<(), PromQlError> {
 }
 
 fn validate_vector_selector(vs: &VectorSelector) -> Result<(), PromQlError> {
-    if vs.offset.is_some() {
-        return unsupported("offset modifier");
-    }
+    // `offset` est supporté par l'évaluateur (décalage de la fenêtre temporelle,
+    // cf. exec.rs::offset_ms). Le modificateur `@` reste non supporté.
     if vs.at.is_some() {
         return unsupported("@ modifier");
     }
@@ -289,8 +288,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_offset_modifier() {
-        ko("foo offset 5m", "offset");
+    fn accepts_offset_modifier() {
+        ok("foo offset 5m");
+        ok("foo offset -5m");
+        ok("rate(foo[5m] offset 1h)");
+        ok("max_over_time(solar_yield_kwh[1d] offset 365d)");
+        ok("avg_over_time(bms_v[1h]) - avg_over_time(bms_v[1h] offset 24h)");
+    }
+
+    #[test]
+    fn rejects_at_modifier() {
+        ko("foo @ 1620000000", "@ modifier");
     }
 
     #[test]

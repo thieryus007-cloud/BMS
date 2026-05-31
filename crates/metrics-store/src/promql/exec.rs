@@ -57,8 +57,8 @@ use std::time::Duration;
 
 use promql_parser::label::MatchOp;
 use promql_parser::parser::{
-    AggregateExpr, BinaryExpr, Call, Expr, LabelModifier, MatrixSelector, NumberLiteral, ParenExpr,
-    StringLiteral, UnaryExpr, VectorSelector,
+    AggregateExpr, BinaryExpr, Call, Expr, LabelModifier, MatrixSelector, NumberLiteral, Offset,
+    ParenExpr, StringLiteral, UnaryExpr, VectorSelector,
 };
 use redb::ReadTransaction;
 use regex::Regex;
@@ -67,6 +67,22 @@ use crate::reader::Reader;
 use crate::tables::{AggBucket, SeriesMeta, Tier};
 
 use super::error::PromQlError;
+
+/// Décalage temporel (ms) induit par un modificateur `offset` PromQL.
+///
+/// Sémantique PromQL : `expr offset d` évalue le sélecteur à `t - d`.
+/// - `Offset::Pos(d)` (`offset 5m`) → décalage `+d` vers le passé.
+/// - `Offset::Neg(d)` (`offset -5m`) → décalage `-d` (vers le futur).
+/// - aucun offset → 0.
+///
+/// L'appelant calcule donc l'instant effectif `t_eff = t - offset_ms(&vs.offset)`.
+fn offset_ms(off: &Option<Offset>) -> i64 {
+    match off {
+        Some(Offset::Pos(d)) => d.as_millis() as i64,
+        Some(Offset::Neg(d)) => -(d.as_millis() as i64),
+        None => 0,
+    }
+}
 
 pub type Labels = BTreeMap<String, String>;
 
@@ -254,6 +270,8 @@ impl<'r> Evaluator<'r> {
     }
 
     fn eval_vector_selector(&self, vs: &VectorSelector, t: i64) -> Result<Value, PromQlError> {
+        // Modificateur `offset` : on évalue le sélecteur à l'instant décalé.
+        let t_eff = t - offset_ms(&vs.offset);
         let matched = self.match_series(vs)?;
         let rtx = self.txn()?;
         let mut out = Vec::with_capacity(matched.len());
@@ -262,7 +280,7 @@ impl<'r> Evaluator<'r> {
             // nécessaire — scan inverse au lieu de matérialiser tout le Vec.
             let last = self
                 .reader
-                .last_point_in_range_with_tx(rtx, *sid, t - self.lookback_ms, t)
+                .last_point_in_range_with_tx(rtx, *sid, t_eff - self.lookback_ms, t_eff)
                 .map_err(|e| PromQlError::Execution(e.to_string()))?;
             if let Some((_, v)) = last {
                 out.push(InstantSample { labels: labels.clone(), value: v });
@@ -547,14 +565,17 @@ impl<'r> Evaluator<'r> {
             // absent_over_time : présent si ≥ 1 série matchée a un point dans la
             // fenêtre.
             Expr::MatrixSelector(MatrixSelector { vs, range }) => {
-                let win_start = t - range.as_millis() as i64;
+                // Modificateur `offset` : fenêtre décalée comme pour les autres
+                // fonctions à fenêtre.
+                let t_eff = t - offset_ms(&vs.offset);
+                let win_start = t_eff - range.as_millis() as i64;
                 let matched = self.match_series(vs)?;
                 let rtx = self.txn()?;
                 let mut any = false;
                 for (sid, _) in matched.iter() {
                     if self
                         .reader
-                        .last_point_in_range_with_tx(rtx, *sid, win_start, t)
+                        .last_point_in_range_with_tx(rtx, *sid, win_start, t_eff)
                         .map_err(|e| PromQlError::Execution(e.to_string()))?
                         .is_some()
                     {
@@ -599,7 +620,9 @@ impl<'r> Evaluator<'r> {
         t: i64,
     ) -> Result<Value, PromQlError> {
         let range_ms = range.as_millis() as i64;
-        let win_start = t - range_ms;
+        // Modificateur `offset` : la fenêtre `[win_start, t_eff]` est décalée.
+        let t_eff = t - offset_ms(&vs.offset);
+        let win_start = t_eff - range_ms;
         let tier = tier_for_range(range_ms);
         let matched = self.match_series(vs)?;
         // Paramètre scalaire éventuel = 1er argument qui n'est pas le
@@ -637,30 +660,30 @@ impl<'r> Evaluator<'r> {
                 Tier::Raw if name == "irate" => {
                     let lt = self
                         .reader
-                        .last_two_in_range_with_tx(rtx, *sid, win_start, t)
+                        .last_two_in_range_with_tx(rtx, *sid, win_start, t_eff)
                         .map_err(|e| PromQlError::Execution(e.to_string()))?;
                     apply_irate_last_two(lt)
                 }
                 Tier::Raw if endpoints_only => {
                     let fl = self
                         .reader
-                        .first_last_in_range_with_tx(rtx, *sid, win_start, t)
+                        .first_last_in_range_with_tx(rtx, *sid, win_start, t_eff)
                         .map_err(|e| PromQlError::Execution(e.to_string()))?;
                     apply_range_fn_endpoints(name, fl, range_ms)
                 }
                 Tier::Raw => {
                     let pts = self
                         .reader
-                        .query_range_raw_with_tx(rtx, *sid, win_start, t)
+                        .query_range_raw_with_tx(rtx, *sid, win_start, t_eff)
                         .map_err(|e| PromQlError::Execution(e.to_string()))?;
-                    apply_range_fn_raw(name, &pts, range_ms, t, param)
+                    apply_range_fn_raw(name, &pts, range_ms, t_eff, param)
                 }
                 Tier::Hourly | Tier::Daily => {
                     let buckets = self
                         .reader
-                        .query_range_buckets_with_tx(rtx, *sid, win_start, t, tier)
+                        .query_range_buckets_with_tx(rtx, *sid, win_start, t_eff, tier)
                         .map_err(|e| PromQlError::Execution(e.to_string()))?;
-                    apply_range_fn_buckets(name, &buckets, range_ms, t, param)
+                    apply_range_fn_buckets(name, &buckets, range_ms, t_eff, param)
                 }
             };
             if let Some(v) = value_opt {
