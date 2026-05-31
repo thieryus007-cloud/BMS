@@ -382,24 +382,25 @@ coup d'œil quotidien et l'alerting.
 | Panel | Type | Requête PromQL | Apport (nouveauté) |
 |---|---|---|---|
 | BMS actifs | stat | `count(group(bms_soc) by (bms_id))` | `group` = présence binaire |
+| SOC médian parc (P50) | gauge | `quantile(0.5, bms_soc)` | percentile **spatial** (SLO) |
+| C-rate normalisé / pack | timeseries | `abs(bms_current) / on(bms_id) bms_reported_capacity_ah` | `on()` = courant ÷ capacité |
+| SoH min parc | stat | `min(bms_soh)` | agrégat (santé) |
 | SOC P05 / P50 / P95 du parc | timeseries | `quantile(0.05, bms_soc)`, `quantile(0.5, bms_soc)`, `quantile(0.95, bms_soc)` | percentile **spatial** (SLO) |
 | Tension cellule — bande P05↔P95 | timeseries | `quantile(0.95, bms_cell_voltage)` et `quantile(0.05, bms_cell_voltage)` | dispersion parc, alerte 2.8–4.2 V |
 | Dispersion cellules / pack | timeseries | `stddev by (bms_id)(bms_cell_voltage)` | `stddev` (santé équilibrage) |
-| Distribution SOH | bar gauge | `count_values("soh", round(bms_soh, 5))` | histogramme d'état |
-| C-rate normalisé / pack | gauge | `abs(bms_current) / on(bms_id) bms_reported_capacity_ah` | `on()` = courant ÷ capacité |
-| Pire cellule du parc | table | `bottomk(3, bms_min_cell_voltage)` | top-k (déjà supporté) |
+| Distribution SoH | bar gauge | `count_values("soh", round(bms_soh, 0.1))` | histogramme d'état (arrondi 0,1 %) |
+| 3 cellules les plus basses | table | `bottomk(3, bms_min_cell_voltage)` | top-k (déjà supporté) |
 
-### 🆕 `18-rendement-pv.json` — « Rendements & pertes PV »
-Normalisations et ratios par `on()`/`group_left`, comparaisons J vs J-1.
+### 🆕 `18-rendement-pv.json` — « Rendements & lissage »
+Ratios, lissage par sous-requête, comparaisons J vs J-1.
 
-| Panel | Requête PromQL | Apport |
-|---|---|---|
-| Production solaire totale | `sum(venus_mppt_power_w) + sum(pvinv_power_w)` | agrégat (déjà OK) |
-| Rendement onduleur AC/DC | `pvinv_power_w / on() sum(dc_pv_power_w)` | ratio par matching |
-| Auto-conso (PV utilisé / produit) | `(1 - (sum(et112_power_w{address="0x09"} > 0) / on() sum(venus_mppt_power_w))) * 100` | `on()` + comparaison filtre |
-| Production lissée 1 h | `avg_over_time(venus_mppt_power_w[1h:5m])` | **sous-requête** (anti-bruit) |
-| Pic de puissance glissant 24 h | `max_over_time(venus_mppt_power_w[24h:5m])` | sous-requête |
-| Yield aujourd'hui vs hier | `sum(venus_mppt_yield_today_kwh) - sum(venus_mppt_yield_today_kwh offset 24h)` | `offset` (tendance) |
+| Panel | Type | Requête PromQL | Apport |
+|---|---|---|---|
+| Production solaire totale | timeseries | `sum(venus_mppt_power_w) + sum(pvinv_power_w)` | agrégat (MPPT + micro-onduleurs) |
+| Pic puissance 24 h (glissant) | stat | `max_over_time(sum(venus_mppt_power_w)[24h:5m])` | **sous-requête sur agrégat** |
+| Rendement onduleur (AC/DC) | gauge | `sum(pvinv_power_w) / sum(dc_pv_power_w) * 100` | ratio (%) |
+| Puissance MPPT lissée 1 h | timeseries | `avg_over_time(venus_mppt_power_w[1h:5m])` | **sous-requête** (anti-bruit) |
+| Yield aujourd'hui vs hier | timeseries | `sum(venus_mppt_yield_today_kwh)` **et** `sum(venus_mppt_yield_today_kwh offset 24h)` (2 séries superposées) | `offset` (tendance) |
 
 ### 🆕 `19-bilan-energie.json` — « Bilan énergétique J / J-1 / 7 j »
 Comparaisons temporelles via `offset` + `@`, fiabilisées par le fix P0.

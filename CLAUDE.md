@@ -308,6 +308,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Symptôme | Solution |
 |----------|----------|
 | `make sync` → "Permission denied" | `sudo chown -R pi5compute:pi5compute ~/Daly-BMS-Rust/ && git reset --hard origin/<branch>` |
+| `deploy-pi5.sh` → `rustup: not found` | PATH root ≠ PATH user sous `sudo`. Corrigé : le script build via `as_user` (sous `$SUDO_USER`). Sinon : builder **sans sudo** (`make build-arm && make build-energy-arm`) puis `sudo bash scripts/deploy-pi5.sh --no-build`. Dashboards seuls : `sudo bash scripts/fix-grafana.sh`. |
 | Service BMS ne démarre pas | `journalctl -u daly-bms -n 50` |
 | Config ignorée | Copier vers `/etc/daly-bms/config.toml` |
 | `scp: dest open Failure` | `ssh root@192.168.1.120 "svc -d /service/dbus-mqtt-venus"` puis redéployer |
