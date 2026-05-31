@@ -44,12 +44,17 @@ done
 # `as_user` ré-exécute la commande dans un shell de login de cet utilisateur
 # (PATH chargé via ~/.profile / ~/.cargo/env). L'install (cp /usr/local/bin,
 # systemctl) reste en root.
+#
+# `$PWD` et la commande sont passés en **paramètres positionnels** ($1, $2) au
+# shell de login (et non interpolés dans la chaîne) pour éviter toute double
+# expansion / injection si le chemin ou la commande contient des caractères
+# spéciaux (revue Gemini).
 RUN_USER="${SUDO_USER:-$(id -un)}"
 as_user() {
     if [ "$(id -un)" = "root" ] && [ "$RUN_USER" != "root" ]; then
-        sudo -u "$RUN_USER" -H bash -lc "cd '$PWD' && $*"
+        sudo -u "$RUN_USER" -H bash -lc 'cd "$1" && eval "$2"' _ "$PWD" "$*"
     else
-        bash -lc "$*"
+        bash -lc 'cd "$1" && eval "$2"' _ "$PWD" "$*"
     fi
 }
 
