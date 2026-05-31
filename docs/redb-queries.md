@@ -631,8 +631,9 @@ venus_shunt_soc_percent
 venus_shunt_power_w
 
 
-# Vérification : liste de toutes les métriques présentes (noms __name__)
-# curl http://192.168.1.141:8080/api/v1/labels | jq '.data | length'
+# Vérification : nombre de métriques présentes (valeurs distinctes de __name__)
+# curl http://192.168.1.141:8080/api/v1/label/__name__/values | jq '.data | length'
+# (NB : /api/v1/labels renvoie les NOMS de labels — bms_id, address… — pas les métriques)
 # ou via le dashboard custom /dashboard/history (sélecteur de série)
 
 # Dernier point de chaque métrique (vérification fraîcheur)

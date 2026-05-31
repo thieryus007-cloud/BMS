@@ -110,6 +110,15 @@ sudo systemctl restart grafana-server
 
 ## 📈 Dashboard PV - Comparaison Multi-Années
 
+> ⚠️ **Compatibilité shim PromQL redb** — ce dashboard d'origine a été conçu
+> pour MetricsQL (VictoriaMetrics) et ses panels de comparaison annuelle
+> utilisent le modificateur **`offset`** (`… offset 1y`) et des **subqueries**,
+> que le shim PromQL de redb **ne supporte pas** (cf. `docs/architecture-redb.md`
+> §5). Pour les reproduire avec redb : décaler la **fenêtre temporelle côté
+> Grafana** (ou via les bornes `start`/`end` de l'API) au lieu d'`offset`, et
+> calculer les cumuls **côté client** à partir d'un `query_range`. Importez-le
+> tel quel pour la structure, puis adaptez les requêtes des panels comparatifs.
+
 ### Import du dashboard
 
 1. **Dashboards → Import → Upload JSON file**
@@ -1110,28 +1119,40 @@ curl -H "Authorization: Bearer ${API_KEY}"   "${GRAFANA_URL}/render/d/${DASHBOAR
 
 ## 🔧 Requêtes PromQL Utiles
 
-> ⚠️ **Métriques réelles écrites par le projet** (voir `crates/daly-bms-server/src/vm_client.rs`):
+> ⚠️ **Métriques réelles écrites par le projet** (voir `crates/daly-bms-server/src/redb_writes.rs`):
 > - `solar_total_w` — gauge, puissance PV totale instantanée (W)
 > - `dc_pv_power_w` — gauge, somme MPPT côté DC (W)
 > - `pvinv_power_w` — gauge, micro-onduleurs ET112 côté AC (W)
 > - `solar_yield_kwh` — compteur journalier remis à 0 chaque jour (kWh)
 >
-> `increase()` ne s'applique **PAS** aux gauges. Pour l'énergie, utilisez
-> `solar_yield_kwh` (compteur journalier) ou les fonctions PromQL (shim redb)
-> `integrate()` / `sum_over_time()` sur la puissance.
+> `increase()` ne s'applique **PAS** aux gauges. Pour l'énergie, utilisez le
+> compteur `solar_yield_kwh` (cumul journalier) ou l'approximation
+> `avg_over_time(<puissance>[durée]) * heures` (Wh).
+
+> ⚠️ **Limites du shim PromQL redb** — contrairement à MetricsQL/VictoriaMetrics,
+> le shim **ne supporte pas** :
+> - la fonction **`integrate()`** (MetricsQL) → utiliser `avg_over_time(p[w]) * heures` ;
+> - le modificateur **`offset`** → décaler la **fenêtre temporelle côté client**
+>   (plage Grafana, ou bornes `start`/`end` de l'API) au lieu d'`offset` ;
+> - les **subqueries `[range:step]`** → faire un `query_range` sur la période puis
+>   agréger (somme / cumul) **côté client**.
+>
+> Les lignes marquées ⚠️ ci-dessous reposent sur ces constructions non supportées
+> et nécessitent l'un de ces contournements. Réf. `docs/redb-queries.md` et
+> `docs/architecture-redb.md` §5.
 
 | Objectif | Requête |
 |----------|---------|
 | **Puissance totale instantanée** | `solar_total_w` |
 | **Production aujourd'hui** | `max_over_time(solar_yield_kwh[24h])` |
-| **Production hier** | `max_over_time(solar_yield_kwh[24h] offset 24h)` |
-| **Variation J / J-1 (%)** | `((max_over_time(solar_yield_kwh[24h]) - max_over_time(solar_yield_kwh[24h] offset 24h)) / max_over_time(solar_yield_kwh[24h] offset 24h)) * 100` |
-| **Production cumulée 30 j** | `sum_over_time(max_over_time(solar_yield_kwh[1d])[30d:1d])` |
-| **Production cumulée 1 an** | `sum_over_time(max_over_time(solar_yield_kwh[1d])[365d:1d])` |
-| **Comparaison année N vs N-1** | `max_over_time(solar_yield_kwh[1d] offset 365d)` |
+| **Production hier** ⚠️ | `max_over_time(solar_yield_kwh[24h])` sur une plage décalée de 24 h **côté client** (pas d'`offset`) |
+| **Variation J / J-1 (%)** ⚠️ | calcul **côté client** à partir des valeurs « aujourd'hui » et « hier » (le shim n'a pas d'`offset`) |
+| **Production cumulée 30 j** ⚠️ | `query_range` de `max_over_time(solar_yield_kwh[1d])` sur 30 j, puis somme **côté client** (pas de subquery) |
+| **Production cumulée 1 an** ⚠️ | idem sur 365 j, somme **côté client** |
+| **Comparaison année N vs N-1** ⚠️ | `max_over_time(solar_yield_kwh[1d])` sur deux plages annuelles distinctes **côté client** (pas d'`offset 365d`) |
 | **Puissance moyenne 1 h** | `avg_over_time(solar_total_w[1h])` |
 | **Pic de puissance du jour** | `max_over_time(solar_total_w[24h])` |
-| **Énergie via intégration** | `integrate(solar_total_w[1d]) / 3600` (Wh) |
+| **Énergie via intégration** | `avg_over_time(solar_total_w[1d]) * 24` (Wh) |
 
 ---
 
