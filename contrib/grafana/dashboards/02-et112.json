@@ -42,7 +42,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_power_w{address=\"7\"}",
+          "expr": "et112_power_w{address=\"0x07\"}",
           "legendFormat": "Micro-onduleurs (addr 7)",
           "refId": "A"
         },
@@ -51,7 +51,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_power_w{address=\"8\"}",
+          "expr": "et112_power_w{address=\"0x08\"}",
           "legendFormat": "Maison / Conso (addr 8)",
           "refId": "B"
         },
@@ -60,7 +60,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_power_w{address=\"9\"}",
+          "expr": "et112_power_w{address=\"0x09\"}",
           "legendFormat": "Réseau / Grid (addr 9)",
           "refId": "C"
         }
@@ -109,7 +109,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_voltage_v{address=\"7\"}",
+          "expr": "et112_voltage_v{address=\"0x07\"}",
           "legendFormat": "Tension addr 7",
           "refId": "A"
         },
@@ -118,7 +118,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_voltage_v{address=\"8\"}",
+          "expr": "et112_voltage_v{address=\"0x08\"}",
           "legendFormat": "Tension addr 8",
           "refId": "B"
         },
@@ -127,7 +127,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_voltage_v{address=\"9\"}",
+          "expr": "et112_voltage_v{address=\"0x09\"}",
           "legendFormat": "Tension addr 9",
           "refId": "C"
         }
@@ -176,7 +176,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_current_a{address=\"7\"}",
+          "expr": "et112_current_a{address=\"0x07\"}",
           "legendFormat": "Courant addr 7",
           "refId": "A"
         },
@@ -185,7 +185,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_current_a{address=\"8\"}",
+          "expr": "et112_current_a{address=\"0x08\"}",
           "legendFormat": "Courant addr 8",
           "refId": "B"
         },
@@ -194,7 +194,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_current_a{address=\"9\"}",
+          "expr": "et112_current_a{address=\"0x09\"}",
           "legendFormat": "Courant addr 9",
           "refId": "C"
         }
@@ -256,7 +256,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_energy_import_wh{address=\"9\"}",
+          "expr": "et112_energy_import_wh{address=\"0x09\"}",
           "legendFormat": "Import Réseau",
           "refId": "A"
         },
@@ -265,7 +265,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_energy_import_wh{address=\"8\"}",
+          "expr": "et112_energy_import_wh{address=\"0x08\"}",
           "legendFormat": "Import Maison",
           "refId": "B"
         }
@@ -314,7 +314,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_energy_export_wh{address=\"9\"}",
+          "expr": "et112_energy_export_wh{address=\"0x09\"}",
           "legendFormat": "Export Réseau",
           "refId": "A"
         },
@@ -323,7 +323,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_energy_export_wh{address=\"7\"}",
+          "expr": "et112_energy_export_wh{address=\"0x07\"}",
           "legendFormat": "Export Micro-ond.",
           "refId": "B"
         }
@@ -385,7 +385,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_power_factor{address=\"8\"}",
+          "expr": "et112_power_factor{address=\"0x08\"}",
           "legendFormat": "PF Maison",
           "refId": "A"
         }
@@ -440,7 +440,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_power_factor{address=\"9\"}",
+          "expr": "et112_power_factor{address=\"0x09\"}",
           "legendFormat": "PF Réseau",
           "refId": "A"
         }
@@ -495,7 +495,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_frequency_hz{address=\"8\"}",
+          "expr": "et112_frequency_hz{address=\"0x08\"}",
           "legendFormat": "Fréq Maison",
           "refId": "A"
         }
@@ -544,7 +544,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_reactive_power_var{address=\"7\"}",
+          "expr": "et112_reactive_power_var{address=\"0x07\"}",
           "legendFormat": "VAR addr 7",
           "refId": "A"
         },
@@ -553,7 +553,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_reactive_power_var{address=\"8\"}",
+          "expr": "et112_reactive_power_var{address=\"0x08\"}",
           "legendFormat": "VAR addr 8",
           "refId": "B"
         },
@@ -562,7 +562,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "et112_reactive_power_var{address=\"9\"}",
+          "expr": "et112_reactive_power_var{address=\"0x09\"}",
           "legendFormat": "VAR addr 9",
           "refId": "C"
         }

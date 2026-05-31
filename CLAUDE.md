@@ -314,6 +314,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | `scp: dest open Failure` | `ssh root@192.168.1.120 "svc -d /service/dbus-mqtt-venus"` puis redéployer |
 | Venus symlink disparu (màj firmware) | `ssh root@192.168.1.120 "ln -sf /data/etc/sv/dbus-mqtt-venus /service/dbus-mqtt-venus"` |
 | ET112 "en attente de données" | Mauvaise adresse Modbus → `sudo systemctl stop daly-bms && mbpoll -m rtu -a 1:15 -b 9600 -t 3:float -r 1 -c 1 /dev/ttyUSB0` |
+| Dashboard Grafana ET112 vide alors que les données existent | **Format du label `address`** : le backend écrit `address="0x07/0x08/0x09"` (hex, `redb_writes.rs::write_et112`). Les requêtes PromQL doivent utiliser `address="0x07"`, **jamais** `address="7"` (décimal → 0 série). Vérif : `curl -s 'localhost:8080/api/v1/query?query=et112_power_w' \| jq '.data.result[].metric'`. |
 | Widget météo "Température: -" | Limitation Venus OS — inévitable, non fixable |
 | `mbpoll` sans réponse | daly-bms monopolise le port — `sudo systemctl stop daly-bms` d'abord |
 | Dashboard affiche cumul brut | Vérifier `pvinv_baseline` retained MQTT (`santuario/persist/pvinv_baseline`) |
