@@ -1369,6 +1369,15 @@ mod tests {
             assert!((v[1].value - 72000.0).abs() < 1e-6); // L2: 200*360
             assert_eq!(v[0].labels.get("cls").map(String::as_str), Some("big"));
             assert_eq!(v[0].labels.get("phase").map(String::as_str), Some("L1"));
+
+            // Sans group_left, l'appariement OneToOne avec doublons côté gauche
+            // (2 phases, même bms_id) doit échouer (sémantique Prometheus).
+            let expr = parse_and_validate("phase_power * on(bms_id) capacity").unwrap();
+            let err = ev.eval_instant(&expr, ts).unwrap_err();
+            assert!(
+                err.to_string().contains("côté gauche"),
+                "attendu erreur many-to-one, got: {err}"
+            );
         }
         let _ = std::fs::remove_file(&path);
     }
