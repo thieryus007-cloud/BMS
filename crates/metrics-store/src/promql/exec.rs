@@ -16,6 +16,20 @@
 //! - Labels : `label_replace label_join` (Phase 4)
 //! - Absence : `absent` (vecteur instant) / `absent_over_time` (range) — Phase 5
 //!
+//! ## Évolution conformité (cf. `docs/Evolution-compliance-PromQL.md`)
+//! - Modificateurs temporels : `offset` **et** `@ <ts>`/`@ start()`/`@ end()`
+//!   (`resolve_eval_time`).
+//! - Opérateurs ensemblistes : `and`/`or`/`unless` (`eval_set_op`), avec
+//!   `on`/`ignoring` éventuel.
+//! - Matching vectoriel : `on`/`ignoring` + `group_left`/`group_right`
+//!   (`vector_binary_op` + `result_metric`) pour arithmétique et comparaisons.
+//! - Agrégateurs : `quantile` (percentile spatial), `group`, `count_values`,
+//!   `stddev`, `stdvar`.
+//! - Sous-requêtes : `expr[range:step]` (`eval_subquery_call`) — matérialise une
+//!   série synthétique par sous-échantillonnage puis applique la fonction fenêtre.
+//! - Arithmétique étendue : `%` (modulo) et `^` (puissance).
+//! - P0 : `rate`/`increase` retournent *no data* (et non `0`) sur un seul point.
+//!
 //! ## Sémantique des labels
 //! Agrégations (sauf topk/bottomk) et comparaisons **droppent `__name__`** ;
 //! topk/bottomk et les fonctions de fenêtre **conservent** les labels.
@@ -50,15 +64,16 @@
 //! d'un step à l'autre sans cloner le `BTreeMap` (les Labels sont
 //! co-possédés par le cache et tous les samples qui en dérivent).
 
-use std::cell::{OnceCell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 use promql_parser::label::MatchOp;
 use promql_parser::parser::{
-    AggregateExpr, BinaryExpr, Call, Expr, LabelModifier, MatrixSelector, NumberLiteral, Offset,
-    ParenExpr, StringLiteral, UnaryExpr, VectorSelector,
+    AggregateExpr, AtModifier, BinModifier, BinaryExpr, Call, Expr, LabelModifier, MatrixSelector,
+    NumberLiteral, Offset, ParenExpr, StringLiteral, SubqueryExpr, UnaryExpr,
+    VectorMatchCardinality, VectorSelector,
 };
 use redb::ReadTransaction;
 use regex::Regex;
@@ -118,6 +133,12 @@ enum Value {
 const HOURLY_THRESHOLD_MS: i64 = 7 * 86_400_000;
 const DAILY_THRESHOLD_MS: i64 = 90 * 86_400_000;
 
+/// Résolution par défaut d'une sous-requête sans `step` explicite (1 min).
+const DEFAULT_SUBQUERY_STEP_MS: i64 = 60_000;
+/// Borne supérieure du nombre de sous-pas d'une sous-requête (anti-explosion
+/// mémoire/CPU). Au-delà, l'évaluation est rejetée avec un message explicite.
+const MAX_SUBQUERY_STEPS: i64 = 11_000;
+
 fn tier_for_range(range_ms: i64) -> Tier {
     if range_ms <= HOURLY_THRESHOLD_MS {
         Tier::Raw
@@ -142,6 +163,11 @@ pub struct Evaluator<'r> {
     /// L'AST PromQL est immutable pendant l'évaluation donc le pointeur
     /// est stable. Évite tout calcul de fingerprint après le 1er step.
     match_cache: RefCell<HashMap<usize, Arc<Vec<(u32, Arc<Labels>)>>>>,
+    /// Bornes `start`/`end` de la requête courante — nécessaires pour résoudre
+    /// les modificateurs `@ start()` / `@ end()`. Renseignées au début de
+    /// `eval_range` / `eval_instant`.
+    query_start_ms: Cell<i64>,
+    query_end_ms: Cell<i64>,
 }
 
 impl<'r> Evaluator<'r> {
@@ -152,6 +178,8 @@ impl<'r> Evaluator<'r> {
             read_txn: OnceCell::new(),
             series_catalog: OnceCell::new(),
             match_cache: RefCell::new(HashMap::new()),
+            query_start_ms: Cell::new(0),
+            query_end_ms: Cell::new(0),
         }
     }
 
@@ -162,6 +190,8 @@ impl<'r> Evaluator<'r> {
             read_txn: OnceCell::new(),
             series_catalog: OnceCell::new(),
             match_cache: RefCell::new(HashMap::new()),
+            query_start_ms: Cell::new(0),
+            query_end_ms: Cell::new(0),
         }
     }
 
@@ -185,6 +215,9 @@ impl<'r> Evaluator<'r> {
         // l'Evaluator sur une autre expression (dont un nœud aurait été
         // réalloué à la même adresse) ne renvoie jamais un résultat périmé.
         self.match_cache.borrow_mut().clear();
+        // Bornes pour `@ start()` / `@ end()`.
+        self.query_start_ms.set(start_ms);
+        self.query_end_ms.set(end_ms);
         let mut by_labels: BTreeMap<Arc<Labels>, Vec<(i64, f64)>> = BTreeMap::new();
         // Sentinelle pour les valeurs scalaires (labels vides). Partagée
         // sur tous les steps scalaires pour éviter N allocations.
@@ -228,10 +261,33 @@ impl<'r> Evaluator<'r> {
         // pointeur avant toute évaluation pour éviter un faux positif
         // d'adresse mémoire réutilisée.
         self.match_cache.borrow_mut().clear();
+        // Pour une requête instant, `start` == `end` == t (cf. `@ start()/end()`).
+        self.query_start_ms.set(t_ms);
+        self.query_end_ms.set(t_ms);
         match self.eval_at(expr, t_ms)? {
             Value::Scalar(v) => Ok(vec![InstantSample { labels: Arc::new(Labels::new()), value: v }]),
             Value::Vector(s) => Ok(s),
         }
+    }
+
+    /// Résout l'instant d'évaluation effectif d'un sélecteur en tenant compte
+    /// des modificateurs temporels `@` (fixe l'instant) **puis** `offset`
+    /// (décale relativement). `@` est prioritaire : `m @ T offset O` évalue à
+    /// `T - O`. Sans `@`, on part de l'instant courant `t`.
+    fn resolve_eval_time(&self, at: &Option<AtModifier>, offset: &Option<Offset>, t: i64) -> i64 {
+        let base = match at {
+            Some(AtModifier::Start) => self.query_start_ms.get(),
+            Some(AtModifier::End) => self.query_end_ms.get(),
+            Some(AtModifier::At(time)) => {
+                // SystemTime → ms epoch (peut être avant epoch → 0).
+                match time.duration_since(UNIX_EPOCH) {
+                    Ok(d) => d.as_millis().try_into().unwrap_or(i64::MAX),
+                    Err(_) => 0,
+                }
+            }
+            None => t,
+        };
+        base.saturating_sub(offset_ms(offset))
     }
 
     // ── interne ──────────────────────────────────────────────────────────
@@ -278,8 +334,8 @@ impl<'r> Evaluator<'r> {
     }
 
     fn eval_vector_selector(&self, vs: &VectorSelector, t: i64) -> Result<Value, PromQlError> {
-        // Modificateur `offset` : on évalue le sélecteur à l'instant décalé.
-        let t_eff = t.saturating_sub(offset_ms(&vs.offset));
+        // Modificateurs temporels `@` (fixe) puis `offset` (décale).
+        let t_eff = self.resolve_eval_time(&vs.at, &vs.offset, t);
         let matched = self.match_series(vs)?;
         let rtx = self.txn()?;
         let mut out = Vec::with_capacity(matched.len());
@@ -298,23 +354,28 @@ impl<'r> Evaluator<'r> {
     }
 
     fn eval_binary(&self, b: &BinaryExpr, t: i64) -> Result<Value, PromQlError> {
+        let op = b.op.to_string();
+        // Opérateurs ensemblistes (`and`/`or`/`unless`) : logique dédiée
+        // (filtrage par présence de labels, sans arithmétique). Les deux
+        // opérandes doivent être des vecteurs instantanés.
+        if matches!(op.as_str(), "and" | "or" | "unless") {
+            let lhs = self.eval_at(&b.lhs, t)?;
+            let rhs = self.eval_at(&b.rhs, t)?;
+            return eval_set_op(&op, lhs, rhs, b.modifier.as_ref());
+        }
         let lhs = self.eval_at(&b.lhs, t)?;
         let rhs = self.eval_at(&b.rhs, t)?;
-        let op = b.op.to_string();
         // Comparaisons (`== != > < >= <=`) : logique dédiée (filtre vs `bool`).
         if let Some(cmp) = cmp_fn(&op) {
             let return_bool = b.modifier.as_ref().map(|m| m.return_bool).unwrap_or(false);
-            return self.eval_comparison(lhs, rhs, cmp, return_bool);
+            return self.eval_comparison(lhs, rhs, cmp, return_bool, b.modifier.as_ref());
         }
-        let scalar_fn: fn(f64, f64) -> f64 = match op.as_str() {
-            "+" => |a, b| a + b,
-            "-" => |a, b| a - b,
-            "*" => |a, b| a * b,
-            "/" => |a, b| a / b,
-            other => return Err(PromQlError::Unsupported(format!("binary {other}"))),
-        };
+        let scalar_fn = arith_fn(&op)?;
         match (lhs, rhs) {
             (Value::Scalar(a), Value::Scalar(c)) => Ok(Value::Scalar(scalar_fn(a, c))),
+            // NB : pour les opérations scalaire×vecteur on conserve les labels
+            // d'origine (dont `__name__`) — comportement historique préservé
+            // pour ne pas modifier l'affichage des séries existantes.
             (Value::Scalar(a), Value::Vector(v)) => Ok(Value::Vector(
                 v.into_iter()
                     .map(|s| InstantSample { labels: s.labels, value: scalar_fn(a, s.value) })
@@ -325,9 +386,13 @@ impl<'r> Evaluator<'r> {
                     .map(|s| InstantSample { labels: s.labels, value: scalar_fn(s.value, c) })
                     .collect(),
             )),
-            (Value::Vector(lhs), Value::Vector(rhs)) => Ok(Value::Vector(align_and_op(
-                lhs, rhs, scalar_fn,
-            ))),
+            (Value::Vector(lhs), Value::Vector(rhs)) => Ok(Value::Vector(vector_binary_op(
+                lhs,
+                rhs,
+                b.modifier.as_ref(),
+                true, // arithmétique → drop __name__
+                &|l, r| Some(scalar_fn(l, r)),
+            )?)),
         }
     }
 
@@ -345,6 +410,7 @@ impl<'r> Evaluator<'r> {
         rhs: Value,
         cmp: fn(f64, f64) -> bool,
         return_bool: bool,
+        modifier: Option<&BinModifier>,
     ) -> Result<Value, PromQlError> {
         // Applique la comparaison à un sample vecteur contre une valeur
         // scalaire. `lhs_is_vec` indique l'ordre des opérandes.
@@ -380,7 +446,22 @@ impl<'r> Evaluator<'r> {
                 v.into_iter().filter_map(|s| map_sample(s, a, false)).collect(),
             )),
             (Value::Vector(lhs), Value::Vector(rhs)) => {
-                Ok(Value::Vector(align_and_compare(lhs, rhs, cmp, return_bool)))
+                // vec×vec : matching vectoriel (`on`/`ignoring`/`group_*`). En
+                // mode filtre, on émet la valeur du lhs si la condition est vraie ;
+                // en mode `bool`, on émet 0/1 pour chaque paire alignée.
+                let combine = move |l: f64, r: f64| -> Option<f64> {
+                    let cond = cmp_truth(cmp, l, r);
+                    if return_bool {
+                        Some(if cond { 1.0 } else { 0.0 })
+                    } else if cond {
+                        Some(l)
+                    } else {
+                        None
+                    }
+                };
+                Ok(Value::Vector(vector_binary_op(
+                    lhs, rhs, modifier, true, &combine,
+                )?))
             }
         }
     }
@@ -478,8 +559,63 @@ impl<'r> Evaluator<'r> {
             return Ok(Value::Vector(out));
         }
 
+        // quantile(φ, vec) : φ-quantile spatial sur l'ensemble des séries du
+        // groupe (interpolation linéaire). `__name__` retiré (agrégation).
+        if op == "quantile" {
+            let phi = match &a.param {
+                Some(p) => match self.eval_at(p, t)? {
+                    Value::Scalar(v) => v,
+                    Value::Vector(_) => {
+                        return Err(PromQlError::Execution(
+                            "le paramètre de quantile doit être scalaire".into(),
+                        ))
+                    }
+                },
+                None => {
+                    return Err(PromQlError::Execution("quantile requiert un paramètre φ".into()))
+                }
+            };
+            let mut groups: BTreeMap<Labels, Vec<f64>> = BTreeMap::new();
+            for s in &inner {
+                groups.entry(group_key(&s.labels)).or_default().push(s.value);
+            }
+            let out = groups
+                .into_iter()
+                .map(|(labels, vals)| InstantSample {
+                    labels: Arc::new(labels),
+                    value: quantile_value(phi, vals),
+                })
+                .collect();
+            return Ok(Value::Vector(out));
+        }
+
+        // count_values("label", vec) : compte les séries par valeur distincte,
+        // en ajoutant un label `label=<valeur>` au groupe.
+        if op == "count_values" {
+            let label_name = match a.param.as_deref() {
+                Some(Expr::StringLiteral(StringLiteral { val })) => val.clone(),
+                _ => {
+                    return Err(PromQlError::Execution(
+                        "count_values requiert un paramètre chaîne (nom de label)".into(),
+                    ))
+                }
+            };
+            let mut groups: BTreeMap<Labels, u64> = BTreeMap::new();
+            for s in &inner {
+                let mut key = group_key(&s.labels);
+                key.insert(label_name.clone(), fmt_value_label(s.value));
+                *groups.entry(key).or_insert(0) += 1;
+            }
+            let out = groups
+                .into_iter()
+                .map(|(labels, cnt)| InstantSample { labels: Arc::new(labels), value: cnt as f64 })
+                .collect();
+            return Ok(Value::Vector(out));
+        }
+
         struct Acc {
             sum: f64,
+            sumsq: f64,
             min: f64,
             max: f64,
             cnt: u64,
@@ -489,23 +625,31 @@ impl<'r> Evaluator<'r> {
         for s in &inner {
             let e = groups.entry(group_key(&s.labels)).or_insert(Acc {
                 sum: 0.0,
+                sumsq: 0.0,
                 min: f64::INFINITY,
                 max: f64::NEG_INFINITY,
                 cnt: 0,
             });
             e.sum += s.value;
+            e.sumsq += s.value * s.value;
             e.min = e.min.min(s.value);
             e.max = e.max.max(s.value);
             e.cnt += 1;
         }
         let mut out = Vec::with_capacity(groups.len());
         for (labels, acc) in groups {
+            let n = acc.cnt as f64;
             let value = match op.as_str() {
                 "sum" => acc.sum,
                 "min" => acc.min,
                 "max" => acc.max,
-                "avg" => acc.sum / acc.cnt as f64,
-                "count" => acc.cnt as f64,
+                "avg" => acc.sum / n,
+                "count" => n,
+                // `group` : présence binaire (valeur 1 par groupe).
+                "group" => 1.0,
+                // Variance / écart-type de population sur les séries du groupe.
+                "stdvar" => (acc.sumsq / n - (acc.sum / n).powi(2)).max(0.0),
+                "stddev" => (acc.sumsq / n - (acc.sum / n).powi(2)).max(0.0).sqrt(),
                 other => return Err(PromQlError::Unsupported(format!("aggregator {other}"))),
             };
             out.push(InstantSample { labels: Arc::new(labels), value });
@@ -547,6 +691,14 @@ impl<'r> Evaluator<'r> {
         }) {
             return self.eval_range_call(name, vs, range, c, t);
         }
+        // Sous-requête : `f(<expr>[range:step])` — l'argument fenêtre est une
+        // `Subquery` (et non un `MatrixSelector` sur un sélecteur simple).
+        if let Some(sq) = c.args.args.iter().find_map(|a| match a.as_ref() {
+            Expr::Subquery(sq) => Some(sq),
+            _ => None,
+        }) {
+            return self.eval_subquery_call(name, sq, c, t);
+        }
         // Fonctions instantanées : 1er arg = vecteur, args suivants = scalaires.
         let inner = match self.eval_at(c.args.args[0].as_ref(), t)? {
             Value::Vector(v) => v,
@@ -573,9 +725,9 @@ impl<'r> Evaluator<'r> {
             // absent_over_time : présent si ≥ 1 série matchée a un point dans la
             // fenêtre.
             Expr::MatrixSelector(MatrixSelector { vs, range }) => {
-                // Modificateur `offset` : fenêtre décalée comme pour les autres
-                // fonctions à fenêtre.
-                let t_eff = t.saturating_sub(offset_ms(&vs.offset));
+                // Modificateurs `@`/`offset` : fenêtre fixée/décalée comme pour
+                // les autres fonctions à fenêtre.
+                let t_eff = self.resolve_eval_time(&vs.at, &vs.offset, t);
                 let range_ms: i64 = range.as_millis().try_into().unwrap_or(i64::MAX);
                 let win_start = t_eff.saturating_sub(range_ms);
                 let matched = self.match_series(vs)?;
@@ -629,8 +781,9 @@ impl<'r> Evaluator<'r> {
         t: i64,
     ) -> Result<Value, PromQlError> {
         let range_ms: i64 = range.as_millis().try_into().unwrap_or(i64::MAX);
-        // Modificateur `offset` : la fenêtre `[win_start, t_eff]` est décalée.
-        let t_eff = t.saturating_sub(offset_ms(&vs.offset));
+        // Modificateurs temporels `@`/`offset` : la fenêtre `[win_start, t_eff]`
+        // est fixée puis décalée.
+        let t_eff = self.resolve_eval_time(&vs.at, &vs.offset, t);
         let win_start = t_eff.saturating_sub(range_ms);
         let tier = tier_for_range(range_ms);
         let matched = self.match_series(vs)?;
@@ -697,6 +850,94 @@ impl<'r> Evaluator<'r> {
             };
             if let Some(v) = value_opt {
                 out.push(InstantSample { labels: labels.clone(), value: v });
+            }
+        }
+        Ok(Value::Vector(out))
+    }
+
+    /// Évalue une fonction à fenêtre dont l'argument est une **sous-requête**
+    /// `inner[range:step]`. On matérialise une série synthétique en évaluant
+    /// `inner` à chaque sous-pas `step` sur `[t_eff-range, t_eff]`, puis on
+    /// applique la fonction de fenêtre (`apply_range_fn_raw`) sur les points
+    /// ainsi obtenus, par combinaison de labels.
+    fn eval_subquery_call(
+        &self,
+        name: &str,
+        sq: &SubqueryExpr,
+        c: &Call,
+        t: i64,
+    ) -> Result<Value, PromQlError> {
+        let range_ms: i64 = sq.range.as_millis().try_into().unwrap_or(i64::MAX);
+        // Résolution interne : `step` explicite, sinon défaut 1 min (comme
+        // l'intervalle d'évaluation global de Prometheus).
+        let step_ms: i64 = sq
+            .step
+            .map(|d| d.as_millis().try_into().unwrap_or(i64::MAX))
+            .filter(|s| *s > 0)
+            .unwrap_or(DEFAULT_SUBQUERY_STEP_MS);
+        // Modificateurs `@`/`offset` portés par la sous-requête elle-même.
+        let t_eff = self.resolve_eval_time(&sq.at, &sq.offset, t);
+        let win_start = t_eff.saturating_sub(range_ms);
+        // Garde anti-explosion : borne le nombre de sous-pas.
+        let n_steps = range_ms / step_ms + 1;
+        if n_steps > MAX_SUBQUERY_STEPS {
+            return Err(PromQlError::Execution(format!(
+                "sous-requête trop fine : {n_steps} sous-pas (max {MAX_SUBQUERY_STEPS}) — \
+                 élargir la résolution [range:step]"
+            )));
+        }
+        // Paramètre scalaire éventuel (predict_linear T, quantile_over_time φ) =
+        // 1er argument qui n'est ni la sous-requête ni un matrix selector.
+        let param: Option<f64> = {
+            let mut p = None;
+            for a in &c.args.args {
+                if !matches!(a.as_ref(), Expr::Subquery(_) | Expr::MatrixSelector(_)) {
+                    match self.eval_at(a, t)? {
+                        Value::Scalar(v) => p = Some(v),
+                        Value::Vector(_) => {
+                            return Err(PromQlError::Execution(format!(
+                                "{name}: paramètre scalaire attendu"
+                            )))
+                        }
+                    }
+                    break;
+                }
+            }
+            p
+        };
+        // Matérialise les points par combinaison de labels.
+        let scalar_key: Arc<Labels> = Arc::new(Labels::new());
+        let mut series: BTreeMap<Arc<Labels>, Vec<(i64, f64)>> = BTreeMap::new();
+        let mut st = win_start;
+        while st <= t_eff {
+            match self.eval_at(&sq.expr, st)? {
+                Value::Scalar(v) => {
+                    series.entry(scalar_key.clone()).or_default().push((st, v));
+                }
+                Value::Vector(samples) => {
+                    for s in samples {
+                        series.entry(s.labels).or_default().push((st, s.value));
+                    }
+                }
+            }
+            st = st.saturating_add(step_ms);
+        }
+        // Applique la fonction de fenêtre sur chaque série synthétique. Les
+        // points sont déjà triés par timestamp croissant (st croissant).
+        let mut out = Vec::with_capacity(series.len());
+        for (labels, pts) in series {
+            let value_opt = if name == "irate" {
+                let lt = if pts.len() >= 2 {
+                    Some((pts[pts.len() - 2], pts[pts.len() - 1]))
+                } else {
+                    None
+                };
+                apply_irate_last_two(lt)
+            } else {
+                apply_range_fn_raw(name, &pts, range_ms, t_eff, param)
+            };
+            if let Some(v) = value_opt {
+                out.push(InstantSample { labels, value: v });
             }
         }
         Ok(Value::Vector(out))
@@ -871,6 +1112,23 @@ fn scalar_arg_opt(
     scalar_arg(c, idx, t, ev).map(Some)
 }
 
+/// Formate une valeur flottante en valeur de label pour `count_values`
+/// (représentation compacte, analogue à `strconv.FormatFloat(f, 'f', -1, 64)`
+/// côté Prometheus). Les valeurs spéciales sont rendues comme Prometheus.
+fn fmt_value_label(v: f64) -> String {
+    if v.is_nan() {
+        "NaN".into()
+    } else if v.is_infinite() {
+        if v > 0.0 {
+            "+Inf".into()
+        } else {
+            "-Inf".into()
+        }
+    } else {
+        format!("{v}")
+    }
+}
+
 /// Arrondi PromQL au plus proche multiple de `to_nearest` (`round(v, tn)`),
 /// demi-vers-le-haut comme Prometheus (`floor(v/tn + 0.5) * tn`).
 fn round_to(v: f64, to_nearest: f64) -> f64 {
@@ -971,8 +1229,12 @@ fn apply_range_fn_raw(
             _ => None,
         };
     }
-    // Fonctions nécessitant ≥ 2 points (régression / dérivée).
-    if matches!(name, "deriv" | "predict_linear") && pts.len() < 2 {
+    // Fonctions nécessitant ≥ 2 points sous la fenêtre. Pour `rate`/`increase`
+    // c'est la sémantique Prometheus stricte : un seul point ⇒ *no data* (et
+    // non `0`, qui masquait silencieusement les séries clairsemées — cf. P0 de
+    // `docs/Evolution-compliance-PromQL.md` §4.6/§7). Idem `deriv`/`predict_linear`
+    // dont la régression est indéfinie sur un point.
+    if matches!(name, "deriv" | "predict_linear" | "rate" | "increase") && pts.len() < 2 {
         return None;
     }
     let vals: Vec<f64> = pts.iter().map(|p| p.1).collect();
@@ -1160,33 +1422,221 @@ fn apply_range_fn_buckets(
     })
 }
 
-/// Aligne deux vecteurs par labels (hors `__name__`), applique l'opération
-/// scalaire sur les paires alignées. Élimine `__name__` du résultat
-/// (semantique PromQL standard).
-fn align_and_op(
-    lhs: Vec<InstantSample>,
-    rhs: Vec<InstantSample>,
-    op: fn(f64, f64) -> f64,
-) -> Vec<InstantSample> {
-    let rhs_idx: BTreeMap<Labels, f64> = rhs
-        .into_iter()
-        .map(|s| {
-            let mut l = (*s.labels).clone();
-            l.remove("__name__");
-            (l, s.value)
-        })
-        .collect();
-    // P4 : pré-dimensionne le résultat (au plus min(|lhs|, |rhs|) paires
-    // alignées) pour éviter les réallocations successives du Vec.
-    let mut out = Vec::with_capacity(lhs.len().min(rhs_idx.len()));
-    for s in lhs {
-        let mut key = (*s.labels).clone();
-        key.remove("__name__");
-        if let Some(&rval) = rhs_idx.get(&key) {
-            out.push(InstantSample { labels: Arc::new(key), value: op(s.value, rval) });
+/// Fonction scalaire associée à un opérateur arithmétique PromQL.
+fn arith_fn(op: &str) -> Result<fn(f64, f64) -> f64, PromQlError> {
+    Ok(match op {
+        "+" => |a, b| a + b,
+        "-" => |a, b| a - b,
+        "*" => |a, b| a * b,
+        "/" => |a, b| a / b,
+        // `%` : modulo flottant (sémantique Go `math.Mod`, fournie par `f64::rem`).
+        "%" => |a, b| a % b,
+        // `^` : puissance.
+        "^" => |a: f64, b: f64| a.powf(b),
+        other => return Err(PromQlError::Unsupported(format!("binary {other}"))),
+    })
+}
+
+/// **Signature de matching** d'un sample : sous-ensemble de labels servant à
+/// apparier deux vecteurs selon le modificateur `on`/`ignoring`.
+/// - `on(l…)` (`Include`) : ne garder que les labels listés.
+/// - `ignoring(l…)` (`Exclude`) : garder tous les labels sauf ceux listés (et
+///   `__name__`).
+/// - aucun modificateur : tous les labels sauf `__name__`.
+fn matching_sig(labels: &Labels, matching: Option<&LabelModifier>) -> Labels {
+    let mut key = Labels::new();
+    match matching {
+        Some(LabelModifier::Include(ls)) => {
+            for l in &ls.labels {
+                if let Some(v) = labels.get(l) {
+                    key.insert(l.clone(), v.clone());
+                }
+            }
+        }
+        Some(LabelModifier::Exclude(ls)) => {
+            for (k, v) in labels.iter() {
+                if k == "__name__" || ls.labels.contains(k) {
+                    continue;
+                }
+                key.insert(k.clone(), v.clone());
+            }
+        }
+        None => {
+            for (k, v) in labels.iter() {
+                if k == "__name__" {
+                    continue;
+                }
+                key.insert(k.clone(), v.clone());
+            }
         }
     }
-    out
+    key
+}
+
+/// Construit les labels du résultat d'une opération vec×vec (sémantique
+/// Prometheus `resultMetric`).
+///
+/// - `OneToOne` : on part des labels du côté `many` (= lhs), on droppe
+///   `__name__` (si `drop_name`), puis selon le matching : `on` ⇒ ne garder que
+///   les labels d'appariement, `ignoring` ⇒ retirer les labels listés.
+/// - `group_left`/`group_right` : on garde **tous** les labels du côté `many`
+///   (sauf `__name__`), puis on recopie les labels `include` depuis le côté
+///   `one`.
+fn result_metric(
+    many: &Labels,
+    one: &Labels,
+    card: &VectorMatchCardinality,
+    matching: Option<&LabelModifier>,
+    drop_name: bool,
+) -> Labels {
+    let mut lb = many.clone();
+    if drop_name {
+        lb.remove("__name__");
+    }
+    match card {
+        VectorMatchCardinality::OneToOne | VectorMatchCardinality::ManyToMany => {
+            match matching {
+                Some(LabelModifier::Include(ls)) => {
+                    lb.retain(|k, _| ls.labels.contains(k));
+                }
+                Some(LabelModifier::Exclude(ls)) => {
+                    for l in &ls.labels {
+                        lb.remove(l);
+                    }
+                }
+                None => {}
+            }
+        }
+        VectorMatchCardinality::ManyToOne(include) | VectorMatchCardinality::OneToMany(include) => {
+            for l in &include.labels {
+                match one.get(l) {
+                    Some(v) => {
+                        lb.insert(l.clone(), v.clone());
+                    }
+                    None => {
+                        lb.remove(l);
+                    }
+                }
+            }
+        }
+    }
+    lb
+}
+
+/// Opération binaire vec×vec avec matching vectoriel et cardinalité.
+///
+/// `combine(l, r)` calcule la valeur de sortie (orientation préservée :
+/// `l` = lhs, `r` = rhs) ; `None` filtre la paire (mode comparaison filtre).
+/// `drop_name` indique si `__name__` doit être retiré du résultat.
+fn vector_binary_op(
+    lhs: Vec<InstantSample>,
+    rhs: Vec<InstantSample>,
+    modifier: Option<&BinModifier>,
+    drop_name: bool,
+    combine: &dyn Fn(f64, f64) -> Option<f64>,
+) -> Result<Vec<InstantSample>, PromQlError> {
+    let matching = modifier.and_then(|m| m.matching.as_ref());
+    let default_card = VectorMatchCardinality::OneToOne;
+    let card = modifier.map(|m| &m.card).unwrap_or(&default_card);
+
+    // `group_right` : le côté « many » est le rhs → on indexe le lhs (« one »).
+    if matches!(card, VectorMatchCardinality::OneToMany(_)) {
+        let mut one_idx: HashMap<Labels, (f64, Arc<Labels>)> = HashMap::with_capacity(lhs.len());
+        for s in lhs {
+            let key = matching_sig(&s.labels, matching);
+            if one_idx.insert(key, (s.value, s.labels)).is_some() {
+                return Err(PromQlError::Execution(
+                    "many-to-many matching non autorisé : plusieurs séries du côté \
+                     'one' (group_right) partagent les mêmes labels d'appariement"
+                        .into(),
+                ));
+            }
+        }
+        let mut out = Vec::with_capacity(rhs.len());
+        for s in rhs {
+            let key = matching_sig(&s.labels, matching);
+            if let Some((lval, llabels)) = one_idx.get(&key) {
+                if let Some(v) = combine(*lval, s.value) {
+                    let labels = result_metric(&s.labels, llabels, card, matching, drop_name);
+                    out.push(InstantSample { labels: Arc::new(labels), value: v });
+                }
+            }
+        }
+        return Ok(out);
+    }
+
+    // `OneToOne` / `group_left` : le côté « one » est le rhs → on l'indexe.
+    let mut one_idx: HashMap<Labels, (f64, Arc<Labels>)> = HashMap::with_capacity(rhs.len());
+    for s in rhs {
+        let key = matching_sig(&s.labels, matching);
+        if one_idx.insert(key, (s.value, s.labels)).is_some() {
+            return Err(PromQlError::Execution(
+                "matching vectoriel : plusieurs séries du côté droit partagent les \
+                 mêmes labels d'appariement (préciser on()/ignoring() ou group_left)"
+                    .into(),
+            ));
+        }
+    }
+    let mut out = Vec::with_capacity(lhs.len());
+    for s in lhs {
+        let key = matching_sig(&s.labels, matching);
+        if let Some((rval, rlabels)) = one_idx.get(&key) {
+            if let Some(v) = combine(s.value, *rval) {
+                let labels = result_metric(&s.labels, rlabels, card, matching, drop_name);
+                out.push(InstantSample { labels: Arc::new(labels), value: v });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Opérateurs ensemblistes `and` / `or` / `unless` (vec×vec uniquement).
+/// L'appariement utilise `matching_sig` (avec `on`/`ignoring` éventuel). Les
+/// labels (dont `__name__`) sont **conservés** (pas de drop, pas d'arithmétique).
+fn eval_set_op(
+    op: &str,
+    lhs: Value,
+    rhs: Value,
+    modifier: Option<&BinModifier>,
+) -> Result<Value, PromQlError> {
+    let (lhs, rhs) = match (lhs, rhs) {
+        (Value::Vector(l), Value::Vector(r)) => (l, r),
+        _ => {
+            return Err(PromQlError::Execution(format!(
+                "l'opérateur ensembliste '{op}' requiert deux vecteurs instantanés"
+            )))
+        }
+    };
+    let matching = modifier.and_then(|m| m.matching.as_ref());
+    let out = match op {
+        "and" => {
+            let rhs_keys: HashSet<Labels> =
+                rhs.iter().map(|s| matching_sig(&s.labels, matching)).collect();
+            lhs.into_iter()
+                .filter(|s| rhs_keys.contains(&matching_sig(&s.labels, matching)))
+                .collect()
+        }
+        "unless" => {
+            let rhs_keys: HashSet<Labels> =
+                rhs.iter().map(|s| matching_sig(&s.labels, matching)).collect();
+            lhs.into_iter()
+                .filter(|s| !rhs_keys.contains(&matching_sig(&s.labels, matching)))
+                .collect()
+        }
+        "or" => {
+            let lhs_keys: HashSet<Labels> =
+                lhs.iter().map(|s| matching_sig(&s.labels, matching)).collect();
+            let mut out = lhs;
+            for s in rhs {
+                if !lhs_keys.contains(&matching_sig(&s.labels, matching)) {
+                    out.push(s);
+                }
+            }
+            out
+        }
+        other => return Err(PromQlError::Unsupported(format!("set operator {other}"))),
+    };
+    Ok(Value::Vector(out))
 }
 
 /// Fonctions mathématiques unaires (`sqrt exp ln log2 log10 sgn`). `NaN` se
@@ -1355,49 +1805,6 @@ fn drop_name(labels: &Arc<Labels>) -> Arc<Labels> {
     } else {
         labels.clone()
     }
-}
-
-/// Aligne deux vecteurs par labels (hors `__name__`) et applique une
-/// comparaison par paire. En mode filtre, seuls les samples vrais sont
-/// conservés (valeur du lhs) ; en mode `bool`, tous sont conservés (1.0/0.0).
-fn align_and_compare(
-    lhs: Vec<InstantSample>,
-    rhs: Vec<InstantSample>,
-    cmp: fn(f64, f64) -> bool,
-    return_bool: bool,
-) -> Vec<InstantSample> {
-    // `drop_name` réutilise l'Arc quand `__name__` est absent, et n'alloue
-    // qu'un Arc refcount=1 sinon. On déstructure `s` puis on droppe `labels`
-    // avant `try_unwrap` : sans cela l'Arc original resterait vivant
-    // (refcount ≥ 2) et `try_unwrap` échouerait toujours, re-clonant le
-    // BTreeMap (revue Gemini PR #528). Côté lhs on conserve l'Arc pour le
-    // réinjecter en sortie.
-    let rhs_idx: BTreeMap<Labels, f64> = rhs
-        .into_iter()
-        .map(|s| {
-            let InstantSample { labels, value } = s;
-            let l = drop_name(&labels);
-            drop(labels);
-            let l = Arc::try_unwrap(l).unwrap_or_else(|arc| (*arc).clone());
-            (l, value)
-        })
-        .collect();
-    let mut out = Vec::with_capacity(lhs.len().min(rhs_idx.len()));
-    for s in lhs {
-        let key = drop_name(&s.labels);
-        if let Some(&rval) = rhs_idx.get(&*key) {
-            let cond = cmp_truth(cmp, s.value, rval);
-            if return_bool {
-                out.push(InstantSample {
-                    labels: key,
-                    value: if cond { 1.0 } else { 0.0 },
-                });
-            } else if cond {
-                out.push(InstantSample { labels: key, value: s.value });
-            }
-        }
-    }
-    out
 }
 
 #[cfg(test)]

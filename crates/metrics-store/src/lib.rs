@@ -1271,4 +1271,252 @@ mod tests {
         }
         let _ = std::fs::remove_file(&path);
     }
+
+    /// Évolution conformité PromQL : opérateurs ensemblistes (`and`/`or`/`unless`)
+    /// et matching vectoriel (`on`/`group_left`) — alertes multi-critères ESS.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_set_ops_and_vector_matching() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_setops");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let w = store.writer();
+            let ts = 100_000;
+            // SOC / température par BMS.
+            w.write(Sample::new("bms_soc", ts, 10.0).with_label("bms_id", "1")).await.unwrap();
+            w.write(Sample::new("bms_soc", ts, 50.0).with_label("bms_id", "2")).await.unwrap();
+            w.write(Sample::new("bms_temp_c", ts, 50.0).with_label("bms_id", "1")).await.unwrap();
+            w.write(Sample::new("bms_temp_c", ts, 30.0).with_label("bms_id", "2")).await.unwrap();
+            // Rendement string PV (on()).
+            w.write(
+                Sample::new("mppt_power_w", ts, 380.0)
+                    .with_label("string_id", "A")
+                    .with_label("mppt_id", "1"),
+            )
+            .await
+            .unwrap();
+            w.write(
+                Sample::new("pv_theo_w", ts, 400.0)
+                    .with_label("string_id", "A")
+                    .with_label("model", "400W"),
+            )
+            .await
+            .unwrap();
+            // Puissance par phase + capacité (group_left many-to-one).
+            w.write(
+                Sample::new("phase_power", ts, 100.0)
+                    .with_label("bms_id", "1")
+                    .with_label("phase", "L1"),
+            )
+            .await
+            .unwrap();
+            w.write(
+                Sample::new("phase_power", ts, 200.0)
+                    .with_label("bms_id", "1")
+                    .with_label("phase", "L2"),
+            )
+            .await
+            .unwrap();
+            w.write(
+                Sample::new("capacity", ts, 360.0)
+                    .with_label("bms_id", "1")
+                    .with_label("cls", "big"),
+            )
+            .await
+            .unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let at = |e: &str| {
+                let expr = parse_and_validate(e).unwrap();
+                ev.eval_instant(&expr, ts).unwrap()
+            };
+
+            // AND multi-critères : SOC<20 ET T>45 → seul bms_id=1.
+            let v = at("bms_soc < 20 and bms_temp_c > 45");
+            assert_eq!(v.len(), 1, "and");
+            assert_eq!(v[0].labels.get("bms_id").map(String::as_str), Some("1"));
+            assert!((v[0].value - 10.0).abs() < 1e-9);
+
+            // OR : SOC>20 (bms 2) ∪ T>45 (bms 1) → 2 séries.
+            let v = at("bms_soc > 20 or bms_temp_c > 45");
+            assert_eq!(v.len(), 2, "or");
+
+            // UNLESS : bms_soc sauf ceux >20 → seul bms_id=1.
+            let v = at("bms_soc unless bms_soc > 20");
+            assert_eq!(v.len(), 1, "unless");
+            assert_eq!(v[0].labels.get("bms_id").map(String::as_str), Some("1"));
+
+            // on(string_id) : rendement 380/400 = 0.95, labels réduits à string_id.
+            let v = at("mppt_power_w / on(string_id) pv_theo_w");
+            assert_eq!(v.len(), 1, "on()");
+            assert!((v[0].value - 0.95).abs() < 1e-9, "ratio = {}", v[0].value);
+            assert_eq!(v[0].labels.get("string_id").map(String::as_str), Some("A"));
+            assert!(v[0].labels.get("mppt_id").is_none(), "on() ne garde que string_id");
+
+            // group_left(cls) : many(phase)→one(capacity), copie le label cls.
+            let mut v = at("phase_power * on(bms_id) group_left(cls) capacity");
+            v.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+            assert_eq!(v.len(), 2, "group_left");
+            assert!((v[0].value - 36000.0).abs() < 1e-6); // L1: 100*360
+            assert!((v[1].value - 72000.0).abs() < 1e-6); // L2: 200*360
+            assert_eq!(v[0].labels.get("cls").map(String::as_str), Some("big"));
+            assert_eq!(v[0].labels.get("phase").map(String::as_str), Some("L1"));
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Évolution conformité PromQL : agrégateurs `quantile`, `group`,
+    /// `count_values`, `stddev` (SLO santé batterie / état de flotte).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_new_aggregators() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_aggs");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let w = store.writer();
+            let ts = 100_000;
+            for (n, val) in [(1, 1.0), (2, 2.0), (3, 3.0), (4, 4.0), (5, 5.0)] {
+                w.write(Sample::new("q", ts, val).with_label("n", &n.to_string())).await.unwrap();
+            }
+            // count_values : valeurs [1,1,2].
+            w.write(Sample::new("cv", ts, 1.0).with_label("x", "a")).await.unwrap();
+            w.write(Sample::new("cv", ts, 1.0).with_label("x", "b")).await.unwrap();
+            w.write(Sample::new("cv", ts, 2.0).with_label("x", "c")).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+            let at = |e: &str| {
+                let expr = parse_and_validate(e).unwrap();
+                ev.eval_instant(&expr, ts).unwrap()
+            };
+
+            // quantile(0.5) spatial = médiane = 3.
+            let v = at("quantile(0.5, q)");
+            assert_eq!(v.len(), 1, "quantile");
+            assert!((v[0].value - 3.0).abs() < 1e-9, "median = {}", v[0].value);
+
+            // group → présence binaire (1), un seul groupe.
+            let v = at("group(q)");
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 1.0).abs() < 1e-9);
+
+            // stddev population de [1..5] = sqrt(2).
+            let v = at("stddev(q)");
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 2.0_f64.sqrt()).abs() < 1e-9, "stddev = {}", v[0].value);
+
+            // count_values("v", cv) → {v=1}=2, {v=2}=1.
+            let mut v = at(r#"count_values("v", cv)"#);
+            v.sort_by(|a, b| a.value.partial_cmp(&b.value).unwrap());
+            assert_eq!(v.len(), 2, "count_values");
+            assert!((v[0].value - 1.0).abs() < 1e-9); // valeur "2" apparaît 1×
+            assert_eq!(v[0].labels.get("v").map(String::as_str), Some("2"));
+            assert!((v[1].value - 2.0).abs() < 1e-9); // valeur "1" apparaît 2×
+            assert_eq!(v[1].labels.get("v").map(String::as_str), Some("1"));
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Évolution conformité PromQL : modificateur `@` (point-in-time fixe) et
+    /// sous-requêtes `[range:step]` (lissage de rate, moyennes mobiles).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_at_modifier_and_subquery() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_at_sub");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 64, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let w = store.writer();
+            // bms_v{bms_id=1} : 1.0..1.9 aux ts 100_000..109_000 (ms).
+            for i in 0..10_i64 {
+                let ts = 100_000 + i * 1_000;
+                w.write(Sample::new("bms_v", ts, 1.0 + i as f64 / 10.0).with_label("bms_id", "1"))
+                    .await
+                    .unwrap();
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+
+            // `@ 105` (secondes → 105_000 ms) fixe l'instant, même évalué à t=200_000.
+            let e = parse_and_validate(r#"bms_v{bms_id="1"} @ 105"#).unwrap();
+            let v = ev.eval_instant(&e, 200_000).unwrap();
+            assert_eq!(v.len(), 1, "@ modifier");
+            assert!((v[0].value - 1.5).abs() < 1e-9, "@105 → {}", v[0].value);
+
+            // Sous-requête : max_over_time(bms_v[10s:2s]) à t=109_000 → max = 1.9.
+            let e = parse_and_validate(r#"max_over_time(bms_v{bms_id="1"}[10s:2s])"#).unwrap();
+            let v = ev.eval_instant(&e, 109_000).unwrap();
+            assert_eq!(v.len(), 1, "subquery");
+            assert!((v[0].value - 1.9).abs() < 1e-9, "max subq = {}", v[0].value);
+
+            // avg_over_time sous-requête : moyenne des sous-échantillons.
+            let e = parse_and_validate(r#"avg_over_time(bms_v{bms_id="1"}[8s:2s])"#).unwrap();
+            let v = ev.eval_instant(&e, 109_000).unwrap();
+            assert_eq!(v.len(), 1);
+            // sous-pas à 101,103,105,107,109k → valeurs 1.1,1.3,1.5,1.7,1.9 → moy 1.5.
+            assert!((v[0].value - 1.5).abs() < 1e-9, "avg subq = {}", v[0].value);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// P0 (§4.6) : `rate`/`increase` avec un seul point sous la fenêtre doivent
+    /// retourner *no data* (et non `0`), pour ne pas masquer les séries
+    /// clairsemées dans les bilans énergétiques.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn promql_rate_single_point_no_data() {
+        use crate::promql::{parse_and_validate, Evaluator};
+
+        let path = tmp_db_path("promql_1pt");
+        let _ = std::fs::remove_file(&path);
+        {
+            let opts = Options {
+                writer: WriterConfig { batch_max: 8, flush_ms: 20, poll_idle_ms: 2 },
+                ..Options::default()
+            };
+            let store = MetricsStore::open(&path, opts).expect("open");
+            let w = store.writer();
+            // Compteur clairsemé : 2 points espacés de 10 s.
+            w.write(Sample::new("sparse", 100_000, 0.0)).await.unwrap();
+            w.write(Sample::new("sparse", 110_000, 100.0)).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let reader = store.reader();
+            let ev = Evaluator::new(&reader);
+
+            // Fenêtre de 3 s à t=100_000 : un seul point → no data (0 série).
+            let e = parse_and_validate("increase(sparse[3s])").unwrap();
+            assert_eq!(ev.eval_instant(&e, 100_000).unwrap().len(), 0, "increase 1pt");
+            let e = parse_and_validate("rate(sparse[3s])").unwrap();
+            assert_eq!(ev.eval_instant(&e, 100_000).unwrap().len(), 0, "rate 1pt");
+
+            // Fenêtre de 15 s à t=110_000 : 2 points → increase = 100 (non régressé).
+            let e = parse_and_validate("increase(sparse[15s])").unwrap();
+            let v = ev.eval_instant(&e, 110_000).unwrap();
+            assert_eq!(v.len(), 1);
+            assert!((v[0].value - 100.0).abs() < 1e-9, "increase 2pt = {}", v[0].value);
+        }
+        let _ = std::fs::remove_file(&path);
+    }
 }

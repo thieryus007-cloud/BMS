@@ -4,12 +4,15 @@
 //!
 //! Pipeline :
 //! 1. **parse** : délégué à [`promql_parser::parser::parse`].
-//! 2. **validate** ([`validate::validate`]) : rejette les constructions
-//!    non supportées (subqueries, `offset`/`@`, set ops `and/or/unless`,
-//!    vector matching `on/ignoring/group_left/right`, fonctions hors liste
-//!    blanche). Liste blanche étendue au-delà du golden set §6.5 (cf.
-//!    `docs/promql-compat-roadmap.md` : comparaisons, `by/without`,
-//!    `topk/bottomk`, `irate`, math, labels, prédiction/stats, `absent`).
+//! 2. **validate** ([`validate::validate`]) : liste blanche des fonctions et
+//!    opérateurs supportés. Depuis l'évolution de conformité (cf.
+//!    `docs/Evolution-compliance-PromQL.md`), le sous-ensemble couvre aussi :
+//!    les modificateurs temporels `offset` **et** `@`, les opérateurs
+//!    ensemblistes `and`/`or`/`unless`, le matching vectoriel
+//!    `on`/`ignoring`/`group_left`/`group_right`, les agrégateurs `quantile`,
+//!    `group`, `count_values`, `stddev`, `stdvar`, et les **sous-requêtes**
+//!    `expr[range:step]`. Seules restent rejetées les fonctions hors liste
+//!    blanche (ex. `histogram_quantile`, `vector`).
 //! 3. **execute** ([`exec::Evaluator`]) : évalue l'AST sur une plage
 //!    `(start, end, step)` en interrogeant le `Reader`. Sélection
 //!    automatique de la table (raw/hourly/daily) selon §6.3.

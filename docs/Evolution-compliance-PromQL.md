@@ -2,6 +2,33 @@ Voici l'audit de conformité PromQL du crate `metrics-store` du dépôt **Daly-B
 
 ---
 
+## 0. STATUT D'IMPLÉMENTATION (mise à jour)
+
+> Les écarts identifiés ci-dessous ont été **implémentés** dans le moteur
+> (`crates/metrics-store/src/promql/{validate,exec}.rs`). Couverture désormais
+> assurée pour toutes les requêtes/alertes Grafana avancées listées dans ce
+> document :
+>
+> | Fonctionnalité | Statut | Localisation |
+> |---|---|---|
+> | `offset` | ✅ implémenté | `exec::offset_ms` |
+> | `@ <ts>` / `@ start()` / `@ end()` | ✅ implémenté | `exec::resolve_eval_time` |
+> | `and` / `or` / `unless` | ✅ implémenté | `exec::eval_set_op` |
+> | `on` / `ignoring` | ✅ implémenté | `exec::matching_sig`, `vector_binary_op` |
+> | `group_left` / `group_right` | ✅ implémenté | `exec::result_metric`, `vector_binary_op` |
+> | `quantile` (agrégateur) | ✅ implémenté | `exec::eval_aggregate` |
+> | `group` / `count_values` / `stddev` / `stdvar` (agrégateurs) | ✅ implémenté | `exec::eval_aggregate` |
+> | Sous-requêtes `[range:step]` | ✅ implémenté | `exec::eval_subquery_call` |
+> | `%` (modulo) / `^` (puissance) | ✅ implémenté | `exec::arith_fn` |
+> | `rate`/`increase` sur 1 point → *no data* (P0 §4.6) | ✅ corrigé | `exec::apply_range_fn_raw` |
+> | `round(v, 0)` → défaut `to_nearest=1` | ⚠️ écart documenté (§4.7) — conservé volontairement | `exec::round_to` |
+>
+> Les limitations résiduelles documentées (§5 : approximations sur tiers
+> compactés hourly/daily) restent inchangées : elles relèvent de la stratégie de
+> tiering et non d'un manque de fonctionnalité PromQL.
+
+---
+
 ## 1. Résumé exécutif
 
 Le crate `metrics-store` implémente un **shim PromQL personnalisé** exécuté sur une base redb (TSDB embarquée). Il repose sur le parser externe `promql-parser` v0.9.0 (dernière version stable, compatible Prometheus v2.45.0), sur lequel est construit un évaluateur maison avec une couche de validation par liste blanche.
