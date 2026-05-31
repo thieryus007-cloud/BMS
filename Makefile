@@ -252,7 +252,7 @@ uninstall-node-exporter:
 	-sudo rm -f /etc/systemd/system/node-exporter.service
 	-sudo rm -f /usr/local/bin/node_exporter
 	sudo systemctl daemon-reload
-	@echo "✓ node_exporter désinstallé. Pense à retirer le job 'node' de /etc/victoriametrics/scrape.yml"
+	@echo "✓ node_exporter désinstallé."
 
 # =============================================================================
 # Perses — Dashboard monitoring (essai parallèle à Grafana)

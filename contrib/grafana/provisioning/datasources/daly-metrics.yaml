@@ -1,8 +1,7 @@
 apiVersion: 1
 
 # Datasource Grafana qui interroge le backend metrics-store (redb) via
-# daly-bms-server. VictoriaMetrics a été retiré (Phase 5) — redb est la
-# seule TSDB de lecture du système.
+# daly-bms-server. redb est la seule TSDB de lecture du système.
 #
 # Les endpoints Prometheus-compat exposés par daly-bms-server (/api/v1/query,
 # /api/v1/query_range, /api/v1/labels, /api/v1/series, /api/v1/label/:n/values,

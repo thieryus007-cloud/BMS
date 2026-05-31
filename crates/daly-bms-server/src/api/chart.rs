@@ -1,4 +1,4 @@
-//! Endpoint historique graphique — utilise VictoriaMetrics pour le dashboard overview.
+//! Endpoint historique graphique — lit le metrics-store (redb) pour le dashboard overview.
 //!
 //! GET /api/v1/chart/history?minutes=60
 //! Retourne { solar:[{t,v}], soc:[{t,v}], load:[{t,v}] }
@@ -36,9 +36,9 @@ pub async fn get_chart_history(
 ) -> impl IntoResponse {
     let minutes = q.minutes.unwrap_or(60).clamp(1, 720) as i64;
 
-    // Pré-flight : le backend SÉLECTIONNÉ par config doit être disponible
+    // Pré-flight : le backend redb (metrics-store) doit être disponible
     // (review gemini #2 sur PR #456 — éviter le faux positif "ok+data vides"
-    // quand default_backend pointe sur un backend non initialisé).
+    // quand le metrics-store n'est pas initialisé).
     if !state.is_query_backend_ready() {
         return Json(json!({"solar": [], "soc": [], "load": [], "ok": false, "reason": "no_query_backend"}));
     }
@@ -47,7 +47,7 @@ pub async fn get_chart_history(
     let start_ms = now_ms - minutes * 60 * 1000;
     let step_ms: i64 = if minutes <= 60 { 60_000 } else if minutes <= 360 { 300_000 } else { 600_000 };
 
-    // Dispatcher VM/redb (cf. AppState::dispatched_query_range)
+    // Requête PromQL via le shim redb (cf. AppState::dispatched_query_range)
     let (solar_res, soc_res, load_res) = tokio::join!(
         state.dispatched_query_range("solar_total_w",                       start_ms, now_ms, step_ms),
         state.dispatched_query_range("avg(bms_soc)",                        start_ms, now_ms, step_ms),

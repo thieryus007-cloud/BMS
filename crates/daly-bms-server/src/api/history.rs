@@ -1,6 +1,6 @@
 //! Endpoint historique énergie — GET /api/v1/history/energy?period=day|week|month|year
 //!
-//! Sources VictoriaMetrics :
+//! Séries lues depuis le metrics-store (redb) :
 //!   et112_power_w{address}          → puissance W par compteur
 //!   et112_energy_import_wh{address} → énergie cumulée (import)
 //!   et112_energy_export_wh{address} → énergie cumulée (export)

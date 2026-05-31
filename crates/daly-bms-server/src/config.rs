@@ -37,8 +37,9 @@ pub struct AppConfig {
     #[serde(default)]
     pub mqtt: MqttConfig,
 
-    /// Backend TSDB local redb (dual-write avec VictoriaMetrics).
-    /// Cf. `docs/plan_migration_vm_redb.md`. Désactivé par défaut.
+    /// Backend TSDB local redb (metrics-store) — seule source de vérité
+    /// des séries temporelles. Cf. `docs/architecture-redb.md`. Désactivé
+    /// par défaut (mode dégradé pour debug).
     #[serde(default)]
     pub metrics_store: MetricsStoreConfig,
 
@@ -411,11 +412,11 @@ impl MqttConfig {
     }
 }
 
-/// Section `[metrics_store]` — dual-write redb pour la migration §10
-/// (plan_migration_vm_redb.md). Une fois `enabled = true` :
+/// Section `[metrics_store]` — backend TSDB redb (seule source de vérité).
+/// Cf. `docs/architecture-redb.md`. Une fois `enabled = true` :
 /// - la base redb est ouverte au démarrage à `db_path` ;
-/// - les samples écrits via `VmClient::write_rows` sont fan-outés vers
-///   le writer batché (`try_write`, non bloquant) ;
+/// - les samples produits par les snapshots (`redb_writes.rs`) sont
+///   poussés vers le writer batché (`try_write`, non bloquant) ;
 /// - la tâche de maintenance (compaction raw→hourly→daily) tourne
 ///   selon `maintenance_interval_hours`.
 #[derive(Debug, Clone, Deserialize, Serialize)]

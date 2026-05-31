@@ -398,8 +398,8 @@ name      = "DEYE — Shelly Pro 2PM"
 # =============================================================================
 # metrics-store — backend TSDB embarqué (redb pure-Rust)
 # =============================================================================
-# Seule TSDB du système depuis Phase 5 (retrait VictoriaMetrics).
-# Cf. docs/plan_migration_vm_redb.md.
+# Seule TSDB du système (lecture + écriture des séries temporelles).
+# Cf. docs/architecture-redb.md.
 #
 # IMPORTANT : enabled doit être à `true` en prod, sinon plus aucune lecture/
 # écriture de séries temporelles ne fonctionne (le dashboard custom et
@@ -574,7 +574,7 @@ api_key            = "v6GFvkweNo7DK7yD3ylIZ9w52aKBU0eJ7wLXkSR3"
 country            = "FR"
 client_id          = "Santuario-123456"
 poll_interval_secs = 600              # 10 minutes
-vm_url             = "http://127.0.0.1:8080"  # redb via daly-bms-server (plus de VictoriaMetrics)
+vm_url             = "http://127.0.0.1:8080"  # daly-bms-server → metrics-store redb (POST /api/v1/import/prometheus)
 
 # --- Gestion courant de charge ---
 [energy_manager.charge_current]
@@ -601,7 +601,7 @@ vacation_target_c     = 45.0          # °C cible en VACATION
 temp_set_delay_secs   = 15            # s — délai avant réglage temp
 keepalive_secs        = 25            # s — keepalive Venus OS watchdog
 irradiance_min_wm2    = 300         # W/m² — irradiance min pour activer HEAT_PUMP
-vm_url                = "http://127.0.0.1:8080"  # redb via daly-bms-server (plus de VictoriaMetrics)
+vm_url                = "http://127.0.0.1:8080"  # daly-bms-server → metrics-store redb (POST /api/v1/import/prometheus)
 
 # --- Production solaire ---
 [energy_manager.solar]

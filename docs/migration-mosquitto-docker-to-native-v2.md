@@ -198,7 +198,7 @@ After=network-online.target mosquitto.service   # ← mosquitto.service INEXISTA
 │           │                                                                  │
 │           ▼                                                                  │
 │  Dashboard JS (:9001 WebSocket)                                            │
-│  VictoriaMetrics (:8428)                                                     │
+│  metrics-store redb (embarqué dans daly-bms-server :8080)                    │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
                               │
@@ -1012,7 +1012,7 @@ ps aux | grep mosquitto | grep -v grep
 □ Page /dashboard/shelly — Shelly Pro 2PM : données affichées
 □ Page /dashboard/bms/1 et /2 — données BMS actualisées
 □ Explorateur MQTT WebSocket :9001 — PAS de flood (< 5 msg/s en veille)
-□ VictoriaMetrics — données BMS ET112 présentes
+□ metrics-store redb — données BMS ET112 présentes (curl :8080/api/v1/redb/series)
 ```
 
 ### 13.3 Vérification flux spécifiques

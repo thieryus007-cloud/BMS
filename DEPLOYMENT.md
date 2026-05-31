@@ -75,7 +75,7 @@ C'est tout. Dis-moi si tu veux que je t'ajoute une cible `make update-clean` dan
 └────────────────────┬────────────────────────────────────┘
          │           │           │
     RS485│       MQTT│       MQTT│
-    BUS  │      BRIDGE       VictoriaMetrics
+    BUS  │      BRIDGE       metrics-store (redb)
          │           │           │
 ┌────────▼───────────▼───────────▼────────────────────────┐
 │           MQTT BROKER (192.168.1.120:1883)              │
@@ -87,12 +87,12 @@ C'est tout. Dis-moi si tu veux que je t'ajoute une cible `make update-clean` dan
              │                      └──────────────┐
              │                                     │
     ┌────────▼──────────────────┐    ┌──────────▼──────────────┐
-    │  NanoPi (Venus OS GX)      │    │  VictoriaMetrics         │
-    │  192.168.1.120             │    │  http://localhost:8428   │
+    │  NanoPi (Venus OS GX)      │    │  metrics-store (redb)    │
+    │  192.168.1.120             │    │  embarqué dans :8080     │
     ├────────────────────────────┤    ├──────────────────────────┤
-    │  dbus-mqtt-venus           │    │  Bucket: daly_bms        │
-    │  (runit service)           │    │  Retention: 30 days      │
-    │                            │    │                          │
+    │  dbus-mqtt-venus           │    │  /mnt/nvme/daly-bms/     │
+    │  (runit service)           │    │      metrics.redb        │
+    │                            │    │  Tiering 30j/365j/5ans   │
     │  Topics reçus:             │    │  Métriques stockées:     │
     │  ├─ santuario/meteo/venus  │    │  ├─ bms_snapshot        │
     │  ├─ santuario/heat/*/venus │    │  ├─ et112_status        │
@@ -436,7 +436,7 @@ NanoPi
 [ ] D-Bus services actifs (dbus -y | grep victron)
 
 OPTIONNEL
-[ ] VictoriaMetrics
+[ ] metrics-store redb actif (curl :8080/-/healthy)
 [ ] Alertes configurées (seuils SOC, temp, etc.)
 [ ] VRM Portal synchronisé
 ```

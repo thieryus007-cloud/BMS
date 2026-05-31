@@ -1,4 +1,4 @@
-# 📊 Grafana + VictoriaMetrics pour Monitoring PV Solaire
+# 📊 Grafana + redb (metrics-store) pour Monitoring PV Solaire
 
 Guide complet d'installation de Grafana sur Raspberry Pi 5 avec dashboard de comparaison de production photovoltaïque sur 5 ans.
 
@@ -7,7 +7,7 @@ Guide complet d'installation de Grafana sur Raspberry Pi 5 avec dashboard de com
 ## 🚀 Installation Automatique (recommandée)
 
 Un script d'installation idempotent gère **l'intégralité** de la mise en place :
-dépôt APT, paquet Grafana, provisioning de la datasource VictoriaMetrics et du
+dépôt APT, paquet Grafana, provisioning de la datasource redb (daly-metrics) et du
 dashboard PV, ouverture UFW, healthcheck.
 
 ```bash
@@ -18,7 +18,7 @@ bash scripts/setup-grafana.sh
 bash scripts/setup-grafana.sh --admin-pwd='ChangeMe!2026'   # mot de passe initial
 bash scripts/setup-grafana.sh --port=8081                   # port custom
 bash scripts/setup-grafana.sh --renderer                    # + image renderer (PDF)
-bash scripts/setup-grafana.sh --vm-url=http://10.0.0.5:8428 # VM distant
+bash scripts/setup-grafana.sh --api-url=http://10.0.0.5:8080 # daly-bms-server distant
 sudo bash scripts/setup-grafana.sh --uninstall              # désinstallation
 ```
 
@@ -26,13 +26,13 @@ Le script déploie :
 
 | Élément | Chemin |
 |---------|--------|
-| Datasource (auto) | `/etc/grafana/provisioning/datasources/victoriametrics.yaml` |
+| Datasource (auto) | `/etc/grafana/provisioning/datasources/daly-metrics.yaml` |
 | Provider dashboards | `/etc/grafana/provisioning/dashboards/daly-bms.yaml` |
 | Dashboard PV | `/var/lib/grafana/dashboards/pv-solar-5y.json` |
 | Sources | `contrib/grafana/` (versionné dans le repo) |
 
 **Aucun import manuel à faire** — au premier démarrage Grafana, la datasource
-`VictoriaMetrics` et le dashboard *PV Solaire - Monitoring & Comparaison 5 Ans*
+`Daly Metrics (redb)` et le dashboard *PV Solaire - Monitoring & Comparaison 5 Ans*
 (dossier *PV Solaire*) sont créés automatiquement.
 
 ---
@@ -96,11 +96,14 @@ sudo systemctl restart grafana-server
 
 ---
 
-## 🔌 Connexion VictoriaMetrics
+## 🔌 Connexion à la datasource redb (daly-metrics)
+
+> La datasource est provisionnée automatiquement par `scripts/setup-grafana.sh`.
+> La procédure manuelle ci-dessous n'est utile qu'en cas de création à la main.
 
 1. Dans Grafana : **Configuration → Data Sources → Add data source**
 2. Sélectionner **Prometheus**
-3. **URL** : `http://192.168.1.141:8428` *(adaptez selon votre config)*
+3. **URL** : `http://192.168.1.141:8080` *(adaptez selon votre config)*
 4. **Save & Test** → doit afficher "Data source is working"
 
 ---
@@ -111,7 +114,7 @@ sudo systemctl restart grafana-server
 
 1. **Dashboards → Import → Upload JSON file**
 2. Sélectionner le fichier ci-dessous
-3. Choisir la data source VictoriaMetrics
+3. Choisir la data source Daly Metrics (redb)
 4. **Import**
 
 ### JSON du Dashboard
@@ -1025,7 +1028,7 @@ sudo systemctl restart grafana-server
     "pv",
     "solaire",
     "victron",
-    "victoriametrics"
+    "redb"
   ],
   "templating": {
     "list": [
@@ -1114,7 +1117,7 @@ curl -H "Authorization: Bearer ${API_KEY}"   "${GRAFANA_URL}/render/d/${DASHBOAR
 > - `solar_yield_kwh` — compteur journalier remis à 0 chaque jour (kWh)
 >
 > `increase()` ne s'applique **PAS** aux gauges. Pour l'énergie, utilisez
-> `solar_yield_kwh` (compteur journalier) ou les fonctions VictoriaMetrics
+> `solar_yield_kwh` (compteur journalier) ou les fonctions PromQL (shim redb)
 > `integrate()` / `sum_over_time()` sur la puissance.
 
 | Objectif | Requête |
@@ -1128,7 +1131,7 @@ curl -H "Authorization: Bearer ${API_KEY}"   "${GRAFANA_URL}/render/d/${DASHBOAR
 | **Comparaison année N vs N-1** | `max_over_time(solar_yield_kwh[1d] offset 365d)` |
 | **Puissance moyenne 1 h** | `avg_over_time(solar_total_w[1h])` |
 | **Pic de puissance du jour** | `max_over_time(solar_total_w[24h])` |
-| **Énergie via intégration (VM)** | `integrate(solar_total_w[1d]) / 3600` (Wh) |
+| **Énergie via intégration** | `integrate(solar_total_w[1d]) / 3600` (Wh) |
 
 ---
 
@@ -1141,22 +1144,21 @@ curl -H "Authorization: Bearer ${API_KEY}"   "${GRAFANA_URL}/render/d/${DASHBOAR
 └─────────────────┘               └────────┬────────┘
                                            │ 
                                            ↓
-┌─────────────────┐               ┌─────────────────┐
-│   Grafana       │←──────────────│ VictoriaMetrics │
-│   (Visualisation│    PromQL     │   (Stockage)    │
-│    + PDF)       │               │   Rétention 5y  │
-└─────────────────┘               └─────────────────┘
+┌─────────────────┐               ┌──────────────────────────┐
+│   Grafana       │←──────────────│ daly-bms-server (redb :8080) │
+│   (Visualisation│    PromQL     │   (Stockage metrics-store)   │
+│    + PDF)       │               │   Tiering 30j/365j/5 ans     │
+└─────────────────┘               └──────────────────────────┘
 ```
 
 ---
 
 ## 📝 Notes
 
-- **Rétention VictoriaMetrics** : Configurer avec `-retentionPeriod=5y` pour 5 ans de données
-- **Espace disque** : ~5 GB/an en full resolution (200 metrics @ 1Hz)
-- **Downsampling optionnel** : `-downsampling.period=90d:1m` pour réduire l'espace après 90 jours
-- **Backup** : Exporter régulièrement via `/api/v1/export` si besoin d'archivage externe
+- **Rétention redb (tiering automatique)** : raw 30 jours / hourly 365 jours / daily 5 ans — géré nativement par le crate `metrics-store`, aucun flag à configurer
+- **Espace disque** : le tiering downsample automatiquement les données anciennes (base `/mnt/nvme/daly-bms/metrics.redb`) — surveiller avec `du -sh /mnt/nvme/daly-bms/metrics.redb`
+- **Backup** : sauvegarder le fichier `metrics.redb` (sur NVMe) pour un archivage externe
 
 ---
 
-*Dashboard créé pour monitoring PV Victron + VictoriaMetrics sur Raspberry Pi 5*
+*Dashboard créé pour monitoring PV Victron + redb sur Raspberry Pi 5*

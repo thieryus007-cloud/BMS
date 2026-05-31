@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Vue d'ensemble ESS \u2014 Solaire, Batteries, R\u00e9seau, Consommation (VictoriaMetrics)",
+  "description": "Vue d'ensemble ESS \u2014 Solaire, Batteries, R\u00e9seau, Consommation (redb)",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -3071,7 +3071,7 @@
     "ess",
     "solaire",
     "batteries",
-    "victoriametrics"
+    "redb"
   ],
   "templating": {
     "list": [

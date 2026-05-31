@@ -1,8 +1,7 @@
 //! Module redb writer — pousse les samples des snapshots vers metrics-store::Writer.
 //!
-//! Ce module remplace l'écriture VictoriaMetrics retirée en Phase 5. Il est
-//! appelé depuis chaque `state.on_*_snapshot()` pour pousser les valeurs
-//! mesurées dans la TSDB redb.
+//! Il est appelé depuis chaque `state.on_*_snapshot()` pour pousser les
+//! valeurs mesurées dans la TSDB redb (seule source de vérité des séries).
 //!
 //! ## Rate limiting
 //!
@@ -31,7 +30,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// Intervalle minimum entre 2 écritures d'une même série (metric+labels).
-/// Garde le rate global gérable et aligne avec ce que faisait l'ancien VmClient.
+/// Garde le rate global gérable (1 écriture / 5 s max par série).
 const MIN_WRITE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Intervalle min pour les compteurs d'énergie (varient lentement).
@@ -361,7 +360,7 @@ pub fn write_et112(writer: &Writer, rl: &RateLimiter, snap: &Et112Snapshot) {
              .with_label("address", addr.clone()),
          &format!("et112_reactive_power_var:{}", addr));
 
-    // Énergie cumulée en Wh (convention VictoriaMetrics historique).
+    // Énergie cumulée en Wh (compteur monotone).
     push(writer, rl, ENERGY_WRITE_INTERVAL,
          Sample::new("et112_energy_import_wh", ts, snap.energy_import_kwh() as f64 * 1000.0)
              .with_label("address", addr.clone()),

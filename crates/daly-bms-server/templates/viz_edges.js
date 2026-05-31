@@ -1,4 +1,4 @@
-// ── EDGE CHART OVERLAY (hover → mini ECharts popup 6h depuis VictoriaMetrics) ────
+// ── EDGE CHART OVERLAY (hover → mini ECharts popup 6h depuis metrics-store redb) ────
 function EdgeChartOverlay({ labelX, labelY, history, color }) {
   const [hover, setHover]     = useState(false);
   const [payload, setPayload] = useState(null);

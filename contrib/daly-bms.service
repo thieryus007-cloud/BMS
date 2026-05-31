@@ -70,7 +70,7 @@ RuntimeMaxSec=86400
 SupplementaryGroups=dialout
 
 # Répertoires gérés par systemd — créés avant le démarrage avec le bon owner.
-# /var/lib/daly-bms → données runtime (réservé futur — historique time-series via VictoriaMetrics)
+# /var/lib/daly-bms → données runtime (l'historique time-series est dans metrics-store redb sur /mnt/nvme)
 # /var/log/daly-bms → logs tournants quotidiens
 StateDirectory=daly-bms
 StateDirectoryMode=0750

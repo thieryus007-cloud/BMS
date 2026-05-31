@@ -1,5 +1,12 @@
 # Plan de migration : VictoriaMetrics → redb (variante pure-Rust)
 
+> ## ✅ MIGRATION TERMINÉE — DOCUMENT HISTORIQUE
+> VictoriaMetrics a été **entièrement retiré** (code, double écriture, service).
+> **redb (`metrics-store`) est désormais la seule TSDB.** Ce document est
+> conservé comme **trace historique** de la migration et de ses décisions.
+> Pour l'architecture **actuelle**, voir **[`architecture-redb.md`](./architecture-redb.md)**.
+> Les références à VictoriaMetrics ci-dessous sont donc d'ordre historique.
+
 > **Projet** : Daly-BMS-Rust
 > **Objectif** : Remplacer VictoriaMetrics (~120–150 Mo RSS) par un fichier
 > [`redb`](https://github.com/cberner/redb) (embedded key-value store, pur Rust,

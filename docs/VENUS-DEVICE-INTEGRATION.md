@@ -176,7 +176,7 @@ Fichier : `contrib/mosquitto/mosquitto.conf` (déployé vers `/etc/mosquitto/mos
 ```
 topic santuario/# in 0
 ```
-Sert à victoria pour lire les données BMS.
+Sert à daly-bms-server (metrics-store redb) pour lire les données BMS.
 
 ### Direction Pi5 → NanoPi (commandes energy-manager → service Rust)
 ```

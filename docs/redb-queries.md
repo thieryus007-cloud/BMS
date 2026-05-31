@@ -1,34 +1,50 @@
-# VictoriaMetrics — Référence des métriques et requêtes PromQL
+# redb — Référence des métriques et requêtes PromQL
 
-> URL VMUI : `http://192.168.1.141:8428/vmui/`
-> URL API  : `http://192.168.1.141:8428/api/v1/query?query=<PROMQL>`
+> Backend : **redb** (`/mnt/nvme/daly-bms/metrics.redb`), interrogé via le **shim PromQL** de `daly-bms-server` sur le port **8080**.
+> URL API : `http://192.168.1.141:8080/api/v1/query?query=<PROMQL>`
+> Range   : `http://192.168.1.141:8080/api/v1/query_range?query=<PROMQL>&start=…&end=…&step=…`
+> Visualisation : dashboard custom interne **`/dashboard/history`** et **Grafana** (`:3000`, datasource « Daly Metrics (redb) »).
+
+> ℹ️ **Sous-ensemble PromQL supporté** — Le shim redb n'implémente qu'un sous-ensemble audité de PromQL (cf. `crates/metrics-store/src/promql/validate.rs` et `docs/plan_migration_vm_redb.md` §6.5). Toute construction hors liste blanche est rejetée avec `status=error`, `errorType=bad_data`.
+>
+> **Fonctions à fenêtre** (`f(m[range])`) : `increase`, `rate`, `irate`, `delta`, `deriv`, `predict_linear`, `changes`, `resets`, `avg_over_time`, `sum_over_time`, `min_over_time`, `max_over_time`, `count_over_time`, `last_over_time`, `stddev_over_time`, `stdvar_over_time`, `quantile_over_time`, `absent_over_time`.
+> **Fonctions instantanées** : `abs`, `clamp_min`, `clamp_max`, `clamp`, `ceil`, `floor`, `round`, `sqrt`, `exp`, `ln`, `log2`, `log10`, `sgn`, `absent`.
+> **Manipulation de labels** : `label_replace`, `label_join`.
+> **Agrégateurs** : `sum`, `max`, `min`, `avg`, `count` (avec `by (…)` / `without (…)`), `topk(k, …)`, `bottomk(k, …)`.
+> **Opérateurs** : arithmétiques `+ - * /` (vecteur⊗scalaire ou vecteur⊗vecteur **aligné**), comparaisons `== != > < >= <=` (filtre ou `bool`).
+>
+> **Non supporté** : `integrate` et les autres fonctions MetricsQL, les **subqueries** `[Xh:Ym]`, les modifiers `offset` / `@`, le vector matching `on()` / `ignoring()` / `group_left` / `group_right`, les set ops `and` / `or` / `unless`, les agrégateurs paramétrés `quantile` / `count_values`.
 
 ---
-Pour convertir une courbe d’intensité (en Ampères) en une charge totale en Ampères-heures (Ah) sur une période définie, VictoriaMetrics met à disposition une fonction integrate dédiée dans son langage de requête MetricsQL.
 
-Voici la commande PromQL complète, à exécuter via l’API REST depuis la ligne de commande avec curl. Cette requête simule une intégration sur les 6 dernières heures et convertit le résultat en Ampères-heures.
+## Calculs de charge / décharge en Ampères-heures (Ah)
+
+Pour convertir une courbe d'intensité (A) en charge totale en Ampères-heures (Ah) sur une période, on **n'utilise PAS** la fonction MetricsQL `integrate` (absente du shim). On approxime l'intégrale par `avg_over_time(...) * durée`, ce qui est exact pour un pas d'échantillonnage régulier.
+
+> ⚠️ **Non supporté par le shim redb** : `integrate(venus_shunt_current_a[6h])`.
+> **Alternative supportée** : `avg_over_time(venus_shunt_current_a[6h]) * 6` (courant moyen × nombre d'heures → Ah). Toutes les requêtes ci-dessous reposent sur cette équivalence.
 
 ```bash
-Décharge sur les deux derniéres heures
-curl -s "http://192.168.1.141:8428/api/v1/query" \
+# Décharge sur les deux dernières heures
+curl -s "http://192.168.1.141:8080/api/v1/query" \
   --data-urlencode "query=-avg_over_time(clamp_max(venus_shunt_current_a,0)[2h])*2" \
   | jq -r '.data.result[0].value[1]'
 # → Affiche : 11.950000127156335
 
-http://192.168.1.141:8428/api/v1/query?query=-avg_over_time(clamp_max(venus_shunt_current_a,0)[2h])*2
+http://192.168.1.141:8080/api/v1/query?query=-avg_over_time(clamp_max(venus_shunt_current_a,0)[2h])*2
 
-http://192.168.1.141:8428/api/v1/query?query=-avg_over_time(clamp_max(venus_shunt_current_a,0)[10h])*10
+http://192.168.1.141:8080/api/v1/query?query=-avg_over_time(clamp_max(venus_shunt_current_a,0)[10h])*10
 
 # 🔋 Ah chargés (24h)
-curl -s "http://192.168.1.141:8428/api/v1/query" \
+curl -s "http://192.168.1.141:8080/api/v1/query" \
   --data-urlencode "query=-avg_over_time(clamp_min(venus_shunt_current_a,0)[24h])*24"
 
 # 🔌 Ah déchargés (24h)
-curl -s "http://192.168.1.141:8428/api/v1/query" \
+curl -s "http://192.168.1.141:8080/api/v1/query" \
   --data-urlencode "query=avg_over_time(clamp_max(venus_shunt_current_a,0)[24h])*24"
 
 # ⚖️ Ah nets (24h)
-curl -s "http://192.168.1.141:8428/api/v1/query" \
+curl -s "http://192.168.1.141:8080/api/v1/query" \
   --data-urlencode "query=avg_over_time(venus_shunt_current_a[24h])*24"
 
 
@@ -69,6 +85,11 @@ Taux de cyclage (%) = (Ah chargés + Ah déchargés) / Capacité batterie × 100
 | `* 24` | Conversion A moyen → Ah sur 24h |
 | `/ 200 * 100` | Normalisation par capacité et conversion en % |
 
+> 💡 **Métrique dérivée recommandée** : le serveur émet `venus_shunt_current_abs = |I|` (cf. `write_venus_smartshunt`). Le numérateur ci-dessus se simplifie alors exactement en `avg_over_time(venus_shunt_current_abs[24h])`, plus précis et sans subquery :
+> ```promql
+> avg_over_time(venus_shunt_current_abs[24h]) * 24 / 200 * 100
+> ```
+
 #### 🔹 Avec capacité dynamique (via un metric)
 Si votre exporter Victron expose la capacité nominale (ex: `venus_battery_capacity_ah`), utilisez :
 ```promql
@@ -78,18 +99,19 @@ Si votre exporter Victron expose la capacité nominale (ex: `venus_battery_capac
 ) * 24 / venus_battery_capacity_ah * 100
 ```
 > ✅ Avantage : la requête s'adapte automatiquement si vous changez de batterie.
+> ⚠️ Note : la division vecteur⊗vecteur exige des séries **alignées** sur le même `step`. Le shim ne supporte que l'alignement exact tous-labels (pas de `on()` / `ignoring()`).
 
 ---
 
 ### 🌐 URL API prête à l'emploi
 ```
-http://192.168.1.141:8428/api/v1/query?query=(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h])-avg_over_time(clamp_max(venus_shunt_current_a,0)[24h]))*24/200*100
+http://192.168.1.141:8080/api/v1/query?query=(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h])-avg_over_time(clamp_max(venus_shunt_current_a,0)[24h]))*24/200*100
 ```
 
 #### 🧪 Test rapide avec `curl`
 ```bash
 # Taux de cyclage sur 24h (capacité 200 Ah)
-curl -s "http://192.168.1.141:8428/api/v1/query" \
+curl -s "http://192.168.1.141:8080/api/v1/query" \
   --data-urlencode "query=(avg_over_time(clamp_min(venus_shunt_current_a,0)[24h])-avg_over_time(clamp_max(venus_shunt_current_a,0)[24h]))*24/200*100" \
   | jq -r '.data.result[0].value[1] + " %"'
 ```
@@ -114,6 +136,7 @@ curl -s "http://192.168.1.141:8428/api/v1/query" \
 
 #### 1. Panel "Taux de cyclage quotidien"
 - **Type** : `Stat` ou `Gauge`
+- **Datasource** : `Daly Metrics (redb)` (UID `daly-metrics`)
 - **Requête** :
   ```promql
   (avg_over_time(clamp_min(venus_shunt_current_a,0)[24h]) - avg_over_time(clamp_max(venus_shunt_current_a,0)[24h])) * 24 / 200 * 100
@@ -141,20 +164,20 @@ Puis dans la requête :
 ### ⚠️ Points de vigilance
 
 1. **Fenêtre glissante vs jour calendaire**  
-   `[24h]` calcule sur les dernières 24h glissantes. Pour un jour calendaire (minuit → maintenant), il faut calculer un `offset` dynamique côté client.
+   `[24h]` calcule sur les dernières 24h glissantes. Pour un jour calendaire (minuit → maintenant), il faut calculer un `offset` dynamique côté client — le modifier `offset` n'étant pas supporté par le shim, ajustez la borne `start`/`end` de `query_range` côté appelant.
 
 2. **Précision**  
-   L'approximation par `avg_over_time` est fiable si votre intervalle de scrape est ≤ 30s. Pour plus de précision, utilisez une sous-requête :
-   ```promql
-   [24h:10s]  # Échantillonnage interne à 10s
-   ```
+   L'approximation par `avg_over_time` est fiable si votre intervalle d'écriture est ≤ 30s (cf. throttles plus bas).
+
+   > ⚠️ **Non supporté par le shim redb** : la sous-requête `[24h:10s]` (échantillonnage interne).
+   > **Alternative** : le shim agrège **tous les points bruts** de la fenêtre (tier raw ≤ 7 j), donc `avg_over_time(m[24h])` est déjà exact sans sous-échantillonnage. Pour un proxy plus précis, utiliser la métrique dérivée `venus_shunt_current_abs`.
 
 3. **Données manquantes**  
    Vérifiez la continuité des données :
    ```promql
    count_over_time(venus_shunt_current_a[24h])
    ```
-   Si le résultat est bien inférieur à `24*60*(60/scrape_interval)`, des données manquent et le calcul sera sous-estimé.
+   Si le résultat est bien inférieur au nombre de points attendu (`24*3600 / intervalle_écriture`), des données manquent et le calcul sera sous-estimé.
 
 4. **Capacité réelle vs nominale**  
    La capacité d'une batterie diminue avec l'âge. Pour un calcul plus réaliste, vous pouvez créer un metric `battery_effective_capacity_ah` mis à jour manuellement ou via un test de décharge.
@@ -168,7 +191,7 @@ Puis dans la requête :
 | BMS ×2 | bms_voltage, bms_current, bms_power, bms_soc, bms_capacity_ah, bms_cell_delta_mv, bms_temp_max, bms_temp_min, bms_charge_mos, bms_discharge_mos, bms_cell_voltage×16 | ~54 |
 | ET112 ×3 | et112_voltage_v, et112_current_a, et112_power_w, et112_apparent_power_va, et112_power_factor, et112_frequency_hz, et112_energy_import_wh, et112_energy_export_wh | 24 |
 | Irradiance | irradiance_wm2 | 1 |
-| SmartShunt | venus_shunt_voltage_v, venus_shunt_current_a, venus_shunt_power_w, venus_shunt_soc_percent, venus_shunt_energy_in_kwh, venus_shunt_energy_out_kwh, venus_shunt_ah_charged_today, venus_shunt_ah_discharged_today | 8 |
+| SmartShunt | venus_shunt_voltage_v, venus_shunt_current_a, venus_shunt_current_abs, venus_shunt_power_w, venus_shunt_soc_percent, venus_shunt_energy_in_kwh, venus_shunt_energy_out_kwh, venus_shunt_ah_charged_today, venus_shunt_ah_discharged_today | 9 |
 | Solar agrégé | solar_total_w, mppt_power_w, solar_yield_kwh | 3 |
 | Inverter (EasySolar II GX) | venus_inverter_voltage_v, venus_inverter_current_a, venus_inverter_power_w, venus_inverter_ac_output_voltage_v, venus_inverter_ac_output_current_a, venus_inverter_ac_output_power_w, venus_inverter_ac_freq_hz, venus_inverter_ac_in_ignore | 8 |
 | MPPT ×2 | venus_mppt_power_w, venus_mppt_pv_voltage_v, venus_mppt_dc_current_a, venus_mppt_yield_today_kwh, venus_mppt_max_power_today_w | 10 |
@@ -177,7 +200,7 @@ Puis dans la requête :
 | ATS CHINT | ats_sw1_closed, ats_sw2_closed, ats_active_source, ats_voltage_v×6, ats_freq_hz×2 | 11 |
 | Tasmota ×6 | tasmota_power_on, tasmota_power_w, tasmota_voltage_v, tasmota_current_a, tasmota_energy_today_kwh | 30 |
 | Shelly Pro 2PM | shelly_output×2, shelly_power_w×2, shelly_voltage_v×2, shelly_current_a×2, shelly_energy_wh×2 | 10 |
-| **Total** | | **~171** |
+| **Total** | | **~172** |
 
 ---
 
@@ -303,6 +326,9 @@ max_over_time(irradiance_wm2[24h])
 ```promql
 # Courant batterie instantané (A — négatif = décharge)
 venus_shunt_current_a
+
+# Valeur absolue du courant batterie (|I|, métrique dérivée serveur)
+venus_shunt_current_abs
 
 # Tension batterie (V)
 venus_shunt_voltage_v
@@ -605,9 +631,9 @@ venus_shunt_soc_percent
 venus_shunt_power_w
 
 
-# Vérification cardinality — toutes les métriques présentes
-# VMUI → Explore → Cardinality
-# ou : curl http://192.168.1.141:8428/api/v1/label/__name__/values | jq '.data | length'
+# Vérification : liste de toutes les métriques présentes (noms __name__)
+# curl http://192.168.1.141:8080/api/v1/labels | jq '.data | length'
+# ou via le dashboard custom /dashboard/history (sélecteur de série)
 
 # Dernier point de chaque métrique (vérification fraîcheur)
 {__name__=~"bms_soc|venus_shunt_soc_percent|solar_total_w|ats_active_source|tasmota_power_on"}
@@ -615,7 +641,7 @@ venus_shunt_power_w
 
 ---
 
-## Throttles d'écriture VM
+## Throttles d'écriture redb
 
 | Source | Intervalle écriture | Fréquence données source |
 |--------|--------------------|--------------------------| 
@@ -631,3 +657,7 @@ venus_shunt_power_w
 | ATS | 5 s | 2 s (RS485) |
 | Tasmota | 10 s | push MQTT |
 | Shelly | 10 s | push MQTT |
+
+---
+
+> _Note historique : avant la migration de mai 2026, ces requêtes étaient servies par VictoriaMetrics (`:8428`, MetricsQL). Elles passent désormais par le shim PromQL de `daly-bms-server` (`:8080`) interrogeant redb._
