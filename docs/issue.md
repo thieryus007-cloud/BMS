@@ -156,4 +156,170 @@ Le crate `metrics-store` offre une **implémentation PromQL robuste et bien test
 
 **Conformité estimée : ~70 %** du langage PromQL standard, avec une conformité **~95 %** sur le sous-ensemble déclaré supporté.
 
+Voici des **requêtes Grafana réalistes et sophistiquées** pour un ESS multi-BMS / multi-MPPT qui **échouent actuellement** avec le shim PromQL de `metrics-store`, classées par type de limitation.
+
+---
+
+## 1. Comparaisons temporelles (`offset`, `@`)
+
+### ❌ Requête : "SOC actuel vs SOC à la même heure hier (comparaison jour J-1)"
+**PromQL idéal :**
+```promql
+bms_soc{bms_id="1"} - bms_soc{bms_id="1"} offset 24h
+```
+**Pourquoi ça échoue :** `offset` et `@` sont rejetés par le validateur (`validate_vector_selector`).
+
+**Impact ESS :** Impossible de faire des tableaux de bord "tendance 24h", des alertes "dérive anormale par rapport à la veille", ou des graphiques de superposition jour/J-1 dans Grafana.
+
+**Contournement :** Aucun côté PromQL. Il faut exporter deux séries distinctes côté applicatif (ex. `bms_soc` et `bms_soc_yesterday`) ou faire le calcul dans Grafana avec deux requêtes et une transformation — ce qui casse l'alerte PromQL native.
+
+---
+
+## 2. Jointures conditionnelles (`and`, `or`, `unless`)
+
+### ❌ Requête : "Alerte : BMS en surcharge thermique (SOC < 20% ET température > 45°C)"
+**PromQL idéal :**
+```promql
+bms_soc < 20 and bms_temp_c > 45
+```
+**Pourquoi ça échoue :** `and` est rejeté comme opérateur binaire non supporté.
+
+**Impact ESS :** Impossible de créer des alertes multi-critères sur le **même équipement** (même `bms_id`). Par exemple : "Déclenchement chauffage si T° < 5°C **et** tension cellule < 2.5V".
+
+**Contournement :** Deux requêtes séparées dans Grafana + transformation `Merge` ou `Math`, mais l'alerte ne peut pas être exprimée en une seule règle PromQL.
+
+---
+
+### ❌ Requête : "Liste des BMS actifs mais sans communication MPPT (orphans)"
+**PromQL idéal :**
+```promql
+bms_status unless on(bms_id) mppt_status
+```
+**Pourquoi ça échoue :** `unless` et `on(...)` sont rejetés.
+
+**Impact ESS :** Impossible de détecter des équipements déconnectés logiquement (présents dans la table BMS, absents du bus MPPT).
+
+---
+
+## 3. Matching vectoriel avancé (`on`, `ignoring`, `group_left`, `group_right`)
+
+### ❌ Requête : "Rendement DC/DC par string PV : Puissance MPPT / Puissance théorique du panneau"
+**PromQL idéal :**
+```promql
+mppt_power_w / on(string_id) pv_panel_theoretical_w
+```
+**Pourquoi ça échoue :** `on(string_id)` est rejeté. L'évaluateur ne supporte que l'alignement **OneToOne** sur **tous les labels** (hors `__name__`).
+
+**Impact ESS :** Si `mppt_power_w` a les labels `{string_id="A", mppt_id="1"}` et `pv_panel_theoretical_w` a `{string_id="A", model="400W"}`, la division échoue car les labels ne matchent pas exactement (différence de `mppt_id` vs `model`). On ne peut pas dire "divise-les juste sur `string_id`".
+
+**Contournement :** Pré-calculer le rendement côté applicatif et l'exposer comme une nouvelle métrique `mppt_yield_ratio`.
+
+---
+
+### ❌ Requête : "Puissance par phase, enrichie avec la capacité nominale du BMS (many-to-one)"
+**PromQL idéal :**
+```promql
+bms_power_w * on(bms_id) group_left(capacity_ah) bms_capacity_ah
+```
+**Pourquoi ça échoue :** `group_left` est rejeté.
+
+**Impact ESS :** Impossible d'attacher des métadonnées statiques (capacité, date de mise en service, type de cellule) à des séries temporelles dynamiques côté requête. C'est pourtant essentiel pour normaliser des indicateurs (ex. "C-rate = courant / capacité").
+
+---
+
+## 4. Agrégateur `quantile` (percentile instantané)
+
+### ❌ Requête : "95e percentile de la tension cellule sur l'ensemble du parc BMS"
+**PromQL idéal :**
+```promql
+quantile(0.95, bms_cell_voltage_v)
+```
+**Pourquoi ça échoue :** `quantile` (agrégateur instant, différent de `quantile_over_time`) n'est pas dans `SUPPORTED_AGGREGATORS`.
+
+**Impact ESS :** Impossible de faire des SLO/SLA du type : "95% des cellules doivent rester entre 2.8V et 4.2V". On peut faire `max` ou `min`, mais pas de percentile global.
+
+**Note :** `quantile_over_time(0.95, bms_cell_voltage_v[1h])` **fonctionne** (c'est une fonction range), mais elle calcule le percentile temporel d'une **série unique**, pas le percentile spatial sur l'ensemble des BMS.
+
+---
+
+## 5. Subqueries (`[range:resolution]`)
+
+### ❌ Requête : "Moyenne mobile sur 1h du taux de charge, évaluée toutes les 5 minutes"
+**PromQL idéal :**
+```promql
+avg_over_time(rate(bms_energy_wh[5m])[1h:5m])
+```
+**Pourquoi ça échoue :** Les subqueries `[1h:5m]` sont rejetées explicitement.
+
+**Impact ESS :** Très courant pour le suivi de la santé des batteries : on veut lisser le `rate` de décharge sur une fenêtre longue sans sur-échantillonner. Actuellement, il faut choisir entre un `rate` bruité (fenêtre courte) ou un `rate` retardé (fenêtre longue).
+
+---
+
+### ❌ Requête : "Prédiction du SOC dans 2h basée sur la tendance moyenne des dernières 6h"
+**PromQL idéal :**
+```promql
+predict_linear(bms_soc[1h], 7200) 
+# ou, plus sophistiqué :
+predict_linear(avg_over_time(bms_soc[10m])[6h:10m], 7200)
+```
+**Pourquoi ça échoue :** La version simple `predict_linear(bms_soc[1h], 7200)` **fonctionne**, mais la version lissée avec subquery est impossible. Sur un SOC bruité, la prédiction directe sur 1h est instable.
+
+---
+
+## 6. Agrégateur `group`
+
+### ❌ Requête : "Nombre de BMS actifs (présence binaire, indépendamment de la valeur)"
+**PromQL idéal :**
+```promql
+group(bms_status) 
+```
+**Pourquoi ça échoue :** `group` n'est pas supporté.
+
+**Impact ESS :** `count(bms_status)` compte les séries, mais si on veut juste vérifier la *présence* d'une série (valeur = 1 peu importe la métrique originale), `group` est le standard PromQL. Utile pour des dashboards "état de la flotte".
+
+---
+
+## 7. Cas limites silencieux (faux positifs)
+
+### ⚠️ Requête : "Énergie injectée aujourd'hui (Wh) sur un MPPT peu ensoleillé"
+**PromQL :**
+```promql
+increase(mppt_energy_wh[24h])
+```
+**Piège :** Si le MPPT n'a produit que 2 points dans la journée (ex. matin et soir avec coupure nuageuse), `increase` retourne `0` au lieu de `no data` ou de la vraie différence.
+
+**Pourquoi :** Le bug P0 identifié dans l'audit : `raw_counter_increase` sur 1 seul point retourne `0.0`, donc `increase` retourne `0` et `rate` retourne `0 / range`.
+
+**Impact ESS :** Un MPPT à l'arrêt ou déconnecté apparaît comme "0 Wh produits" (ce qui est vrai) mais un MPPT avec 2 points espacés de 12h apparaît aussi à 0, ce qui est **faux** (la différence entre les 2 points est positive). Cela fausse les bilans énergétiques agrégés.
+
+---
+
+## 8. Récapitulatif par dashboard ESS
+
+| Dashboard / Alert ESS | Requête typique | Statut |
+|---|---|---|
+| **Bilan énergétique jour** | `sum(increase(bms_energy_wh[24h]))` | ✅ |
+| **Bilan vs hier** | `... - ... offset 24h` | ❌ |
+| **Alerte surcharge** | `bms_soc < 20 and bms_temp > 45` | ❌ |
+| **Rendement par string** | `mppt_power / on(string_id) theoretical` | ❌ |
+| **C-rate global** | `sum(bms_current) / on(bms_id) group_left capacity` | ❌ |
+| **Santé cellule (SLO)** | `quantile(0.95, bms_cell_v)` | ❌ |
+| **Prédiction SOC lissée** | `predict_linear(avg_over_time(...)[6h:10m], ...)` | ❌ |
+| **Détection orphans** | `bms_status unless mppt_status` | ❌ |
+| **Compteur fiabilisé** | `increase(mppt_energy_wh[24h])` sur série clairsemée | ⚠️ Faux positif |
+
+---
+
+## Recommandation immédiate
+
+Pour un ESS en production, je suggère de **prioriser** l'implémentation dans cet ordre :
+
+1. **`and` / `or`** — indispensable pour les alertes multi-critères (sécurité thermique)
+2. **`on` / `ignoring`** — nécessaire pour les rendements et normalisations (C-rate)
+3. **`offset`** — pour les tendances et comparaisons (optimisation énergétique)
+4. **`quantile` (agrégateur)** — pour les SLO de santé batterie
+5. **Correction `increase`/`rate` à 1 point** — pour fiabiliser les bilans énergétiques
+
+Les subqueries et `group_left` peuvent attendre si vous pré-calculez les métriques dérivées côté `energy-manager` ou `daly-bms-server`.
+
 Les écarts principaux concernent les opérations de **jointure vectorielle avancée** et les **modificateurs temporels**, qui sont volontairement hors scope pour ce système. Le point le plus critique à corriger est le comportement de `rate`/`increase` sur un seul point, qui peut induire des alertes silencieuses fausses.
