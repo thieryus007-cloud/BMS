@@ -1,16 +1,23 @@
 # PromQL compatibility roadmap — metrics-store
 
-> **✅ ÉTAT : phases 1, 2, 3a, 3b, 3c, Phase 4 (math & labels), Phase 5 (P2/P3)
-> et Phase 6 (modifier `offset`) implémentées et testées.** Le sous-ensemble
-> PromQL supporté inclut désormais le groupement `by`/`without`, les
-> comparaisons (+ `bool`), `topk`/`bottomk`, `irate`, les fonctions math
+> **✅ ÉTAT : phases 1 → 7 implémentées et testées.** Le sous-ensemble PromQL
+> supporté inclut désormais le groupement `by`/`without`, les comparaisons
+> (+ `bool`), `topk`/`bottomk`, `irate`, les fonctions math
 > (`sqrt exp ln log2 log10 sgn clamp`), la manipulation de labels
 > (`label_replace`, `label_join`), `deriv`/`predict_linear`/`*_over_time`,
-> `absent`/`changes`/`resets`, et le **modifier `offset`** (instant + range,
-> négatif inclus), en plus du rejet explicite du vector matching non trivial.
-> Restent non supportés : subqueries `[r:s]`, modifier `@`. Voir la matrice de
-> compat dans `docs/architecture-redb.md` §5. Le document ci-dessous reste
-> comme référence de conception.
+> `absent`/`changes`/`resets`, le **modifier `offset`** (instant + range,
+> négatif inclus), **et — Phase 7 (conformité avancée) —** les opérateurs
+> ensemblistes `and`/`or`/`unless`, le matching vectoriel
+> `on`/`ignoring`/`group_left`/`group_right`, le modifier `@`
+> (`<ts>`/`start()`/`end()`), les agrégateurs `quantile`/`group`/`count_values`/
+> `stddev`/`stdvar`, les **sous-requêtes** `expr[range:step]`, et l'arithmétique
+> `%`/`^`. La correction P0 (`rate`/`increase` → *no data* sur 1 seul point) est
+> intégrée. Voir `docs/Evolution-compliance-PromQL.md` pour l'audit détaillé et
+> les propositions de dashboards exploitant ces capacités.
+>
+> **Restent volontairement hors scope** : `histogram_quantile`, `holt_winters`,
+> trigonométrie (`sin/cos/…`), `sort`/`sort_desc`, `scalar`/`vector`, fonctions
+> date/heure. Le document ci-dessous reste comme référence de conception.
 
 > **But du document** : plan d'implémentation **autoportant** pour élargir la
 > compatibilité PromQL du moteur `metrics-store` (le shim que Grafana
@@ -358,6 +365,73 @@ dynamiques, échelles log, normalisation).
 
 ---
 
+## Phase 7 — Conformité avancée (✅ fait)
+
+**Objectif** : couvrir **toutes** les requêtes/alertes Grafana avancées d'un ESS
+multi-BMS / multi-MPPT identifiées dans `docs/Evolution-compliance-PromQL.md`
+(jointures conditionnelles, normalisations, SLO, comparaisons temporelles,
+lissage), sans régression. Implémenté en un lot cohérent.
+
+### 7a — Opérateurs ensemblistes `and` / `or` / `unless`
+- `validate.rs` : `SUPPORTED_SET_OPS = ["and","or","unless"]`, acceptés dans
+  `validate_binary` ; `bool` reste réservé aux comparaisons.
+- `exec.rs::eval_set_op` : appariement par **signature de labels**
+  (`matching_sig`, avec `on`/`ignoring` éventuel). `and` = garde le lhs si une
+  série rhs partage la signature ; `unless` = l'inverse ; `or` = lhs ∪ (rhs dont
+  la signature est absente du lhs). **Labels conservés** (dont `__name__`), pas
+  d'arithmétique. Erreur explicite si un opérande est scalaire.
+
+### 7b — Matching vectoriel `on` / `ignoring` + `group_left` / `group_right`
+- `exec.rs::matching_sig` : calcule la signature d'appariement
+  (`on` ⇒ ne garder que les labels listés ; `ignoring` ⇒ tous sauf listés +
+  `__name__` ; défaut ⇒ tous sauf `__name__`).
+- `exec.rs::result_metric` : construit les labels du résultat à la Prometheus
+  (`OneToOne` : drop name + keep/del selon on/ignoring ; `group_left`/
+  `group_right` : tous les labels du côté « many » + recopie des labels
+  `include` depuis le côté « one »).
+- `exec.rs::vector_binary_op` : routage générique (closure `combine`) partagé
+  par l'arithmétique et les comparaisons vec×vec. Détecte les doublons de
+  signature côté « one » **et** côté « many » en `OneToOne` (exige alors
+  `group_left`/`group_right`, conforme Prometheus).
+
+### 7c — Modifier `@` (`<ts>` / `start()` / `end()`)
+- `validate.rs` : `@` n'est plus rejeté dans `validate_vector_selector`.
+- `exec.rs::resolve_eval_time` : `@` fixe l'instant (`@ <ts>` en **secondes**
+  epoch, `@ start()`/`@ end()` = bornes de la requête, mémorisées dans
+  `query_start_ms`/`query_end_ms`), puis `offset` décale relativement.
+  Appliqué aux sélecteurs instant, aux fonctions à fenêtre et à `absent`.
+
+### 7d — Agrégateurs `quantile` / `group` / `count_values` / `stddev` / `stdvar`
+- `validate.rs` : `SCALAR_PARAM_AGGREGATORS = [topk,bottomk,quantile]`,
+  `STRING_PARAM_AGGREGATORS = [count_values]`, et `group`/`stddev`/`stdvar`
+  ajoutés à `SUPPORTED_AGGREGATORS`.
+- `exec.rs::eval_aggregate` : `quantile(φ, vec)` = percentile **spatial** par
+  groupe (interpolation linéaire) ; `count_values("l", vec)` = comptage par
+  valeur distincte (ajoute le label `l`) ; `group` = présence binaire (1) ;
+  `stddev`/`stdvar` = écart-type/variance de population via **algorithme de
+  Welford** (stable numériquement sur compteurs cumulés à grande magnitude).
+
+### 7e — Sous-requêtes `expr[range:step]`
+- `validate.rs` : `Expr::Subquery` valide l'expression interne (plus de rejet).
+- `exec.rs::eval_subquery_call` : matérialise une série synthétique en évaluant
+  l'expression interne à chaque sous-pas (`step` explicite, sinon 1 min), puis
+  applique la fonction fenêtre (`apply_range_fn_raw`). Garde anti-explosion
+  (`MAX_SUBQUERY_STEPS = 11 000`) et garde anti-boucle (saturation `i64::MAX`).
+
+### 7f — Arithmétique `%` (modulo) / `^` (puissance) + correction P0
+- `exec.rs::arith_fn` : `%` et `^` ajoutés.
+- `exec.rs::apply_range_fn_raw` : `rate`/`increase` retournent ***no data*** (et
+  non `0`) lorsqu'un seul point tombe sous la fenêtre — fiabilise les bilans
+  énergétiques sur séries clairsemées (P0 §4.6 de l'audit).
+
+**Tests** : `promql_set_ops_and_vector_matching`, `promql_new_aggregators`,
+`promql_at_modifier_and_subquery`, `promql_rate_single_point_no_data` (lib.rs) +
+couverture `validate.rs` ; golden 16 dashboards toujours vert (77 tests OK).
+**PR** : `feat(metrics-store): conformité PromQL avancée` + revue Gemini
+(boucle subquery, variance Welford, matching OneToOne).
+
+---
+
 ## Récapitulatif
 
 | Phase | Contenu | Effort | Risque | Priorité | État |
@@ -372,8 +446,15 @@ dynamiques, échelles log, normalisation).
 | 5 (P2) | deriv, predict_linear, quantile/stddev/stdvar_over_time | ½ j | moyen | moyenne | ✅ fait |
 | 5 (P3) | absent, absent_over_time, changes, resets + fix `round(v,to_nearest)` | ½ j | faible | moyenne | ✅ fait |
 | 6 | modifier `offset` (instant + range, négatif inclus) | ¼ j | faible | moyenne | ✅ fait |
+| 7a | set ops `and`/`or`/`unless` | ½ j | moyen | **haute** | ✅ fait |
+| 7b | matching `on`/`ignoring`/`group_left`/`group_right` | ½–1 j | moyen | **haute** | ✅ fait |
+| 7c | modifier `@` (`<ts>`/`start()`/`end()`) | ¼ j | faible | moyenne | ✅ fait |
+| 7d | agrégateurs `quantile`/`group`/`count_values`/`stddev`/`stdvar` | ½ j | faible | moyenne | ✅ fait |
+| 7e | sous-requêtes `[range:step]` | ½ j | moyen | moyenne | ✅ fait |
+| 7f | arithmétique `%`/`^` + fix P0 `rate`/`increase` 1 point | ¼ j | faible | **haute** | ✅ fait |
 
-**Ordre recommandé** : 1 → 2 → (3a/3b/3c à la demande) → 4 → 5 (avant dashboards sophistiqués).
+**Ordre recommandé** : 1 → 2 → (3a/3b/3c à la demande) → 4 → 5 → 7 (toutes les
+constructions PromQL avancées requises par Grafana sont désormais couvertes).
 
 ### Phase 5 — notes d'implémentation
 - `eval_call` localise le `MatrixSelector` **n'importe où** dans les args (gère
@@ -397,10 +478,23 @@ dynamiques, échelles log, normalisation).
   (`offset -5m`, vers le futur). Test sémantique : `promql_offset_modifier`
   (lib.rs). Permet la comparaison de périodes (`m offset 24h`, `m offset 1y`)
   sans contournement client.
-- **Restants (P4, à la demande)** : `histogram_quantile`, `holt_winters`,
-  trigo (`sin/cos/…`), `sort`/`sort_desc`, `scalar`/`vector`, fonctions date,
-  set ops `and/or/unless`, vector matching, `{__name__=~…}`, modifier `@`,
-  subqueries `[r:s]`.
+### Phase 7 — notes d'implémentation
+- **Deux types `Labels`** toujours valables : `exec::Labels` (BTreeMap) vs la
+  liste de noms du modifier ; `matching_sig`/`result_metric` manipulent des
+  `exec::Labels`.
+- `vector_binary_op` est partagé par arithmétique **et** comparaisons (closure
+  `combine` : `Some(v)` émet, `None` filtre). Set ops passent par `eval_set_op`
+  (pas d'arithmétique, labels conservés).
+- `@ <ts>` est en **secondes** epoch (sémantique Prometheus) → multiplié par
+  1000 dans `resolve_eval_time`. `@ start()`/`end()` lisent les bornes
+  mémorisées au début de `eval_range`/`eval_instant`.
+- `stddev`/`stdvar` utilisent **Welford** (`mean`/`m2`) et non `Σx²/n−(Σx/n)²`.
+- Sous-requêtes : `step` par défaut = 1 min ; bornes `MAX_SUBQUERY_STEPS` et
+  garde de saturation `i64::MAX`. Réutilise `apply_range_fn_raw` (raw path).
+
+- **Restants (hors scope, à la demande)** : `histogram_quantile`,
+  `holt_winters`, trigo (`sin/cos/…`), `sort`/`sort_desc`, `scalar`/`vector`,
+  fonctions date/heure, `{__name__=~…}`.
 
 ### Définition de « terminé » par PR
 - [ ] `cargo test -p metrics-store` vert (unitaires + golden + coverage 16 dashboards).
