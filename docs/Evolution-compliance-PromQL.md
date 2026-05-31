@@ -357,12 +357,14 @@ Les écarts principaux concernent les opérations de **jointure vectorielle avan
 
 ---
 
-# 9. Dashboards Grafana évolués — propositions (exploitation des nouvelles capacités)
+# 9. Dashboards Grafana évolués — réalisés (exploitation des nouvelles capacités)
 
-> Maintenant que le moteur couvre `and/or/unless`, `on/ignoring/group_left`,
-> `quantile/group/count_values/stddev`, `@`, `offset` et les sous-requêtes, on
-> peut bâtir des tableaux de bord **impossibles auparavant**. Cette section
-> propose **4 nouveaux dashboards** + **5 évolutions** des dashboards existants.
+> ✅ **Statut : les 4 dashboards ci-dessous sont créés** dans
+> `contrib/grafana/dashboards/` (`17-flotte-sante.json`, `18-rendement-pv.json`,
+> `19-bilan-energie.json`, `20-alertes-avancees.json`) et **validés** par le test
+> golden `provisioned_grafana_dashboards_coverage` (chaque `expr` est acceptée
+> par le moteur). Section §9.2 = évolutions optionnelles de dashboards existants
+> (catalogue de panneaux à intégrer à la demande).
 >
 > **Contraintes de provisioning** (cf. CLAUDE.md règle 14) : format provisioning
 > (pas d'export), **pas** de `__inputs`/`__requires`, datasource UID =
@@ -434,21 +436,58 @@ exprimable en **une seule** requête grâce à `and`/`or`/`unless`).
 | `08-solaire` | « Production vs hier » (overlay) | `sum(venus_mppt_power_w)` **et** `sum(venus_mppt_power_w offset 24h)` | `offset` |
 | `15-energy-manager` | « CPU lissé 5 min » | `avg_over_time(em_cpu_percent[5m:30s])` | sous-requête (anti-pic) |
 
-## 9.3 Plan de mise en œuvre (sans régression)
+## 9.3 Process de mise en œuvre (complet, sans régression)
 
-1. **Créer les JSON** dans `contrib/grafana/dashboards/` au format provisioning
-   (cloner la structure d'un dashboard existant : `datasource.uid="daly-metrics"`,
-   pas de `__inputs`/`__requires`). Un par fichier `17-…` → `20-…`.
-2. **Garde CI automatique** : `cargo test -p metrics-store
-   provisioned_grafana_dashboards_coverage` valide que **chaque** `expr` est
-   acceptée par le moteur → aucun panneau cassé ne peut passer inaperçu.
-3. **Déploiement** : `bash scripts/deploy-pi5.sh` copie les JSON vers
-   `/var/lib/grafana/dashboards/` et redémarre Grafana (cf. CLAUDE.md §0, 3g).
-4. **Alerting** : pour `20-alertes-avancees`, convertir les panneaux en règles
-   Grafana Alert (condition « count() > 0 » sur la requête) — chaque alerte tient
-   en une requête PromQL unique, sans transformation côté Grafana.
+### Étape 1 — Validation locale (déjà faite, garde CI permanente)
+```bash
+# Vérifie que CHAQUE expr PromQL des 20 dashboards est acceptée par le moteur.
+cargo test -p metrics-store --test golden_promql
+# → provisioned_grafana_dashboards_coverage ... ok  (aucun panneau cassé)
+```
+Ce test lit dynamiquement `contrib/grafana/dashboards/*.json` : tout nouveau
+dashboard (ou panneau) y est automatiquement couvert. Un `expr` non supporté
+ferait **échouer la CI** avant tout déploiement.
 
-> **Note** : ces requêtes ont été validées contre le moteur (mêmes constructions
-> que les tests d'intégration `promql_set_ops_and_vector_matching`,
-> `promql_new_aggregators`, `promql_at_modifier_and_subquery`). Les noms de
-> métriques/labels proviennent des dashboards provisionnés actuels.
+### Étape 2 — Récupération du code sur le Pi5
+```bash
+# (sur le Pi5, user pi5compute)
+make sync                       # git fetch + reset --hard origin/<branche>
+```
+
+### Étape 3 — Déploiement Grafana
+```bash
+bash scripts/deploy-pi5.sh      # importe TOUS les *.json via l'API Grafana
+# (la boucle scripts/fix-grafana.sh itère contrib/grafana/dashboards/*.json :
+#  les 4 nouveaux dashboards sont importés sans modification de script)
+```
+> ⚠️ **Aucun binaire à recompiler** : les dashboards ne sont pas embarqués dans
+> `daly-bms-server` (ce sont des fichiers Grafana). Le moteur PromQL, lui, doit
+> déjà tourner avec la version qui supporte les nouvelles constructions
+> (Phase 7 — cf. `docs/promql-compat-roadmap.md`). Sinon : `make build-arm` +
+> redéploiement du binaire (cf. CLAUDE.md §0).
+
+### Étape 4 — Vérification post-déploiement
+```bash
+curl -s http://localhost:3000/api/search?tag=daly-bms | jq '.[].title'   # 20 dashboards
+# Sanity-check d'une requête avancée directement sur le backend :
+curl -s "http://localhost:8080/api/v1/query?query=quantile(0.95,bms_cell_voltage)" | jq .
+curl -s "http://localhost:8080/api/v1/query?query=count(group(bms_soc)by(bms_id))" | jq .
+```
+
+### Étape 5 — Alerting (dashboard 20)
+Convertir chaque panneau de `20-alertes-avancees` en **règle Grafana Alert** :
+condition « `count() > 0` sur la série de la requête » (la requête filtre déjà :
+un résultat non vide = alerte active). Chaque alerte tient en **une seule**
+requête PromQL, sans transformation Grafana ni jointure côté client.
+
+### Rollback
+```bash
+git revert <commit>             # puis make sync + bash scripts/deploy-pi5.sh
+# ou supprimer les dashboards 17–20 via l'UI Grafana (Dashboards → Delete).
+```
+
+> **Note** : noms de métriques/labels issus des dashboards provisionnés actuels
+> (`bms_*{bms_id="0x01"|"0x02"}`, `et112_*{address="0x09"}`, `venus_*`). Requêtes
+> validées contre le moteur (mêmes constructions que les tests d'intégration
+> `promql_set_ops_and_vector_matching`, `promql_new_aggregators`,
+> `promql_at_modifier_and_subquery`).
