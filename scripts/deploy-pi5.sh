@@ -38,19 +38,34 @@ for arg in "$@"; do
     esac
 done
 
+# Compilation et `git` doivent tourner sous l'utilisateur appelant (pas root) :
+# `rustup`/`cargo` sont installés dans son `~/.cargo` et le dépôt lui appartient.
+# Sous `sudo`, le PATH de root n'inclut pas `~/.cargo/bin` → « rustup: not found ».
+# `as_user` ré-exécute la commande dans un shell de login de cet utilisateur
+# (PATH chargé via ~/.profile / ~/.cargo/env). L'install (cp /usr/local/bin,
+# systemctl) reste en root.
+RUN_USER="${SUDO_USER:-$(id -un)}"
+as_user() {
+    if [ "$(id -un)" = "root" ] && [ "$RUN_USER" != "root" ]; then
+        sudo -u "$RUN_USER" -H bash -lc "cd '$PWD' && $*"
+    else
+        bash -lc "$*"
+    fi
+}
+
 # ── 1. Récupération du code ───────────────────────────────────────────────────
 step "Synchronisation du dépôt…"
-make sync || error "make sync a échoué"
+as_user "make sync" || error "make sync a échoué"
 info "Code à jour"
 
-# ── 2. Compilation croisée aarch64 ───────────────────────────────────────────
+# ── 2. Compilation croisée aarch64 (sous l'utilisateur appelant, pas root) ────
 if $DO_BUILD; then
-    step "Compilation daly-bms-server (aarch64)…"
-    make build-arm || error "make build-arm a échoué"
+    step "Compilation daly-bms-server (aarch64) — user: $RUN_USER…"
+    as_user "make build-arm" || error "make build-arm a échoué"
     info "daly-bms-server compilé"
 
-    step "Compilation energy-manager (aarch64)…"
-    make build-energy-arm || error "make build-energy-arm a échoué"
+    step "Compilation energy-manager (aarch64) — user: $RUN_USER…"
+    as_user "make build-energy-arm" || error "make build-energy-arm a échoué"
     info "energy-manager compilé"
 else
     warn "Build skippé (--no-build)"
