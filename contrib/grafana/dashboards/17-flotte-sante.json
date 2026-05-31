@@ -480,7 +480,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "count_values(\"soh\", round(bms_soh, 5))",
+          "expr": "count_values(\"soh\", round(bms_soh, 0.1))",
           "legendFormat": "{{soh}} %",
           "refId": "A"
         }
