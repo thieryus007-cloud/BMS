@@ -613,9 +613,14 @@ impl<'r> Evaluator<'r> {
             return Ok(Value::Vector(out));
         }
 
+        // Accumulateur de Welford : `mean`/`m2` permettent de calculer la
+        // variance de population de façon numériquement stable (évite
+        // l'annulation catastrophique de `Σx²/n − (Σx/n)²` sur des compteurs
+        // d'énergie cumulés à grande magnitude et faible variance).
         struct Acc {
             sum: f64,
-            sumsq: f64,
+            mean: f64,
+            m2: f64,
             min: f64,
             max: f64,
             cnt: u64,
@@ -625,16 +630,20 @@ impl<'r> Evaluator<'r> {
         for s in &inner {
             let e = groups.entry(group_key(&s.labels)).or_insert(Acc {
                 sum: 0.0,
-                sumsq: 0.0,
+                mean: 0.0,
+                m2: 0.0,
                 min: f64::INFINITY,
                 max: f64::NEG_INFINITY,
                 cnt: 0,
             });
             e.sum += s.value;
-            e.sumsq += s.value * s.value;
+            e.cnt += 1;
+            // Mise à jour incrémentale de Welford.
+            let delta = s.value - e.mean;
+            e.mean += delta / e.cnt as f64;
+            e.m2 += delta * (s.value - e.mean);
             e.min = e.min.min(s.value);
             e.max = e.max.max(s.value);
-            e.cnt += 1;
         }
         let mut out = Vec::with_capacity(groups.len());
         for (labels, acc) in groups {
@@ -647,9 +656,9 @@ impl<'r> Evaluator<'r> {
                 "count" => n,
                 // `group` : présence binaire (valeur 1 par groupe).
                 "group" => 1.0,
-                // Variance / écart-type de population sur les séries du groupe.
-                "stdvar" => (acc.sumsq / n - (acc.sum / n).powi(2)).max(0.0),
-                "stddev" => (acc.sumsq / n - (acc.sum / n).powi(2)).max(0.0).sqrt(),
+                // Variance / écart-type de population (Welford : `m2 / n`).
+                "stdvar" => acc.m2 / n,
+                "stddev" => (acc.m2 / n).sqrt(),
                 other => return Err(PromQlError::Unsupported(format!("aggregator {other}"))),
             };
             out.push(InstantSample { labels: Arc::new(labels), value });
@@ -919,6 +928,12 @@ impl<'r> Evaluator<'r> {
                         series.entry(s.labels).or_default().push((st, s.value));
                     }
                 }
+            }
+            // Garde anti-boucle infinie : si `st` est sur le point de saturer à
+            // `i64::MAX` (cas `@` résolvant un timestamp extrême), `saturating_add`
+            // figerait `st` à `t_eff` et `st <= t_eff` resterait vrai à jamais.
+            if st > t_eff.saturating_sub(step_ms) {
+                break;
             }
             st = st.saturating_add(step_ms);
         }
@@ -1577,10 +1592,24 @@ fn vector_binary_op(
             ));
         }
     }
+    // En `OneToOne`, l'appariement doit aussi être unique côté gauche : si deux
+    // séries du lhs partagent la même signature, c'est une relation many-to-one
+    // qui doit être explicitée par `group_left` (sinon erreur Prometheus). En
+    // `group_left` (`ManyToOne`), les doublons côté gauche sont au contraire
+    // attendus, donc cette garde ne s'applique pas.
+    let check_lhs_unique = matches!(card, VectorMatchCardinality::OneToOne);
+    let mut seen_lhs: HashSet<Labels> = HashSet::new();
     let mut out = Vec::with_capacity(lhs.len());
     for s in lhs {
         let key = matching_sig(&s.labels, matching);
         if let Some((rval, rlabels)) = one_idx.get(&key) {
+            if check_lhs_unique && !seen_lhs.insert(key.clone()) {
+                return Err(PromQlError::Execution(
+                    "matching vectoriel : plusieurs séries du côté gauche partagent les \
+                     mêmes labels d'appariement (préciser group_left/group_right)"
+                        .into(),
+                ));
+            }
             if let Some(v) = combine(s.value, *rval) {
                 let labels = result_metric(&s.labels, rlabels, card, matching, drop_name);
                 out.push(InstantSample { labels: Arc::new(labels), value: v });
