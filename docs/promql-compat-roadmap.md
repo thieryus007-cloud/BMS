@@ -1,12 +1,15 @@
 # PromQL compatibility roadmap — metrics-store
 
-> **✅ ÉTAT : phases 1, 2, 3a, 3b, 3c + Phase 4 (math & labels) implémentées
-> et testées.** Le sous-ensemble PromQL supporté inclut désormais le
-> groupement `by`/`without`, les comparaisons (+ `bool`), `topk`/`bottomk`,
-> `irate`, les fonctions math (`sqrt exp ln log2 log10 sgn clamp`) et la
-> manipulation de labels (`label_replace`, `label_join`), en plus du rejet
-> explicite du vector matching non trivial. Voir la matrice de compat à jour
-> dans `docs/plan_migration_vm_redb.md` §6.4-6.5. Le document ci-dessous reste
+> **✅ ÉTAT : phases 1, 2, 3a, 3b, 3c, Phase 4 (math & labels), Phase 5 (P2/P3)
+> et Phase 6 (modifier `offset`) implémentées et testées.** Le sous-ensemble
+> PromQL supporté inclut désormais le groupement `by`/`without`, les
+> comparaisons (+ `bool`), `topk`/`bottomk`, `irate`, les fonctions math
+> (`sqrt exp ln log2 log10 sgn clamp`), la manipulation de labels
+> (`label_replace`, `label_join`), `deriv`/`predict_linear`/`*_over_time`,
+> `absent`/`changes`/`resets`, et le **modifier `offset`** (instant + range,
+> négatif inclus), en plus du rejet explicite du vector matching non trivial.
+> Restent non supportés : subqueries `[r:s]`, modifier `@`. Voir la matrice de
+> compat dans `docs/architecture-redb.md` §5. Le document ci-dessous reste
 > comme référence de conception.
 
 > **But du document** : plan d'implémentation **autoportant** pour élargir la
@@ -368,6 +371,7 @@ dynamiques, échelles log, normalisation).
 | 4b | label_replace / label_join | ½ j | faible | **haute** | ✅ fait |
 | 5 (P2) | deriv, predict_linear, quantile/stddev/stdvar_over_time | ½ j | moyen | moyenne | ✅ fait |
 | 5 (P3) | absent, absent_over_time, changes, resets + fix `round(v,to_nearest)` | ½ j | faible | moyenne | ✅ fait |
+| 6 | modifier `offset` (instant + range, négatif inclus) | ¼ j | faible | moyenne | ✅ fait |
 
 **Ordre recommandé** : 1 → 2 → (3a/3b/3c à la demande) → 4 → 5 (avant dashboards sophistiqués).
 
@@ -386,9 +390,17 @@ dynamiques, échelles log, normalisation).
 - `linear_regression` : garde anti division par zéro via comparaison des
   timestamps de bornes (`pts[0] == pts[last]`, exact) plutôt que `var_x == 0.0`.
 - Tier compacté : approximations documentées (cf. §6.5 du plan de migration).
+- **Phase 6 — modifier `offset`** (✅ fait) : retiré du rejet dans
+  `validate_vector_selector` (le `@` reste rejeté) ; `exec.rs::offset_ms`
+  applique `t_eff = t − offset` au lookback instantané, à la fenêtre des
+  fonctions à fenêtre et à `absent_over_time`. Couvre l'offset négatif
+  (`offset -5m`, vers le futur). Test sémantique : `promql_offset_modifier`
+  (lib.rs). Permet la comparaison de périodes (`m offset 24h`, `m offset 1y`)
+  sans contournement client.
 - **Restants (P4, à la demande)** : `histogram_quantile`, `holt_winters`,
   trigo (`sin/cos/…`), `sort`/`sort_desc`, `scalar`/`vector`, fonctions date,
-  set ops `and/or/unless`, vector matching, `{__name__=~…}`.
+  set ops `and/or/unless`, vector matching, `{__name__=~…}`, modifier `@`,
+  subqueries `[r:s]`.
 
 ### Définition de « terminé » par PR
 - [ ] `cargo test -p metrics-store` vert (unitaires + golden + coverage 16 dashboards).

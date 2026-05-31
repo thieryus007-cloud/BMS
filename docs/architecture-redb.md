@@ -448,7 +448,9 @@ est rejeté** avec `errorType=bad_data`.
 
 **Sélecteurs** : `VectorSelector` instantané avec matchers `=`, `!=`, `=~`,
 `!~`. `MatrixSelector` (`m[range]`) uniquement comme argument d'une fonction
-à fenêtre.
+à fenêtre. Le modificateur **`offset`** (`m offset 5m`, `m[w] offset 1h`,
+y compris négatif) est supporté : il décale l'instant d'évaluation à
+`t − offset` (cf. `exec.rs::offset_ms`).
 
 **Opérateurs arithmétiques** (`SUPPORTED_BINOPS`) : `+`, `-`, `*`, `/`
 (vec×scalaire, scalaire×vec, vec×vec aligné sur tous les labels hors
@@ -488,7 +490,6 @@ Toute comparaison impliquant un `NaN` est fausse.
 |--------------|------------------|
 | **String literal nu** (hors arg de `label_*`) | `string literal` |
 | **Subquery** `expr[Xh:Ym]` | `subquery …` — réécrire en deux requêtes côté client |
-| **`offset`** (modifier) | `offset modifier` |
 | **`@`** (modifier @-timestamp) | `@ modifier` |
 | **Set ops** `and`, `or`, `unless` | `binary operator: and/or/unless` |
 | **Vector matching** `on(...)`, `ignoring(...)`, `group_left`, `group_right` | `vector matching … non supporté` (seul l'alignement exact `OneToOne` tous-labels est géré) |

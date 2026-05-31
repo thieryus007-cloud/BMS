@@ -97,6 +97,12 @@ function SmartShuntNode({ data }) {
   const power   = live?.power_w        ?? null;
   const state   = live?.state          ?? null;
   const ttgMin  = live?.time_to_go_min ?? null;
+  // Ah chargés / déchargés aujourd'hui : valeurs fournies directement par
+  // l'energy-manager (intégration courant×temps depuis minuit). Règle 13 —
+  // on privilégie cette mesure ; le recalcul PromQL ci-dessous (vmCharge /
+  // vmDischarge) ne sert que de repli si ces champs sont absents.
+  const ahChaLive = live?.ah_charged_today    ?? null;
+  const ahDisLive = live?.ah_discharged_today ?? null;
 
   const [vmCharge,    setVmCharge]    = useState(null);
   const [vmDischarge, setVmDischarge] = useState(null);
@@ -130,6 +136,10 @@ function SmartShuntNode({ data }) {
     const t = setInterval(fetchDailyTotals, 60000);
     return () => clearInterval(t);
   }, []);
+
+  // Valeur affichée : energy-manager en priorité, repli sur le recalcul PromQL.
+  const chargeAh    = ahChaLive != null ? Math.abs(ahChaLive) : vmCharge;
+  const dischargeAh = ahDisLive != null ? Math.abs(ahDisLive) : vmDischarge;
 
   const stateClass = state === 'Charging' ? 'charging' : state === 'Discharging' ? 'discharging' : 'idle';
 
@@ -183,11 +193,11 @@ function SmartShuntNode({ data }) {
         ),
         h('div', { className: 'ss-row', style: { flex: '1 1 0', minWidth: 0 } },
           h('span', { className: 'ss-row-lbl' }, '⬆ Chargée (auj.)'),
-          h('span', { className: 'ss-row-val pos' }, vmCharge    != null ? `${vmCharge.toFixed(1)} Ah`    : '—')
+          h('span', { className: 'ss-row-val pos' }, chargeAh    != null ? `${chargeAh.toFixed(1)} Ah`    : '—')
         ),
         h('div', { className: 'ss-row', style: { flex: '1 1 0', minWidth: 0 } },
           h('span', { className: 'ss-row-lbl' }, '⬇ Déchargée (auj.)'),
-          h('span', { className: 'ss-row-val neg' }, vmDischarge != null ? `${vmDischarge.toFixed(1)} Ah` : '—')
+          h('span', { className: 'ss-row-val neg' }, dischargeAh != null ? `${dischargeAh.toFixed(1)} Ah` : '—')
         )
       )
     ) : h('div', { className: 'ss-wait' }, 'En attente…')

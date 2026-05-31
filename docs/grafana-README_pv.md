@@ -110,14 +110,13 @@ sudo systemctl restart grafana-server
 
 ## 📈 Dashboard PV - Comparaison Multi-Années
 
-> ⚠️ **Compatibilité shim PromQL redb** — ce dashboard d'origine a été conçu
-> pour MetricsQL (VictoriaMetrics) et ses panels de comparaison annuelle
-> utilisent le modificateur **`offset`** (`… offset 1y`) et des **subqueries**,
-> que le shim PromQL de redb **ne supporte pas** (cf. `docs/architecture-redb.md`
-> §5). Pour les reproduire avec redb : décaler la **fenêtre temporelle côté
-> Grafana** (ou via les bornes `start`/`end` de l'API) au lieu d'`offset`, et
-> calculer les cumuls **côté client** à partir d'un `query_range`. Importez-le
-> tel quel pour la structure, puis adaptez les requêtes des panels comparatifs.
+> ⚠️ **Compatibilité shim PromQL redb** — le modificateur **`offset`**
+> (`… offset 1y`, utilisé par les panels de comparaison annuelle) est
+> **supporté** par le shim. En revanche les **subqueries** `[range:step]`
+> (cumuls glissants) ne le sont **pas** (cf. `docs/architecture-redb.md` §5) :
+> pour ces panels, faites un `query_range` sur la période puis agrégez **côté
+> client**. Le dashboard s'importe tel quel ; seuls les panels de cumul à base
+> de subquery sont à adapter.
 
 ### Import du dashboard
 
@@ -1132,24 +1131,22 @@ curl -H "Authorization: Bearer ${API_KEY}"   "${GRAFANA_URL}/render/d/${DASHBOAR
 > ⚠️ **Limites du shim PromQL redb** — contrairement à MetricsQL/VictoriaMetrics,
 > le shim **ne supporte pas** :
 > - la fonction **`integrate()`** (MetricsQL) → utiliser `avg_over_time(p[w]) * heures` ;
-> - le modificateur **`offset`** → décaler la **fenêtre temporelle côté client**
->   (plage Grafana, ou bornes `start`/`end` de l'API) au lieu d'`offset` ;
 > - les **subqueries `[range:step]`** → faire un `query_range` sur la période puis
 >   agréger (somme / cumul) **côté client**.
 >
-> Les lignes marquées ⚠️ ci-dessous reposent sur ces constructions non supportées
-> et nécessitent l'un de ces contournements. Réf. `docs/redb-queries.md` et
-> `docs/architecture-redb.md` §5.
+> Le modificateur **`offset`** est, lui, **supporté**. Les lignes marquées ⚠️
+> ci-dessous reposent sur une subquery et nécessitent le contournement client.
+> Réf. `docs/redb-queries.md` et `docs/architecture-redb.md` §5.
 
 | Objectif | Requête |
 |----------|---------|
 | **Puissance totale instantanée** | `solar_total_w` |
 | **Production aujourd'hui** | `max_over_time(solar_yield_kwh[24h])` |
-| **Production hier** ⚠️ | `max_over_time(solar_yield_kwh[24h])` sur une plage décalée de 24 h **côté client** (pas d'`offset`) |
-| **Variation J / J-1 (%)** ⚠️ | calcul **côté client** à partir des valeurs « aujourd'hui » et « hier » (le shim n'a pas d'`offset`) |
-| **Production cumulée 30 j** ⚠️ | `query_range` de `max_over_time(solar_yield_kwh[1d])` sur 30 j, puis somme **côté client** (pas de subquery) |
+| **Production hier** | `max_over_time(solar_yield_kwh[24h] offset 24h)` |
+| **Variation J / J-1 (%)** | `((max_over_time(solar_yield_kwh[24h]) - max_over_time(solar_yield_kwh[24h] offset 24h)) / max_over_time(solar_yield_kwh[24h] offset 24h)) * 100` |
+| **Production cumulée 30 j** ⚠️ | `query_range` de `max_over_time(solar_yield_kwh[1d])` sur 30 j, puis somme **côté client** (subquery non supportée) |
 | **Production cumulée 1 an** ⚠️ | idem sur 365 j, somme **côté client** |
-| **Comparaison année N vs N-1** ⚠️ | `max_over_time(solar_yield_kwh[1d])` sur deux plages annuelles distinctes **côté client** (pas d'`offset 365d`) |
+| **Comparaison année N vs N-1** | `max_over_time(solar_yield_kwh[1d] offset 365d)` |
 | **Puissance moyenne 1 h** | `avg_over_time(solar_total_w[1h])` |
 | **Pic de puissance du jour** | `max_over_time(solar_total_w[24h])` |
 | **Énergie via intégration** | `avg_over_time(solar_total_w[1d]) * 24` (Wh) |
