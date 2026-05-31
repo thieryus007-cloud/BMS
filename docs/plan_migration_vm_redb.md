@@ -36,8 +36,8 @@
 | Import historique VM → redb | ✅ exécuté 18 mai 06:48 (271 séries, ~19M samples, base à ~1.2 Go) |
 | Migration routes internes (`/chart`, `/history`, `/dashboards`) | ✅ commit `0839b84` 18 mai — dashboard custom `/dashboard/history` passe aussi par le dispatcher |
 | Observation 24 h post-migration complète | ⏳ en cours (lancée 18 mai matin, J1 attendu 19 mai matin) |
-| **Phase 4 — Retrait VM** | ❌ planifié après obs OK, cf. §0.8 |
-| **Phase 5 — Cleanup code** | ❌ planifié post-Phase 4 +7j, cf. §0.9 |
+| **Phase 4 — Retrait VM** |  ✅ OK, cf. §0.8 |
+| **Phase 5 — Cleanup code** |  ✅ OK, cf. §0.9 |
 | **Volume actuel data dir** | redb `/mnt/nvme/daly-bms/metrics.redb` ~1.2 Go ; VM `/mnt/nvme/victoria-metrics` 50 Mo |
 
 #### 0.1.1 État réel mesuré sur Pi5 prod (Mai 2026)
@@ -396,105 +396,15 @@ Critères pour passer en Phase 4 (à vérifier le lendemain) :
 - Dashboard custom `/dashboard/history` visuellement OK
 - Aucun ticket de support / panel "No data" non attendu
 
-### 0.8 Phase 4 — Retrait VictoriaMetrics (procédure détaillée)
+### 0.8 Phase 4 — Retrait VictoriaMetrics ( ✅ Fait)
 
-**Pré-requis stricts** (ne pas démarrer sinon) :
-- ≥ 24 h consécutifs en mode `default_backend = "redb"` sans incident
-- Dashboard custom `/dashboard/history` validé en mode redb
-- Backup à jour de `/mnt/nvme/daly-bms/metrics.redb` (la base est la
-  seule source de vérité après retrait VM)
-- Fenêtre de maintenance acceptable (le retrait est sans interruption
-  visible mais on préfère l'aligner avec un créneau calme)
 
-#### Étape 1 : Backup défensif (avant tout)
-
-```bash
-# 1.1 Snapshot redb
-sudo systemctl stop daly-bms
-sudo cp /mnt/nvme/daly-bms/metrics.redb \
-        /mnt/nvme/daly-bms/metrics.redb.before-phase4-$(date +%Y%m%d_%H%M%S)
-sudo systemctl start daly-bms
-
-# 1.2 Export VM "ceinture + bretelles" (50 Mo, ~10s)
-curl -s -G 'http://127.0.0.1:8428/api/v1/export' \
-  --data-urlencode 'match[]={__name__=~".+"}' \
-  | gzip > /mnt/nvme/vm-export-before-phase4-$(date +%Y%m%d_%H%M%S).jsonl.gz
-
-# Vérifs
-ls -lh /mnt/nvme/daly-bms/metrics.redb.before-phase4-*
-ls -lh /mnt/nvme/vm-export-before-phase4-*.jsonl.gz
-```
-
-#### Étape 2 : Désactivation de VictoriaMetrics (réversible 5 minutes)
-
-```bash
-# 2.1 Stop + disable systemd
-sudo systemctl stop victoriametrics.service
-sudo systemctl disable victoriametrics.service
-
-# 2.2 Vérif : daly-bms-server doit continuer à fonctionner (writes vers
-#     VM échouent silencieusement mais lectures redb OK)
-journalctl -u daly-bms --since "1 minute ago" --no-pager \
-  | grep -iE 'vm|victoria' | head -20
-# Attendu : "VM write error 502 / connection refused" — c'est OK, le
-# dual-write côté daly-bms-server fait try_write best-effort sans
-# pénaliser le path principal.
-
-# 2.3 Test Grafana — doit continuer à fonctionner (lit redb)
-# Ouvrir 1 dashboard et vérifier qu'il charge.
-
-# 2.4 Test dashboard custom — idem
-curl -s 'http://127.0.0.1:8080/api/v1/chart/history?minutes=60' | jq '.ok'
-# Doit retourner "true" ou similaire (pas false/no_query_backend)
-```
-
-**Si problème à ce stade** — rollback instantané :
-```bash
-sudo systemctl enable victoriametrics.service
-sudo systemctl start victoriametrics.service
-# VM repart, daly-bms reprend le dual-write tel quel.
-```
-
-#### Étape 3 : Archive du data dir VM (réversibilité 30 jours)
-
-```bash
-# Renomme le répertoire data — VM ne peut plus le ré-ouvrir
-ARCHIVE_NAME="/mnt/nvme/victoria-metrics.archive-$(date +%Y%m%d)"
-sudo mv /mnt/nvme/victoria-metrics "$ARCHIVE_NAME"
-sudo chmod -R a-w "$ARCHIVE_NAME"
-sudo du -sh "$ARCHIVE_NAME"
-
-# Conservation 30 jours dans /mnt/nvme — agenda à 30 jours dans CLAUDE.md
-# pour suppression définitive si tout va bien.
-```
-
-#### Étape 4 : Validation post-retrait (24 h obs)
-
-```bash
-# 4.1 RSS gagné — attendu ~135 Mo (cf. §0.1.3)
-free -h
-ps -eo rss,user,cmd --sort=-rss | head -10
-
-# 4.2 Pas d'erreurs côté daly-bms
-journalctl -u daly-bms --since "10 minutes ago" --no-pager \
-  | grep -iE 'error|panic' | head -10
-# Les warnings sur VM write failed sont attendus (et bénins)
-
-# 4.3 Grafana + dashboard custom continuent à servir depuis redb
+# 4.3 Grafana + dashboard custom continuent à servir depuis redb  ✅ Fait
 curl -s 'http://127.0.0.1:8080/-/healthy' && echo
 curl -s 'http://127.0.0.1:8080/api/v1/query?query=up' | jq '.status'
 curl -s 'http://127.0.0.1:8080/api/v1/chart/history?minutes=60' | jq '.solar | length'
 ```
-
-À ce stade VM est mort. Le code daly-bms-server contient encore le
-client VM (qui échoue silencieusement à chaque write) — le cleanup
-Phase 5 retire ce code mort.
-
-### 0.9 Phase 5 — Cleanup code (procédure commit par commit)
-
-À faire après ≥ 7 jours de stabilité Phase 4 (= confirmation qu'on n'a
-pas besoin de revenir en arrière sur VM). Chaque commit ci-dessous est
-indépendant et atomique — peut être déployé puis le suivant.
+### 0.9 Phase 5 — Cleanup code ( ✅ Fait)
 
 #### Commit 5.1 — Retrait des écritures VM (côté daly-bms-server)
 
