@@ -83,10 +83,11 @@ use super::error::PromQlError;
 fn offset_ms(off: &Option<Offset>) -> i64 {
     match off {
         Some(Offset::Pos(d)) => d.as_millis().try_into().unwrap_or(i64::MAX),
-        Some(Offset::Neg(d)) => {
-            let ms: i64 = d.as_millis().try_into().unwrap_or(i64::MAX);
-            ms.saturating_neg()
-        }
+        Some(Offset::Neg(d)) => d
+            .as_millis()
+            .try_into()
+            .map(|ms: i64| ms.saturating_neg())
+            .unwrap_or(i64::MIN),
         None => 0,
     }
 }
