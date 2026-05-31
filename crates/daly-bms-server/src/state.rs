@@ -273,7 +273,7 @@ pub struct MonitorSnapshot {
     pub timestamp: DateTime<Utc>,
     /// Services systemd (daly-bms).
     pub services: Vec<ServiceStatus>,
-    /// Services réseau vérifiés par sonde TCP (mosquitto, victoriametrics, energy-manager, venus).
+    /// Services réseau vérifiés par sonde TCP (mosquitto, energy-manager, venus).
     pub network_services: Vec<ServiceStatus>,
     /// Port série RS485 présent sur le système.
     pub serial_port_ok: bool,
@@ -380,10 +380,9 @@ pub struct AppState {
     pub shelly_client: Arc<tokio::sync::Mutex<Option<rumqttc::AsyncClient>>>,
     /// Moteur d'alertes (None si alerts.db_path vide dans la config).
     pub alert_engine: Option<Arc<AlertEngine>>,
-    /// Backend TSDB redb (metrics-store). Phase 5 cleanup : SEULE source de
-    /// vérité pour les lectures et écritures de séries temporelles depuis
-    /// le retrait de VictoriaMetrics. `None` uniquement si désactivé dans
-    /// la config (mode dégradé pour debug).
+    /// Backend TSDB redb (metrics-store) : SEULE source de vérité pour les
+    /// lectures et écritures de séries temporelles. `None` uniquement si
+    /// désactivé dans la config (mode dégradé pour debug).
     pub metrics_store: Option<Arc<metrics_store::MetricsStore>>,
     /// Rate limiter pour les écritures redb depuis les `on_*_snapshot()`.
     /// Empêche un sample d'être poussé plus d'1× / 5 s par série.
@@ -509,8 +508,7 @@ fn redb_query_instant_inner(
 }
 /// Formatage cohérent avec la convention Prometheus (review gemini #4).
 /// `f64::to_string()` natif Rust produit des chaînes du type
-/// `53.900001525878906` (artéfact de la conversion f32→f64), incohérent
-/// avec ce que renvoie VictoriaMetrics (`53.9000015259`). On cap à 6
+/// `53.900001525878906` (artéfact de la conversion f32→f64). On cap à 6
 /// décimales et on trim les zéros terminaux — bon compromis entre
 /// précision et lisibilité.
 fn fmt_val(v: f64) -> String {

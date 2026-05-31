@@ -116,4 +116,4 @@ Pour mémoire, voici ce que le commit `chore: audit cleanup` a retiré :
 - PDF de référence (Daly UART, ET112, Modbus, solar-radiation)
 - Guides : `energy-manager-guide.md`, `ATS_CHINT_MAINTENANCE.md`,
   `DEPLOY-VENUS-ARMV7.md`, `VENUS-DEVICE-INTEGRATION.md`,
-  `victoriametrics-queries.md`
+  `redb-queries.md`

@@ -3,10 +3,9 @@
 //! Accepte le format texte Prometheus exposition (Prometheus remote write simplifié)
 //! et écrit chaque échantillon directement dans metrics-store (redb).
 //!
-//! Ce endpoint remplace l'endpoint VictoriaMetrics `/api/v1/import/prometheus`
-//! utilisé par energy-manager (monitoring.rs, lg_thinq.rs, rule_metrics.rs,
-//! water_heater/mod.rs). Après la suppression de VictoriaMetrics (Phase 5),
-//! ces écriture tombaient silencieusement dans le vide (port 8428 fermé).
+//! Cet endpoint est consommé par energy-manager (monitoring.rs, lg_thinq.rs,
+//! rule_metrics.rs, water_heater/mod.rs) qui poste ses métriques au format
+//! Prometheus vers daly-bms-server. Les échantillons sont écrits dans redb.
 //!
 //! ## Format accepté
 //!
@@ -16,7 +15,7 @@
 //! metric_name{label1="val1",label2="val2"} value [timestamp_ms]
 //! ```
 //!
-//! Le timestamp est en millisecondes depuis l'époque Unix (comme VictoriaMetrics).
+//! Le timestamp est en millisecondes depuis l'époque Unix.
 //! S'il est absent, on utilise l'horodatage courant.
 //! Les valeurs non-finies (NaN, Inf) sont ignorées silencieusement.
 //!

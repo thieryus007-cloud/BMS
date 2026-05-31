@@ -1,4 +1,4 @@
-/// Push rule-engine evaluation metrics to VictoriaMetrics (Prometheus format).
+/// Push rule-engine evaluation metrics to daly-bms-server / metrics-store redb (Prometheus format).
 /// Call this after each rule evaluation to track which rules fire and how often.
 use tracing::warn;
 

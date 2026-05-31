@@ -6,7 +6,7 @@
 //! - Top processus (par CPU%)
 //! - Métriques runtime tokio (polls, latences)
 //!
-//! Exporte vers VictoriaMetrics via POST /api/v1/import/prometheus.
+//! Exporte vers daly-bms-server (metrics-store redb) via POST /api/v1/import/prometheus.
 
 use std::time::{Duration, Instant};
 use tokio::process::Command;

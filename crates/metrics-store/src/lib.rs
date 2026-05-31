@@ -1,14 +1,13 @@
 //! `metrics-store` — backend TSDB pure-Rust basé sur [`redb`].
 //!
-//! Cette crate remplacera VictoriaMetrics pour stocker les métriques produites
-//! par `daly-bms-server` et `energy-manager`. Cf. `docs/plan_migration_vm_redb.md`
-//! pour la conception complète :
+//! Cette crate est la seule TSDB du système : elle stocke les métriques
+//! produites par `daly-bms-server` et `energy-manager`.
+//! Cf. `docs/architecture-redb.md` pour la conception complète :
 //!
-//! - §4 schéma de tables et encodage des clés
-//! - §5 API publique (`MetricsStore`, `Writer`, `Reader`)
-//! - §6 transpileur PromQL (à venir)
-//! - §9 tiering raw→hourly→daily (à venir)
-//! - §10 plan de bascule en 4 phases
+//! - schéma de tables et encodage des clés
+//! - API publique (`MetricsStore`, `Writer`, `Reader`)
+//! - shim PromQL
+//! - tiering raw→hourly→daily
 //!
 //! État Phase 0 :
 //! - 0.3 squelette crate ✅

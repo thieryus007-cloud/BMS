@@ -52,9 +52,8 @@ pub async fn run_monitor_agent(state: AppState) {
         prev_net_ts     = Instant::now();
 
         let snap = collect_snapshot(&state, net_rx_bps, net_tx_bps).await;
-        // Phase 5 cleanup : écriture VM retirée. Les métriques système sont
-        // écrites uniquement dans metrics-store via on_monitor_snapshot
-        // (et le hook dual-write côté state.rs).
+        // Les métriques système sont écrites dans metrics-store (redb) via
+        // on_monitor_snapshot (hook d'écriture côté state.rs).
         state.on_monitor_snapshot(snap).await;
     }
 }
@@ -416,7 +415,7 @@ pub async fn run_watchdog_agent(_state: AppState) {
 }
 
 // =============================================================================
-// Métriques système → VictoriaMetrics
+// Métriques système → metrics-store (redb)
 // =============================================================================
 
 // Phase 5 cleanup : la fonction build_monitor_vm_rows() qui sérialisait les

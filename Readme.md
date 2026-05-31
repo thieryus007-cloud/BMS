@@ -6,7 +6,7 @@ Remplacement total de la stack Python/FastAPI **et** des flows Node-RED par **Ru
 `energy-manager` + `dbus-mqtt-venus`).
 
 > Dashboard intégré **SSR Rust** (Askama + ECharts) — aucun npm.
-> Broker MQTT **natif systemd** (`mosquitto-broker.service`), VictoriaMetrics en binaire natif.
+> Broker MQTT **natif systemd** (`mosquitto-broker.service`), métriques stockées dans **redb** (crate `metrics-store`, embarqué dans daly-bms-server).
 > Déploiement ultra-léger : **un seul binaire statique** (~12–18 Mo). Aucun Docker requis.
 > Compatible **Windows** (testé) et **Linux/aarch64** (Raspberry Pi).
 
@@ -41,7 +41,7 @@ Remplacement total de la stack Python/FastAPI **et** des flows Node-RED par **Ru
 │                          Mosquitto :1883                            │
 │                                  │                                  │
 │                                │                                    │
-│                       VictoriaMetrics :8428                         │
+│              metrics-store (redb, embarqué dans :8080)              │
 └────────────────────────────────┬────────────────────────────────────┘
                                  │ MQTT (santuario/*/venus)
                                  ▼
@@ -71,7 +71,7 @@ Remplacement total de la stack Python/FastAPI **et** des flows Node-RED par **Ru
 ```
 
 > **Adresses BMS production** : `0x01` (BMS-360Ah) et `0x02` (BMS-320Ah)
-> **Validé en production** sur RPi5 au 17 mars 2026 — données confirmées dans VictoriaMetrics.
+> **Validé en production** sur RPi5 au 17 mars 2026 — données confirmées dans le metrics-store (redb).
 > **Pi5 = master** : tous les capteurs RS485 y sont connectés, le NanoPi reste dédié Venus OS / D-Bus.
 
 ### Flux MQTT par domaine (préfixe `santuario/`)
@@ -94,7 +94,7 @@ Remplacement total de la stack Python/FastAPI **et** des flows Node-RED par **Ru
 |---------|------|------|------|
 | **daly-bms-server** | Pi5 | 8080 | Serveur principal Rust : polling RS485, REST API, WebSocket, Dashboard SSR |
 | **Mosquitto** | Pi5 | 1883 (MQTT), 9001 (WS) | Broker MQTT — relaye toutes les données capteurs vers Venus OS et energy-manager |
-| **VictoriaMetrics** | Pi5 | 8428 | Base de données séries temporelles — stockage 30 jours de métriques |
+| **metrics-store (redb)** | Pi5 | fichier `/mnt/nvme/daly-bms/metrics.redb` | TSDB embarquée pure-Rust (crate `metrics-store`), servie via daly-bms-server:8080 (shim PromQL) — tiering raw 30 j / hourly 365 j / daily 5 ans |
 | **energy-manager** | Pi5 | 8081 | Automatisation — flows MQTT, alertes, webhooks (migré NanoPi → Pi5) |
 | **dbus-mqtt-venus** | NanoPi | — | Bridge MQTT → D-Bus Venus OS (Rust pur, zbus) — unique binaire sur NanoPi, enregistre tous les capteurs sur Venus |
 
@@ -119,10 +119,10 @@ BMS UART  ──► daly_bms_core::poll_loop()   ← mode hardware (RS485/USB)
        (3600 snaps/BMS)         ┌────────┬──────┴──────┬───────────┐
                                 ▼        ▼              ▼           ▼
                            MqttBridge              AlertEngine WebSocket
-                           (rumqttc)  (VictoriaMetrics2)  (rusqlite)  (/ws/bms/*)
+                           (rumqttc)  (metrics-store redb)  (rusqlite)  (/ws/bms/*)
                                │           │
                                ▼           ▼
-                          Mosquitto     VictoriaMetrics
+                          Mosquitto     metrics-store (redb, embarqué)
                                │           │
              dbus-mqtt-venus   
              com.victronenergy.battery.*
@@ -168,7 +168,7 @@ ATS CHINT RS485                   ──► daly-bms-server::ats (lecture + comm
 |---|---|---|---|
 | `rs485-bus` | — | ✅ Production | Lib : bus RS485 partagé (mutex tokio) + Modbus RTU pur Rust |
 | `daly-bms-core` | — | ✅ Production | Lib : protocole UART Daly, parsing trames, types (`BmsSnapshot`), polling |
-| `daly-bms-server` | Pi5 | ✅ Production | Binaire Pi5 : API Axum (REST + WebSocket) + Dashboard SSR + bridges (MQTT, VictoriaMetrics, AlertEngine SQLite) — gère BMS, ET112, ATS, irradiance, Tasmota, Shelly |
+| `daly-bms-server` | Pi5 | ✅ Production | Binaire Pi5 : API Axum (REST + WebSocket) + Dashboard SSR + bridges (MQTT, metrics-store redb, AlertEngine SQLite) — gère BMS, ET112, ATS, irradiance, Tasmota, Shelly |
 | `energy-manager` | Pi5 | ✅ Production | Binaire Pi5 (port 8081) — automatisation énergie via `rust-rule-engine` (charge_current, deye_command, inverter, irradiance, smartshunt, solar_power, water_heater, switch_ats, victron_keepalive) + clients HTTP Open-Meteo et LG ThinQ |
 | `dbus-mqtt-venus` | NanoPi (armv7) | ✅ Production | Binaire NanoPi : MQTT → D-Bus Venus OS (zbus pur Rust) — services `battery`, `pvinverter`, `heatpump`, `temperature`, `switch`, `meteo`, `platform` |
 
@@ -196,7 +196,7 @@ Daly-BMS-Rust/
 │   ├── daly-bms-server/          ← Serveur principal Pi5 (REST/WS + Dashboard SSR)
 │   │   ├── src/
 │   │   │   ├── main.rs, config.rs, state.rs, autodetect.rs,
-│   │   │   ├── monitor.rs, console.rs, vm_client.rs
+│   │   │   ├── monitor.rs, console.rs, redb_writes.rs
 │   │   │   ├── api/              ← Router Axum : bms, system, ats, et112,
 │   │   │   │                       chart, history, alerts, tasmota, shelly,
 │   │   │   │                       promql, console, health
@@ -238,7 +238,6 @@ Daly-BMS-Rust/
 ├── contrib/
 │   ├── daly-bms.service          ← Unité systemd daly-bms-server
 │   ├── energy-manager.service    ← Unité systemd energy-manager
-│   ├── victoriametrics-scrape.yml← Config scrape Prometheus pour VM
 │   ├── install-systemd.sh        ← Script d'installation systemd
 │   └── uninstall-systemd.sh      ← Script de désinstallation
 ├── docs/                         ← Guides détaillés (energy-manager, ATS, Venus, etc.)
@@ -256,13 +255,13 @@ Daly-BMS-Rust/
 
 | Service                    | RAM minimale | RAM confortable |
 |----------------------------|-------------|-----------------|
-| daly-bms-server (Rust)     | ~25 MB      | ~50 MB          |
+| daly-bms-server (Rust, redb embarqué) | ~25 MB | ~50 MB     |
 | energy-manager (Rust)      | ~30 MB      | ~100 MB (LimitMemoryMax=100M) |
 | mosquitto-broker (natif)   | ~8 MB       | ~15 MB          |
-| VictoriaMetrics 2.x (Go)   | ~150 MB     | ~350 MB         |
+| metrics-store (redb)       | embarqué dans daly-bms-server | ~0 Mo RSS additionnel (gain ~135 Mo vs ex-VictoriaMetrics) |
 | OS Raspberry Pi OS Lite    | ~150 MB     | ~200 MB         |
 | Marge tampon / cache       | ~200 MB     | ~400 MB         |
-| **TOTAL**                  | **~563 MB** | **~1115 MB**    |
+| **TOTAL**                  | **~413 MB** | **~765 MB**     |
 
 #### NanoPi Neo3 (Venus OS — services Rust statiques)
 
@@ -471,9 +470,12 @@ sudo journalctl --vacuum-time=7d
 sudo journalctl --vacuum-size=100M
 ```
 
-### Rétention des données VictoriaMetrics
+### Rétention des données (metrics-store redb)
 
-Par défaut : **30 jours** (720h), configurable via le flag de démarrage `--retentionPeriod` de VictoriaMetrics.
+Le metrics-store applique un **tiering automatique** : données brutes (raw) conservées **30 jours**,
+agrégats horaires (hourly) **365 jours**, agrégats journaliers (daily) **5 ans**. La maintenance de
+tiering (raw→hourly→daily) tourne 4×/jour dans daly-bms-server. Aucun flag externe : la base redb est
+self-contained.
 
 ### Nettoyage complet (reset usine)
 
@@ -481,16 +483,16 @@ Par défaut : **30 jours** (720h), configurable via le flag de démarrage `--ret
 # Arrêter tout
 sudo systemctl stop daly-bms energy-manager mosquitto-broker
 
-# Supprimer données VictoriaMetrics et broker (DONNÉES PERDUES)
-sudo rm -rf /var/lib/victoria-metrics-data /var/lib/mosquitto/mosquitto.db
+# Supprimer la base metrics-store (redb) et le broker (DONNÉES PERDUES)
+sudo rm -rf /mnt/nvme/daly-bms/metrics.redb /var/lib/mosquitto/mosquitto.db
 
 # Redémarrer
 sudo systemctl start mosquitto-broker energy-manager daly-bms
 ```
 
-> **Note RPi/eMMC** : Sur Raspberry Pi avec carte SD ou eMMC, surveiller l'espace disque.
-> VictoriaMetrics peut écrire ~50–200 Mo/jour selon la fréquence de polling et le nombre de BMS.
-> La rétention 30j = environ 1,5–6 Go max.
+> **Note RPi/eMMC** : Sur Raspberry Pi avec carte SD ou eMMC (ou NVMe), surveiller l'espace disque.
+> La base redb croît selon la fréquence de polling et le nombre de séries : prévoir ~200–400 Mo à 30 j,
+> et au maximum ~2 Go à l'horizon 5 ans grâce au tiering (raw/hourly/daily).
 
 ---
 
@@ -580,17 +582,20 @@ sudo systemctl restart mosquitto-broker
 
 ---
 
-## Configuration VictoriaMetrics
+## Accès aux métriques (metrics-store redb)
 
-### Accès initial
+Le metrics-store (redb) est **embarqué dans daly-bms-server** : aucun service ni port dédié. Les
+métriques s'interrogent via l'API PromQL compat exposée par daly-bms-server sur le port 8080.
 
-| Service | URL | Identifiants par défaut |
-|---------|-----|------------------------|
-| VictoriaMetrics | `http://RPi5:8428` | admin / voir `.env` |
+### Points d'accès
+
+| Accès | URL | Notes |
+|-------|-----|-------|
+| API PromQL (compat Grafana) | `http://RPi5:8080/api/v1/query`, `/api/v1/query_range`, `/api/v1/labels` | Shim PromQL servi par daly-bms-server |
+| Healthcheck metrics-store | `http://RPi5:8080/-/healthy` | État du backend redb |
+| Dashboard custom interne | `http://RPi5:8080/dashboard/history` | Visualisation native (SSR + ECharts), sans dépendance externe |
+| Grafana | `http://RPi5:3000` | Datasource « Daly Metrics (redb) » (UID `daly-metrics`) → `http://127.0.0.1:8080` |
 | energy-manager | `http://RPi5:8081` | aucun (à sécuriser si exposé) |
-
-> **Après un `make reset`** : utiliser l'URL de base sans chemin (ex. `http://192.168.1.141:8428`).
-> L'ancien org ID dans l'URL bookmarkée devient invalide — se reconnecter depuis la page d'accueil.
 
 
 ### Dashboard (in progress)
@@ -614,7 +619,7 @@ Il affiche pour chaque BMS :
 - [x] Protocole UART + checksum + tests unitaires
 - [x] API Axum (toutes les routes définies)
 - [x] AppState + ring buffer + broadcast WebSocket
-- [x] Bridges (MQTT, VictoriaMetrics, AlertEngine)
+- [x] Bridges (MQTT, metrics-store redb, AlertEngine)
 
 ### Phase 1 — Infrastructure & Intégration ✅
 
@@ -627,9 +632,9 @@ Il affiche pour chaque BMS :
 
 ### Phase 2 — Production RPi5 ✅
 
-- [x] RPi5 CM opérationnel — données BMS 0x01 et 0x02 confirmées dans VictoriaMetrics
+- [x] RPi5 CM opérationnel — données BMS 0x01 et 0x02 confirmées dans le metrics-store (redb)
 - [x] Correction adresses BMS (0x28/0x29 → 0x01/0x02)
-- [x] Rotation logs systemd configurée + rétention VictoriaMetrics 30j
+- [x] Rotation logs systemd configurée + rétention metrics-store (redb) raw 30j / hourly 365j / daily 5 ans
 - [ ] Validation commandes d'écriture (MOS, SOC, reset) sur hardware réel
 - [ ] Tests intégration 24h stabilité
 

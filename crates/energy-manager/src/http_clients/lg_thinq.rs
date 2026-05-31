@@ -231,7 +231,7 @@ pub async fn spawn_poller(
                     }
                     bus2.emit_live(LiveEvent::new("water_heater", &snap));
 
-                    // Write 3 LG ThinQ metrics to VictoriaMetrics
+                    // Write 3 LG ThinQ metrics to daly-bms-server (metrics-store redb)
                     let ts_ms = now.timestamp_millis();
                     let mut lines = Vec::new();
                     lines.push(format!("wh_mode{{}} {} {}", snap.mode.to_venus_state(), ts_ms));

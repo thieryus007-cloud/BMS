@@ -343,7 +343,8 @@ pub struct WaterHeaterConfig {
     /// Minimum battery SOC to allow HEAT_PUMP mode (%)
     #[serde(default = "default_soc_min_pct")]
     pub soc_min_pct: f64,
-    /// VictoriaMetrics write URL for water heater metrics
+    /// URL d'écriture des métriques chauffe-eau (daly-bms-server → redb,
+    /// endpoint POST /api/v1/import/prometheus). Défaut : http://127.0.0.1:8080
     #[serde(default = "default_wh_vm_url")]
     pub vm_url: String,
 }

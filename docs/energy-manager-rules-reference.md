@@ -235,7 +235,7 @@ Décision (salience 200) :
 **Sorties** :
 - API LG ThinQ POST `/control` (mode + temp)
 - MQTT retained `santuario/heatpump/1/venus` (keepalive)
-- VictoriaMetrics metrics (toutes les 5min)
+- Métriques redb (metrics-store, toutes les 5min)
 - WebSocket live "water_heater_venus"
 
 Config : irradiance_min_wm2=300, mode_change_min_secs=900, heat_pump_target_c=60, vacation_target_c=45, temp_set_delay_secs=15
@@ -469,7 +469,7 @@ Les valeurs `ats_position` et `ats_state` restent à leur défaut (0) dans Energ
 - heat_pump_target_c (60), vacation_target_c (45)
 - temp_set_delay_secs (15)
 - keepalive_secs (25)
-- vm_url (VictoriaMetrics)
+- vm_url (URL daly-bms-server → metrics-store redb, défaut http://127.0.0.1:8080)
 
 **`[energy_manager.open_meteo]`** :
 - enabled (true)

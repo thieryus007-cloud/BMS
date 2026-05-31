@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Monitoring PV solaire (Victron + ET112) avec comparaison multi-ann\u00e9es \u2014 donn\u00e9es VictoriaMetrics",
+  "description": "Monitoring PV solaire (Victron + ET112) avec comparaison multi-ann\u00e9es \u2014 donn\u00e9es redb",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -1141,7 +1141,7 @@
     "pv",
     "solaire",
     "victron",
-    "victoriametrics"
+    "redb"
   ],
   "templating": {
     "list": [

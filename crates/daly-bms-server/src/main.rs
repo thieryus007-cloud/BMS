@@ -289,7 +289,7 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    // ── metrics-store redb (dual-write Phase 1, `plan_migration_vm_redb.md`) ──
+    // ── metrics-store redb (seule TSDB, cf. `docs/architecture-redb.md`) ──
     let metrics_store = if config.metrics_store.enabled {
         let opts = metrics_store::Options {
             cache_bytes: config.metrics_store.cache_mb * 1024 * 1024,
@@ -303,7 +303,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(s) => {
                 info!(
                     db_path = %config.metrics_store.db_path,
-                    "metrics-store ouvert (dual-write activé)"
+                    "metrics-store ouvert (écriture redb activée)"
                 );
                 if config.metrics_store.maintenance_interval_hours > 0 {
                     let policy = metrics_store::TierPolicy {
@@ -323,7 +323,7 @@ async fn main() -> anyhow::Result<()> {
                 Some(s)
             }
             Err(e) => {
-                warn!("metrics-store ouverture échouée : {e} — dual-write désactivé");
+                warn!("metrics-store ouverture échouée : {e} — écriture redb désactivée");
                 None
             }
         }
@@ -332,8 +332,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // ── État partagé ───────────────────────────────────────────────────────────
-    // Phase 5 cleanup : VictoriaMetrics retiré. metrics-store est la seule
-    // TSDB (lecture + écriture via le Writer du shim).
+    // metrics-store (redb) est la seule TSDB (lecture + écriture via le Writer du shim).
     let metrics_store_arc = metrics_store.as_ref().map(|s| std::sync::Arc::new(s.clone()));
     let state = AppState::new(
         config.clone(),

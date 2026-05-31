@@ -113,4 +113,4 @@ Total : 6 séries temporelles
 
 Conclusion:.  
 Nombre mini/maximal de séries temporelles : .  
-# ~200/240 (en incluant des métriques supplémentaires ou des tags supplémentaires dans VictoriaMetrics).
+# ~200/240 (en incluant des métriques supplémentaires ou des labels supplémentaires dans le metrics-store redb).
