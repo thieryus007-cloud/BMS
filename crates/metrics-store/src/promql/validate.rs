@@ -1,9 +1,17 @@
 //! Validation : walk de l'AST. Rejette tout ce qui n'est pas dans le
-//! sous-ensemble PromQL audité §6.5.
+//! sous-ensemble PromQL supporté par l'évaluateur (`exec.rs`).
+//!
+//! Couverture (cf. `docs/Evolution-compliance-PromQL.md`) : sélecteurs avec
+//! `offset` **et** `@` (modificateurs temporels), arithmétique, comparaisons,
+//! agrégations (`sum/min/max/avg/count/group/stddev/stdvar` + paramétrées
+//! `topk/bottomk/quantile/count_values`), opérateurs ensemblistes
+//! (`and/or/unless`), matching vectoriel (`on/ignoring/group_left/group_right`),
+//! fonctions à fenêtre / instantanées / labels, et **sous-requêtes**
+//! (`expr[range:step]`).
 
 use promql_parser::parser::{
     AggregateExpr, BinaryExpr, Call, Expr, MatrixSelector, ParenExpr, SubqueryExpr, UnaryExpr,
-    VectorMatchCardinality, VectorSelector,
+    VectorSelector,
 };
 
 use super::error::PromQlError;
@@ -41,17 +49,24 @@ pub const SUPPORTED_INSTANT_FUNCS: &[&str] = &[
 pub const SUPPORTED_LABEL_FUNCS: &[&str] = &["label_replace", "label_join"];
 
 /// Opérateurs d'agrégation instant supportés (sans paramètre).
-pub const SUPPORTED_AGGREGATORS: &[&str] = &["sum", "max", "min", "avg", "count"];
+pub const SUPPORTED_AGGREGATORS: &[&str] =
+    &["sum", "max", "min", "avg", "count", "group", "stddev", "stdvar"];
 
-/// Agrégateurs paramétrés supportés (`op(k, vec)`).
-pub const PARAMETERIZED_AGGREGATORS: &[&str] = &["topk", "bottomk"];
+/// Agrégateurs paramétrés par un **scalaire** (`op(k, vec)` / `op(φ, vec)`).
+pub const SCALAR_PARAM_AGGREGATORS: &[&str] = &["topk", "bottomk", "quantile"];
 
-/// Opérateurs binaires arithmétiques supportés (vec×scalar et vec×vec
-/// aligné — §6.5).
-pub const SUPPORTED_BINOPS: &[&str] = &["+", "-", "*", "/"];
+/// Agrégateurs paramétrés par une **chaîne** (`count_values("label", vec)`).
+pub const STRING_PARAM_AGGREGATORS: &[&str] = &["count_values"];
+
+/// Opérateurs binaires arithmétiques supportés (vec×scalar et vec×vec avec
+/// matching `on`/`ignoring` et cardinalité `group_left`/`group_right`).
+pub const SUPPORTED_BINOPS: &[&str] = &["+", "-", "*", "/", "%", "^"];
 
 /// Opérateurs de comparaison supportés (filtre, ou 0/1 avec `bool`).
 pub const SUPPORTED_CMP_OPS: &[&str] = &["==", "!=", ">", "<", ">=", "<="];
+
+/// Opérateurs ensemblistes (logiques) supportés.
+pub const SUPPORTED_SET_OPS: &[&str] = &["and", "or", "unless"];
 
 pub fn validate(expr: &Expr) -> Result<(), PromQlError> {
     match expr {
@@ -61,10 +76,9 @@ pub fn validate(expr: &Expr) -> Result<(), PromQlError> {
         Expr::MatrixSelector(MatrixSelector { vs, .. }) => validate_vector_selector(vs),
         Expr::Paren(ParenExpr { expr }) => validate(expr),
         Expr::Unary(UnaryExpr { expr }) => validate(expr),
-        Expr::Subquery(SubqueryExpr { .. }) => unsupported(
-            "subquery (e.g. [Xh:Ym]) — réécrire la requête en deux \
-             expressions distinctes côté client (cf. plan §6.5)",
-        ),
+        // Sous-requête : on valide l'expression interne. La résolution
+        // (range:step) est gérée par l'évaluateur (`exec.rs::eval_subquery`).
+        Expr::Subquery(SubqueryExpr { expr, .. }) => validate(expr),
         Expr::Extension(_) => unsupported("extension expression"),
         Expr::Aggregate(a) => validate_aggregate(a),
         Expr::Binary(b) => validate_binary(b),
@@ -72,34 +86,43 @@ pub fn validate(expr: &Expr) -> Result<(), PromQlError> {
     }
 }
 
-fn validate_vector_selector(vs: &VectorSelector) -> Result<(), PromQlError> {
-    // `offset` est supporté par l'évaluateur (décalage de la fenêtre temporelle,
-    // cf. exec.rs::offset_ms). Le modificateur `@` reste non supporté.
-    if vs.at.is_some() {
-        return unsupported("@ modifier");
-    }
+fn validate_vector_selector(_vs: &VectorSelector) -> Result<(), PromQlError> {
+    // `offset` et `@` (modificateurs temporels) sont tous deux supportés par
+    // l'évaluateur (cf. exec.rs::offset_ms / resolve_at). Rien à rejeter ici.
     Ok(())
 }
 
 fn validate_aggregate(a: &AggregateExpr) -> Result<(), PromQlError> {
     let op_str = a.op.to_string();
     let is_plain = SUPPORTED_AGGREGATORS.contains(&op_str.as_str());
-    let is_param = PARAMETERIZED_AGGREGATORS.contains(&op_str.as_str());
-    if !is_plain && !is_param {
+    let is_scalar_param = SCALAR_PARAM_AGGREGATORS.contains(&op_str.as_str());
+    let is_string_param = STRING_PARAM_AGGREGATORS.contains(&op_str.as_str());
+    if !is_plain && !is_scalar_param && !is_string_param {
         return unsupported(&format!("aggregator: {op_str}"));
-    }
-    // `topk`/`bottomk` exigent un paramètre `k` ; les autres (`quantile`, …)
-    // ne sont pas supportés et les agrégateurs simples n'en acceptent pas.
-    if is_param && a.param.is_none() {
-        return unsupported(&format!("aggregator {op_str} requires a parameter"));
     }
     if is_plain && a.param.is_some() {
         return unsupported(&format!("parameterized aggregator: {op_str}"));
     }
-    if let Some(p) = &a.param {
-        validate(p)?;
+    if (is_scalar_param || is_string_param) && a.param.is_none() {
+        return unsupported(&format!("aggregator {op_str} requires a parameter"));
     }
-    // Le groupement `by`/`without` est supporté par l'évaluateur (Phase 2).
+    if let Some(p) = &a.param {
+        if is_string_param {
+            // `count_values("label", vec)` : le paramètre doit être une chaîne.
+            if !matches!(p.as_ref(), Expr::StringLiteral(_)) {
+                return unsupported(&format!(
+                    "{op_str}: le paramètre doit être un littéral chaîne"
+                ));
+            }
+        } else {
+            // topk/bottomk/quantile : paramètre scalaire (pas une chaîne).
+            if matches!(p.as_ref(), Expr::StringLiteral(_)) {
+                return unsupported(&format!("{op_str}: le paramètre doit être scalaire"));
+            }
+            validate(p)?;
+        }
+    }
+    // Le groupement `by`/`without` est supporté par l'évaluateur.
     validate(&a.expr)
 }
 
@@ -107,25 +130,18 @@ fn validate_binary(b: &BinaryExpr) -> Result<(), PromQlError> {
     let op_str = b.op.to_string();
     let is_arith = SUPPORTED_BINOPS.contains(&op_str.as_str());
     let is_cmp = SUPPORTED_CMP_OPS.contains(&op_str.as_str());
-    if !is_arith && !is_cmp {
+    let is_set = SUPPORTED_SET_OPS.contains(&op_str.as_str());
+    if !is_arith && !is_cmp && !is_set {
         return unsupported(&format!("binary operator: {op_str}"));
     }
     if let Some(m) = &b.modifier {
-        // `bool` n'est valide que sur une comparaison (filtre → 0/1). Sur un
-        // opérateur arithmétique il reste rejeté.
+        // `bool` n'est valide que sur une comparaison (filtre → 0/1).
         if m.return_bool && !is_cmp {
-            return unsupported("bool modifier");
-        }
-        // L'évaluateur n'implémente que l'alignement exact tous-labels
-        // (`OneToOne` sans `on`/`ignoring`). Un matching non trivial
-        // (`on(...)`, `ignoring(...)`, `group_left`, `group_right`) serait
-        // silencieusement ignoré → on le rejette.
-        if m.matching.is_some() || !matches!(m.card, VectorMatchCardinality::OneToOne) {
-            return unsupported(
-                "vector matching (on/ignoring/group_left/group_right) — non supporté",
-            );
+            return unsupported("bool modifier (réservé aux comparaisons)");
         }
     }
+    // Matching vectoriel (`on`/`ignoring`/`group_left`/`group_right`) est
+    // désormais supporté par l'évaluateur (`exec.rs::vector_binary_op`).
     validate(&b.lhs)?;
     validate(&b.rhs)?;
     Ok(())
@@ -211,6 +227,9 @@ mod tests {
         ok("max(bms_cell_delta_mv)");
         ok("sum(et112_power_w)");
         ok("avg(bms_v)");
+        ok("group(bms_status)");
+        ok("stddev(bms_v)");
+        ok("stdvar(bms_v)");
     }
 
     #[test]
@@ -253,11 +272,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_subquery() {
-        ko(
-            r#"avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])"#,
-            "subquery",
-        );
+    fn accepts_subquery() {
+        // Sous-requêtes désormais supportées (cf. exec.rs::eval_subquery).
+        ok(r#"avg_over_time(clamp_min(venus_shunt_current_a,0)[24h:1m])"#);
+        ok("avg_over_time(rate(bms_energy_wh[5m])[1h:5m])");
+        ok("max_over_time(rate(cnt[5m])[1h:1m])");
     }
 
     #[test]
@@ -277,14 +296,15 @@ mod tests {
         ok("foo != 5");
         ok("foo > bool 5"); // `bool` se place après l'opérateur en PromQL
         ok("foo > bar"); // vec/vec aligné
-        // NB : `bool` sur un opérateur arithmétique (`foo + 5 bool`) est
-        // rejeté directement par le parser (ParseError), pas par la
-        // validation — la garde `return_bool && !is_cmp` reste défensive.
     }
 
     #[test]
-    fn rejects_set_operator() {
-        ko("foo and bar", "binary operator: and");
+    fn accepts_set_operators() {
+        ok("bms_soc < 20 and bms_temp_c > 45");
+        ok("foo or bar");
+        ok("bms_status unless mppt_status");
+        ok("bms_status unless on(bms_id) mppt_status");
+        ok("foo and on(instance) bar");
     }
 
     #[test]
@@ -294,11 +314,15 @@ mod tests {
         ok("rate(foo[5m] offset 1h)");
         ok("max_over_time(solar_yield_kwh[1d] offset 365d)");
         ok("avg_over_time(bms_v[1h]) - avg_over_time(bms_v[1h] offset 24h)");
+        ok(r#"bms_soc{bms_id="1"} - bms_soc{bms_id="1"} offset 24h"#);
     }
 
     #[test]
-    fn rejects_at_modifier() {
-        ko("foo @ 1620000000", "@ modifier");
+    fn accepts_at_modifier() {
+        ok("foo @ 1620000000");
+        ok("foo @ start()");
+        ok("foo @ end()");
+        ok("rate(foo[5m] @ 1620000000)");
     }
 
     #[test]
@@ -309,9 +333,20 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_parameterized_aggregator() {
-        ko("quantile(0.9, bms_v)", "aggregator: quantile");
-        ko("count_values(\"v\", bms_v)", "aggregator: count_values");
+    fn accepts_quantile_and_count_values() {
+        ok("quantile(0.95, bms_cell_voltage_v)");
+        ok("quantile(0.9, bms_v) by (bms_id)");
+        ok(r#"count_values("version", build_info)"#);
+        ok(r#"count_values("le", bms_v) by (bms_id)"#);
+    }
+
+    #[test]
+    fn rejects_misparameterized_aggregators() {
+        // count_values exige une chaîne, quantile un scalaire. Ces erreurs de
+        // type de paramètre sont détectées par le parser lui-même (ParseError)
+        // avant même la validation — on vérifie simplement le rejet.
+        assert!(parse_and_validate(r#"count_values(5, bms_v)"#).is_err());
+        assert!(parse_and_validate(r#"quantile("x", bms_v)"#).is_err());
     }
 
     #[test]
@@ -323,8 +358,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_vector_matching() {
-        ko("a / on(x) b", "vector matching");
-        ko("a * on(x) group_left b", "vector matching");
+    fn accepts_vector_matching() {
+        ok("mppt_power_w / on(string_id) pv_panel_theoretical_w");
+        ok("a * on(x) group_left b");
+        ok("a * on(x) group_left(capacity_ah) b");
+        ok("a / ignoring(mppt_id) b");
+        ok("bms_power_w * on(bms_id) group_left(capacity_ah) bms_capacity_ah");
     }
 }
