@@ -94,7 +94,7 @@ Pi5 (192.168.1.141, pi5compute)
     └── publication MQTT → consommée par daly-bms-server (writes metrics-store)
   grafana-server (systemd, :3000)
     ├── Datasource : "Daly Metrics (redb)" → http://127.0.0.1:8080 (UID: daly-metrics)
-    ├── 15 dashboards provisionés dans /var/lib/grafana/dashboards/
+    ├── 20 dashboards provisionés dans /var/lib/grafana/dashboards/
     └── Données NVMe optionnel (/mnt/nvme/grafana)
 
 NanoPi (192.168.1.120, root)
@@ -155,7 +155,9 @@ crates/dbus-mqtt-venus/src/             ← bridge MQTT→D-Bus NanoPi
 contrib/daly-bms.service                ← unité systemd daly-bms-server
 contrib/energy-manager.service          ← unité systemd energy-manager
 contrib/grafana/                        ← provisioning Grafana complet
-  dashboards/01-bms.json … 15-energy-manager.json  ← 15 dashboards JSON
+  dashboards/01-bms.json … 20-alertes-avancees.json ← 20 dashboards JSON
+    (17→20 = dashboards évolués PromQL avancé : flotte/SLO, rendement PV,
+     bilan énergie J/J-1, alertes multi-critères — cf. docs/Evolution-compliance-PromQL.md §9)
   provisioning/datasources/daly-metrics.yaml        ← datasource PromQL → :8080
   provisioning/dashboards/daly-bms.yaml             ← provider → /var/lib/grafana/dashboards
 scripts/setup-grafana.sh                ← installation Grafana (première fois)
@@ -354,4 +356,4 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Debug MQTT | `MQTT_DEBUGGING_GUIDE.md` |
 | Debug onduleur / SmartShunt | `DEBUG_ONDULEUR_SMARTSHUNT.md` |
 | Guide energy-manager — modifier/ajouter/retirer une fonctionnalité | `docs/energy-manager-guide.md` |
-| Grafana — 15 dashboards (liste, métriques, provisioning) | `contrib/grafana/` + `scripts/setup-grafana.sh` |
+| Grafana — 20 dashboards (liste, métriques, provisioning) | `contrib/grafana/` + `scripts/setup-grafana.sh` |
