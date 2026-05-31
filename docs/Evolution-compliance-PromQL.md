@@ -330,10 +330,14 @@ increase(mppt_energy_wh[24h])
 | **Alerte surcharge** | `bms_soc < 20 and bms_temp > 45` | ❌ |
 | **Rendement par string** | `mppt_power / on(string_id) theoretical` | ❌ |
 | **C-rate global** | `sum(bms_current) / on(bms_id) group_left capacity` | ❌ |
-| **Santé cellule (SLO)** | `quantile(0.95, bms_cell_v)` | ❌ |
-| **Prédiction SOC lissée** | `predict_linear(avg_over_time(...)[6h:10m], ...)` | ❌ |
-| **Détection orphans** | `bms_status unless mppt_status` | ❌ |
-| **Compteur fiabilisé** | `increase(mppt_energy_wh[24h])` sur série clairsemée | ⚠️ Faux positif |
+| **Santé cellule (SLO)** | `quantile(0.95, bms_cell_v)` | ✅ |
+| **Prédiction SOC lissée** | `predict_linear(avg_over_time(...)[6h:10m], ...)` | ✅ |
+| **Détection orphans** | `bms_status unless mppt_status` | ✅ |
+| **Compteur fiabilisé** | `increase(mppt_energy_wh[24h])` sur série clairsemée | ✅ corrigé |
+
+> **Mise à jour** : toutes les lignes ci-dessus sont désormais **✅** (cf. §0).
+> Les statuts `❌` historiques sont conservés dans le corps de l'audit (§3–§7)
+> comme trace de l'analyse initiale.
 
 ---
 
@@ -350,3 +354,101 @@ Pour un ESS en production, je suggère de **prioriser** l'implémentation dans c
 Les subqueries et `group_left` peuvent attendre si vous pré-calculez les métriques dérivées côté `energy-manager` ou `daly-bms-server`.
 
 Les écarts principaux concernent les opérations de **jointure vectorielle avancée** et les **modificateurs temporels**, qui sont volontairement hors scope pour ce système. Le point le plus critique à corriger est le comportement de `rate`/`increase` sur un seul point, qui peut induire des alertes silencieuses fausses.
+
+---
+
+# 9. Dashboards Grafana évolués — propositions (exploitation des nouvelles capacités)
+
+> Maintenant que le moteur couvre `and/or/unless`, `on/ignoring/group_left`,
+> `quantile/group/count_values/stddev`, `@`, `offset` et les sous-requêtes, on
+> peut bâtir des tableaux de bord **impossibles auparavant**. Cette section
+> propose **4 nouveaux dashboards** + **5 évolutions** des dashboards existants.
+>
+> **Contraintes de provisioning** (cf. CLAUDE.md règle 14) : format provisioning
+> (pas d'export), **pas** de `__inputs`/`__requires`, datasource UID =
+> `daly-metrics`. Tout nouveau fichier JSON dans `contrib/grafana/dashboards/`
+> est validé automatiquement par le test golden
+> `provisioned_grafana_dashboards_coverage`.
+> Labels réels : `bms_*{bms_id="0x01"|"0x02"}`, `et112_*{address="0x07|0x08|0x09"}`.
+
+## 9.1 Nouveaux dashboards proposés
+
+### 🆕 `17-flotte-sante.json` — « Santé de flotte & SLO batterie »
+Vue consolidée multi-BMS orientée **service-level objectives**, pensée pour le
+coup d'œil quotidien et l'alerting.
+
+| Panel | Type | Requête PromQL | Apport (nouveauté) |
+|---|---|---|---|
+| BMS actifs | stat | `count(group(bms_soc) by (bms_id))` | `group` = présence binaire |
+| SOC P05 / P50 / P95 du parc | timeseries | `quantile(0.05, bms_soc)`, `quantile(0.5, bms_soc)`, `quantile(0.95, bms_soc)` | percentile **spatial** (SLO) |
+| Tension cellule — bande P05↔P95 | timeseries | `quantile(0.95, bms_cell_voltage)` et `quantile(0.05, bms_cell_voltage)` | dispersion parc, alerte 2.8–4.2 V |
+| Dispersion cellules / pack | timeseries | `stddev by (bms_id)(bms_cell_voltage)` | `stddev` (santé équilibrage) |
+| Distribution SOH | bar gauge | `count_values("soh", round(bms_soh, 5))` | histogramme d'état |
+| C-rate normalisé / pack | gauge | `abs(bms_current) / on(bms_id) bms_reported_capacity_ah` | `on()` = courant ÷ capacité |
+| Pire cellule du parc | table | `bottomk(3, bms_min_cell_voltage)` | top-k (déjà supporté) |
+
+### 🆕 `18-rendement-pv.json` — « Rendements & pertes PV »
+Normalisations et ratios par `on()`/`group_left`, comparaisons J vs J-1.
+
+| Panel | Requête PromQL | Apport |
+|---|---|---|
+| Production solaire totale | `sum(venus_mppt_power_w) + sum(pvinv_power_w)` | agrégat (déjà OK) |
+| Rendement onduleur AC/DC | `pvinv_power_w / on() sum(dc_pv_power_w)` | ratio par matching |
+| Auto-conso (PV utilisé / produit) | `(1 - (sum(et112_power_w{address="0x09"} > 0) / on() sum(venus_mppt_power_w))) * 100` | `on()` + comparaison filtre |
+| Production lissée 1 h | `avg_over_time(venus_mppt_power_w[1h:5m])` | **sous-requête** (anti-bruit) |
+| Pic de puissance glissant 24 h | `max_over_time(venus_mppt_power_w[24h:5m])` | sous-requête |
+| Yield aujourd'hui vs hier | `sum(venus_mppt_yield_today_kwh) - sum(venus_mppt_yield_today_kwh offset 24h)` | `offset` (tendance) |
+
+### 🆕 `19-bilan-energie.json` — « Bilan énergétique J / J-1 / 7 j »
+Comparaisons temporelles via `offset` + `@`, fiabilisées par le fix P0.
+
+| Panel | Requête PromQL | Apport |
+|---|---|---|
+| Import réseau aujourd'hui | `increase(et112_energy_import_wh{address="0x09"}[24h]) / 1000` | P0 (séries clairsemées) |
+| Import : aujourd'hui vs hier | `increase(et112_energy_import_wh{address="0x09"}[24h]) - increase(et112_energy_import_wh{address="0x09"}[24h] offset 24h)` | `offset` |
+| Export / Import (ratio jour) | `increase(et112_energy_export_wh{address="0x09"}[24h]) / on(address) increase(et112_energy_import_wh{address="0x09"}[24h])` | `on(address)` |
+| SOC à minuit (point-in-time) | `venus_shunt_soc_percent @ start()` | modifier `@` |
+| Dérive SOC sur 24 h | `venus_shunt_soc_percent - venus_shunt_soc_percent offset 24h` | `offset` |
+| Décharge cumulée 7 j | `sum(increase(venus_shunt_energy_out_kwh[7d]))` | tiering hourly |
+
+### 🆕 `20-alertes-avancees.json` — « Centre d'alertes multi-critères »
+Dashboard d'alerting natif PromQL (chaque panneau = une règle Grafana Alert
+exprimable en **une seule** requête grâce à `and`/`or`/`unless`).
+
+| Alerte | Requête PromQL (déclenche si résultat non vide) | Apport |
+|---|---|---|
+| Surcharge thermique | `bms_soc < 20 and bms_temp_max > 45` | `and` multi-critères |
+| Déséquilibre + cellule basse | `bms_cell_delta_mv > 50 and bms_min_cell_voltage < 3.0` | `and` |
+| Sur-courant prolongé | `abs(bms_current) / on(bms_id) bms_reported_capacity_ah > 0.5` | `on()` (C-rate > 0.5C) |
+| BMS muet (heartbeat) | `absent(bms_soc{bms_id="0x01"}) or absent(bms_soc{bms_id="0x02"})` | `absent` + `or` (orphans) |
+| Onduleur OFF mais PV présent | `(venus_inverter_state == 0) and on() (sum(venus_mppt_power_w) > 100)` | `and` + comparaison |
+| Toute alarme BMS active | `bms_alarm_high_temp > 0 or bms_alarm_low_voltage > 0 or bms_alarm_high_voltage > 0` | `or` |
+
+## 9.2 Évolutions de dashboards existants
+
+| Dashboard | Ajout proposé | Requête PromQL | Nouveauté |
+|---|---|---|---|
+| `01-bms` | Rangée « SLO & dispersion » | `quantile(0.95, bms_cell_voltage)`, `stddev by (bms_id)(bms_cell_voltage)` | `quantile`, `stddev` |
+| `03-mppt` | Panneau « Rendement par instance » | `venus_mppt_power_w / on() venus_mppt_max_power_today_w` | `on()` |
+| `04-smartshunt` | « Prédiction SOC 2 h (lissée) » | `predict_linear(avg_over_time(venus_shunt_soc_percent[10m])[2h:10m], 7200)` | sous-requête + predict_linear |
+| `08-solaire` | « Production vs hier » (overlay) | `sum(venus_mppt_power_w)` **et** `sum(venus_mppt_power_w offset 24h)` | `offset` |
+| `15-energy-manager` | « CPU lissé 5 min » | `avg_over_time(em_cpu_percent[5m:30s])` | sous-requête (anti-pic) |
+
+## 9.3 Plan de mise en œuvre (sans régression)
+
+1. **Créer les JSON** dans `contrib/grafana/dashboards/` au format provisioning
+   (cloner la structure d'un dashboard existant : `datasource.uid="daly-metrics"`,
+   pas de `__inputs`/`__requires`). Un par fichier `17-…` → `20-…`.
+2. **Garde CI automatique** : `cargo test -p metrics-store
+   provisioned_grafana_dashboards_coverage` valide que **chaque** `expr` est
+   acceptée par le moteur → aucun panneau cassé ne peut passer inaperçu.
+3. **Déploiement** : `bash scripts/deploy-pi5.sh` copie les JSON vers
+   `/var/lib/grafana/dashboards/` et redémarre Grafana (cf. CLAUDE.md §0, 3g).
+4. **Alerting** : pour `20-alertes-avancees`, convertir les panneaux en règles
+   Grafana Alert (condition « count() > 0 » sur la requête) — chaque alerte tient
+   en une requête PromQL unique, sans transformation côté Grafana.
+
+> **Note** : ces requêtes ont été validées contre le moteur (mêmes constructions
+> que les tests d'intégration `promql_set_ops_and_vector_matching`,
+> `promql_new_aggregators`, `promql_at_modifier_and_subquery`). Les noms de
+> métriques/labels proviennent des dashboards provisionnés actuels.
