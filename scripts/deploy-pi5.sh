@@ -190,6 +190,35 @@ if [[ -f contrib/energy-manager.service ]] \
     info "Unit systemd energy-manager mis à jour"
 fi
 
+# ── 5.bis Mosquitto bridge config (si modifié dans le repo) ──────────────────
+# Le bridge MQTT Pi5→NanoPi est défini dans contrib/mosquitto/mosquitto.conf
+# (règles `out` santuario/*). Toute nouvelle famille de topic (ex: santuario/grid/#
+# pour les ET112 acload/grid) DOIT y figurer, sinon le NanoPi ne reçoit rien.
+# Déploiement sécurisé : backup → copie → verify-no-loop.sh → restart, avec
+# restauration automatique si la validation anti-boucle échoue (règle projet n°11).
+MOSQ_SRC=contrib/mosquitto/mosquitto.conf
+MOSQ_DST=/etc/mosquitto/mosquitto.conf
+if [[ -f "$MOSQ_SRC" ]] && ! sudo diff -q "$MOSQ_SRC" "$MOSQ_DST" >/dev/null 2>&1; then
+    step "Mise à jour mosquitto.conf (bridge topics)…"
+    MOSQ_BAK="${MOSQ_DST}.bak-$(date +%Y%m%d_%H%M%S)"
+    sudo cp "$MOSQ_DST" "$MOSQ_BAK" 2>/dev/null || true
+    sudo cp "$MOSQ_SRC" "$MOSQ_DST"
+    if [[ -x /usr/local/bin/verify-no-loop.sh ]]; then
+        if ! sudo /usr/local/bin/verify-no-loop.sh; then
+            warn "verify-no-loop a échoué — restauration de mosquitto.conf depuis $MOSQ_BAK"
+            [[ -f "$MOSQ_BAK" ]] && sudo cp "$MOSQ_BAK" "$MOSQ_DST"
+            error "Bridge mosquitto invalide (risque de boucle) — config restaurée, déploiement interrompu"
+        fi
+        info "Bridge validé (aucune boucle)"
+    else
+        warn "verify-no-loop.sh absent — bridge NON validé (vérifier manuellement les règles 'out')"
+    fi
+    sudo systemctl restart mosquitto-broker
+    info "mosquitto.conf déployé + mosquitto-broker redémarré"
+else
+    info "mosquitto.conf déjà à jour (ou absent du repo)"
+fi
+
 # ── 6. Déploiement daly-bms-server ───────────────────────────────────────────
 step "Déploiement daly-bms-server…"
 sudo systemctl stop daly-bms

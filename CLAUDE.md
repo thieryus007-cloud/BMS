@@ -162,7 +162,10 @@ contrib/grafana/                        ← provisioning Grafana complet
   provisioning/datasources/daly-metrics.yaml        ← datasource PromQL → :8080
   provisioning/dashboards/daly-bms.yaml             ← provider → /var/lib/grafana/dashboards
 scripts/setup-grafana.sh                ← installation Grafana (première fois)
-scripts/deploy-pi5.sh                   ← déploiement complet (binaires + Grafana + validation)
+scripts/deploy-pi5.sh                   ← déploiement complet (binaires + mosquitto.conf + Grafana + validation)
+                                          ⚠ NE déploie PAS Config.toml si /etc/daly-bms/config.toml existe
+                                          (préserve la prod) → `sudo cp Config.toml /etc/daly-bms/config.toml` manuel.
+                                          ⚠ NE déploie PAS le NanoPi → `make install-venus-v7` séparément.
 ```
 
 **IMPORTANT** : Le service lit `/etc/daly-bms/config.toml`, PAS `~/Daly-BMS-Rust/Config.toml`.
