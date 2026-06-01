@@ -206,7 +206,8 @@ async fn publish_irradiance(
 /// Publie un snapshot ET112 sur le topic `santuario/{service_type}/{idx}/venus`.
 ///
 /// service_type = "pvinverter" → topic pvinverter/{idx}/venus  (PvinverterPayload)
-/// service_type = "acload"     → topic grid/{idx}/venus        (GridPayload)
+/// service_type = "grid"       → topic grid/{idx}/venus        (GridPayload → com.victronenergy.grid)
+/// service_type = "acload"     → topic grid/{idx}/venus        (GridPayload → com.victronenergy.acload)
 /// service_type = "heatpump"   → topic heatpump/{idx}/venus    (HeatpumpPayload)
 async fn publish_et112_snapshot(
     client: &AsyncClient,
@@ -222,9 +223,9 @@ async fn publish_et112_snapshot(
         .unwrap_or("santuario");
 
     let topic_prefix = match service_type {
-        "acload"   => "grid",
-        "heatpump" => "heatpump",
-        _          => "pvinverter",
+        "grid" | "acload" => "grid",   // → com.victronenergy.grid / acload (selon service_type côté NanoPi)
+        "heatpump"        => "heatpump",
+        _                 => "pvinverter",
     };
     let topic = format!("{}/{}/{}/venus", base, topic_prefix, mqtt_index);
 

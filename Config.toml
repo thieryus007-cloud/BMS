@@ -168,9 +168,11 @@ device_instance  = 20      # DeviceInstance Venus OS / VRM
 # Préfixe des topics heatpump
 topic_prefix = "santuario/heatpump"
 
-# Les PAC/chauffe-eau sont déclarés via [[et112.devices]] (service_type="heatpump")
-# et configurés dans nanoPi/config-nanopi.toml côté dbus-mqtt-venus.
-# Aucun [[heatpumps]] ici — daly-bms-server ne lit pas cette section.
+# Le vrai chauffe-eau (LG ThinQ) est publié par energy-manager sur
+# santuario/heatpump/1/venus → com.victronenergy.heatpump.mqtt_1.
+# Les ET112 0x08/0x09 ne sont PAS des PAC : ils sont déclarés en acload/grid
+# (cf. [[et112.devices]] ci-dessous). Aucun [[heatpumps]] ici —
+# daly-bms-server ne lit pas cette section.
 
 # =============================================================================
 # Capteur météo / irradiance RS485 (com.victronenergy.meteo)
@@ -211,9 +213,13 @@ poll_interval_ms = 5000
 # Les champs port/baud sont supprimés — bus hérité du SharedBus global.
 #
 # Adresses RS485 (configurées physiquement sur les compteurs) :
-#   0x07 = Micro-onduleurs → D-Bus pvinverter (mqtt_3, instance 63)
-#   0x08 = PAC Chauffe-eau  → D-Bus pvinverter ou acload
-#   0x09 = PAC Climatisation → D-Bus pvinverter ou acload
+#   0x07 = Micro-onduleurs  → D-Bus pvinverter (mqtt_7, instance 32)
+#   0x08 = Maison (conso)    → D-Bus acload     (mqtt_8, instance 30) — charge AC mesurée
+#   0x09 = Réseau (EDF)      → D-Bus grid       (mqtt_9, instance 31) — compteur réseau import/export
+#
+# Sémantique Victron (wiki dbus) :
+#   com.victronenergy.grid   = point de connexion réseau (compté import/export, ESS, bilan système)
+#   com.victronenergy.acload = consommation AC locale, monitoring indépendant (NON compté dans le grid)
 
 [et112]
 # Intervalle de polling en millisecondes (2000 = toutes les 2 secondes)
@@ -233,16 +239,16 @@ position         = 1
 [[et112.devices]]               # SN: 119215X — branché ✅
 address          = "0x08"
 name             = "ET112-Maison"
-mqtt_index       = 8           # → santuario/heatpump/8/venus
-service_type     = "heatpump"
+mqtt_index       = 8           # → santuario/grid/8/venus → com.victronenergy.acload.mqtt_8
+service_type     = "acload"
 device_instance  = 30
 position         = 1
 
 [[et112.devices]]               # SN: 061077X — branché ✅
 address          = "0x09"
 name             = "ET112-Réseau"
-mqtt_index       = 9           # → santuario/heatpump/9/venus
-service_type     = "heatpump"
+mqtt_index       = 9           # → santuario/grid/9/venus → com.victronenergy.grid.mqtt_9
+service_type     = "grid"
 device_instance  = 31
 position         = 1
 
