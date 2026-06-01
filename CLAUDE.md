@@ -182,8 +182,8 @@ Bus `/dev/ttyUSB0` :
 | 0x02 | BMS-320Ah | `battery.mqtt_2` | `bms/2/venus` | 152 |
 | 0x05 | PRALRAN irradiance | `meteo` | `irradiance/raw` | 40 |
 | 0x07 | ET112-Micro-Onduleurs (SN 119253X) | `pvinverter.mqtt_7` | `pvinverter/7/venus` | 32 |
-| 0x08 | ET112-Maison (SN 119215X) | `heatpump.mqtt_8` | `heatpump/8/venus` | 30 |
-| 0x09 | ET112-Réseau (SN 061077X) | `heatpump.mqtt_9` | `heatpump/9/venus` | 31 |
+| 0x08 | ET112-Maison (SN 119215X) | `acload.mqtt_8` | `grid/8/venus` | 30 |
+| 0x09 | ET112-Réseau (SN 061077X) | `grid.mqtt_9` | `grid/9/venus` | 31 |
 
 Services D-Bus actifs nominaux :
 
@@ -191,8 +191,8 @@ Services D-Bus actifs nominaux :
 com.victronenergy.battery.mqtt_1          BMS-360Ah (inst. 151)
 com.victronenergy.battery.mqtt_2          BMS-320Ah (inst. 152)
 com.victronenergy.pvinverter.mqtt_7       ET112-Micro-Onduleurs (inst. 32)
-com.victronenergy.heatpump.mqtt_8         ET112-Maison / Consommation (inst. 30)
-com.victronenergy.heatpump.mqtt_9         ET112-Réseau / Grid (inst. 31)
+com.victronenergy.acload.mqtt_8           ET112-Maison / Consommation AC (inst. 30)
+com.victronenergy.grid.mqtt_9             ET112-Réseau / Compteur réseau EDF (inst. 31)
 com.victronenergy.temperature.mqtt_1      Capteur ext. (type 4, inst. 20)
 com.victronenergy.switch.mqtt_1           ATS CHINT (inst. 60)
 com.victronenergy.switch.mqtt_2           Tongou Switch1 (inst. 61)
