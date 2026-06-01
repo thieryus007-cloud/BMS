@@ -7,15 +7,19 @@
 #   0x09 "ET112-Réseau"  : heatpump.mqtt_9  →  grid.mqtt_9
 #
 # ┌───────────────────────────────────────────────────────────────────────┐
-# │  LANCER SANS SUDO :   bash scripts/migrate-et112-grid-acload.sh        │
-# │  (le script appelle `sudo` lui-même pour /etc, /usr/local/bin, systemctl)│
+# │  LANCEMENT (les DEUX fonctionnent) :                                    │
+# │     bash scripts/migrate-et112-grid-acload.sh          (recommandé)     │
+# │     sudo bash scripts/migrate-et112-grid-acload.sh     (auto-corrigé)   │
 # └───────────────────────────────────────────────────────────────────────┘
 #
-# Pourquoi pas `sudo bash ...` ? Sous sudo, $HOME=/root et surtout
-# SSH_AUTH_SOCK est supprimé → l'agent SSH (clé NanoPi) n'est plus accessible
-# et ssh/scp échouent. En lançant le script en tant que pi5compute, ssh/scp,
-# rustup (make build-arm) et l'agent fonctionnent nativement ; seules les
-# commandes privilégiées passent par sudo (qui demandera le mot de passe 1×).
+# Si lancé avec sudo, le script se RELANCE automatiquement en tant que
+# $SUDO_USER (sinon rustup/make build-arm et les clés SSH du user seraient
+# introuvables sous root), puis rappelle `sudo` uniquement pour les
+# opérations privilégiées (/etc, /usr/local/bin, systemctl).
+#
+# NB clé SSH : si ta clé NanoPi a une passphrase chargée dans un ssh-agent,
+# privilégie le lancement SANS sudo (l'agent reste accessible). Une clé sans
+# passphrase (~/.ssh/id_nanopi) fonctionne dans les deux cas.
 #
 # Caractéristiques :
 #   - Sauvegarde horodatée de chaque fichier avant écrasement (rollback facile).
@@ -36,7 +40,34 @@ set -euo pipefail
 # Chemin du dépôt : dérivé de l'emplacement du script (robuste).
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 REPO_DIR="${REPO_DIR:-$(dirname "$SCRIPT_DIR")}"
+
+# ---------------------------------------------------------------------------
+# Auto-correction : si lancé avec `sudo` (donc en root), on se relance en tant
+# que l'utilisateur d'origine. Indispensable car :
+#   - rustup/cargo (make build-arm) sont dans le PATH du user, pas de root ;
+#   - ssh/scp doivent utiliser les clés ~user/.ssh, pas celles de root.
+# Les opérations privilégiées repassent par `sudo` depuis le script.
+# ---------------------------------------------------------------------------
+if [[ $EUID -eq 0 ]]; then
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    echo "→ Relance en tant que '$SUDO_USER' (rustup + clés SSH user)…"
+    exec sudo -u "$SUDO_USER" -H bash "$SCRIPT_PATH" "$@"
+  else
+    echo "✗ Lance ce script SANS sudo : bash $SCRIPT_PATH" >&2
+    exit 1
+  fi
+fi
+
+# À partir d'ici on tourne forcément en utilisateur non-root.
+# Garantir rustup/cargo dans le PATH (shell non-login = profil non sourcé).
+export PATH="$HOME/.cargo/bin:$PATH"
+SUDO="sudo"
+
+# Options SSH communes : timeout + acceptation auto d'un hôte inconnu
+# (évite l'échec silencieux sous automatisation si known_hosts est vierge).
+SSH_OPTS="-o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
 
 NANOPI="${NANOPI:-root@192.168.1.120}"
 NANOPI_SVC="/service/dbus-mqtt-venus"
@@ -64,15 +95,6 @@ step() { echo -e "\n${c_blue}▶ $*${c_off}"; }
 ok()   { echo -e "${c_grn}✓ $*${c_off}"; }
 warn() { echo -e "${c_yel}⚠ $*${c_off}"; }
 die()  { echo -e "${c_red}✗ $*${c_off}" >&2; exit 1; }
-
-# sudo seulement si on n'est pas déjà root
-if [[ $EUID -eq 0 ]]; then
-  SUDO=""
-  warn "Lancé en root : ssh/scp utiliseront les clés de root (et non de l'agent user)."
-  warn "En cas d'échec SSH, relance SANS sudo : bash $0"
-else
-  SUDO="sudo"
-fi
 
 run()  { if [[ $DRY_RUN -eq 1 ]]; then echo "  [dry-run] $*"; else eval "$@"; fi; }
 priv() { run "$SUDO $*"; }   # commande privilégiée (sudo si nécessaire)
@@ -110,12 +132,11 @@ grep -q 'service_type     = "grid"'   Config.toml \
 grep -q '"grid" | "acload" => "grid"' crates/daly-bms-server/src/bridges/mqtt.rs \
   || die "mqtt.rs ne contient pas la branche grid/acload — fais 'make sync' d'abord."
 
-# Test SSH NanoPi (comportement identique au ssh manuel : agent/passphrase OK)
-if ssh -o ConnectTimeout=8 "$NANOPI" true 2>/dev/null; then
+# Test SSH NanoPi (comportement identique au ssh manuel : agent/clé user)
+if ssh $SSH_OPTS "$NANOPI" true 2>/dev/null; then
   ok "SSH NanoPi OK"
 else
-  die "SSH NanoPi ($NANOPI) injoignable. Teste : ssh $NANOPI true
-       (si tu utilises un agent : exécute ce script SANS sudo)"
+  die "SSH NanoPi ($NANOPI) injoignable. Teste : ssh $NANOPI true"
 fi
 
 # Pré-autorisation sudo (prompt 1× en amont, évite une coupure en cours de route)
@@ -184,7 +205,7 @@ ok "daly-bms redémarré (publie désormais santuario/grid/8|9/venus)"
 step "Phase 4 — Purge des messages retained obsolètes (heatpump 8/9)"
 for idx in 8 9; do
   run "mosquitto_pub -h '$MQTT_HOST' -t 'santuario/heatpump/$idx/venus' -r -n"
-  run "ssh '$NANOPI' \"mosquitto_pub -h localhost -t 'santuario/heatpump/$idx/venus' -r -n\""
+  run "ssh $SSH_OPTS '$NANOPI' \"mosquitto_pub -h localhost -t 'santuario/heatpump/$idx/venus' -r -n\""
 done
 ok "Retained heatpump/8 et heatpump/9 purgés (Pi5 + NanoPi)"
 
@@ -193,9 +214,9 @@ ok "Retained heatpump/8 et heatpump/9 purgés (Pi5 + NanoPi)"
 # (AUCUNE recompilation NanoPi : seule la config change)
 # ---------------------------------------------------------------------------
 step "Phase 5 — Déploiement config NanoPi + restart dbus-mqtt-venus"
-run "ssh '$NANOPI' \"cp '$NANOPI_CFG' '${NANOPI_CFG}.bak-$(date +%Y%m%d-%H%M%S)'\" || true"
-run "scp nanoPi/config-nanopi.toml '$NANOPI:$NANOPI_CFG'"
-run "ssh '$NANOPI' 'svc -t $NANOPI_SVC'"
+run "ssh $SSH_OPTS '$NANOPI' \"cp '$NANOPI_CFG' '${NANOPI_CFG}.bak-$(date +%Y%m%d-%H%M%S)'\" || true"
+run "scp $SSH_OPTS nanoPi/config-nanopi.toml '$NANOPI:$NANOPI_CFG'"
+run "ssh $SSH_OPTS '$NANOPI' 'svc -t $NANOPI_SVC'"
 ok "dbus-mqtt-venus redémarré (supprime heatpump.mqtt_8/9, crée acload.mqtt_8 + grid.mqtt_9)"
 
 # ---------------------------------------------------------------------------
@@ -209,7 +230,7 @@ else
   echo "--- Topics MQTT grid (doit montrer 8 et 9) ---"
   timeout 6 mosquitto_sub -h "$MQTT_HOST" -t 'santuario/grid/+/venus' -v -W 5 || true
   echo "--- Services D-Bus Victron (NanoPi) ---"
-  ssh "$NANOPI" "dbus -y | grep -E 'acload|grid|heatpump'" || true
+  ssh $SSH_OPTS "$NANOPI" "dbus -y | grep -E 'acload|grid|heatpump'" || true
   echo "--- Healthcheck daly-bms ---"
   curl -s http://localhost:8080/-/healthy || true
   echo
