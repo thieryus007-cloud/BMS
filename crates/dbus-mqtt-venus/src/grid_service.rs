@@ -12,8 +12,9 @@
 //! /Ac/L1/Energy/Reverse  — kWh injectés (export)
 //! /Ac/L1/Power           — W (puissance réelle)
 //! /Ac/L1/Voltage         — V AC
-//! /Ac/L2/...             — Phase 2 (même structure, enregistrée à 0.0 si monophasé)
-//! /Ac/L3/...             — Phase 3 (même structure, enregistrée à 0.0 si monophasé)
+//! /Ac/L2/...             — Phase 2 (exposée seulement si num_phases >= 2)
+//! /Ac/L3/...             — Phase 3 (exposée seulement si num_phases >= 3)
+//! /Ac/NumberOfPhases     — nombre de phases réelles (1 pour ET112 monophasé)
 //! /DeviceType            — type de compteur (340 = generic energy meter)
 //! /IsGenericEnergyMeter  — 1 si masquerade en genset/acload
 //! /Connected
@@ -129,6 +130,10 @@ impl PhaseValues {
 #[derive(Debug, Clone)]
 pub struct GridValues {
     pub connected:              i32,
+    /// Nombre de phases réellement présentes (1=monophasé, 2, 3).
+    /// Détermine quelles phases sont exposées sur D-Bus → la console/VRM
+    /// n'affiche que les phases existantes (pas de L2/L3 fantômes à 0 W).
+    pub num_phases:             u8,
     pub l1:                     PhaseValues,
     pub l2:                     PhaseValues,
     pub l3:                     PhaseValues,
@@ -143,6 +148,7 @@ impl GridValues {
     pub fn disconnected(device_instance: u32, product_name: String) -> Self {
         Self {
             connected:              0,
+            num_phases:             1,   // monophasé par défaut (cas ET112)
             l1:                     PhaseValues::default(),
             l2:                     PhaseValues::default(),
             l3:                     PhaseValues::default(),
@@ -160,8 +166,14 @@ impl GridValues {
         product_name:    String,
     ) -> Self {
         let empty = GridPhasePayload::default();
+        // Nombre de phases = celles réellement fournies dans le payload.
+        // Monophasé (ET112) → seul L1 est présent → num_phases = 1.
+        let num_phases = 1
+            + payload.ac.l2.is_some() as u8
+            + payload.ac.l3.is_some() as u8;
         Self {
             connected: 1,
+            num_phases,
             l1: PhaseValues::from_payload(payload.ac.l1.as_ref().unwrap_or(&empty)),
             l2: PhaseValues::from_payload(payload.ac.l2.as_ref().unwrap_or(&empty)),
             l3: PhaseValues::from_payload(payload.ac.l3.as_ref().unwrap_or(&empty)),
@@ -196,12 +208,19 @@ impl GridValues {
         // Metadata compteur
         m.insert("/DeviceType".into(),            DbusItem::i32(self.device_type));
         m.insert("/IsGenericEnergyMeter".into(),  DbusItem::i32(self.is_generic_energy_meter));
+        m.insert("/Ac/NumberOfPhases".into(),     DbusItem::i32(self.num_phases as i32));
 
-        // Phases — toujours toutes les 3 présentes (0.0 si monophasé ou non reçu)
-        // Obligatoire : les chemins doivent être enregistrés dès le démarrage (GetValue)
+        // Phases — uniquement celles réellement présentes (num_phases).
+        // Monophasé (ET112) → seul /Ac/L1/* est exposé → la console/VRM
+        // n'affiche pas de L2/L3 fantômes à 0 W. VRM lit la racine via GetItems
+        // (live), donc les phases absentes ne sont simplement pas listées.
         Self::phase_items(&mut m, "/Ac/L1", &self.l1);
-        Self::phase_items(&mut m, "/Ac/L2", &self.l2);
-        Self::phase_items(&mut m, "/Ac/L3", &self.l3);
+        if self.num_phases >= 2 {
+            Self::phase_items(&mut m, "/Ac/L2", &self.l2);
+        }
+        if self.num_phases >= 3 {
+            Self::phase_items(&mut m, "/Ac/L3", &self.l3);
+        }
 
         m
     }

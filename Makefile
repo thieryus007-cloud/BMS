@@ -136,13 +136,13 @@ build-venus-arm: check-arm-deps
 
 build-arm-v7: check-armv7-deps
 	CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=$(CROSS_LINKER_ARMV7) \
-	RUSTFLAGS="-C target-cpu=native -C link-arg=-Wl,--as-needed" \
+	RUSTFLAGS="-C link-arg=-Wl,--as-needed" \
 	$(CARGO) build --release --target $(TARGET_ARMV7) --bin $(BINARY)
 	@echo "✓ Binaire ARMv7 : $(ARMV7_RELEASE_DIR)/$(BINARY)"
 
 build-venus-armv7 build-venus-v7: check-armv7-deps
 	CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=$(CROSS_LINKER_ARMV7) \
-	RUSTFLAGS="-C target-cpu=native -C link-arg=-Wl,--as-needed" \
+	RUSTFLAGS="-C link-arg=-Wl,--as-needed" \
 	$(CARGO) build --release --target $(TARGET_ARMV7) --bin $(VENUS_BIN) --bin $(BINARY)
 	@echo "✓ Binaires ARMv7 Venus OS :"
 	@echo "  $(ARMV7_RELEASE_DIR)/$(BINARY)"

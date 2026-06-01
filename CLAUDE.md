@@ -313,6 +313,9 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Config ignorée | Copier vers `/etc/daly-bms/config.toml` |
 | `scp: dest open Failure` | `ssh root@192.168.1.120 "svc -d /service/dbus-mqtt-venus"` puis redéployer |
 | Venus symlink disparu (màj firmware) | `ssh root@192.168.1.120 "ln -sf /data/etc/sv/dbus-mqtt-venus /service/dbus-mqtt-venus"` |
+| `dbus-mqtt-venus` crash-loop sur NanoPi (`svstat` uptime=0, tous les services D-Bus absents) | Binaire armv7 mal compilé → **SIGILL** (exit 132). Cause : `target-cpu=native` dans le build armv7 (hôte aarch64 ≠ cible armv7). Corrigé dans le Makefile. Diag : lancer le binaire à la main sur le NanoPi. Indice au build : warnings `'+lse' is not a recognized feature`. |
+| `install-venus.sh: Permission denied` (`make install-venus-v7`) | Bit +x manquant → `chmod +x nanoPi/install-venus.sh` ou déployer via `ARCH=armv7 bash nanoPi/install-venus.sh 192.168.1.120`. |
+| Compteur grid/acload affiche L2/L3 fantômes à 0 W dans VRM | ET112 monophasé : `grid_service` n'expose que les phases présentes via `/Ac/NumberOfPhases` (dérivé du payload). Si L2/L3 persistent → rafraîchir VRM (cache console). |
 | ET112 "en attente de données" | Mauvaise adresse Modbus → `sudo systemctl stop daly-bms && mbpoll -m rtu -a 1:15 -b 9600 -t 3:float -r 1 -c 1 /dev/ttyUSB0` |
 | Dashboard Grafana ET112 vide alors que les données existent | **Format du label `address`** : le backend écrit `address="0x07/0x08/0x09"` (hex, `redb_writes.rs::write_et112`). Les requêtes PromQL doivent utiliser `address="0x07"`, **jamais** `address="7"` (décimal → 0 série). Vérif : `curl -s 'localhost:8080/api/v1/query?query=et112_power_w' \| jq '.data.result[].metric'`. |
 | Widget météo "Température: -" | Limitation Venus OS — inévitable, non fixable |
@@ -336,7 +339,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 3. Ne jamais déployer `daly-bms-server` sur NanoPi (uniquement `dbus-mqtt-venus`).
 4. `sudo cp Config.toml /etc/daly-bms/config.toml` après toute modif config.
 5. Arrêter `dbus-mqtt-venus` avant copie du binaire.
-6. NanoPi = **armv7**, Pi5 = **aarch64** — ne pas confondre les binaires.
+6. NanoPi = **armv7**, Pi5 = **aarch64** — ne pas confondre les binaires. **Jamais** `target-cpu=native` pour le build armv7 (l'hôte est aarch64 → SIGILL sur le NanoPi). Le Makefile build armv7 n'utilise que `-C link-arg=-Wl,--as-needed`.
 7. SSH vers NanoPi : `ssh root@192.168.1.120` (pas l'alias `nanopi`).
 8. Templates Askama → `make build-arm` + redéploiement après tout changement HTML.
 9. **CLAUDE.md = mémoire projet** : toute info découverte → ajouter ici + commit.
