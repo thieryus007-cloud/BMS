@@ -652,6 +652,7 @@ impl AppState {
         if self.console_bus.receiver_count() > 0 {
             let device = match snap.address {
                 1 => EventDevice::Bms1,
+                2 => EventDevice::Bms2,
                 3 => EventDevice::Bms3,
                 _ => EventDevice::Bms2,
             };

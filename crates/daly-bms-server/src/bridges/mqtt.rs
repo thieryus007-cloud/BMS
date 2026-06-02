@@ -120,6 +120,7 @@ pub async fn run_mqtt_bridge(state: AppState, cfg: MqttConfig, addr_map: HashMap
             let topic = format!("{}/bms/{}/venus", cfg.topic_prefix.trim_end_matches('/').rsplit_once('/').map(|(p,_)| p).unwrap_or("santuario"), topic_id);
             let device = match snap.address {
                 1 => EventDevice::Bms1,
+                2 => EventDevice::Bms2,
                 3 => EventDevice::Bms3,
                 _ => EventDevice::Bms2,
             };
