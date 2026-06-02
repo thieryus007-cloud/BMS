@@ -220,6 +220,7 @@
 /* Device dot colours */
 .dev-bms1         { background: #58a6ff; }
 .dev-bms2         { background: #56d364; }
+.dev-bms3         { background: #79c0ff; }
 .dev-et112        { background: #d29922; }
 .dev-ats          { background: #f0883e; }
 .dev-irradiance   { background: #ffdf5d; }
@@ -354,6 +355,7 @@
         <div class="con-filter-title">RS485</div>
         <label class="con-check"><input type="checkbox" class="dev-filter" value="bms1"       checked onchange="applyFilters()"><span class="con-dot dev-bms1"></span> BMS-1</label>
         <label class="con-check"><input type="checkbox" class="dev-filter" value="bms2"       checked onchange="applyFilters()"><span class="con-dot dev-bms2"></span> BMS-2</label>
+        <label class="con-check"><input type="checkbox" class="dev-filter" value="bms3"       checked onchange="applyFilters()"><span class="con-dot dev-bms3"></span> BMS-3</label>
         <label class="con-check"><input type="checkbox" class="dev-filter" value="et112"      checked onchange="applyFilters()"><span class="con-dot dev-et112"></span> ET112</label>
         <label class="con-check"><input type="checkbox" class="dev-filter" value="ats"        checked onchange="applyFilters()"><span class="con-dot dev-ats"></span> ATS CHINT</label>
         <label class="con-check"><input type="checkbox" class="dev-filter" value="irradiance" checked onchange="applyFilters()"><span class="con-dot dev-irradiance"></span> PRALRAN</label>
@@ -711,7 +713,7 @@ function kindLabel(k) {
 }
 function deviceLabel(d) {
   return {
-    bms1:'BMS-1', bms2:'BMS-2', et112:'ET112', ats:'ATS',
+    bms1:'BMS-1', bms2:'BMS-2', bms3:'BMS-3', et112:'ET112', ats:'ATS',
     irradiance:'PRALRAN', smartshunt:'SmartShunt',
     tasmota:'Tasmota', shelly:'Shelly',
     water_heater:'ChauffEau', solar:'Solaire',

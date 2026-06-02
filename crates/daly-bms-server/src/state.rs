@@ -650,7 +650,11 @@ impl AppState {
         // Console diagnostic event — seulement si quelqu'un écoute (évite de retenir
         // un Arc<ConsoleEvent> volumineux dans le ring buffer du broadcast).
         if self.console_bus.receiver_count() > 0 {
-            let device = if snap.address == 1 { EventDevice::Bms1 } else { EventDevice::Bms2 };
+            let device = match snap.address {
+                1 => EventDevice::Bms1,
+                3 => EventDevice::Bms3,
+                _ => EventDevice::Bms2,
+            };
             self.console_bus.emit(ConsoleEvent::rs485(device, &format!("BMS-{} snapshot", snap.address), json!({
                 "address": snap.address,
                 "soc": snap.soc,

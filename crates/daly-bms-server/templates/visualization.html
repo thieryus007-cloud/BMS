@@ -53,7 +53,7 @@ const edgeTypes = { doubleLine: AnimatedFlowEdge, customBezier: CustomBezierEdge
 const NODES0 = [
   { id: 'spiral-race',   type: 'spiralRace',  position: { x: -350, y: -30  }, data: { prodKwh: 0, soc: 0, irrWm2: 0 } },
   { id: 'production',  type: 'summary',     position: { x: -30,  y: -30  }, data: { label: 'Production',  icon: '☀️',  value: '—', sub: 'Micro-onduleurs',   dotClass: '' } },
-  { id: 'batteries',   type: 'summary',     position: { x: 170,  y: -30  }, data: { label: 'Batteries',   icon: '🔋', value: '—', sub: '360 Ah + 320 Ah',  dotClass: '' } },
+  { id: 'batteries',   type: 'summary',     position: { x: 170,  y: -30  }, data: { label: 'Batteries',   icon: '🔋', value: '—', sub: '360 Ah + 320 Ah + 620 Ah',  dotClass: '' } },
   { id: 'meteo',       type: 'summary',     position: { x: 370,  y: -30  }, data: { label: 'Météo',       icon: '🌤️',  value: '—', sub: 'Irradiance solaire', dotClass: '' } },
   { id: 'temp-ext',    type: 'temperature', position: { x: 570, y: -30 }, data: { label: 'Température', icon: '🌡️', live: null } },
   { id: 'chauffe-eau',   type: 'waterheater', position: { x: 780,  y: 550 }, data: { label: 'Chauffe-eau',   icon: '🚿', live: null, heatpump: null, isClimatisation: false } },
@@ -95,7 +95,7 @@ const HIST_ET112_8 = { metric: 'et112_power_w',                    address: '0x0
 const HIST_ET112_9 = { metric: 'et112_power_w',                    address: '0x09', label: 'Climatisation — W (6h)' };
 const HIST_BMS_1   = { metric: 'bms_current',   bms_id: '0x01',                    label: 'BMS-360Ah — I (6h)' };
 const HIST_BMS_2   = { metric: 'bms_current',   bms_id: '0x02',                    label: 'BMS-320Ah — I (6h)' };
-const HIST_BMS_3   = { metric: 'bms_current',   bms_id: '0x03',                    label: 'BMS-3 — I (6h)' };
+const HIST_BMS_3   = { metric: 'bms_current',   bms_id: '0x03',                    label: 'BMS-620Ah — I (6h)' };
 const HIST_MPPT    = { metric: 'solar_total_w',                                     label: 'Solaire total — W (6h)' };
 const HIST_INV_DC  = { metric: 'venus_inverter_power_w',                            label: 'Onduleur — P DC (6h)' };
 const HIST_INV_AC  = { metric: 'venus_inverter_ac_output_power_w',                  label: 'Onduleur — P AC sortie (6h)' };
@@ -167,7 +167,7 @@ const atsExecRef = useRef(null);
   }, []);
 
   const applyData = useCallback(function(d) {
-    const bms1 = d.bms1, bms2 = d.bms2;
+    const bms1 = d.bms1, bms2 = d.bms2, bms3 = d.bms3;
     const et7  = d.et7,  et8  = d.et8, et9 = d.et9;
     const irr  = d.irr;
     const mpptList        = d.mpptList        ?? [];
@@ -182,7 +182,7 @@ const atsExecRef = useRef(null);
     const hp1 = heatpumps.find(h => h.mqtt_index === 1) ?? null;
     const hp9 = heatpumps.find(h => h.mqtt_index === 9) ?? null;
 
-    const validBms = [bms1, bms2].filter(Boolean);
+    const validBms = [bms1, bms2, bms3].filter(Boolean);
     const avgSoc   = validBms.length
       ? (validBms.reduce((s, b) => s + (b.Soc ?? 0), 0) / validBms.length).toFixed(0)
       : null;
@@ -197,7 +197,7 @@ const atsExecRef = useRef(null);
     const prodSub      = et7 ? `${((et7.energy_export_wh ?? 0) / 1000).toFixed(1)} kWh ET112` : mpptList.length > 0 ? `${mpptYieldSumG.toFixed(2)} kWh MPPT` : 'Micro-onduleurs';
     const prodDot      = (et7?.connected || mpptList.length > 0) ? (totalProdPwr > 50 ? 'live' : '') : '';
     const batVal       = displaySoc != null ? `SOC ${displaySoc.toFixed(0)}%` : '—';
-    const batSub       = totalPwr ? `${totalPwr > 0 ? '+' : ''}${(totalPwr / 1000).toFixed(2)} kW` : '360 Ah + 320 Ah';
+    const batSub       = totalPwr ? `${totalPwr > 0 ? '+' : ''}${(totalPwr / 1000).toFixed(2)} kW` : '360 Ah + 320 Ah + 620 Ah';
     const batDot       = displaySoc == null ? '' : displaySoc > 50 ? 'live' : displaySoc > 20 ? 'warn' : 'alarm';
     const irrVal       = irr?.irradiance_wm2 != null ? `${irr.irradiance_wm2.toFixed(0)} W/m²` : '—';
     const irrSub       = irr?.total_yield_kwh != null ? `☀ ${irr.total_yield_kwh.toFixed(1)} kWh` : 'Irradiance solaire';
@@ -226,6 +226,9 @@ const atsExecRef = useRef(null);
           }
           case 'e-hubBMS-b2': {
             const pw = bms2?.Dc?.Power ?? 0; fv = Math.abs(pw); rev = pw > 0; break;
+          }
+          case 'e-hubBMS-b3': {
+            const pw = bms3?.Dc?.Power ?? 0; fv = Math.abs(pw); rev = pw > 0; break;
           }
         }
         return {
@@ -308,6 +311,7 @@ const atsExecRef = useRef(null);
           return { ...n, data: { ...n.data, value: irrVal, sub: irrSub, dotClass: irrDot } };
         case 'bms1': return { ...n, data: { ...n.data, live: bms1 ?? null } };
         case 'bms2': return { ...n, data: { ...n.data, live: bms2 ?? null } };
+        case 'bms3': return { ...n, data: { ...n.data, live: bms3 ?? null } };
         case 'micro-ond':   return { ...n, data: { ...n.data, live: et7  ?? null } };
         case 'et112-reseau': return { ...n, data: { ...n.data, live: et9 ?? null } };
         case 'et112-maison': return { ...n, data: { ...n.data, live: et8 ?? null } };
@@ -365,9 +369,10 @@ const atsExecRef = useRef(null);
   useEffect(function() {
     const safe = p => p.catch(() => null);
     async function fetchAll() {
-      const [bms1, bms2, et7, et8, et9, irr, venusResp, tempResp, atsResp] = await Promise.all([
+      const [bms1, bms2, bms3, et7, et8, et9, irr, venusResp, tempResp, atsResp] = await Promise.all([
         safe(fetch('/api/v1/bms/1/status').then(r => r.ok ? r.json() : null)),
         safe(fetch('/api/v1/bms/2/status').then(r => r.ok ? r.json() : null)),
+        safe(fetch('/api/v1/bms/3/status').then(r => r.ok ? r.json() : null)),
         safe(fetch('/api/v1/et112/7/status').then(r => r.ok ? r.json() : null)),
         safe(fetch('/api/v1/et112/8/status').then(r => r.ok ? r.json() : null)),
         safe(fetch('/api/v1/et112/9/status').then(r => r.ok ? r.json() : null)),
@@ -413,7 +418,7 @@ const atsExecRef = useRef(null);
       const temp = temps.length > 0 ? temps[0] : null;
       const ats = atsResp?.values ?? null;
 
-      applyData({ bms1, bms2, et7, et8, et9, irr, mpptList, mpptTotalPowerW, mpptTotalDcA, shunt, inverter, temp, ats, tasmotaDevices, heatpumps });
+      applyData({ bms1, bms2, bms3, et7, et8, et9, irr, mpptList, mpptTotalPowerW, mpptTotalDcA, shunt, inverter, temp, ats, tasmotaDevices, heatpumps });
     }
     fetchAll();
     const timer = setInterval(fetchAll, 2000);
