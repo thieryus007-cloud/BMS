@@ -46,7 +46,7 @@ auto_discover_end   = 16
 
 # Liste explicite des BMS (recommandé en production)
 # Format : "0x01,0x02,0x03" ou tableau TOML ["0x01", "0x02"]
-addresses = ["0x01", "0x02"]
+addresses = ["0x01", "0x02", "0x03"]
 
 
 [api]
@@ -497,14 +497,14 @@ max_discharge_a = 120.0
 mqtt_index      = 2
 device_instance = 152
 
-# [[bms]]                          # ← décommenter quand branché
-# address         = "0x03"
-# name            = "BMS-628Ah"
-# capacity_ah     = 628.0
-# max_charge_a    = 200.0
-# max_discharge_a = 120.0
-# mqtt_index      = 3
-# device_instance = 153
+[[bms]]
+address         = "0x03"
+name            = "BMS-620Ah"
+capacity_ah     = 620.0
+max_charge_a    = 200.0
+max_discharge_a = 120.0
+mqtt_index      = 3
+device_instance = 153
 
 # [[bms]]                          # ← décommenter quand branché
 # address         = "0x04"

@@ -118,7 +118,11 @@ pub async fn run_mqtt_bridge(state: AppState, cfg: MqttConfig, addr_map: HashMap
                 .cloned()
                 .unwrap_or_else(|| snap.address.to_string());
             let topic = format!("{}/bms/{}/venus", cfg.topic_prefix.trim_end_matches('/').rsplit_once('/').map(|(p,_)| p).unwrap_or("santuario"), topic_id);
-            let device = if snap.address == 1 { EventDevice::Bms1 } else { EventDevice::Bms2 };
+            let device = match snap.address {
+                1 => EventDevice::Bms1,
+                3 => EventDevice::Bms3,
+                _ => EventDevice::Bms2,
+            };
             if state.console_bus.receiver_count() > 0 {
                 state.console_bus.emit(ConsoleEvent::mqtt_out(device, &topic, json!({
                     "Soc": snap.soc,

@@ -184,6 +184,7 @@ Bus `/dev/ttyUSB0` :
 |------|----------|-----------|------------|----------|
 | 0x01 | BMS-360Ah | `battery.mqtt_1` | `bms/1/venus` | 151 |
 | 0x02 | BMS-320Ah | `battery.mqtt_2` | `bms/2/venus` | 152 |
+| 0x03 | BMS-620Ah | `battery.mqtt_3` | `bms/3/venus` | 153 |
 | 0x05 | PRALRAN irradiance | `meteo` | `irradiance/raw` | 40 |
 | 0x07 | ET112-Micro-Onduleurs (SN 119253X) | `pvinverter.mqtt_7` | `pvinverter/7/venus` | 32 |
 | 0x08 | ET112-Maison (SN 119215X) | `acload.mqtt_8` | `grid/8/venus` | 30 |
@@ -194,6 +195,7 @@ Services D-Bus actifs nominaux :
 ```
 com.victronenergy.battery.mqtt_1          BMS-360Ah (inst. 151)
 com.victronenergy.battery.mqtt_2          BMS-320Ah (inst. 152)
+com.victronenergy.battery.mqtt_3          BMS-620Ah (inst. 153)
 com.victronenergy.pvinverter.mqtt_7       ET112-Micro-Onduleurs (inst. 32)
 com.victronenergy.acload.mqtt_8           ET112-Maison / Consommation AC (inst. 30)
 com.victronenergy.grid.mqtt_9             ET112-Réseau / Compteur réseau EDF (inst. 31)

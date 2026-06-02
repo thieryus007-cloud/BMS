@@ -33,6 +33,7 @@ pub enum EventKind {
 pub enum EventDevice {
     Bms1,
     Bms2,
+    Bms3,
     Et112,
     Ats,
     Irradiance,   // PRALRAN capteur irradiance RS485
