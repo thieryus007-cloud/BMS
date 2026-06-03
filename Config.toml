@@ -483,8 +483,8 @@ enabled = false
 address         = "0x01"
 name            = "BMS-360Ah"
 capacity_ah     = 360.0
-max_charge_a    = 200.0
-max_discharge_a = 120.0
+max_charge_a    = 180.0
+max_discharge_a = 100.0
 mqtt_index      = 1
 device_instance = 151
 
@@ -492,8 +492,8 @@ device_instance = 151
 address         = "0x02"
 name            = "BMS-320Ah"
 capacity_ah     = 320.0
-max_charge_a    = 200.0
-max_discharge_a = 120.0
+max_charge_a    = 180.0
+max_discharge_a = 100.0
 mqtt_index      = 2
 device_instance = 152
 
@@ -501,8 +501,8 @@ device_instance = 152
 address         = "0x03"
 name            = "BMS-620Ah"
 capacity_ah     = 620.0
-max_charge_a    = 200.0
-max_discharge_a = 120.0
+max_charge_a    = 180.0
+max_discharge_a = 100.0
 mqtt_index      = 3
 device_instance = 153
 
