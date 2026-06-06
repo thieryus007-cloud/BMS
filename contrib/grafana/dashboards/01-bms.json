@@ -836,7 +836,7 @@
             "uid": "daly-metrics"
           },
           "expr": "bms_cell_voltage{bms_id=\"0x03\"}",
-          "legendFormat": "",
+          "legendFormat": "Cellule {{cell}}",
           "refId": "A"
         }
       ],
