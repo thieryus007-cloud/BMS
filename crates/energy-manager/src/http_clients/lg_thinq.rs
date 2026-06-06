@@ -213,7 +213,7 @@ pub async fn spawn_poller(
     let cfg2   = cfg.clone();
     let bus2   = bus.clone();
     let state2 = state.clone();
-    tokio::spawn(async move {
+    crate::supervise::spawn_critical(async move {
         let poller = LgThinqClient::new(cfg2.clone());
         let vm_url = cfg2.vm_url.clone();
         let mut ticker = interval(Duration::from_secs(poller.cfg.poll_interval_secs));

@@ -15,6 +15,7 @@ mod persist;
 #[allow(dead_code)]
 mod rule_metrics;
 mod rules_loader;
+mod supervise;
 mod types;
 
 use bus::AppBus;
@@ -102,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
     let srv_lg       = lg_arc.clone();
     let srv_loader   = loader.clone();
     let srv_reload   = bus.rule_reload.clone();
-    tokio::spawn(async move {
+    supervise::spawn_critical(async move {
         live_ws::server::serve(&bind, live_tx, srv_state, srv_lg, srv_loader, srv_reload).await;
     });
 
@@ -117,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
 
     // Heartbeat watchdog systemd (doit arriver avant WatchdogSec=60)
-    tokio::spawn(async {
+    supervise::spawn_critical(async {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             ticker.tick().await;

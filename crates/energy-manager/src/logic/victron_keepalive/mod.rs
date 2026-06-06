@@ -10,7 +10,7 @@ use crate::bus::AppBus;
 use crate::types::MqttOutgoing;
 
 pub async fn spawn(portal_id: String, bus: AppBus) {
-    tokio::spawn(run(portal_id, bus));
+    crate::supervise::spawn_critical(run(portal_id, bus));
 }
 
 async fn run(portal_id: String, bus: AppBus) {

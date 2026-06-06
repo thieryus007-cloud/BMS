@@ -27,8 +27,8 @@ pub async fn spawn(
     let state2 = state.clone();
     let vic2   = vic.clone();
 
-    tokio::spawn(mqtt_task(vic2, bus2, state2, loader));
-    tokio::spawn(writer_task(cfg, bus, state));
+    crate::supervise::spawn_critical(mqtt_task(vic2, bus2, state2, loader));
+    crate::supervise::spawn_critical(writer_task(cfg, bus, state));
 }
 
 async fn mqtt_task(

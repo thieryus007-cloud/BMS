@@ -90,6 +90,34 @@ struct Cli {
 // Point d'entrée
 // =============================================================================
 
+// =============================================================================
+// Supervision des tâches critiques (audit robustesse §2)
+// =============================================================================
+
+/// Lance une tâche critique de service. Si son future se termine (retour) — ce
+/// qui ne doit jamais arriver pour une boucle de bridge MQTT→D-Bus — on log une
+/// erreur fatale et on arrête le process pour forcer un redémarrage propre par
+/// le superviseur (runit sur Venus OS, systemd sur Pi5). Auparavant, seul le
+/// PlatformManager (bloquant) terminait le process : un manager dont `run()`
+/// retournait (D-Bus perdu) mourait silencieusement, le service restant « up »
+/// alors qu'un bridge était éteint. Les panics sont déjà fatals via
+/// `panic = "abort"` (profil release) ; ce helper couvre les retours propres.
+fn spawn_critical<F>(fut: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    tokio::task::spawn(async move {
+        fut.await;
+        error!(
+            "Une tâche critique de bridge s'est terminée de façon inattendue — \
+             arrêt du process pour redémarrage par le superviseur"
+        );
+        // Laisse le temps aux logs de partir avant l'exit.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        std::process::exit(1);
+    });
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialiser le logging
@@ -144,12 +172,12 @@ async fn main() -> Result<()> {
     // -------------------------------------------------------------------------
     let (bms_tx, bms_rx) = mpsc::channel(64);
     let mqtt_cfg = cfg.mqtt.clone();
-    tokio::spawn(async move {
+    spawn_critical(async move {
         start_mqtt_source(mqtt_cfg, bms_tx).await;
     });
 
     let battery_manager = BatteryManager::new(cfg.venus.clone(), cfg.bms, bms_rx);
-    tokio::spawn(async move {
+    spawn_critical(async move {
         if let Err(e) = battery_manager.run().await {
             error!("BatteryManager terminé avec erreur : {:#}", e);
         }
@@ -161,12 +189,12 @@ async fn main() -> Result<()> {
     let (sensor_tx, sensor_rx) = mpsc::channel(64);
     let mqtt_cfg2    = cfg.mqtt.clone();
     let heat_prefix  = cfg.heat.topic_prefix.clone();
-    tokio::spawn(async move {
+    spawn_critical(async move {
         start_sensor_mqtt_source(mqtt_cfg2, heat_prefix, sensor_tx).await;
     });
 
     let sensor_manager = SensorManager::new(cfg.venus.clone(), cfg.sensors, sensor_rx);
-    tokio::spawn(async move {
+    spawn_critical(async move {
         if let Err(e) = sensor_manager.run().await {
             error!("SensorManager terminé avec erreur : {:#}", e);
         }
@@ -178,12 +206,12 @@ async fn main() -> Result<()> {
     let (heatpump_tx, heatpump_rx) = mpsc::channel(64);
     let mqtt_cfg3       = cfg.mqtt.clone();
     let heatpump_prefix = cfg.heatpump.topic_prefix.clone();
-    tokio::spawn(async move {
+    spawn_critical(async move {
         start_heatpump_mqtt_source(mqtt_cfg3, heatpump_prefix, heatpump_tx).await;
     });
 
     let heatpump_manager = HeatpumpManager::new(cfg.venus.clone(), cfg.heatpumps, heatpump_rx);
-    tokio::spawn(async move {
+    spawn_critical(async move {
         if let Err(e) = heatpump_manager.run().await {
             error!("HeatpumpManager terminé avec erreur : {:#}", e);
         }
@@ -195,12 +223,12 @@ async fn main() -> Result<()> {
     let (meteo_tx, meteo_rx) = mpsc::channel(16);
     let mqtt_cfg4    = cfg.mqtt.clone();
     let meteo_topic  = cfg.meteo.topic.clone();
-    tokio::spawn(async move {
+    spawn_critical(async move {
         start_meteo_mqtt_source(mqtt_cfg4, meteo_topic, meteo_tx).await;
     });
 
     let meteo_manager = MeteoManager::new(cfg.venus.clone(), cfg.meteo, meteo_rx);
-    tokio::spawn(async move {
+    spawn_critical(async move {
         if let Err(e) = meteo_manager.run().await {
             error!("MeteoManager terminé avec erreur : {:#}", e);
         }
@@ -212,12 +240,12 @@ async fn main() -> Result<()> {
     let (switch_tx, switch_rx) = mpsc::channel(32);
     let mqtt_cfg5      = cfg.mqtt.clone();
     let switch_prefix  = cfg.switch.topic_prefix.clone();
-    tokio::spawn(async move {
+    spawn_critical(async move {
         start_switch_mqtt_source(mqtt_cfg5, switch_prefix, switch_tx).await;
     });
 
     let switch_manager = SwitchManager::new(cfg.venus.clone(), cfg.switches, switch_rx, cfg.mqtt.clone());
-    tokio::spawn(async move {
+    spawn_critical(async move {
         if let Err(e) = switch_manager.run().await {
             error!("SwitchManager terminé avec erreur : {:#}", e);
         }
@@ -229,12 +257,12 @@ async fn main() -> Result<()> {
     let (grid_tx, grid_rx) = mpsc::channel(32);
     let mqtt_cfg6    = cfg.mqtt.clone();
     let grid_prefix  = cfg.grid.topic_prefix.clone();
-    tokio::spawn(async move {
+    spawn_critical(async move {
         start_grid_mqtt_source(mqtt_cfg6, grid_prefix, grid_tx).await;
     });
 
     let grid_manager = GridManager::new(cfg.venus.clone(), cfg.grids, grid_rx);
-    tokio::spawn(async move {
+    spawn_critical(async move {
         if let Err(e) = grid_manager.run().await {
             error!("GridManager terminé avec erreur : {:#}", e);
         }
@@ -246,12 +274,12 @@ async fn main() -> Result<()> {
     let (pvinverter_tx, pvinverter_rx) = mpsc::channel(32);
     let mqtt_cfg7          = cfg.mqtt.clone();
     let pvinverter_prefix  = cfg.pvinverter.topic_prefix.clone();
-    tokio::spawn(async move {
+    spawn_critical(async move {
         start_pvinverter_mqtt_source(mqtt_cfg7, pvinverter_prefix, pvinverter_tx).await;
     });
 
     let pvinverter_manager = PvinverterManager::new(cfg.venus.clone(), cfg.pvinverters, pvinverter_rx);
-    tokio::spawn(async move {
+    spawn_critical(async move {
         if let Err(e) = pvinverter_manager.run().await {
             error!("PvinverterManager terminé avec erreur : {:#}", e);
         }
@@ -264,7 +292,7 @@ async fn main() -> Result<()> {
     let (platform_tx, platform_rx) = mpsc::channel(16);
     let mqtt_cfg8      = cfg.mqtt.clone();
     let platform_topic = cfg.platform.topic.clone();
-    tokio::spawn(async move {
+    spawn_critical(async move {
         start_platform_mqtt_source(mqtt_cfg8, platform_topic, platform_tx).await;
     });
 

@@ -21,9 +21,9 @@ pub async fn spawn(
     state: Arc<RwLock<EnergyState>>,
     loader: Arc<RulesLoader>,
 ) {
-    tokio::spawn(keepalive_task(cfg.keepalive_secs, bus.clone(), state.clone()));
+    crate::supervise::spawn_critical(keepalive_task(cfg.keepalive_secs, bus.clone(), state.clone()));
     if let Some(lg_client) = lg {
-        tokio::spawn(control_task(cfg, lg_client, bus, state, loader));
+        crate::supervise::spawn_critical(control_task(cfg, lg_client, bus, state, loader));
     } else {
         info!("Water heater auto-control disabled (no LG ThinQ client)");
     }

@@ -39,6 +39,11 @@ pub struct SharedBus {
     pub inter_frame_ms: u64,
     /// Timeout de réception par défaut pour `transact()`.
     pub timeout_ms: u64,
+    // Paramètres d'ouverture conservés pour la réouverture après déconnexion
+    // USB / ré-énumération du device (audit robustesse §3).
+    port_path: String,
+    baud: u32,
+    parity: tokio_serial::Parity,
 }
 
 impl SharedBus {
@@ -71,6 +76,9 @@ impl SharedBus {
             inner: Mutex::new(stream),
             inter_frame_ms,
             timeout_ms,
+            port_path: port_path.to_string(),
+            baud,
+            parity,
         }))
     }
 
@@ -124,6 +132,31 @@ impl SharedBus {
             .await
             .ok_or_else(|| anyhow::anyhow!("Timeout ({} ms) — aucune réponse", timeout_ms))?
             .map_err(|e| anyhow::anyhow!("RX erreur : {}", e))
+    }
+
+    /// Réouvre le port série après une déconnexion (USB débranché / device
+    /// ré-énuméré). Remplace le `SerialStream` interne sous le même Mutex :
+    /// tous les drivers partageant ce `SharedBus` (BMS, ET112, ATS, PRALRAN)
+    /// repartent sur le nouveau handle sans coordination supplémentaire.
+    ///
+    /// Le nouveau flux est ouvert avant d'acquérir le verrou puis échangé ;
+    /// l'ancien `SerialStream` (fd périmé) est libéré lors de l'affectation.
+    /// En cas d'échec d'ouverture, l'ancien handle est conservé inchangé.
+    /// Cf. audit robustesse §3.
+    pub async fn reopen(&self) -> anyhow::Result<()> {
+        use tokio_serial::SerialPortBuilderExt;
+
+        let stream = tokio_serial::new(&self.port_path, self.baud)
+            .data_bits(tokio_serial::DataBits::Eight)
+            .stop_bits(tokio_serial::StopBits::One)
+            .parity(self.parity)
+            .flow_control(tokio_serial::FlowControl::None)
+            .open_native_async()
+            .map_err(|e| anyhow::anyhow!("Réouverture {} échouée : {}", self.port_path, e))?;
+
+        let mut guard = self.inner.lock().await;
+        *guard = stream;
+        Ok(())
     }
 }
 

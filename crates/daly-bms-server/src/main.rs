@@ -51,6 +51,34 @@ use tracing_subscriber::prelude::*;
 use tracing_appender::rolling;
 
 // =============================================================================
+// Supervision des tâches critiques (audit robustesse §2)
+// =============================================================================
+
+/// Lance une tâche critique longue durée. Si son future se termine (retour) —
+/// ce qui ne doit jamais arriver pour une boucle de polling/bridge — on log une
+/// erreur fatale et on arrête le process pour forcer un redémarrage propre par
+/// systemd (`Restart=on-failure`). Les panics sont déjà fatals via
+/// `panic = "abort"` (profil release) ; ce helper couvre les retours propres.
+///
+/// NB : à n'utiliser QUE pour les boucles externes longue durée — jamais pour
+/// les tâches transitoires par-snapshot (qui se terminent normalement).
+fn spawn_critical<F>(fut: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    tokio::task::spawn(async move {
+        fut.await;
+        error!(
+            "Une tâche critique s'est terminée de façon inattendue — \
+             arrêt du process pour redémarrage par systemd"
+        );
+        // Laisse le temps aux logs de partir avant l'exit.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        std::process::exit(1);
+    });
+}
+
+// =============================================================================
 // Couche tracing → buffer web
 // =============================================================================
 
@@ -359,13 +387,13 @@ async fn main() -> anyhow::Result<()> {
         .collect();
 
     if config.mqtt.enabled {
-        tokio::spawn({
+        spawn_critical({
             let (s, c, m) = (state.clone(), config.mqtt.clone(), mqtt_addr_map);
             async move { mqtt::run_mqtt_bridge(s, c, m).await }
         });
     }
     if let Some(ref engine) = alert_engine {
-        tokio::spawn({
+        spawn_critical({
             let (s, e) = (state.clone(), engine.clone());
             async move { alerts::run_alert_engine(s, e).await }
         });
@@ -376,7 +404,7 @@ async fn main() -> anyhow::Result<()> {
         info!("Démarrage Venus OS MQTT subscriber");
         let state_venus = state.clone();
         let mqtt_cfg = config.mqtt.clone();
-        tokio::spawn(async move {
+        spawn_critical(async move {
             mqtt::start_venus_mqtt_subscriber(state_venus, mqtt_cfg).await
         });
     }
@@ -390,7 +418,7 @@ async fn main() -> anyhow::Result<()> {
         let state_ta = state.clone();
         let devs_ta  = config.tasmota.devices.clone();
         let mqtt_ta  = config.mqtt.clone();
-        tokio::spawn(async move {
+        spawn_critical(async move {
             tasmota::run_tasmota_mqtt_loop(
                 devs_ta,
                 mqtt_ta,
@@ -413,7 +441,7 @@ async fn main() -> anyhow::Result<()> {
         let devs_sh   = config.shelly.devices.clone();
         let mqtt_sh   = config.mqtt.clone();
         let client_sh = state.shelly_client.clone();
-        tokio::spawn(async move {
+        spawn_critical(async move {
             shelly::run_shelly_mqtt_loop(
                 devs_sh,
                 mqtt_sh,
@@ -479,7 +507,7 @@ async fn main() -> anyhow::Result<()> {
                         let state_et_err = state.clone();
                         let bus_et    = shared_bus.clone();
                         let et112_cfg = config.et112.clone();
-                        tokio::spawn(async move {
+                        spawn_critical(async move {
                             et112::run_et112_poll_loop(
                                 bus_et,
                                 et112_cfg.devices,
@@ -512,7 +540,7 @@ async fn main() -> anyhow::Result<()> {
                         let state_irrad     = state.clone();
                         let state_irrad_err = state.clone();
                         let bus_irrad   = shared_bus.clone();
-                        tokio::spawn(async move {
+                        spawn_critical(async move {
                             irradiance::run_irradiance_poll_loop(
                                 bus_irrad,
                                 irrad_cfg,
@@ -547,7 +575,7 @@ async fn main() -> anyhow::Result<()> {
                             let state_ats_err = state.clone();
                             let bus_ats   = shared_bus.clone();
                             state.set_ats_bus(shared_bus.clone()).await;
-                            tokio::spawn(async move {
+                            spawn_critical(async move {
                                 ats::run_ats_poll_loop(
                                     bus_ats,
                                     ats_cfg,
@@ -634,7 +662,7 @@ async fn main() -> anyhow::Result<()> {
 
                         // Consumer task : await sur les 2 channels et appelle state.
                         let state_consumer = state.clone();
-                        tokio::spawn(async move {
+                        spawn_critical(async move {
                             loop {
                                 tokio::select! {
                                     Some(snap) = snap_rx.recv() => {
@@ -654,7 +682,7 @@ async fn main() -> anyhow::Result<()> {
                         let _ = state_poll;
                         let _ = state_err;
 
-                        tokio::spawn(async move {
+                        spawn_critical(async move {
                             poll_loop(
                                 manager,
                                 poll_cfg,

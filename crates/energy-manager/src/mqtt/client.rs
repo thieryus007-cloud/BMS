@@ -28,7 +28,7 @@ pub async fn spawn(
 
     // --- Publisher task ---
     let pub_client = client.clone();
-    tokio::spawn(async move {
+    crate::supervise::spawn_critical(async move {
         while let Some(msg) = outgoing_rx.recv().await {
             let qos = match msg.qos {
                 MqttQos::AtMostOnce  => QoS::AtMostOnce,
@@ -45,7 +45,7 @@ pub async fn spawn(
 
     // --- Event loop (subscriber + dispatcher) ---
     let topics_clone = topics.clone();
-    tokio::spawn(async move {
+    crate::supervise::spawn_critical(async move {
         let mut subscribed = false;
         loop {
             match eventloop.poll().await {
