@@ -60,7 +60,7 @@ pub async fn spawn(
     state: Arc<RwLock<EnergyState>>,
     loader: Arc<RulesLoader>,
 ) {
-    tokio::spawn(run(vic, cfg, bus, state, loader));
+    crate::supervise::spawn_critical(run(vic, cfg, bus, state, loader));
 }
 
 async fn run(

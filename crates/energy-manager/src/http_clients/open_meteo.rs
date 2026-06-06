@@ -49,7 +49,7 @@ pub async fn spawn(
         info!("Open-Meteo polling disabled");
         return;
     }
-    tokio::spawn(run(cfg, bus, state));
+    crate::supervise::spawn_critical(run(cfg, bus, state));
 }
 
 async fn run(

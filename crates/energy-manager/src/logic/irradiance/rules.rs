@@ -24,12 +24,12 @@ impl IrradianceRuleEngine {
     }
 
     pub fn validate(&mut self, raw: f64) -> anyhow::Result<bool> {
-        let mut facts = Facts::new();
+        let facts = Facts::new();
         facts.set("IR.raw",   Value::Number(raw));
         facts.set("IR.valid", Value::Boolean(false));
 
         self.engine
-            .execute(&mut facts)
+            .execute(&facts)
             .context("Irradiance rule engine evaluation failed")?;
 
         Ok(facts

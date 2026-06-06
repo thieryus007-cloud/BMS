@@ -26,8 +26,8 @@ pub async fn spawn(
     let state2 = state.clone();
     let cfg2   = solar_cfg.clone();
 
-    tokio::spawn(publish_task(bus2, state2));
-    tokio::spawn(midnight_reset_task(cfg2, bus, state));
+    crate::supervise::spawn_critical(publish_task(bus2, state2));
+    crate::supervise::spawn_critical(midnight_reset_task(cfg2, bus, state));
 }
 
 // ---------------------------------------------------------------------------

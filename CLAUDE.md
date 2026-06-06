@@ -21,6 +21,7 @@
 | Déployer binaire Pi5 | `sudo systemctl stop daly-bms && sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ && sudo systemctl start daly-bms` |
 | Broker MQTT (status/logs) | `systemctl status mosquitto-broker` / `journalctl -u mosquitto-broker -f` |
 | Taille base redb | `du -sh /mnt/nvme/daly-bms/metrics.redb` |
+| Nettoyer disque (build) | `rm -rf target/armv7-unknown-linux-gnueabihf target/debug target/release && rm -rf ~/.cargo/registry/cache ~/.cargo/registry/src && sudo apt-get clean` (≈ -2,6 G ; garde `target/aarch64`). Reset total : `cargo clean` |
 | Nb séries en base | `curl -s http://localhost:8080/api/v1/redb/series \| jq '.data \| length'` |
 | Healthcheck backend | `curl -s http://localhost:8080/-/healthy` |
 | Diag pic réseau (capture immédiate) | `sudo bash scripts/netdiag.sh` |
@@ -161,7 +162,10 @@ contrib/grafana/                        ← provisioning Grafana complet
   provisioning/datasources/daly-metrics.yaml        ← datasource PromQL → :8080
   provisioning/dashboards/daly-bms.yaml             ← provider → /var/lib/grafana/dashboards
 scripts/setup-grafana.sh                ← installation Grafana (première fois)
-scripts/deploy-pi5.sh                   ← déploiement complet (binaires + Grafana + validation)
+scripts/deploy-pi5.sh                   ← déploiement complet (binaires + mosquitto.conf + Grafana + validation)
+                                          ⚠ NE déploie PAS Config.toml si /etc/daly-bms/config.toml existe
+                                          (préserve la prod) → `sudo cp Config.toml /etc/daly-bms/config.toml` manuel.
+                                          ⚠ NE déploie PAS le NanoPi → `make install-venus-v7` séparément.
 ```
 
 **IMPORTANT** : Le service lit `/etc/daly-bms/config.toml`, PAS `~/Daly-BMS-Rust/Config.toml`.
@@ -183,8 +187,8 @@ Bus `/dev/ttyUSB0` :
 | 0x03 | BMS-620Ah | `battery.mqtt_3` | `bms/3/venus` | 153 |
 | 0x05 | PRALRAN irradiance | `meteo` | `irradiance/raw` | 40 |
 | 0x07 | ET112-Micro-Onduleurs (SN 119253X) | `pvinverter.mqtt_7` | `pvinverter/7/venus` | 32 |
-| 0x08 | ET112-Maison (SN 119215X) | `heatpump.mqtt_8` | `heatpump/8/venus` | 30 |
-| 0x09 | ET112-Réseau (SN 061077X) | `heatpump.mqtt_9` | `heatpump/9/venus` | 31 |
+| 0x08 | ET112-Maison (SN 119215X) | `acload.mqtt_8` | `grid/8/venus` | 30 |
+| 0x09 | ET112-Réseau (SN 061077X) | `grid.mqtt_9` | `grid/9/venus` | 31 |
 
 Services D-Bus actifs nominaux :
 
@@ -193,8 +197,8 @@ com.victronenergy.battery.mqtt_1          BMS-360Ah (inst. 151)
 com.victronenergy.battery.mqtt_2          BMS-320Ah (inst. 152)
 com.victronenergy.battery.mqtt_3          BMS-620Ah (inst. 153)
 com.victronenergy.pvinverter.mqtt_7       ET112-Micro-Onduleurs (inst. 32)
-com.victronenergy.heatpump.mqtt_8         ET112-Maison / Consommation (inst. 30)
-com.victronenergy.heatpump.mqtt_9         ET112-Réseau / Grid (inst. 31)
+com.victronenergy.acload.mqtt_8           ET112-Maison / Consommation AC (inst. 30)
+com.victronenergy.grid.mqtt_9             ET112-Réseau / Compteur réseau EDF (inst. 31)
 com.victronenergy.temperature.mqtt_1      Capteur ext. (type 4, inst. 20)
 com.victronenergy.switch.mqtt_1           ATS CHINT (inst. 60)
 com.victronenergy.switch.mqtt_2           Tongou Switch1 (inst. 61)
@@ -315,6 +319,10 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Config ignorée | Copier vers `/etc/daly-bms/config.toml` |
 | `scp: dest open Failure` | `ssh root@192.168.1.120 "svc -d /service/dbus-mqtt-venus"` puis redéployer |
 | Venus symlink disparu (màj firmware) | `ssh root@192.168.1.120 "ln -sf /data/etc/sv/dbus-mqtt-venus /service/dbus-mqtt-venus"` |
+| Disque racine Pi5 se remplit (`df -h /` > 45 %) | Builds Rust cumulés dans `target/` (aarch64 + armv7 + natif debug/release). Les binaires prod sont dans `/usr/local/bin` → `target/` est jetable. Voir « Nettoyer disque (build) » §0. Ne **jamais** supprimer `~/.cargo/bin`, `/usr/local/bin/*`, ni `/mnt/nvme/.../metrics.redb`. |
+| `dbus-mqtt-venus` crash-loop sur NanoPi (`svstat` uptime=0, tous les services D-Bus absents) | Binaire armv7 mal compilé → **SIGILL** (exit 132). Cause : `target-cpu=native` dans le build armv7 (hôte aarch64 ≠ cible armv7). Corrigé dans le Makefile. Diag : lancer le binaire à la main sur le NanoPi. Indice au build : warnings `'+lse' is not a recognized feature`. |
+| `install-venus.sh: Permission denied` (`make install-venus-v7`) | Bit +x manquant → `chmod +x nanoPi/install-venus.sh` ou déployer via `ARCH=armv7 bash nanoPi/install-venus.sh 192.168.1.120`. |
+| Compteur grid/acload affiche L2/L3 fantômes à 0 W dans VRM | ET112 monophasé : `grid_service` n'expose que les phases présentes via `/Ac/NumberOfPhases` (dérivé du payload). Si L2/L3 persistent → rafraîchir VRM (cache console). |
 | ET112 "en attente de données" | Mauvaise adresse Modbus → `sudo systemctl stop daly-bms && mbpoll -m rtu -a 1:15 -b 9600 -t 3:float -r 1 -c 1 /dev/ttyUSB0` |
 | Dashboard Grafana ET112 vide alors que les données existent | **Format du label `address`** : le backend écrit `address="0x07/0x08/0x09"` (hex, `redb_writes.rs::write_et112`). Les requêtes PromQL doivent utiliser `address="0x07"`, **jamais** `address="7"` (décimal → 0 série). Vérif : `curl -s 'localhost:8080/api/v1/query?query=et112_power_w' \| jq '.data.result[].metric'`. |
 | Widget météo "Température: -" | Limitation Venus OS — inévitable, non fixable |
@@ -338,7 +346,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 3. Ne jamais déployer `daly-bms-server` sur NanoPi (uniquement `dbus-mqtt-venus`).
 4. `sudo cp Config.toml /etc/daly-bms/config.toml` après toute modif config.
 5. Arrêter `dbus-mqtt-venus` avant copie du binaire.
-6. NanoPi = **armv7**, Pi5 = **aarch64** — ne pas confondre les binaires.
+6. NanoPi = **armv7**, Pi5 = **aarch64** — ne pas confondre les binaires. **Jamais** `target-cpu=native` pour le build armv7 (l'hôte est aarch64 → SIGILL sur le NanoPi). Le Makefile build armv7 n'utilise que `-C link-arg=-Wl,--as-needed`.
 7. SSH vers NanoPi : `ssh root@192.168.1.120` (pas l'alias `nanopi`).
 8. Templates Askama → `make build-arm` + redéploiement après tout changement HTML.
 9. **CLAUDE.md = mémoire projet** : toute info découverte → ajouter ici + commit.
@@ -347,6 +355,9 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 12. Secrets : ne jamais committer `.env`.
 13. **Source de vérité métrique** : les valeurs mesurées par Victron (D-Bus/MQTT) et lues sur RS485 sont **prioritaires sur tout calcul dérivé**. Ne jamais remplacer une mesure firmware par un V×I recalculé, ni écraser un champ direct par un agrégat système. Les sommes (`solar_total = mppt+pvinv`) sont OK car ce sont des agrégats explicites, pas des recalculs d'une valeur déjà disponible.
 14. **Dashboards Grafana** : les 15 JSON dans `contrib/grafana/dashboards/` doivent être au format **provisioning** (pas export). Ne jamais inclure `__inputs`/`__requires`. Le datasource UID doit être `daly-metrics` (pas `${datasource}`). `scripts/deploy-pi5.sh` déploie automatiquement.
+15. **CI** : `.github/workflows/ci.yml` (build natif + tests + `clippy -D warnings` + cross-build aarch64/armv7) garde le code vert. Toolchain épinglée dans `rust-toolchain.toml` (1.94.1). Le cross-build armv7 n'utilise **jamais** `target-cpu=native` (cf. SIGILL §8). Garder clippy propre ; pour faire taire un lint, `#[allow(...)]` ciblé.
+16. **Supervision (fail-fast)** : les boucles de service longue durée passent par `spawn_critical` (helper dans chaque binaire ; `supervise.rs` pour energy-manager). Si une boucle retourne (ou panique, via `panic=abort`), le process s'arrête → redémarrage par systemd (`Restart=on-failure`) / runit. **Ne jamais** `spawn_critical` une tâche transitoire (one-shot, timer, traitement par-snapshot) : elle se termine normalement et provoquerait un exit. Conséquence : plus de bridge/poll mort silencieux pendant que le service paraît « up ».
+17. **Réouverture port série** : `SharedBus::reopen()` rouvre `/dev/ttyUSB0` après déconnexion USB / ré-énumération. `poll_loop` la déclenche sur `DalyError::Serial` **et** `DalyError::Io` (backoff + reopen). Bus partagé → ET112/ATS/PRALRAN repartent aussi. Plus besoin de redémarrer le service à la main après un débranchement USB.
 
 ---
 
@@ -354,7 +365,9 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 
 | Besoin | Fichier |
 |--------|---------|
+| Déployer (Pi5 + NanoPi, scripts existants) | `docs/DEPLOIEMENT.md` |
 | Ajouter un appareil / nouvelle métrique | `DASHBOARD_EXTENSION_GUIDE.md` |
+| Ajouter un BMS Daly (Pi5 + NanoPi, config-only) | `docs/AJOUT-BMS.md` |
 | Procédures détaillées (NanoPi, maintenance, récupération firmware, production solaire) | `PROCEDURES.md` |
 | Validation déploiement / checklist | `IMPLEMENTATION_VERIFICATION.md` |
 | Debug MQTT | `MQTT_DEBUGGING_GUIDE.md` |

@@ -139,6 +139,7 @@ fn is_label_name_cont(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_labels(input: &str) -> Result<(SmallVec<[(String, String); 4]>, &str), String> {
     let mut labels = SmallVec::new();
     let mut s = input.trim_start();

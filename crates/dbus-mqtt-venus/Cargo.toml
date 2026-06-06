@@ -40,3 +40,8 @@ clap        = { workspace = true }
 
 # Misc
 tokio-util  = { workspace = true }
+
+# Synchronisation — Mutex sans empoisonnement : si un thread panique en
+# tenant le verrou, les autres accès ne paniquent pas en cascade (robustesse
+# du daemon 24/7). Cf. audit robustesse §5.
+parking_lot = "0.12"

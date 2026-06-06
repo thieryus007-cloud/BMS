@@ -56,6 +56,15 @@ capacity_ah     = 320.0
 max_charge_a    = 200.0
 max_discharge_a = 120.0
 
+[[bms]]
+address         = "0x03"
+name            = "BMS-620Ah"
+mqtt_index      = 3
+device_instance = 153
+capacity_ah     = 620.0
+max_charge_a    = 200.0
+max_discharge_a = 120.0
+
 # -----------------------------------------------------------------------------
 # Capteurs de température
 # Topics : santuario/heat/{mqtt_index}/venus
@@ -85,19 +94,24 @@ device_instance  = 20
 # Pompes à chaleur / chauffe-eau
 # Topics : santuario/heatpump/{mqtt_index}/venus
 # D-Bus  : com.victronenergy.heatpump.mqtt_{mqtt_index}
+#
+# Seul le vrai chauffe-eau (LG ThinQ, publié par energy-manager sur
+# santuario/heatpump/1/venus) est une PAC. Les ET112 0x08/0x09 sont des
+# compteurs d'énergie → déclarés en acload/grid (section [grid] plus bas).
 # -----------------------------------------------------------------------------
 [heatpump]
 topic_prefix = "santuario/heatpump"
 
-[[heatpumps]]
-mqtt_index      = 8             # ET112 addr=0x08 (SN: 119215X) — PAC Chauffe-eau branché ✅
-name            = "PAC Chauffe-eau"
-device_instance = 30
-
-[[heatpumps]]
-mqtt_index      = 9             # ET112 addr=0x09 (SN: 061077X) — PAC Climatisation branché ✅
-name            = "PAC Climatisation"
-device_instance = 31
+# Aucun [[heatpumps]] déclaré actuellement.
+# NB : un index n'est enregistré sur D-Bus que s'il possède une entrée
+# [[heatpumps]] correspondante (heatpump_manager::is_configured).
+# Pour exposer le chauffe-eau LG ThinQ (publié par energy-manager sur
+# santuario/heatpump/1/venus) en com.victronenergy.heatpump.mqtt_1,
+# décommenter :
+# [[heatpumps]]
+# mqtt_index      = 1
+# name            = "Chauffe-eau LG ThinQ"
+# device_instance = 30
 
 # -----------------------------------------------------------------------------
 # Capteur météo / irradiance (singleton — un seul capteur)
@@ -178,41 +192,38 @@ custom_name     = "Tongou 5"
 group           = "Tongou"
 
 # -----------------------------------------------------------------------------
-# Compteurs réseau / consommation AC
-# Topics : santuario/grid/{mqtt_index}/venus
-# D-Bus  : com.victronenergy.grid.mqtt_{mqtt_index}
-#          com.victronenergy.acload.mqtt_{mqtt_index} (si service_type="acload")
+# Compteurs réseau / consommation AC — ET112 0x08 et 0x09 (RS485 Pi5)
+# Topics : santuario/grid/{mqtt_index}/venus  (publiés par daly-bms-server)
+# D-Bus  : com.victronenergy.grid.mqtt_{mqtt_index}    (service_type="grid")
+#          com.victronenergy.acload.mqtt_{mqtt_index}  (service_type="acload")
 #
-# PLAN MIGRATION 3 ET112 (quand tous sur Pi5) :
-#   mqtt_index=3 → pvinverter (ci-dessous, section [pvinverter])
-#   mqtt_index=4 → acload PAC climatisation (AC Out 1)
-#   mqtt_index=5 → acload chauffe-eau (AC Out 1)
+# Sémantique Victron (wiki dbus) :
+#   grid   = point de connexion réseau (compté dans import/export, ESS, bilan).
+#            Un seul compteur "grid" par système.
+#   acload = consommation AC locale, monitoring indépendant (NON compté grid).
 #
-# Le daly-bms-server publie les ET112 acload sur santuario/grid/{n}/venus
-# avec un payload GridPayload (même format que grid, service_type="acload").
+# Mapping production :
+#   0x08 "ET112-Maison"  (mqtt_index=8) → acload  → com.victronenergy.acload.mqtt_8
+#   0x09 "ET112-Réseau"  (mqtt_index=9) → grid    → com.victronenergy.grid.mqtt_9
+#
+# Le payload est identique (GridPayload : Ac/L1/{Voltage,Current,Power,Energy}
+# + Ac/Power + Ac/Energy/Forward+Reverse). Seul service_type ci-dessous
+# décide du nom de service D-Bus (grid vs acload).
 # -----------------------------------------------------------------------------
 [grid]
 topic_prefix = "santuario/grid"
 
-# Décommenter quand un compteur réseau sera connecté :
-# [[grids]]
-# mqtt_index      = 1
-# name            = "Compteur réseau"
-# device_instance = 401
-# service_type    = "grid"     # "grid" ou "acload"
+[[grids]]
+mqtt_index      = 8             # ET112 addr=0x08 (SN: 119215X) — Maison / consommation AC
+name            = "ET112-Maison"
+device_instance = 30
+service_type    = "acload"     # → com.victronenergy.acload.mqtt_8
 
-# Décommenter lors de la migration des ET112 acload depuis le Victron vers Pi5 :
-# [[grids]]
-# mqtt_index      = 4
-# name            = "PAC Climatisation"
-# device_instance = 501
-# service_type    = "acload"   # AC Out 1 — consommation PAC climatisation
-#
-# [[grids]]
-# mqtt_index      = 5
-# name            = "Chauffe-eau"
-# device_instance = 502
-# service_type    = "acload"   # AC Out 1 — consommation chauffe-eau
+[[grids]]
+mqtt_index      = 9             # ET112 addr=0x09 (SN: 061077X) — Réseau / compteur EDF
+name            = "ET112-Réseau"
+device_instance = 31
+service_type    = "grid"       # → com.victronenergy.grid.mqtt_9
 
 # -----------------------------------------------------------------------------
 # Onduleurs PV / compteurs énergie ET112 (Carlo Gavazzi)

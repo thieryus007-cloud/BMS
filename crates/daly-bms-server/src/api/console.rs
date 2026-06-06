@@ -3,7 +3,7 @@
 //! GET /ws/console
 //!
 //! Optional query parameters (comma-separated lists):
-//!   devices = bms1,bms2,et112,smartshunt,ats,energy_manager,venus,system
+//!   devices = bms1,bms2,bms3,et112,smartshunt,ats,energy_manager,venus,system
 //!   kinds   = mqtt_in,mqtt_out,rs485,state,error,system
 
 use crate::console::{EventDevice, EventKind};
@@ -92,6 +92,7 @@ fn device_to_str(d: &EventDevice) -> &'static str {
     match d {
         EventDevice::Bms1        => "bms1",
         EventDevice::Bms2        => "bms2",
+        EventDevice::Bms3        => "bms3",
         EventDevice::Et112       => "et112",
         EventDevice::Ats         => "ats",
         EventDevice::Irradiance  => "irradiance",

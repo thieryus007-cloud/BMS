@@ -24,7 +24,8 @@
 use crate::types::HeatPayload;
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 use zbus::{connection, object_server::SignalContext, Connection};
@@ -202,7 +203,7 @@ struct TemperatureRootIface {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl TemperatureRootIface {
     fn get_items(&self) -> ItemsDict {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard
             .to_items()
             .iter()
@@ -241,7 +242,7 @@ struct BusItemLeaf {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl BusItemLeaf {
     fn get_value(&self) -> OwnedValue {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         match guard.to_items().get(&self.path) {
             Some(item) => json_to_owned(&item.value),
             None       => OwnedValue::from(0i32),
@@ -249,7 +250,7 @@ impl BusItemLeaf {
     }
 
     fn get_text(&self) -> String {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard
             .to_items()
             .get(&self.path)
@@ -294,7 +295,7 @@ impl SensorServiceHandle {
         let items = new_values.to_items();
 
         {
-            let mut guard = self.values.lock().unwrap();
+            let mut guard = self.values.lock();
             *guard = new_values;
         }
 
@@ -312,7 +313,7 @@ impl SensorServiceHandle {
     /// Marque le capteur comme déconnecté (timeout watchdog).
     pub async fn set_disconnected(&self) -> Result<()> {
         let items = {
-            let mut guard = self.values.lock().unwrap();
+            let mut guard = self.values.lock();
             guard.connected = 0;
             guard.to_items()
         };
@@ -323,7 +324,7 @@ impl SensorServiceHandle {
     /// Republication forcée (keepalive Venus OS).
     pub async fn republish(&self) -> Result<()> {
         let items = {
-            let guard = self.values.lock().unwrap();
+            let guard = self.values.lock();
             guard.to_items()
         };
         self.emit_items_changed(&items).await
@@ -398,7 +399,7 @@ pub async fn create_temperature_service(
 
     // Enregistrer un objet feuille par chemin métrique
     let leaf_paths: Vec<String> = {
-        let guard = initial_values.lock().unwrap();
+        let guard = initial_values.lock();
         guard.to_items().into_keys().collect()
     };
 

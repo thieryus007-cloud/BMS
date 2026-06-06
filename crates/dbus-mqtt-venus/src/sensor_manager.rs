@@ -153,7 +153,7 @@ impl SensorManager {
 
         for (idx, svc) in &self.services {
             let last_update = {
-                let guard = svc.values.lock().unwrap();
+                let guard = svc.values.lock();
                 guard.last_update
             };
 

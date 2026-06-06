@@ -12,8 +12,9 @@
 //! /Ac/L1/Energy/Reverse  — kWh injectés (export)
 //! /Ac/L1/Power           — W (puissance réelle)
 //! /Ac/L1/Voltage         — V AC
-//! /Ac/L2/...             — Phase 2 (même structure, enregistrée à 0.0 si monophasé)
-//! /Ac/L3/...             — Phase 3 (même structure, enregistrée à 0.0 si monophasé)
+//! /Ac/L2/...             — Phase 2 (exposée seulement si num_phases >= 2)
+//! /Ac/L3/...             — Phase 3 (exposée seulement si num_phases >= 3)
+//! /Ac/NumberOfPhases     — nombre de phases réelles (1 pour ET112 monophasé)
 //! /DeviceType            — type de compteur (340 = generic energy meter)
 //! /IsGenericEnergyMeter  — 1 si masquerade en genset/acload
 //! /Connected
@@ -28,7 +29,8 @@
 use crate::types::{GridPayload, GridPhasePayload};
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 use zbus::{connection, object_server::SignalContext, Connection};
@@ -129,6 +131,10 @@ impl PhaseValues {
 #[derive(Debug, Clone)]
 pub struct GridValues {
     pub connected:              i32,
+    /// Nombre de phases réellement présentes (1=monophasé, 2, 3).
+    /// Détermine quelles phases sont exposées sur D-Bus → la console/VRM
+    /// n'affiche que les phases existantes (pas de L2/L3 fantômes à 0 W).
+    pub num_phases:             u8,
     pub l1:                     PhaseValues,
     pub l2:                     PhaseValues,
     pub l3:                     PhaseValues,
@@ -143,6 +149,7 @@ impl GridValues {
     pub fn disconnected(device_instance: u32, product_name: String) -> Self {
         Self {
             connected:              0,
+            num_phases:             1,   // monophasé par défaut (cas ET112)
             l1:                     PhaseValues::default(),
             l2:                     PhaseValues::default(),
             l3:                     PhaseValues::default(),
@@ -160,8 +167,14 @@ impl GridValues {
         product_name:    String,
     ) -> Self {
         let empty = GridPhasePayload::default();
+        // Nombre de phases = celles réellement fournies dans le payload.
+        // Monophasé (ET112) → seul L1 est présent → num_phases = 1.
+        let num_phases = 1
+            + payload.ac.l2.is_some() as u8
+            + payload.ac.l3.is_some() as u8;
         Self {
             connected: 1,
+            num_phases,
             l1: PhaseValues::from_payload(payload.ac.l1.as_ref().unwrap_or(&empty)),
             l2: PhaseValues::from_payload(payload.ac.l2.as_ref().unwrap_or(&empty)),
             l3: PhaseValues::from_payload(payload.ac.l3.as_ref().unwrap_or(&empty)),
@@ -196,12 +209,19 @@ impl GridValues {
         // Metadata compteur
         m.insert("/DeviceType".into(),            DbusItem::i32(self.device_type));
         m.insert("/IsGenericEnergyMeter".into(),  DbusItem::i32(self.is_generic_energy_meter));
+        m.insert("/Ac/NumberOfPhases".into(),     DbusItem::i32(self.num_phases as i32));
 
-        // Phases — toujours toutes les 3 présentes (0.0 si monophasé ou non reçu)
-        // Obligatoire : les chemins doivent être enregistrés dès le démarrage (GetValue)
+        // Phases — uniquement celles réellement présentes (num_phases).
+        // Monophasé (ET112) → seul /Ac/L1/* est exposé → la console/VRM
+        // n'affiche pas de L2/L3 fantômes à 0 W. VRM lit la racine via GetItems
+        // (live), donc les phases absentes ne sont simplement pas listées.
         Self::phase_items(&mut m, "/Ac/L1", &self.l1);
-        Self::phase_items(&mut m, "/Ac/L2", &self.l2);
-        Self::phase_items(&mut m, "/Ac/L3", &self.l3);
+        if self.num_phases >= 2 {
+            Self::phase_items(&mut m, "/Ac/L2", &self.l2);
+        }
+        if self.num_phases >= 3 {
+            Self::phase_items(&mut m, "/Ac/L3", &self.l3);
+        }
 
         m
     }
@@ -218,7 +238,7 @@ struct GridRootIface {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl GridRootIface {
     fn get_items(&self) -> ItemsDict {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard
             .to_items()
             .iter()
@@ -249,7 +269,7 @@ struct BusItemLeaf {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl BusItemLeaf {
     fn get_value(&self) -> OwnedValue {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         match guard.to_items().get(&self.path) {
             Some(item) => json_to_owned(&item.value),
             None       => OwnedValue::from(0i32),
@@ -257,7 +277,7 @@ impl BusItemLeaf {
     }
 
     fn get_text(&self) -> String {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard.to_items().get(&self.path).map(|i| i.text.clone()).unwrap_or_default()
     }
 
@@ -284,7 +304,7 @@ impl GridServiceHandle {
             self.product_name.clone(),
         );
         let items = new_values.to_items();
-        { *self.values.lock().unwrap() = new_values; }
+        { *self.values.lock() = new_values; }
         self.emit_items_changed(&items).await?;
         debug!(
             service = %self.service_name,
@@ -296,7 +316,7 @@ impl GridServiceHandle {
 
     pub async fn set_disconnected(&self) -> Result<()> {
         let items = {
-            let mut g = self.values.lock().unwrap();
+            let mut g = self.values.lock();
             g.connected = 0;
             g.to_items()
         };
@@ -305,7 +325,7 @@ impl GridServiceHandle {
     }
 
     pub async fn republish(&self) -> Result<()> {
-        let items = { self.values.lock().unwrap().to_items() };
+        let items = { self.values.lock().to_items() };
         self.emit_items_changed(&items).await
     }
 
@@ -366,7 +386,7 @@ pub async fn create_grid_service(
         .await?;
 
     let leaf_paths: Vec<String> = {
-        initial_values.lock().unwrap().to_items().into_keys().collect()
+        initial_values.lock().to_items().into_keys().collect()
     };
 
     for path in &leaf_paths {

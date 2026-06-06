@@ -76,6 +76,14 @@ impl DalyPort {
         self.bus.clone()
     }
 
+    /// Réouvre le port série sous-jacent après une déconnexion (USB débranché /
+    /// device ré-énuméré). Délègue à [`SharedBus::reopen`] ; comme le bus est
+    /// partagé, tous les drivers (ET112, ATS, PRALRAN) repartent sur le nouveau
+    /// handle. Cf. audit robustesse §3.
+    pub async fn reopen(&self) -> Result<()> {
+        self.bus.reopen().await.map_err(DalyError::Other)
+    }
+
     /// Envoie une commande et attend la réponse correspondante.
     ///
     /// Applique un délai inter-trame après l'envoi.

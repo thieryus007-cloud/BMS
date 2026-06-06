@@ -32,7 +32,7 @@ impl WaterHeaterRuleEngine {
         soc_low: bool,
         irradiance_low: bool,
     ) -> anyhow::Result<String> {
-        let mut facts = Facts::new();
+        let facts = Facts::new();
         facts.set("WH.want_vacation",  Value::Boolean(false));
         facts.set("WH.grid_connected", Value::Boolean(grid_connected));
         facts.set("WH.soc_low",        Value::Boolean(soc_low));
@@ -40,7 +40,7 @@ impl WaterHeaterRuleEngine {
         facts.set("WH.target_mode",    Value::String("VACATION".to_string()));
 
         self.engine
-            .execute(&mut facts)
+            .execute(&facts)
             .context("Water heater rule engine evaluation failed")?;
 
         Ok(facts
