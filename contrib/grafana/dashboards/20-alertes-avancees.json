@@ -300,7 +300,7 @@
             "type": "prometheus",
             "uid": "daly-metrics"
           },
-          "expr": "absent(bms_soc{bms_id=\"0x01\"}) or absent(bms_soc{bms_id=\"0x02\"})",
+          "expr": "absent(bms_soc{bms_id=\"0x01\"}) or absent(bms_soc{bms_id=\"0x02\"}) or absent(bms_soc{bms_id=\"0x03\"})",
           "legendFormat": "BMS absent",
           "refId": "A"
         }

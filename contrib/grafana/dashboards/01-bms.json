@@ -28,7 +28,7 @@
       "title": "SOC — BMS-360Ah",
       "gridPos": {
         "h": 8,
-        "w": 6,
+        "w": 4,
         "x": 0,
         "y": 1
       },
@@ -92,8 +92,8 @@
       "title": "SOC — BMS-320Ah",
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 6,
+        "w": 4,
+        "x": 4,
         "y": 1
       },
       "datasource": {
@@ -156,7 +156,7 @@
       "title": "SOH BMS-360Ah",
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 4,
         "x": 12,
         "y": 1
       },
@@ -211,8 +211,8 @@
       "title": "SOH BMS-320Ah",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 4,
+        "x": 16,
         "y": 1
       },
       "datasource": {
@@ -266,7 +266,7 @@
       "title": "Capacité restante 360Ah",
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 4,
         "x": 12,
         "y": 5
       },
@@ -321,8 +321,8 @@
       "title": "Capacité restante 320Ah",
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 4,
+        "x": 16,
         "y": 5
       },
       "datasource": {
@@ -337,6 +337,180 @@
           },
           "expr": "bms_capacity_remaining_ah{bms_id=\"0x02\"}",
           "legendFormat": "Cap restante 320Ah",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "amph",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 24,
+      "type": "gauge",
+      "title": "SOC — BMS-620Ah",
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_soc{bms_id=\"0x03\"}",
+          "legendFormat": "SOC BMS-620Ah",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "red"
+              },
+              {
+                "value": 20,
+                "color": "orange"
+              },
+              {
+                "value": 50,
+                "color": "green"
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "SOH BMS-620Ah",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_soh{bms_id=\"0x03\"}",
+          "legendFormat": "SOH BMS-620Ah",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Capacité restante 620Ah",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_capacity_remaining_ah{bms_id=\"0x03\"}",
+          "legendFormat": "Capacité 620Ah",
           "refId": "A"
         }
       ],
@@ -642,6 +816,55 @@
       }
     },
     {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Tensions des cellules — BMS-620Ah",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 43
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "daly-metrics"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "daly-metrics"
+          },
+          "expr": "bms_cell_voltage{bms_id=\"0x03\"}",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mvolt",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
       "id": 15,
       "type": "timeseries",
       "title": "Delta cellules (max-min)",
@@ -649,7 +872,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 43
+        "y": 51
       },
       "datasource": {
         "type": "prometheus",
@@ -698,7 +921,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 43
+        "y": 51
       },
       "datasource": {
         "type": "prometheus",
@@ -747,7 +970,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 57
       },
       "collapsed": false,
       "panels": []
@@ -760,7 +983,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 58
       },
       "datasource": {
         "type": "prometheus",
@@ -827,7 +1050,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 58
+        "y": 66
       },
       "collapsed": false,
       "panels": []
@@ -840,7 +1063,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 59
+        "y": 67
       },
       "datasource": {
         "type": "prometheus",
@@ -898,7 +1121,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 59
+        "y": 67
       },
       "datasource": {
         "type": "prometheus",
@@ -956,7 +1179,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 65
+        "y": 73
       },
       "collapsed": false,
       "panels": []
@@ -969,7 +1192,7 @@
         "h": 4,
         "w": 24,
         "x": 0,
-        "y": 66
+        "y": 74
       },
       "datasource": {
         "type": "prometheus",
