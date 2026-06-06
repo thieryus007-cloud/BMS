@@ -87,6 +87,7 @@ pub struct InstantParams {
     /// - Unix secondes (float, ex: "1700000000.123") — format Prometheus standard
     /// - Unix millisecondes (int, ex: "1700000000123") — notre frontend interne
     /// - RFC3339 (ex: "2026-05-17T19:00:00Z") — fallback Prometheus
+    ///
     /// Défaut : maintenant si absent.
     #[serde(default, deserialize_with = "deser_time_ms_opt")]
     pub time: Option<i64>,

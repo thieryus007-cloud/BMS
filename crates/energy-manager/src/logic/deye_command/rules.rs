@@ -37,6 +37,7 @@ impl DeyeRuleEngine {
     ///
     /// All threshold comparisons are pre-computed in Rust and passed as bool flags
     /// to avoid fact-to-fact comparisons in GRL.
+    #[allow(clippy::too_many_arguments)]
     pub fn evaluate(
         &mut self,
         state_str: &str,

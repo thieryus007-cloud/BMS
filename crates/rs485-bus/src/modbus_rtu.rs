@@ -176,10 +176,13 @@ pub fn parse_read_response(addr: u8, fc: u8, buf: &[u8]) -> anyhow::Result<Vec<u
         );
     }
 
-    // Extraction registres (big-endian u16 dans la trame Modbus)
+    // Extraction registres (big-endian u16 dans la trame Modbus).
+    // `chunks_exact(2)` ignore un éventuel octet résiduel impair au lieu de
+    // paniquer sur `c[1]` — défense en profondeur contre une trame corrompue
+    // (le byte_count pair est déjà garanti par les contrôles ci-dessus).
     let data = &buf[3..buf.len() - 2];
     let regs = data
-        .chunks(2)
+        .chunks_exact(2)
         .map(|c| ((c[0] as u16) << 8) | c[1] as u16)
         .collect();
 
@@ -197,10 +200,11 @@ mod tests {
     #[test]
     fn test_crc16_known_value() {
         // Exemple Modbus RTU standard : requête FC03 addr=1 reg=0 count=1
-        // Requête : 01 03 00 00 00 01 → CRC = 0x840A (lo=0x0A, hi=0x84)
+        // Trame complète : 01 03 00 00 00 01 84 0A (CRC transmis lo puis hi).
+        // CRC_LO=0x84, CRC_HI=0x0A → valeur u16 = (hi<<8)|lo = 0x0A84.
         let data = [0x01u8, 0x03, 0x00, 0x00, 0x00, 0x01];
         let crc = crc16(&data);
-        assert_eq!(crc, 0x840A, "CRC Modbus RTU incorrect");
+        assert_eq!(crc, 0x0A84, "CRC Modbus RTU incorrect");
     }
 
     #[test]

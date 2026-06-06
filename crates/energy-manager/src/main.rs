@@ -137,7 +137,10 @@ fn spawn_persist_watcher(bus: AppBus, state: Arc<RwLock<EnergyState>>) {
         loop {
             let msg = match rx.recv().await {
                 Ok(m) => m,
-                Err(_) => continue,
+                // Lagged : on a raté des messages (récepteur lent) → continuer.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                // Closed : plus aucun émetteur → sortir au lieu de boucler à vide.
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
             if !msg.retain {
                 continue;

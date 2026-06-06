@@ -162,6 +162,7 @@ pub struct Evaluator<'r> {
     /// Cache `match_series` keyé par adresse mémoire du `VectorSelector`.
     /// L'AST PromQL est immutable pendant l'évaluation donc le pointeur
     /// est stable. Évite tout calcul de fingerprint après le 1er step.
+    #[allow(clippy::type_complexity)]
     match_cache: RefCell<HashMap<usize, Arc<Vec<(u32, Arc<Labels>)>>>>,
     /// Bornes `start`/`end` de la requête courante — nécessaires pour résoudre
     /// les modificateurs `@ start()` / `@ end()`. Renseignées au début de
@@ -1062,6 +1063,7 @@ impl<'r> Evaluator<'r> {
     /// la durée de l'eval_range, donc le pointeur est stable et unique
     /// par nœud syntaxique. Cela évite tout coût de fingerprint après le
     /// premier step (~200 steps × 1 lookup ptr trivial).
+    #[allow(clippy::type_complexity)]
     fn match_series(
         &self,
         vs: &VectorSelector,

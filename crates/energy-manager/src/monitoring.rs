@@ -43,11 +43,9 @@ pub fn spawn(vm_url: String, bus: AppBus) {
             ticker.tick().await;
             let Some(m) = ivals.next() else { continue };
             let ts_ms = chrono::Utc::now().timestamp_millis();
-            let lines = vec![
-                format!("em_tokio_task_polls_total{{task=\"energy_manager_monitor\"}} {} {}", m.total_poll_count, ts_ms),
+            let lines = [format!("em_tokio_task_polls_total{{task=\"energy_manager_monitor\"}} {} {}", m.total_poll_count, ts_ms),
                 format!("em_tokio_task_mean_poll_us{{task=\"energy_manager_monitor\"}} {} {}", m.mean_poll_duration().as_micros(), ts_ms),
-                format!("em_tokio_task_mean_scheduled_us{{task=\"energy_manager_monitor\"}} {} {}", m.mean_scheduled_duration().as_micros(), ts_ms),
-            ];
+                format!("em_tokio_task_mean_scheduled_us{{task=\"energy_manager_monitor\"}} {} {}", m.mean_scheduled_duration().as_micros(), ts_ms)];
             write_to_vm(&client, &vm_url, &lines.join("\n")).await;
         }
     });

@@ -526,25 +526,6 @@ fn fmt_val(v: f64) -> String {
         trimmed.to_string()
     }
 }
-#[cfg(test)]
-mod fmt_val_tests {
-    use super::fmt_val;
-    #[test]
-    fn formats_typical_values() {
-        assert_eq!(fmt_val(53.9), "53.9");
-        // Cas où f32→f64 ajoute du bruit décimal (réel observé en prod)
-        assert_eq!(fmt_val(53.900001525878906), "53.900002");
-        assert_eq!(fmt_val(0.0), "0");
-        assert_eq!(fmt_val(-12.34), "-12.34");
-        assert_eq!(fmt_val(100.0), "100");
-    }
-    #[test]
-    fn formats_special_values() {
-        assert_eq!(fmt_val(f64::NAN), "NaN");
-        assert_eq!(fmt_val(f64::INFINITY), "+Inf");
-        assert_eq!(fmt_val(f64::NEG_INFINITY), "-Inf");
-    }
-}
 impl AppState {
     pub fn new(
         config: AppConfig,
@@ -1065,5 +1046,24 @@ impl AppState {
     #[allow(dead_code)]
     pub async fn shelly_latest_all(&self) -> Vec<ShellyEmSnapshot> {
         self.shelly_latest.read().await.values().cloned().collect()
+    }
+}
+#[cfg(test)]
+mod fmt_val_tests {
+    use super::fmt_val;
+    #[test]
+    fn formats_typical_values() {
+        assert_eq!(fmt_val(53.9), "53.9");
+        // Cas où f32→f64 ajoute du bruit décimal (réel observé en prod)
+        assert_eq!(fmt_val(53.900001525878906), "53.900002");
+        assert_eq!(fmt_val(0.0), "0");
+        assert_eq!(fmt_val(-12.34), "-12.34");
+        assert_eq!(fmt_val(100.0), "100");
+    }
+    #[test]
+    fn formats_special_values() {
+        assert_eq!(fmt_val(f64::NAN), "NaN");
+        assert_eq!(fmt_val(f64::INFINITY), "+Inf");
+        assert_eq!(fmt_val(f64::NEG_INFINITY), "-Inf");
     }
 }

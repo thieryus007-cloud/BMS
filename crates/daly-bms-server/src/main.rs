@@ -311,7 +311,10 @@ async fn main() -> anyhow::Result<()> {
                         hourly_retention_days: config.metrics_store.hourly_retention_days,
                         daily_retention_days: config.metrics_store.daily_retention_days,
                     };
-                    let _ = s.spawn_maintenance(
+                    // Le JoinHandle est conservé (binding nommé) : le dropper
+                    // détacherait la tâche sans l'annuler, mais on évite ainsi
+                    // le lint let_underscore_future et on garde la poignée.
+                    let _maintenance_handle = s.spawn_maintenance(
                         policy,
                         config.metrics_store.maintenance_interval_hours,
                     );

@@ -83,6 +83,7 @@ async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle(
     msg: &MqttIncoming,
     state: &Arc<RwLock<EnergyState>>,

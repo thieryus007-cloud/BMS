@@ -881,7 +881,7 @@ mod tests {
                 writer
                     .write(
                         Sample::new("bms_v", ts, id as f64)
-                            .with_label("bms_id", &id.to_string()),
+                            .with_label("bms_id", id.to_string()),
                     )
                     .await
                     .unwrap();
@@ -945,7 +945,7 @@ mod tests {
                 writer
                     .write(
                         Sample::new("bms_v", ts, id as f64)
-                            .with_label("bms_id", &id.to_string()),
+                            .with_label("bms_id", id.to_string()),
                     )
                     .await
                     .unwrap();
@@ -1399,7 +1399,7 @@ mod tests {
             let w = store.writer();
             let ts = 100_000;
             for (n, val) in [(1, 1.0), (2, 2.0), (3, 3.0), (4, 4.0), (5, 5.0)] {
-                w.write(Sample::new("q", ts, val).with_label("n", &n.to_string())).await.unwrap();
+                w.write(Sample::new("q", ts, val).with_label("n", n.to_string())).await.unwrap();
             }
             // count_values : valeurs [1,1,2].
             w.write(Sample::new("cv", ts, 1.0).with_label("x", "a")).await.unwrap();
