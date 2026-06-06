@@ -34,7 +34,8 @@
 use crate::types::PvinverterPayload;
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 use zbus::{connection, object_server::SignalContext, Connection};
@@ -254,7 +255,7 @@ struct PvinverterRootIface {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl PvinverterRootIface {
     fn get_items(&self) -> ItemsDict {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard
             .to_items()
             .iter()
@@ -286,7 +287,7 @@ struct BusItemLeaf {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl BusItemLeaf {
     fn get_value(&self) -> OwnedValue {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         match guard.to_items().get(&self.path) {
             Some(item) => kind_to_owned(&item.kind),
             None       => OwnedValue::from(0i32),
@@ -294,7 +295,7 @@ impl BusItemLeaf {
     }
 
     fn get_text(&self) -> String {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard.to_items().get(&self.path).map(|i| i.text.clone()).unwrap_or_default()
     }
 
@@ -312,7 +313,7 @@ impl BusItemLeaf {
                     return 1;
                 }
                 let items = {
-                    let mut g = self.values.lock().unwrap();
+                    let mut g = self.values.lock();
                     g.position = new_pos;
                     info!(position = new_pos, "Position pvinverter mise à jour par Venus OS");
                     g.to_items()
@@ -329,7 +330,7 @@ impl BusItemLeaf {
                     return 1;
                 }
                 let items = {
-                    let mut g = self.values.lock().unwrap();
+                    let mut g = self.values.lock();
                     g.role = new_role.clone();
                     info!(role = %new_role, "Rôle pvinverter mis à jour par Venus OS");
                     g.to_items()
@@ -372,7 +373,7 @@ pub struct PvinverterServiceHandle {
 
 impl PvinverterServiceHandle {
     pub async fn update(&self, payload: &PvinverterPayload) -> Result<()> {
-        let current_role = { self.values.lock().unwrap().role.clone() };
+        let current_role = { self.values.lock().role.clone() };
         let new_values = PvinverterValues::from_payload(
             payload,
             self.device_instance,
@@ -381,7 +382,7 @@ impl PvinverterServiceHandle {
             current_role,
         );
         let items = new_values.to_items();
-        { *self.values.lock().unwrap() = new_values; }
+        { *self.values.lock() = new_values; }
         self.emit_items_changed(&items).await?;
         debug!(
             service = %self.service_name,
@@ -393,7 +394,7 @@ impl PvinverterServiceHandle {
 
     pub async fn set_disconnected(&self) -> Result<()> {
         let items = {
-            let mut g = self.values.lock().unwrap();
+            let mut g = self.values.lock();
             g.connected = 0;
             g.to_items()
         };
@@ -402,7 +403,7 @@ impl PvinverterServiceHandle {
     }
 
     pub async fn republish(&self) -> Result<()> {
-        let items = { self.values.lock().unwrap().to_items() };
+        let items = { self.values.lock().to_items() };
         self.emit_items_changed(&items).await
     }
 
@@ -457,7 +458,7 @@ pub async fn create_pvinverter_service(
         .await?;
 
     let leaf_paths: Vec<String> = {
-        initial_values.lock().unwrap().to_items().into_keys().collect()
+        initial_values.lock().to_items().into_keys().collect()
     };
 
     for path in &leaf_paths {

@@ -40,7 +40,8 @@
 use crate::types::SwitchPayload;
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -241,7 +242,7 @@ struct SwitchRootIface {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl SwitchRootIface {
     fn get_items(&self) -> ItemsDict {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard
             .to_items()
             .iter()
@@ -275,7 +276,7 @@ struct BusItemLeaf {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl BusItemLeaf {
     fn get_value(&self) -> OwnedValue {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         match guard.to_items().get(&self.path) {
             Some(item) => json_to_owned(&item.value),
             None       => OwnedValue::from(0i32),
@@ -283,7 +284,7 @@ impl BusItemLeaf {
     }
 
     fn get_text(&self) -> String {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard.to_items().get(&self.path).map(|i| i.text.clone()).unwrap_or_default()
     }
 
@@ -316,7 +317,8 @@ impl BusItemLeaf {
             };
 
             // Mise à jour optimiste locale (avant confirmation Tasmota)
-            if let Ok(mut guard) = self.values.lock() {
+            {
+                let mut guard = self.values.lock();
                 guard.switchable_state = if state_val != 0 { 1 } else { 0 };
                 guard.last_update = Instant::now();
             }
@@ -335,7 +337,8 @@ impl BusItemLeaf {
                 zvariant::Value::Str(s) => s.as_str().to_string(),
                 _ => return 0, // type inattendu → ignorer silencieusement
             };
-            if let Ok(mut g) = self.values.lock() {
+            {
+                let mut g = self.values.lock();
                 debug!(path = %self.path, name = %new_name, "CustomName mis à jour depuis console Venus");
                 g.custom_name = new_name;
             }
@@ -363,11 +366,11 @@ pub struct SwitchServiceHandle {
 
 impl SwitchServiceHandle {
     pub async fn update(&self, payload: &SwitchPayload) -> Result<()> {
-        let controllable  = { self.values.lock().unwrap().controllable };
-        let group         = { self.values.lock().unwrap().group.clone() };
+        let controllable  = { self.values.lock().controllable };
+        let group         = { self.values.lock().group.clone() };
         // Lire custom_name depuis le mutex : préserve les renommages effectués
         // depuis la console Venus OS entre deux mises à jour MQTT.
-        let custom_name   = { self.values.lock().unwrap().custom_name.clone() };
+        let custom_name   = { self.values.lock().custom_name.clone() };
         let new_values = SwitchValues::from_payload(
             payload,
             self.device_instance,
@@ -377,7 +380,7 @@ impl SwitchServiceHandle {
             controllable,
         );
         let items = new_values.to_items();
-        { *self.values.lock().unwrap() = new_values; }
+        { *self.values.lock() = new_values; }
         self.emit_items_changed(&items).await?;
         debug!(
             service = %self.service_name,
@@ -390,7 +393,7 @@ impl SwitchServiceHandle {
 
     pub async fn set_disconnected(&self) -> Result<()> {
         let items = {
-            let mut g = self.values.lock().unwrap();
+            let mut g = self.values.lock();
             g.connected = 0;
             g.to_items()
         };
@@ -399,7 +402,7 @@ impl SwitchServiceHandle {
     }
 
     pub async fn republish(&self) -> Result<()> {
-        let items = { self.values.lock().unwrap().to_items() };
+        let items = { self.values.lock().to_items() };
         self.emit_items_changed(&items).await
     }
 
@@ -478,7 +481,7 @@ pub async fn create_switch_service(
 
     // Enregistrer un objet feuille pour chaque chemin exposé
     let leaf_paths: Vec<String> = {
-        initial_values.lock().unwrap().to_items().into_keys().collect()
+        initial_values.lock().to_items().into_keys().collect()
     };
 
     for path in &leaf_paths {

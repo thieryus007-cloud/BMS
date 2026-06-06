@@ -825,6 +825,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "parking_lot",
  "rumqttc",
  "serde",
  "serde_json",
