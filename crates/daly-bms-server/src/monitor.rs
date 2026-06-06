@@ -441,28 +441,20 @@ pub async fn run_watchdog_agent(_state: AppState) {
 /// mémoire phase 2.3, mai 2026).
 pub fn spawn_all(state: AppState) {
     // Supervision (audit robustesse §2/§4) : si un agent se termine (retour) —
-    // ce qui ne doit jamais arriver pour une boucle de monitoring/watchdog — on
-    // arrête le process pour un redémarrage propre par systemd, au lieu de
-    // laisser le heartbeat manquant déclencher WatchdogSec (60 s). Le heartbeat
-    // systemd vit dans monitor_agent : sa mort silencieuse donnait auparavant une
-    // fausse impression de santé. Les panics sont déjà fatals via `panic=abort`.
+    // ce qui ne doit jamais arriver pour une boucle de monitoring/watchdog —
+    // `spawn_critical` arrête le process pour un redémarrage propre par systemd,
+    // au lieu de laisser le heartbeat manquant déclencher WatchdogSec (60 s). Le
+    // heartbeat systemd vit dans monitor_agent : sa mort silencieuse donnait
+    // auparavant une fausse impression de santé. Panics déjà fatals (panic=abort).
     let s_mon = state.clone();
-    tokio::spawn(async move {
+    crate::spawn_critical(async move {
         run_monitor_agent(s_mon).await;
-        tracing::error!(
-            "monitor_agent terminé de façon inattendue — arrêt du process pour redémarrage systemd"
-        );
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        std::process::exit(1);
+        tracing::error!("monitor_agent terminé de façon inattendue");
     });
     let s_wd = state.clone();
-    tokio::spawn(async move {
+    crate::spawn_critical(async move {
         run_watchdog_agent(s_wd).await;
-        tracing::error!(
-            "watchdog_agent terminé de façon inattendue — arrêt du process pour redémarrage systemd"
-        );
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        std::process::exit(1);
+        tracing::error!("watchdog_agent terminé de façon inattendue");
     });
 }
 
