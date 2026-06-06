@@ -365,6 +365,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 
 | Besoin | Fichier |
 |--------|---------|
+| Déployer (Pi5 + NanoPi, scripts existants) | `docs/DEPLOIEMENT.md` |
 | Ajouter un appareil / nouvelle métrique | `DASHBOARD_EXTENSION_GUIDE.md` |
 | Ajouter un BMS Daly (Pi5 + NanoPi, config-only) | `docs/AJOUT-BMS.md` |
 | Procédures détaillées (NanoPi, maintenance, récupération firmware, production solaire) | `PROCEDURES.md` |
