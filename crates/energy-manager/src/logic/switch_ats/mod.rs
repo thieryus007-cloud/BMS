@@ -11,7 +11,7 @@ use crate::types::{EnergyState, MqttOutgoing};
 const KEEPALIVE_SECS: u64 = 60;
 
 pub async fn spawn(bus: AppBus, state: Arc<RwLock<EnergyState>>) {
-    tokio::spawn(run(bus, state));
+    crate::supervise::spawn_critical(run(bus, state));
 }
 
 async fn run(bus: AppBus, state: Arc<RwLock<EnergyState>>) {

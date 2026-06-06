@@ -115,12 +115,29 @@ pub async fn poll_loop<F, E>(
                     );
                     on_error(device.address, PollErrorKind::Timeout, "timeout".to_string());
                 }
-                Err(DalyError::Serial(e)) => {
+                Err(e @ DalyError::Serial(_)) | Err(e @ DalyError::Io(_)) => {
+                    // Erreur port série OU I/O bas niveau : typiquement une
+                    // déconnexion USB / ré-énumération du device. Auparavant les
+                    // erreurs Io tombaient dans le catch-all (aucun backoff, port
+                    // mort martelé) ; on les traite désormais comme une perte de
+                    // port avec backoff + tentative de réouverture (audit §3).
                     let msg = e.to_string();
-                    error!("Erreur port série : {} — backoff {}ms", e, backoff_ms);
+                    error!("Erreur port série/IO : {} — backoff {}ms", e, backoff_ms);
                     on_error(device.address, PollErrorKind::Serial, msg);
                     tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
                     backoff_ms = (backoff_ms * 2).min(config.backoff_max_ms);
+                    // Le bus étant partagé, la réouverture profite aussi aux
+                    // drivers ET112 / ATS / PRALRAN du même SharedBus.
+                    match manager.port.reopen().await {
+                        Ok(()) => {
+                            info!("Port série réouvert avec succès après erreur");
+                            backoff_ms = config.backoff_initial_ms;
+                        }
+                        Err(re) => warn!(
+                            "Réouverture du port série échouée : {} — nouvelle tentative au prochain cycle",
+                            re
+                        ),
+                    }
                     break; // sortir de la boucle devices et réessayer le cycle
                 }
                 Err(e) => {

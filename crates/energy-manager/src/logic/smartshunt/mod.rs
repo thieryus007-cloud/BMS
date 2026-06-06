@@ -23,7 +23,7 @@ use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, LiveEvent, MqttIncoming, MqttOutgoing};
 
 pub async fn spawn(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>, loader: Arc<RulesLoader>) {
-    tokio::spawn(run(vic, bus, state, loader));
+    crate::supervise::spawn_critical(run(vic, bus, state, loader));
 }
 
 async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>, loader: Arc<RulesLoader>) {
@@ -83,6 +83,7 @@ async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle(
     msg: &MqttIncoming,
     state: &Arc<RwLock<EnergyState>>,

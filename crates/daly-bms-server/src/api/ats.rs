@@ -346,7 +346,7 @@ fn ats_addr(state: &AppState) -> u8 {
 /// ignorerait silencieusement un octet final isolé (longueur impaire).
 fn decode_hex_frame(frame_hex: &str) -> Result<Vec<u8>, ()> {
     let hex = frame_hex.replace([' ', ':'], "");
-    if !hex.is_ascii() || hex.len() % 2 != 0 {
+    if !hex.is_ascii() || !hex.len().is_multiple_of(2) {
         return Err(());
     }
     let to_val = |c: u8| match c {

@@ -96,7 +96,7 @@ fn bench_insert_batch(c: &mut Criterion) {
 
                     // Insertion en batchs
                     let mut written = 0_u64;
-                    for chunk in 0..((total + batch as u64 - 1) / batch as u64) {
+                    for chunk in 0..total.div_ceil(batch as u64) {
                         let wtx = db.begin_write().unwrap();
                         {
                             let mut t_raw = wtx.open_table(TABLE_RAW).unwrap();

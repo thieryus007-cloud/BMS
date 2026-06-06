@@ -29,7 +29,8 @@
 use crate::types::HeatpumpPayload;
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 use zbus::{connection, object_server::SignalContext, Connection};
@@ -201,7 +202,7 @@ struct HeatpumpRootIface {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl HeatpumpRootIface {
     fn get_items(&self) -> ItemsDict {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard
             .to_items()
             .iter()
@@ -232,7 +233,7 @@ struct BusItemLeaf {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl BusItemLeaf {
     fn get_value(&self) -> OwnedValue {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         match guard.to_items().get(&self.path) {
             Some(item) => json_to_owned(&item.value),
             None       => OwnedValue::from(0i32),
@@ -240,7 +241,7 @@ impl BusItemLeaf {
     }
 
     fn get_text(&self) -> String {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard.to_items().get(&self.path).map(|i| i.text.clone()).unwrap_or_default()
     }
 
@@ -269,7 +270,7 @@ impl HeatpumpServiceHandle {
             self.custom_name.clone(),
         );
         let items = new_values.to_items();
-        { *self.values.lock().unwrap() = new_values; }
+        { *self.values.lock() = new_values; }
         self.emit_items_changed(&items).await?;
         debug!(service = %self.service_name, state = payload.state, "D-Bus ItemsChanged heatpump émis");
         Ok(())
@@ -277,7 +278,7 @@ impl HeatpumpServiceHandle {
 
     pub async fn set_disconnected(&self) -> Result<()> {
         let items = {
-            let mut g = self.values.lock().unwrap();
+            let mut g = self.values.lock();
             g.connected = 0;
             g.to_items()
         };
@@ -286,7 +287,7 @@ impl HeatpumpServiceHandle {
     }
 
     pub async fn republish(&self) -> Result<()> {
-        let items = { self.values.lock().unwrap().to_items() };
+        let items = { self.values.lock().to_items() };
         self.emit_items_changed(&items).await
     }
 
@@ -340,7 +341,7 @@ pub async fn create_heatpump_service(
         .await?;
 
     let leaf_paths: Vec<String> = {
-        initial_values.lock().unwrap().to_items().into_keys().collect()
+        initial_values.lock().to_items().into_keys().collect()
     };
 
     for path in &leaf_paths {

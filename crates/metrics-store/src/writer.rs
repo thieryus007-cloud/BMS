@@ -145,10 +145,12 @@ impl Writer {
         self.tx.send(WriterMsg::Sample(sample)).await.map_err(map_send_err)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn try_write(&self, sample: Sample) -> Result<(), mpsc::error::TrySendError<Sample>> {
         self.tx.try_send(WriterMsg::Sample(sample)).map_err(map_try_send_err)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn blocking_write(&self, sample: Sample) -> Result<(), mpsc::error::SendError<Sample>> {
         self.tx.blocking_send(WriterMsg::Sample(sample)).map_err(map_send_err)
     }

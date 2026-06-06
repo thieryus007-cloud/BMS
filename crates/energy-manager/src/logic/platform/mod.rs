@@ -9,7 +9,7 @@ use crate::mqtt::topics::publish;
 use crate::types::MqttOutgoing;
 
 pub async fn spawn(cfg: PlatformConfig, bus: AppBus) {
-    tokio::spawn(run(cfg, bus));
+    crate::supervise::spawn_critical(run(cfg, bus));
 }
 
 async fn run(cfg: PlatformConfig, bus: AppBus) {

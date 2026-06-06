@@ -28,7 +28,8 @@
 use crate::types::MeteoPayload;
 use anyhow::Result;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 use zbus::{connection, object_server::SignalContext, Connection};
@@ -185,7 +186,7 @@ struct MeteoRootIface {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl MeteoRootIface {
     fn get_items(&self) -> ItemsDict {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard.to_items().iter().map(|(p, i)| (p.clone(), item_to_inner(i))).collect()
     }
 
@@ -209,12 +210,12 @@ struct BusItemLeaf {
 #[zbus::interface(name = "com.victronenergy.BusItem")]
 impl BusItemLeaf {
     fn get_value(&self) -> OwnedValue {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard.to_items().get(&self.path).map(|i| json_to_owned(&i.value)).unwrap_or(OwnedValue::from(0i32))
     }
 
     fn get_text(&self) -> String {
-        let guard = self.values.lock().unwrap();
+        let guard = self.values.lock();
         guard.to_items().get(&self.path).map(|i| i.text.clone()).unwrap_or_default()
     }
 
@@ -237,7 +238,7 @@ impl MeteoServiceHandle {
     pub async fn update(&self, payload: &MeteoPayload) -> Result<()> {
         let new_values = MeteoValues::from_payload(payload, self.device_instance, self.product_name.clone());
         let items = new_values.to_items();
-        { *self.values.lock().unwrap() = new_values; }
+        { *self.values.lock() = new_values; }
         self.emit_items_changed(&items).await?;
         debug!(
             service     = %self.service_name,
@@ -252,7 +253,7 @@ impl MeteoServiceHandle {
 
     pub async fn set_disconnected(&self) -> Result<()> {
         let items = {
-            let mut g = self.values.lock().unwrap();
+            let mut g = self.values.lock();
             g.connected = 0;
             g.to_items()
         };
@@ -261,7 +262,7 @@ impl MeteoServiceHandle {
     }
 
     pub async fn republish(&self) -> Result<()> {
-        let items = { self.values.lock().unwrap().to_items() };
+        let items = { self.values.lock().to_items() };
         self.emit_items_changed(&items).await
     }
 
@@ -314,7 +315,7 @@ pub async fn create_meteo_service(
         .await?;
 
     let leaf_paths: Vec<String> = {
-        initial_values.lock().unwrap().to_items().into_keys().collect()
+        initial_values.lock().to_items().into_keys().collect()
     };
 
     for path in &leaf_paths {

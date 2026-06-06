@@ -8,7 +8,7 @@ use crate::rules_loader::RulesLoader;
 use crate::types::EnergyState;
 
 pub async fn spawn(bus: AppBus, state: Arc<RwLock<EnergyState>>, bms_server_url: String, loader: Arc<RulesLoader>) {
-    tokio::spawn(http_poll_task(bms_server_url, state.clone(), bus, loader));
+    crate::supervise::spawn_critical(http_poll_task(bms_server_url, state.clone(), bus, loader));
 }
 
 async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>, bus: AppBus, loader: Arc<RulesLoader>) {

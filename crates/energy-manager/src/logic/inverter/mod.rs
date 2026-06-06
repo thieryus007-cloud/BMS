@@ -15,7 +15,7 @@ pub async fn spawn(
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
 ) {
-    tokio::spawn(run(cfg, bus, state));
+    crate::supervise::spawn_critical(run(cfg, bus, state));
 }
 
 async fn run(

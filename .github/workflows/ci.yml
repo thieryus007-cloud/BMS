@@ -1,0 +1,93 @@
+name: CI
+
+# Filet de sécurité robustesse (audit §1) : build natif + tests + clippy,
+# et cross-build des cibles de production (aarch64 Pi5 + armv7 NanoPi).
+# Le cross-build armv7 reproduit le piège documenté du SIGILL : on n'utilise
+# JAMAIS `-C target-cpu=native` (l'hôte CI est x86_64 ≠ cible ARM).
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build natif + clippy + tests (x86_64)
+  # ---------------------------------------------------------------------------
+  test:
+    name: test + clippy (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # La toolchain (version, composants) vient de rust-toolchain.toml.
+      - name: Install toolchain (rust-toolchain.toml)
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Informatif : le code utilise un alignement manuel volontaire que
+      # rustfmt réécrirait. On signale sans bloquer (audit : pas de reformat
+      # massif, zéro régression de style).
+      - name: Format (informatif)
+        run: cargo fmt --all -- --check
+        continue-on-error: true
+
+      - name: Clippy (-D warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+  # ---------------------------------------------------------------------------
+  # Cross-build des binaires de production
+  # ---------------------------------------------------------------------------
+  cross-build:
+    name: cross-build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            apt: gcc-aarch64-linux-gnu
+            linker_env: CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER
+            linker: aarch64-linux-gnu-gcc
+            bins: "--bin daly-bms-server --bin dbus-mqtt-venus --bin energy-manager"
+          - target: armv7-unknown-linux-gnueabihf
+            apt: gcc-arm-linux-gnueabihf
+            linker_env: CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER
+            linker: arm-linux-gnueabihf-gcc
+            bins: "--bin dbus-mqtt-venus --bin daly-bms-server"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain (rust-toolchain.toml)
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross linker
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
+
+      - name: Configure linker
+        run: echo "${{ matrix.linker_env }}=${{ matrix.linker }}" >> "$GITHUB_ENV"
+
+      # Codegen portable par défaut (PAS de target-cpu=native → évite le SIGILL
+      # armv7). L'objectif CI est de détecter les régressions de compilation/lien,
+      # pas de produire le binaire optimisé (fait par le Makefile sur l'hôte cible).
+      - name: Build ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} ${{ matrix.bins }}

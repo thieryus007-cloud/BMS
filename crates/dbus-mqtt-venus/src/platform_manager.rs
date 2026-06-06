@@ -79,7 +79,7 @@ impl PlatformManager {
 
     async fn republish_and_watchdog(&self, watchdog_dur: Duration) {
         let Some(svc) = &self.service else { return };
-        let last = { svc.values.lock().unwrap().last_update };
+        let last = { svc.values.lock().last_update };
         let now  = Instant::now();
         if now.duration_since(last) > watchdog_dur {
             if let Err(e) = svc.set_disconnected().await {

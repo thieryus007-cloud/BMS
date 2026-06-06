@@ -220,7 +220,7 @@ impl SwitchManager {
     async fn republish_and_watchdog(&self, watchdog_dur: Duration) {
         let now = Instant::now();
         for (idx, svc) in &self.services {
-            let last = { svc.values.lock().unwrap().last_update };
+            let last = { svc.values.lock().last_update };
             if now.duration_since(last) > watchdog_dur {
                 if let Err(e) = svc.set_disconnected().await {
                     warn!(index = idx, "Erreur watchdog switch : {:#}", e);
