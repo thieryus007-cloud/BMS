@@ -167,7 +167,7 @@ build-energy-arm: check-arm-deps
 	$(CARGO) build --release --target $(TARGET_ARM) --bin $(ENERGY_BIN)
 	@echo "✓ Binaire ARM energy-manager (optimisé Pi5) : $(ARM_RELEASE_DIR)/$(ENERGY_BIN)"
 
-# Migration redb : binaire d'import VM → redb (cf. docs/plan_migration_vm_redb.md §0.7)
+# Migration redb : binaire d'import VM → redb (cf. docs/metriques-redb-architecture.md §0.7)
 build-import-vm-arm: check-arm-deps
 	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(CROSS_LINKER_GNU) \
 	RUSTFLAGS="$(ARM_RUSTFLAGS)" \
@@ -443,7 +443,7 @@ help:
 	@echo " Perses (monitoring — essai parallèle à Grafana) :"
 	@echo "  make perses-install  Installer Perses sur le Pi5 (port 8090)"
 	@echo "  make perses-uninstall Désinstaller Perses"
-	@echo "  Voir docs/Perses-readme.md pour le guide complet"
+	@echo "  Voir docs/grafana-dashboards.md pour le guide complet"
 	@echo ""
 	@echo " Profiling (optimisation CPU) :"
 	@echo "  make profile-setup   Instructions pour installer perf sur Pi5"

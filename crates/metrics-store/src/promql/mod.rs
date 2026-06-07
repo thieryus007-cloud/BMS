@@ -1,12 +1,12 @@
 //! Transpileur PromQL → plan d'exécution sur le `Reader` redb.
 //!
-//! Plan : `docs/plan_migration_vm_redb.md` §6.
+//! Plan : `docs/metriques-redb-architecture.md` §6.
 //!
 //! Pipeline :
 //! 1. **parse** : délégué à [`promql_parser::parser::parse`].
 //! 2. **validate** ([`validate::validate`]) : liste blanche des fonctions et
 //!    opérateurs supportés. Depuis l'évolution de conformité (cf.
-//!    `docs/Evolution-compliance-PromQL.md`), le sous-ensemble couvre aussi :
+//!    `docs/metriques-promql-reference.md`), le sous-ensemble couvre aussi :
 //!    les modificateurs temporels `offset` **et** `@`, les opérateurs
 //!    ensemblistes `and`/`or`/`unless`, le matching vectoriel
 //!    `on`/`ignoring`/`group_left`/`group_right`, les agrégateurs `quantile`,

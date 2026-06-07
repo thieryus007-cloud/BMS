@@ -1,6 +1,6 @@
 //! `import-vm` — rapatrie l'historique VictoriaMetrics dans une base redb.
 //!
-//! Cf. `docs/plan_migration_vm_redb.md` §0.7 J2-J3.
+//! Cf. `docs/metriques-redb-architecture.md` §0.7 J2-J3.
 //!
 //! ## Pré-requis
 //! - `daly-bms` ARRÊTÉ (sinon contention writer sur la même base redb).

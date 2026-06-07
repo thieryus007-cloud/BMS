@@ -1,5 +1,5 @@
 //! Évaluateur PromQL — couvre le golden set §6.5 + extensions roadmap
-//! promql-compat (cf. `docs/promql-compat-roadmap.md`).
+//! promql-compat (cf. `docs/metriques-promql-reference.md`).
 //!
 //! ## Couverture
 //! - `VectorSelector` (instant) avec matchers `= != =~ !~`
@@ -16,7 +16,7 @@
 //! - Labels : `label_replace label_join` (Phase 4)
 //! - Absence : `absent` (vecteur instant) / `absent_over_time` (range) — Phase 5
 //!
-//! ## Évolution conformité (cf. `docs/Evolution-compliance-PromQL.md`)
+//! ## Évolution conformité (cf. `docs/metriques-promql-reference.md`)
 //! - Modificateurs temporels : `offset` **et** `@ <ts>`/`@ start()`/`@ end()`
 //!   (`resolve_eval_time`).
 //! - Opérateurs ensemblistes : `and`/`or`/`unless` (`eval_set_op`), avec
@@ -48,7 +48,7 @@
 //! Limite résiduelle sur tier compacté : un reset interne à un bucket
 //! horaire/journalier reste invisible (points raw déjà purgés).
 //!
-//! ## Optimisations mémoire (cf. docs/memory-leak-investigation.md §12)
+//! ## Optimisations mémoire (cf. docs/diagnostic-depannage.md §12)
 //! L'Evaluator est scopé per-request et porte trois caches partagés sur
 //! toute la durée d'un `eval_range` :
 //! 1. `read_txn` : une seule `ReadTransaction` redb, évite N×
@@ -1249,7 +1249,7 @@ fn apply_range_fn_raw(
     // Fonctions nécessitant ≥ 2 points sous la fenêtre. Pour `rate`/`increase`
     // c'est la sémantique Prometheus stricte : un seul point ⇒ *no data* (et
     // non `0`, qui masquait silencieusement les séries clairsemées — cf. P0 de
-    // `docs/Evolution-compliance-PromQL.md` §4.6/§7). Idem `deriv`/`predict_linear`
+    // `docs/metriques-promql-reference.md` §4.6/§7). Idem `deriv`/`predict_linear`
     // dont la régression est indéfinie sur un point.
     if matches!(name, "deriv" | "predict_linear" | "rate" | "increase") && pts.len() < 2 {
         return None;

@@ -1,5 +1,5 @@
 //! Encodage des clés composites `(series_id u32, ts_ms i64)` en `[u8; 12]`
-//! big-endian. Cf. plan_migration_vm_redb.md §4.1.
+//! big-endian. Cf. docs/metriques-redb-architecture.md §4.1.
 
 pub const SKEY_LEN: usize = 12;
 const TS_SIGN_FLIP: u64 = 0x8000_0000_0000_0000;
