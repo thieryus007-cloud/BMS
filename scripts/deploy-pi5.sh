@@ -6,7 +6,7 @@
 #   bash scripts/deploy-pi5.sh --no-build       # skip make build-arm
 #   bash scripts/deploy-pi5.sh --no-validate    # skip script test-api.sh
 #
-# Architecture post-migration redb (cf. docs/plan_migration_vm_redb.md) :
+# Architecture post-migration redb (cf. docs/metriques-redb-architecture.md) :
 # - metrics-store (redb à /mnt/nvme/daly-bms/metrics.redb) est la TSDB
 #   primaire, sert toutes les lectures via le dispatcher PromQL local
 #   (`/api/v1/query[_range]`, `/api/v1/chart/*`, `/api/v1/history/*`,

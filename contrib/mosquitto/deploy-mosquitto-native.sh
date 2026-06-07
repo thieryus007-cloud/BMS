@@ -3,7 +3,7 @@
 # deploy-mosquitto-native.sh
 # Bascule Mosquitto Docker -> Mosquitto natif sur Pi5
 # Couvre les étapes §10/§11/§12 du plan
-# docs/migration-mosquitto-docker-to-native-v2.md
+# docs/mqtt-mosquitto.md
 #
 # Usage :
 #   ./contrib/mosquitto/deploy-mosquitto-native.sh           # interactif

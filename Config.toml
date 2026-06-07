@@ -405,7 +405,7 @@ name      = "DEYE — Shelly Pro 2PM"
 # metrics-store — backend TSDB embarqué (redb pure-Rust)
 # =============================================================================
 # Seule TSDB du système (lecture + écriture des séries temporelles).
-# Cf. docs/architecture-redb.md.
+# Cf. docs/metriques-redb-architecture.md.
 #
 # IMPORTANT : enabled doit être à `true` en prod, sinon plus aucune lecture/
 # écriture de séries temporelles ne fonctionne (le dashboard custom et

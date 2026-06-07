@@ -862,7 +862,7 @@ Nombre mini/maximal de séries temporelles : .
 > VictoriaMetrics a été **entièrement retiré** (code, double écriture, service).
 > **redb (`metrics-store`) est désormais la seule TSDB.** Ce document est
 > conservé comme **trace historique** de la migration et de ses décisions.
-> Pour l'architecture **actuelle**, voir **[`architecture-redb.md`](./architecture-redb.md)**.
+> Pour l'architecture **actuelle**, voir le corps de ce document (sections 1 à 10 ci-dessus).
 > Les références à VictoriaMetrics ci-dessous sont donc d'ordre historique.
 
 > **Projet** : Daly-BMS-Rust

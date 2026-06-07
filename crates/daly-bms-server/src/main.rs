@@ -317,7 +317,7 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    // ── metrics-store redb (seule TSDB, cf. `docs/architecture-redb.md`) ──
+    // ── metrics-store redb (seule TSDB, cf. `docs/metriques-redb-architecture.md`) ──
     let metrics_store = if config.metrics_store.enabled {
         let opts = metrics_store::Options {
             cache_bytes: config.metrics_store.cache_mb * 1024 * 1024,

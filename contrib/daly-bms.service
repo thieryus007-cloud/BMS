@@ -63,7 +63,7 @@ RestartSec=5s
 # règle polkit `50-dalybms-systemd-restart.rules` si injoignable. Ajouter
 # un ExecStartPost créerait un deadlock systemd (daly-bms reste en état
 # activating tant que `systemctl restart energy-manager` ne rend pas la
-# main, et inversement). Cf. docs/memory-leak-investigation.md §10.
+# main, et inversement). Cf. docs/diagnostic-depannage.md §10.
 RuntimeMaxSec=86400
 
 # Accès au port série RS485 (/dev/ttyUSB* ou /dev/ttyACM*)

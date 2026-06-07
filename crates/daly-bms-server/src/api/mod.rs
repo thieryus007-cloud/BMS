@@ -172,7 +172,7 @@ pub fn build_router(state: AppState) -> Router {
         // ── Middlewares ───────────────────────────────────────────────────────
         // tower-http upgrade 0.5 → 0.6 a refactoré le pattern BoxCloneService
         // qui causait ~80 % des allocations linéaires par requête HTTP en 0.5
-        // (cf. docs/memory-leak-investigation.md §13). Avec 0.6, CorsLayer +
+        // (cf. docs/diagnostic-depannage.md §13). Avec 0.6, CorsLayer +
         // TraceLayer ne fuient plus → on peut tout réactiver.
         .layer(cors)
         .layer(TraceLayer::new_for_http())

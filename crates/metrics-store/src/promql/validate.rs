@@ -1,7 +1,7 @@
 //! Validation : walk de l'AST. Rejette tout ce qui n'est pas dans le
 //! sous-ensemble PromQL supporté par l'évaluateur (`exec.rs`).
 //!
-//! Couverture (cf. `docs/Evolution-compliance-PromQL.md`) : sélecteurs avec
+//! Couverture (cf. `docs/metriques-promql-reference.md`) : sélecteurs avec
 //! `offset` **et** `@` (modificateurs temporels), arithmétique, comparaisons,
 //! agrégations (`sum/min/max/avg/count/group/stddev/stdvar` + paramétrées
 //! `topk/bottomk/quantile/count_values`), opérateurs ensemblistes

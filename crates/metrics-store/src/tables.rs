@@ -1,4 +1,4 @@
-//! Définitions des tables redb. Cf. plan_migration_vm_redb.md §4.2.
+//! Définitions des tables redb. Cf. docs/metriques-redb-architecture.md §4.2.
 
 use redb::TableDefinition;
 use serde::{Deserialize, Serialize};

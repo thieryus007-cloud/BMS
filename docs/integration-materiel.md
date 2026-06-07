@@ -111,7 +111,7 @@ Bus `/dev/ttyUSB0` — paramètres : 9600 bauds, 8N1 :
 | `0x08` | ET112-Maison (SN 119215X) | `acload.mqtt_8` | `grid/8/venus` | 30 |
 | `0x09` | ET112-Réseau (SN 061077X) | `grid.mqtt_9` | `grid/9/venus` | 31 |
 
-> **Note :** L'adresse `0x06` (ATS CHINT) n'est pas listée dans la table CLAUDE.md §5 mais est documentée dans `ATS_CHINT_MAINTENANCE.md` (schéma ASCII §1). Elle est réservée sur le bus.
+> **Note :** L'adresse `0x06` (ATS CHINT) n'est pas listée dans la table CLAUDE.md §5 mais est documentée dans la section **ATS CHINT** plus bas dans ce document (schéma ASCII §1). Elle est réservée sur le bus.
 
 > **Adresses déjà prises (à ne pas réutiliser)** : `0x01`, `0x02`, `0x03`, `0x05`, `0x06`, `0x07`, `0x08`, `0x09`.
 
@@ -1058,7 +1058,7 @@ API de lecture : `GET /api/v1/irradiance/status`.
 
 ## 10. Résumé inventaire séries temporelles
 
-Estimation de production du système complet (données issues de `docs/timeseries.md`) :
+Estimation de production du système complet (données issues de l'inventaire des séries, cf. [`metriques-redb-architecture.md`](./metriques-redb-architecture.md)) :
 
 | Appareil | Séries temporelles |
 |----|---|
@@ -1083,7 +1083,7 @@ Estimation de production du système complet (données issues de `docs/timeserie
 
 > Statut : MIGRATION TERMINÉE — section historique, conservée pour référence.
 >
-> Ce guide décrit l'ancienne architecture energy-manager (flows JSON, ancienne stack Node-RED-like). La référence actuelle pour energy-manager est `docs/energy-manager-guide.md`. La section §11.5 (checklist générique d'extension) et les modèles de code Rust restent valables comme référence de principe pour tout développement futur.
+> Ce guide décrit l'ancienne architecture energy-manager (flows JSON, ancienne stack Node-RED-like). La référence actuelle pour energy-manager est [`app-energy-manager.md`](./app-energy-manager.md). La section §11.5 (checklist générique d'extension) et les modèles de code Rust restent valables comme référence de principe pour tout développement futur.
 >
 > Version : 2.0 — Date : 2026-04-05 — Statut : **OBSOLÈTE** (remplacé par energy-manager Rust)
 
@@ -1589,7 +1589,7 @@ tokio::spawn(async move {
 - [./mqtt-mosquitto.md] — Architecture MQTT : Mosquitto natif, topics, bridge NanoPi, anti-boucle.
 - [./deploiement-exploitation.md] — Workflow complet Pi5 + NanoPi, procédures systemd.
 - [./ARCHITECTURE.md] — Vue d'ensemble système, index de toute la documentation.
-- `docs/energy-manager-guide.md` — Modifier/ajouter/retirer une fonctionnalité dans energy-manager Rust actuel.
+- [`app-energy-manager.md`](./app-energy-manager.md) — Modifier/ajouter/retirer une fonctionnalité dans energy-manager Rust actuel.
 
 ---
 

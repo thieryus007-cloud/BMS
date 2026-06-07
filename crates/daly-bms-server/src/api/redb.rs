@@ -1,5 +1,5 @@
 //! Endpoints HTTP `/api/v1/redb/*` — interroge le backend `metrics-store`
-//! (redb) directement via le shim PromQL. Cf. plan_migration_vm_redb.md
+//! (redb) directement via le shim PromQL. Cf. docs/metriques-redb-architecture.md
 //! Phase 2.
 //!
 //! Format de réponse : compatible Prometheus HTTP API

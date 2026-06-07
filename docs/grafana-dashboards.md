@@ -806,7 +806,7 @@ Panels (35 panels) :
 
 Ces 4 dashboards utilisent des fonctionnalités PromQL avancées (agrégations, fonctions
 statistiques, `offset`, `start()`, `count_values`). Ils sont décrits dans
-`docs/Evolution-compliance-PromQL.md §9`.
+[`metriques-promql-reference.md`](./metriques-promql-reference.md) §9.
 
 #### Dashboard 17 — Flotte Santé & SLO Batterie
 **Fichier** : `17-flotte-sante.json` | **UID** : `daly-fleet-17` | **Tags** : `daly-bms`, `battery`, `slo`, `fleet`
@@ -1001,7 +1001,7 @@ adaptation du dashboard.
 
 ### 8.4 Limites du shim PromQL redb
 
-> Référence : `docs/architecture-redb.md §5` et `docs/redb-queries.md`.
+> Référence : [`metriques-redb-architecture.md`](./metriques-redb-architecture.md) §5 et [`metriques-promql-reference.md`](./metriques-promql-reference.md).
 
 Le shim PromQL de `daly-bms-server` n'est **pas** un PromQL complet. Fonctionnalités
 **supportées** et **non supportées** :

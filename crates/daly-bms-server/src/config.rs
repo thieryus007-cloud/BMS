@@ -38,7 +38,7 @@ pub struct AppConfig {
     pub mqtt: MqttConfig,
 
     /// Backend TSDB local redb (metrics-store) — seule source de vérité
-    /// des séries temporelles. Cf. `docs/architecture-redb.md`. Désactivé
+    /// des séries temporelles. Cf. `docs/metriques-redb-architecture.md`. Désactivé
     /// par défaut (mode dégradé pour debug).
     #[serde(default)]
     pub metrics_store: MetricsStoreConfig,
@@ -413,7 +413,7 @@ impl MqttConfig {
 }
 
 /// Section `[metrics_store]` — backend TSDB redb (seule source de vérité).
-/// Cf. `docs/architecture-redb.md`. Une fois `enabled = true` :
+/// Cf. `docs/metriques-redb-architecture.md`. Une fois `enabled = true` :
 /// - la base redb est ouverte au démarrage à `db_path` ;
 /// - les samples produits par les snapshots (`redb_writes.rs`) sont
 ///   poussés vers le writer batché (`try_write`, non bloquant) ;

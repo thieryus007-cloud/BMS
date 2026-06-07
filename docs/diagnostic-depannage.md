@@ -756,7 +756,7 @@ com.victronenergy.meteo
 >
 > Les numéros de section (§1–§16) sont préservés car certains commentaires du code source
 > y font référence (notamment `api/mod.rs` §13, `daly-bms.service` §10,
-> `promql/exec.rs` §12, `architecture-redb.md`).
+> `promql/exec.rs` §12, [`metriques-redb-architecture.md`](./metriques-redb-architecture.md)).
 
 ---
 

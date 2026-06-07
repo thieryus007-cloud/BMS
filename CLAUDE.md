@@ -1,7 +1,7 @@
 # CLAUDE.md — Référence Projet Daly-BMS-Rust
 
 > Chargé automatiquement à chaque session. Garder concis.
-> Procédures détaillées → **PROCEDURES.md** (lire sur demande).
+> Index complet de la doc → **docs/ARCHITECTURE.md** (lire sur demande).
 > 
 > **ATTENTION**
 > Toujours faire un PLAN et decomposer les taches pour ne pas avoir "API Error: Stream idle timeout - partial response received"
@@ -158,7 +158,7 @@ contrib/energy-manager.service          ← unité systemd energy-manager
 contrib/grafana/                        ← provisioning Grafana complet
   dashboards/01-bms.json … 20-alertes-avancees.json ← 20 dashboards JSON
     (17→20 = dashboards évolués PromQL avancé : flotte/SLO, rendement PV,
-     bilan énergie J/J-1, alertes multi-critères — cf. docs/Evolution-compliance-PromQL.md §9)
+     bilan énergie J/J-1, alertes multi-critères — cf. docs/metriques-promql-reference.md §9)
   provisioning/datasources/daly-metrics.yaml        ← datasource PromQL → :8080
   provisioning/dashboards/daly-bms.yaml             ← provider → /var/lib/grafana/dashboards
 scripts/setup-grafana.sh                ← installation Grafana (première fois)
@@ -363,14 +363,19 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 
 ## 10. GUIDES COMPLÉMENTAIRES (lire sur demande)
 
-| Besoin | Fichier |
-|--------|---------|
-| Déployer (Pi5 + NanoPi, scripts existants) | `docs/DEPLOIEMENT.md` |
-| Ajouter un appareil / nouvelle métrique | `DASHBOARD_EXTENSION_GUIDE.md` |
-| Ajouter un BMS Daly (Pi5 + NanoPi, config-only) | `docs/AJOUT-BMS.md` |
-| Procédures détaillées (NanoPi, maintenance, récupération firmware, production solaire) | `PROCEDURES.md` |
-| Validation déploiement / checklist | `IMPLEMENTATION_VERIFICATION.md` |
-| Debug MQTT | `MQTT_DEBUGGING_GUIDE.md` |
-| Debug onduleur / SmartShunt | `DEBUG_ONDULEUR_SMARTSHUNT.md` |
-| Guide energy-manager — modifier/ajouter/retirer une fonctionnalité | `docs/energy-manager-guide.md` |
-| Grafana — 20 dashboards (liste, métriques, provisioning) | `contrib/grafana/` + `scripts/setup-grafana.sh` |
+> 📐 **Point d'entrée : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** — vue d'ensemble + index complet.
+
+| Besoin | Document |
+|--------|----------|
+| **Vue d'ensemble système + index de toute la doc** | `docs/ARCHITECTURE.md` |
+| Serveur principal (RS485, protocole Daly, API REST/WS, dashboard SSR) | `docs/app-daly-bms-server.md` |
+| energy-manager (modules `logic/`, règles `.grl`, modifier/ajouter/retirer) | `docs/app-energy-manager.md` |
+| Bridge Venus OS + ajouter un device D-Bus + déploiement armv7 | `docs/app-dbus-mqtt-venus.md` |
+| Déployer (Pi5 + NanoPi), procédures détaillées, restauration git | `docs/deploiement-exploitation.md` |
+| Architecture redb (schéma, tiering) + historique migration VM→redb | `docs/metriques-redb-architecture.md` |
+| Catalogue des métriques + requêtes & conformité PromQL | `docs/metriques-promql-reference.md` |
+| Grafana — 20 dashboards (liste, datasource, provisioning) | `docs/grafana-dashboards.md` |
+| MQTT / Mosquitto (topics, bridge, anti-boucle, migration Docker→natif) | `docs/mqtt-mosquitto.md` |
+| Alertes (AlertEngine natif, règles, hysteresis, notifications) | `docs/alertes.md` |
+| Ajouter un appareil / BMS Daly, ATS CHINT, ET112, PRALRAN | `docs/integration-materiel.md` |
+| Dépannage, netdiag réseau, debug onduleur/SmartShunt, memory-leak | `docs/diagnostic-depannage.md` |

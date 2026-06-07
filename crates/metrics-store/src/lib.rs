@@ -2,7 +2,7 @@
 //!
 //! Cette crate est la seule TSDB du système : elle stocke les métriques
 //! produites par `daly-bms-server` et `energy-manager`.
-//! Cf. `docs/architecture-redb.md` pour la conception complète :
+//! Cf. `docs/metriques-redb-architecture.md` pour la conception complète :
 //!
 //! - schéma de tables et encodage des clés
 //! - API publique (`MetricsStore`, `Writer`, `Reader`)

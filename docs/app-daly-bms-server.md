@@ -1257,7 +1257,7 @@ Champs :
 
 ### A.4 Guide d'ajout d'une nouvelle métrique (checklist générique)
 
-> Cette procédure décrit l'ancienne méthode Node-RED (étapes 1–9 avec flows JSON). Pour l'architecture actuelle (energy-manager Rust), voir [./app-energy-manager.md](./app-energy-manager.md) et `docs/energy-manager-guide.md`. Les étapes côté daly-bms-server (structure Rust, handler MQTT, endpoint API, route) restent identiques.
+> Cette procédure décrit l'ancienne méthode Node-RED (étapes 1–9 avec flows JSON). Pour l'architecture actuelle (energy-manager Rust), voir [./app-energy-manager.md](./app-energy-manager.md). Les étapes côté daly-bms-server (structure Rust, handler MQTT, endpoint API, route) restent identiques.
 
 Checklist générique (parties daly-bms-server, toujours valides) :
 
