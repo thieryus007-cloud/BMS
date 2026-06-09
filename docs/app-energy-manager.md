@@ -328,10 +328,13 @@ ac_ignore == 1 ?
 
 **Topics en entrée** :
 - `N/{pid}/vebus/{vb}/Ac/Out/L1/F` → fréquence AC (Hz)
-- `N/{pid}/vebus/{vb}/Ac/ActiveIn/Connected` → trigger reconnexion réseau (direct, **PAS via ac_ignore**)
+- `N/{pid}/vebus/{vb}/Ac/ActiveIn/Connected` → reconnexion réseau (`v==1`) **et** état physique de connexion stocké dans `ac_connected`
+- `Ac/State/IgnoreAcIn1` → `ac_ignore` (peuplé par les modules inverter/charge_current)
 - État partagé (`EnergyState`) pour la corroboration : `soc_pct`, `battery_current_a`, `irradiance_wm2`, `shunt_last_seen_ts` (fraîcheur)
 
-> ⚠️ **Important** : `Ac/ActiveIn/Connected` déclenche **directement** le rule engine avec `grid_connected=true`. Ce n'est **PAS** une lecture de `ac_ignore` (qui vient de `IgnoreAcIn1`). Les deux topics sont distincts.
+> ⚠️ **Important** : `Ac/ActiveIn/Connected` déclenche **directement** le rule engine avec `grid_connected=true` (`v==1`). Ce n'est **PAS** une lecture de `ac_ignore` (qui vient de `IgnoreAcIn1`). Les deux topics sont distincts.
+
+**Détection d'îlotage** (`is_grid_connected`) : le réseau est considéré connecté **uniquement** si `ac_ignore != 1` **et** `ac_connected != 0`. Cela couvre l'îlotage délibéré (`IgnoreAcIn1==1`, ESS sur batterie) **et** la panne réseau réelle (`ActiveIn/Connected==0`, où `IgnoreAcIn1` peut rester à 0) → la coupure de sécurité DEYE reste active dans les deux cas. Signaux inconnus → défaut « connecté » (dégradation gracieuse vers l'ancien comportement `ac_ignore` seul).
 
 **Conception en deux couches** :
 1. **Cœur fréquence** (autorité = mesure Victron, règle projet #13) — coupe/restaure sur seuils + hystérésis + timers.
