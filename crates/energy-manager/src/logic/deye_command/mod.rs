@@ -151,8 +151,14 @@ async fn run(
                         last_freq = freq;
 
                         let now = Utc::now();
-                        let (connected, restore_blocked, _mppt_full) = read_gates(&state, &cfg, now).await;
+                        let (connected, restore_blocked, mppt_full) = read_gates(&state, &cfg, now).await;
                         if connected { continue; }
+                        // Keep the MPPT-cut debounce in sync with the ticker so a nominal
+                        // frequency update cannot cancel an active MPPT-driven cut.
+                        mppt_full_since = if mppt_full { Some(mppt_full_since.unwrap_or(now)) } else { None };
+                        let mppt_cut = mppt_full_since
+                            .map(|t| (now - t).num_seconds().max(0) as u64 >= cfg.mppt_cut_delay_secs)
+                            .unwrap_or(false);
 
                         let new_state = apply_decision(
                             rule_engine.evaluate(
@@ -167,7 +173,7 @@ async fn run(
                                 cfg.reenable_delay_secs,
                                 lockout_expired(&deye_sm, now),
                                 restore_blocked,
-                                false,
+                                mppt_cut,
                             ),
                             deye_sm,
                             now,
