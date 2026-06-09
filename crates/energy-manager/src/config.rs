@@ -488,8 +488,18 @@ pub fn load() -> Result<EnergyManagerConfig> {
     let raw = std::fs::read_to_string(&path)
         .with_context(|| format!("Cannot read config file: {path}"))?;
 
-    let mut cfg: EnergyConfig = toml::from_str(&raw)
+    // Détection des typos dans NOTRE section (audit 2026-06 §12) : une clé
+    // inconnue sous [energy_manager.*] était silencieusement ignorée → la
+    // valeur par défaut s'appliquait sans bruit. Le reste du fichier
+    // (sections daly-bms-server) est légitimement inconnu ici — pas de
+    // `deny_unknown_fields`, qui casserait le Config.toml partagé.
+    let de = toml::Deserializer::new(&raw);
+    let mut unknown: Vec<String> = Vec::new();
+    let mut cfg: EnergyConfig = serde_ignored::deserialize(de, |p| unknown.push(p.to_string()))
         .with_context(|| format!("Invalid TOML in {path}"))?;
+    for key in unknown.iter().filter(|p| p.starts_with("energy_manager")) {
+        tracing::warn!(cle = %key, fichier = %path, "Config : clé inconnue ignorée (typo ?)");
+    }
 
     // Override sensitive fields from environment
     if let Ok(v) = std::env::var("LG_DEVICE_ID") {
@@ -501,7 +511,41 @@ pub fn load() -> Result<EnergyManagerConfig> {
     if let Ok(v) = std::env::var("LG_API_KEY") {
         cfg.energy_manager.lg_thinq.api_key = v;
     }
+    cfg.energy_manager.validate()?;
     Ok(cfg.energy_manager)
+}
+
+impl EnergyManagerConfig {
+    /// Validation des bornes (audit 2026-06 §12) — volontairement minimale :
+    /// uniquement les invariants dont la violation produit un comportement
+    /// pathologique (boucle de polling chaude, service inopérant).
+    pub fn validate(&self) -> Result<()> {
+        anyhow::ensure!(
+            !self.mqtt.host.trim().is_empty(),
+            "config invalide : `energy_manager.mqtt.host` est vide"
+        );
+        anyhow::ensure!(
+            self.mqtt.port > 0,
+            "config invalide : `energy_manager.mqtt.port` doit être > 0"
+        );
+        anyhow::ensure!(
+            !self.api.bind.trim().is_empty(),
+            "config invalide : `energy_manager.api.bind` est vide"
+        );
+        if self.open_meteo.enabled {
+            anyhow::ensure!(
+                self.open_meteo.poll_interval_secs > 0,
+                "config invalide : `energy_manager.open_meteo.poll_interval_secs` doit être > 0"
+            );
+        }
+        if self.lg_thinq.enabled {
+            anyhow::ensure!(
+                self.lg_thinq.poll_interval_secs > 0,
+                "config invalide : `energy_manager.lg_thinq.poll_interval_secs` doit être > 0"
+            );
+        }
+        Ok(())
+    }
 }
 
 fn find_config_path() -> String {

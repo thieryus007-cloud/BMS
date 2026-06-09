@@ -113,11 +113,81 @@ impl BmsDeviceConfig {
 
 impl AppConfig {
     /// Charge la configuration depuis un fichier TOML.
+    ///
+    /// Les clés inconnues sont signalées sur stderr (audit 2026-06 §12) :
+    /// un typo (`pol_interval_ms`) était silencieusement ignoré → la valeur
+    /// par défaut s'appliquait sans que personne ne le sache. On n'utilise
+    /// PAS `deny_unknown_fields` : `Config.toml` est partagé avec
+    /// energy-manager, dont la section `[energy_manager]` est légitimement
+    /// inconnue ici (la rejeter casserait le démarrage).
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Impossible de lire {}", path.display()))?;
-        toml::from_str(&content)
-            .with_context(|| format!("Erreur de parsing TOML dans {}", path.display()))
+        let de = toml::Deserializer::new(&content);
+        let mut unknown: Vec<String> = Vec::new();
+        let cfg: AppConfig = serde_ignored::deserialize(de, |p| unknown.push(p.to_string()))
+            .with_context(|| format!("Erreur de parsing TOML dans {}", path.display()))?;
+        // Sections étrangères légitimes du Config.toml partagé : [energy_manager]
+        // (energy-manager) et les sections du domaine NanoPi/Venus présentes
+        // aussi dans nanoPi/config-nanopi.toml ([venus], [[sensors]], [heat],
+        // [heatpump], [meteo]) — on ne signale pas ce qui appartient à un
+        // autre consommateur du fichier.
+        const FOREIGN_SECTIONS: &[&str] =
+            &["energy_manager", "venus", "sensors", "heat", "heatpump", "meteo"];
+        for key in unknown.iter().filter(|p| {
+            let top = p.split('.').next().unwrap_or(p);
+            // `device_instance` sous [[bms]]/[[et112.devices]] : champ
+            // documentaire (instance VRM) — le mapping effectif vit dans
+            // nanoPi/config-nanopi.toml. Pas un typo.
+            !FOREIGN_SECTIONS.contains(&top) && !p.ends_with(".device_instance")
+        }) {
+            // stderr : le logging tracing n'est pas encore initialisé ici.
+            eprintln!(
+                "WARN config : clé inconnue `{key}` ignorée dans {} (typo ?)",
+                path.display()
+            );
+        }
+        Ok(cfg)
+    }
+
+    /// Validation des bornes (audit 2026-06 §12) — à appeler après le parse.
+    /// Volontairement minimale : uniquement les invariants dont la violation
+    /// produit un comportement pathologique (boucle de polling chaude,
+    /// service inopérant), jamais des préférences. Erreur nommant le champ.
+    pub fn validate(&self) -> Result<()> {
+        fn nz(field: &str, v: u64) -> Result<()> {
+            anyhow::ensure!(v > 0, "config invalide : `{field}` doit être > 0 (lu : {v})");
+            Ok(())
+        }
+        // NB : `serial.port` vide est légitime (= auto-détection au démarrage).
+        nz("serial.baud", u64::from(self.serial.baud))?;
+        nz("serial.poll_interval_ms", self.serial.poll_interval_ms)?;
+        nz("serial.ring_buffer_size", self.serial.ring_buffer_size as u64)?;
+        nz("et112.poll_interval_ms", self.et112.poll_interval_ms)?;
+        if let Some(ats) = &self.ats {
+            nz("ats.poll_interval_ms", ats.poll_interval_ms)?;
+        }
+        if let Some(irr) = &self.irradiance {
+            nz("irradiance.poll_interval_ms", irr.poll_interval_ms)?;
+        }
+        anyhow::ensure!(
+            !self.api.bind.trim().is_empty(),
+            "config invalide : `api.bind` est vide"
+        );
+        if self.metrics_store.enabled {
+            nz("metrics_store.cache_mb", self.metrics_store.cache_mb as u64)?;
+            nz("metrics_store.queue_depth", self.metrics_store.queue_depth as u64)?;
+            anyhow::ensure!(
+                self.metrics_store.query_max_points >= 0,
+                "config invalide : `metrics_store.query_max_points` doit être ≥ 0 (lu : {})",
+                self.metrics_store.query_max_points
+            );
+            anyhow::ensure!(
+                !self.metrics_store.db_path.trim().is_empty(),
+                "config invalide : `metrics_store.db_path` est vide"
+            );
+        }
+        Ok(())
     }
 
     /// Charge depuis le chemin par défaut ou `DALY_CONFIG`.
@@ -452,6 +522,11 @@ pub struct MetricsStoreConfig {
     #[serde(default = "default_metrics_query_backend")]
     #[allow(dead_code)]
     pub default_backend: String,
+    /// Borne du nombre de points par requête `query_range` (audit 2026-06 §3).
+    /// Défaut 11 000 = limite Prometheus. 0 = désactivé (déconseillé : une
+    /// requête à step minuscule peut allouer sans limite — OOM du Pi).
+    #[serde(default = "default_metrics_query_max_points")]
+    pub query_max_points: i64,
 }
 
 fn default_metrics_db_path() -> String { "/mnt/nvme/daly-bms/metrics.redb".into() }
@@ -462,6 +537,7 @@ fn default_metrics_raw_days() -> u32 { 30 }
 fn default_metrics_hourly_days() -> u32 { 365 }
 fn default_metrics_daily_days() -> u32 { 5 * 365 }
 fn default_metrics_query_backend() -> String { "redb".into() }
+fn default_metrics_query_max_points() -> i64 { metrics_store::promql::DEFAULT_MAX_RANGE_POINTS }
 
 impl Default for MetricsStoreConfig {
     fn default() -> Self {
@@ -475,6 +551,7 @@ impl Default for MetricsStoreConfig {
             hourly_retention_days: default_metrics_hourly_days(),
             daily_retention_days: default_metrics_daily_days(),
             default_backend: default_metrics_query_backend(),
+            query_max_points: default_metrics_query_max_points(),
         }
     }
 }

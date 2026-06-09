@@ -176,13 +176,27 @@ pub struct BusGuard<'a> {
 
 impl<'a> BusGuard<'a> {
     /// Vide le buffer RX (drain les octets résiduels d'une transaction précédente).
+    ///
+    /// Boucle jusqu'à buffer vide ou épuisement du budget `FLUSH_TIMEOUT_MS`
+    /// (audit 2026-06 §8) : un seul `read()` ne drainait qu'un chunk UART —
+    /// une réponse tardive arrivée en plusieurs morceaux laissait des octets
+    /// résiduels qui décalaient la lecture suivante (rafales d'erreurs CRC
+    /// persistantes sur plusieurs transactions). Budget total inchangé :
+    /// sur un bus silencieux, le coût reste d'un seul timeout de 10 ms.
     pub async fn flush_rx(&mut self) {
         let mut tmp = [0u8; 256];
-        let _ = tokio::time::timeout(
-            Duration::from_millis(FLUSH_TIMEOUT_MS),
-            self.port.read(&mut tmp),
-        )
-        .await;
+        let deadline = tokio::time::Instant::now()
+            + Duration::from_millis(FLUSH_TIMEOUT_MS);
+        loop {
+            match tokio::time::timeout_at(deadline, self.port.read(&mut tmp)).await {
+                // Des octets résiduels drainés — on continue tant qu'il en vient.
+                Ok(Ok(n)) if n > 0 => {
+                    trace!(drained = n, "flush_rx : octets résiduels purgés");
+                }
+                // Timeout (bus silencieux), EOF ou erreur I/O : terminé.
+                _ => break,
+            }
+        }
     }
 
     /// Écrit tous les octets dans le port + flush.

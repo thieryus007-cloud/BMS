@@ -391,6 +391,10 @@ pub struct AppState {
     pub dashboard_catalog: crate::dashboards::Catalog,
     /// Persistance SQLite des layouts dashboard (None si init a échoué — fallback localStorage côté UI).
     pub dashboard_storage: Option<crate::dashboards::storage::LayoutStorage>,
+    /// Registre de fraîcheur des sources (audit 2026-06 §18) — alimenté par
+    /// les funnels `on_*`, exporté périodiquement en métrique
+    /// `source_last_update_age_seconds{source=...}`.
+    pub freshness: Arc<crate::freshness::FreshnessRegistry>,
 }
 impl AppState {
     /// Indique si le backend de lecture (metrics-store / redb) est prêt.
@@ -418,8 +422,9 @@ impl AppState {
             .clone()
             .ok_or_else(|| anyhow::anyhow!("metrics-store backend not configured"))?;
         let query = query.to_string();
+        let max_points = self.config.metrics_store.query_max_points;
         tokio::task::spawn_blocking(move || {
-            redb_query_range_inner(&store, &query, start_ms, end_ms, step_ms)
+            redb_query_range_inner(&store, &query, start_ms, end_ms, step_ms, max_points)
         })
         .await
         .map_err(|e| anyhow::anyhow!("redb worker panic: {e}"))?
@@ -453,12 +458,14 @@ fn redb_query_range_inner(
     start_ms: i64,
     end_ms: i64,
     step_ms: i64,
+    max_points: i64,
 ) -> anyhow::Result<serde_json::Value> {
     use metrics_store::promql::{parse_and_validate, Evaluator};
     let expr = parse_and_validate(query)
         .map_err(|e| anyhow::anyhow!("PromQL: {}", e.message()))?;
     let reader = store.reader();
-    let ev = Evaluator::new(&reader);
+    let mut ev = Evaluator::new(&reader);
+    ev.max_range_points = max_points;
     let series = ev
         .eval_range(&expr, start_ms, end_ms, step_ms)
         .map_err(|e| anyhow::anyhow!("PromQL exec: {}", e.message()))?;
@@ -597,6 +604,7 @@ impl AppState {
             redb_rl: crate::redb_writes::RateLimiter::new(),
             dashboard_catalog: crate::dashboards::Catalog::load_default(),
             dashboard_storage,
+            freshness: Arc::new(crate::freshness::FreshnessRegistry::new()),
         }
     }
     /// Incrémente le compteur de polls réussis pour un appareil RS485.
@@ -628,6 +636,8 @@ impl AppState {
     }
     /// Enregistre un nouveau snapshot dans le ring buffer et broadcast WebSocket.
     pub async fn on_snapshot(&self, snap: BmsSnapshot) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch(&format!("bms_{:#04x}", snap.address));
         // Console diagnostic event — seulement si quelqu'un écoute (évite de retenir
         // un Arc<ConsoleEvent> volumineux dans le ring buffer du broadcast).
         if self.console_bus.receiver_count() > 0 {
@@ -694,6 +704,8 @@ impl AppState {
     }
     /// Enregistre un snapshot ET112 dans le ring buffer correspondant.
     pub async fn on_et112_snapshot(&self, snap: Et112Snapshot) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch(&format!("et112_{:#04x}", snap.address));
         if self.console_bus.receiver_count() > 0 {
             self.console_bus.emit(ConsoleEvent::rs485(EventDevice::Et112, &format!("ET112-{:#04x} snapshot", snap.address), json!({
                 "address": snap.address,
@@ -736,6 +748,8 @@ impl AppState {
     }
     /// Enregistre la dernière mesure du capteur d'irradiance.
     pub async fn on_irradiance_snapshot(&self, snap: IrradianceSnapshot) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch("irradiance");
         if self.console_bus.receiver_count() > 0 {
             self.console_bus.emit(ConsoleEvent::rs485(EventDevice::Irradiance, &format!("PRALRAN irradiance — {} W/m²", snap.irradiance_wm2 as i32), json!({
                 "address": snap.address,
@@ -753,6 +767,8 @@ impl AppState {
     }
     /// Enregistre un snapshot Tasmota dans le ring buffer correspondant.
     pub async fn on_tasmota_snapshot(&self, snap: TasmotaSnapshot) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch(&format!("tasmota_{}", snap.id));
         if self.console_bus.receiver_count() > 0 {
             self.console_bus.emit(ConsoleEvent::state(EventDevice::Tasmota, &format!("Tasmota {} — {}", snap.name, if snap.power_on { "ON" } else { "OFF" }), json!({
                 "id": snap.id,
@@ -797,6 +813,8 @@ impl AppState {
     // ==========================================================================
     /// Enregistre/met à jour un snapshot MPPT unique (format v1 legacy).
     pub async fn on_venus_mppt(&self, mppt: VenusMppt) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch("venus_mppt");
         if let Some(store) = &self.metrics_store {
             crate::redb_writes::write_venus_mppt(&store.writer(), &self.redb_rl, &mppt);
         }
@@ -808,6 +826,8 @@ impl AppState {
     /// Utilisé quand Venus OS publie un snapshot complet de tous les chargeurs.
     /// Les entrées orphelines (MPPT déconnecté) sont ainsi purgées automatiquement.
     pub async fn on_venus_mppts_replace(&self, mppts: Vec<VenusMppt>) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch("venus_mppt");
         if let Some(store) = &self.metrics_store {
             let w = store.writer();
             for m in &mppts {
@@ -840,6 +860,8 @@ impl AppState {
     /// Si energy-manager fournit les Ah (AhChargedToday/AhDischargedToday) dans le payload,
     /// on les utilise directement. Sinon on intègre le courant localement (fallback).
     pub async fn on_venus_smartshunt(&self, mut shunt: VenusSmartShunt) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch("venus_smartshunt");
         let now     = shunt.timestamp;
         let day_key = now.date_naive().num_days_from_ce();
         // energy-manager calcule déjà les Ah → utiliser ces valeurs directement.
@@ -916,6 +938,8 @@ impl AppState {
     }
     /// Enregistre/met à jour un capteur de température.
     pub async fn on_venus_temperature(&self, temp: VenusTemperature) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch("venus_temperature");
         if let Some(store) = &self.metrics_store {
             crate::redb_writes::write_venus_temperature(&store.writer(), &self.redb_rl, &temp);
         }
@@ -929,6 +953,8 @@ impl AppState {
     }
     /// Enregistre/met à jour les données de l'onduleur Victron (MultiPlus, cgwacs, etc.).
     pub async fn on_venus_inverter(&self, inverter: VenusInverter) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch("venus_inverter");
         if let Some(store) = &self.metrics_store {
             crate::redb_writes::write_venus_inverter(&store.writer(), &self.redb_rl, &inverter);
         }
@@ -943,6 +969,8 @@ impl AppState {
     // ==========================================================================
     /// Enregistre/met à jour un snapshot heatpump.
     pub async fn on_venus_heatpump(&self, hp: VenusHeatpump) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch("venus_heatpump");
         if let Some(store) = &self.metrics_store {
             crate::redb_writes::write_venus_heatpump(&store.writer(), &self.redb_rl, &hp);
         }
@@ -979,6 +1007,8 @@ impl AppState {
     // ==========================================================================
     /// Enregistre le dernier snapshot ATS.
     pub async fn on_ats_snapshot(&self, snap: AtsSnapshot) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch("ats");
         if self.console_bus.receiver_count() > 0 {
             self.console_bus.emit(ConsoleEvent::rs485(EventDevice::Ats, &format!("ATS CHINT — {}", snap.active_source.label()), json!({
                 "source": snap.active_source.label(),
@@ -1008,6 +1038,8 @@ impl AppState {
     // ==========================================================================
     /// Enregistre le dernier snapshot Shelly et émet un événement console.
     pub async fn on_shelly_snapshot(&self, snap: ShellyEmSnapshot) {
+        // Fraîcheur de la source (audit 2026-06 §18).
+        self.freshness.touch("shelly");
         if self.console_bus.receiver_count() > 0 {
             self.console_bus.emit(ConsoleEvent::state(
                 EventDevice::Shelly,

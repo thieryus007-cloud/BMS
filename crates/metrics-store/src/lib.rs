@@ -83,18 +83,28 @@ impl Default for TierPolicy {
 
 struct Inner {
     db: Arc<Database>,
-    writer_tx: parking_lot::Mutex<Option<mpsc::Sender<writer::WriterMsg>>>,
+    /// Émetteur conservé pour `writer()` même après `shutdown()` : les
+    /// écritures tardives échouent alors en `Closed` (déjà géré par les
+    /// producteurs `try_write`) au lieu de paniquer sur un `expect`.
+    writer_tx: mpsc::Sender<writer::WriterMsg>,
+    /// Sentinelle d'arrêt — prise une seule fois (`Option::take`), ce qui
+    /// rend `shutdown()` / `Drop` idempotents entre eux.
+    shutdown_tx: parking_lot::Mutex<Option<mpsc::Sender<writer::WriterMsg>>>,
     writer_handle: parking_lot::Mutex<Option<thread::JoinHandle<()>>>,
 }
 
-impl Drop for Inner {
-    fn drop(&mut self) {
+impl Inner {
+    /// Arrête le thread writer : envoie la sentinelle `Shutdown` puis joint
+    /// le thread (le batch en file est commité avant l'arrêt, sans perte).
+    /// Idempotent — appelé par `MetricsStore::shutdown()` (arrêt gracieux
+    /// SIGTERM, audit 2026-06 §5) et par `Drop`.
+    fn shutdown_writer(&self) {
         // 1. Signale l'arrêt au thread writer via une sentinelle in-band.
         //    Contrairement à la simple fermeture du canal, cela arrête le
         //    writer **même si des `Writer` clones survivent** côté appelant
         //    (sinon `blocking_recv` ne retournerait jamais `None` et le
         //    `join()` ci-dessous bloquerait indéfiniment — correctif R2).
-        if let Some(tx) = self.writer_tx.lock().take() {
+        if let Some(tx) = self.shutdown_tx.lock().take() {
             // `try_send` (non bloquant) : `Drop` peut s'exécuter dans un
             // runtime tokio où `blocking_send` paniquerait. Si la file est
             // pleine, on laisse au writer le temps de drainer puis on
@@ -119,6 +129,12 @@ impl Drop for Inner {
         if let Some(h) = self.writer_handle.lock().take() {
             let _ = h.join();
         }
+    }
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        self.shutdown_writer();
     }
 }
 
@@ -153,26 +169,63 @@ impl MetricsStore {
 
         Ok(Self {
             inner: Arc::new(Inner {
+                writer_tx: writer_tx.clone(),
                 db,
-                writer_tx: parking_lot::Mutex::new(Some(writer_tx)),
+                shutdown_tx: parking_lot::Mutex::new(Some(writer_tx)),
                 writer_handle: parking_lot::Mutex::new(Some(writer_handle)),
             }),
         })
     }
 
     pub fn writer(&self) -> Writer {
-        let tx = self
-            .inner
-            .writer_tx
-            .lock()
-            .as_ref()
-            .expect("writer channel encore ouvert tant que MetricsStore est vivant")
-            .clone();
-        Writer { tx }
+        Writer { tx: self.inner.writer_tx.clone() }
+    }
+
+    /// Arrêt gracieux explicite (audit 2026-06 §5) : draine et commite le
+    /// batch en file puis joint le thread writer. À appeler avant la sortie
+    /// du process (SIGTERM) — les clones d'état retenus par les tâches de
+    /// fond empêchent le `Drop` naturel de s'exécuter à temps. Idempotent ;
+    /// les écritures ultérieures échouent en `Closed` (gérées par les
+    /// producteurs), aucune panique.
+    pub fn shutdown(&self) {
+        self.inner.shutdown_writer();
     }
 
     pub fn reader(&self) -> Reader {
         Reader { db: self.inner.db.clone() }
+    }
+
+    /// Diagnostique si une erreur retournée par [`MetricsStore::open`] signale
+    /// une base **corrompue** (vs. verrou déjà pris par une autre instance,
+    /// permissions, disque plein…). Sert à décider une mise en quarantaine
+    /// automatique au démarrage (audit 2026-06 §15) : on ne déplace JAMAIS
+    /// une base saine simplement verrouillée ou inaccessible.
+    pub fn open_error_is_corruption(err: &anyhow::Error) -> bool {
+        for cause in err.chain() {
+            if let Some(e) = cause.downcast_ref::<redb::DatabaseError>() {
+                return matches!(
+                    e,
+                    redb::DatabaseError::Storage(redb::StorageError::Corrupted(_))
+                        | redb::DatabaseError::RepairAborted
+                        | redb::DatabaseError::UpgradeRequired(_)
+                );
+            }
+            if let Some(e) = cause.downcast_ref::<redb::TransactionError>() {
+                return matches!(
+                    e,
+                    redb::TransactionError::Storage(redb::StorageError::Corrupted(_))
+                );
+            }
+            if let Some(redb::CommitError::Storage(s)) =
+                cause.downcast_ref::<redb::CommitError>()
+            {
+                return matches!(s, redb::StorageError::Corrupted(_));
+            }
+            if let Some(e) = cause.downcast_ref::<redb::StorageError>() {
+                return matches!(e, redb::StorageError::Corrupted(_));
+            }
+        }
+        false
     }
 
     /// Démarre la tâche de maintenance (compaction raw→hourly→daily).
@@ -482,6 +535,23 @@ mod tests {
             for s in &series {
                 assert_eq!(s.samples.len(), 4, "labels = {:?}", s.labels);
             }
+
+            // Garde-fou audit 2026-06 §3 : nombre de pas borné par
+            // `max_range_points` (sémantique Prometheus).
+            let mut ev_small = Evaluator::new(&reader);
+            ev_small.max_range_points = 3;
+            // 4 pas (100s, 103s, 106s, 109s) > 3 → refus explicite.
+            let err = ev_small.eval_range(&expr, 100_000, 109_000, 3_000).unwrap_err();
+            assert!(
+                err.message().contains("maximum resolution"),
+                "message inattendu : {}", err.message()
+            );
+            // 4 pas pour une borne de 4 → accepté (limite inclusive).
+            ev_small.max_range_points = 4;
+            assert!(ev_small.eval_range(&expr, 100_000, 109_000, 3_000).is_ok());
+            // 0 = garde désactivée.
+            ev_small.max_range_points = 0;
+            assert!(ev_small.eval_range(&expr, 100_000, 109_000, 3_000).is_ok());
         }
         let _ = std::fs::remove_file(&path);
     }

@@ -60,13 +60,14 @@ async fn run(
     info!("Open-Meteo polling started ({:.4}°N, {:.4}°E, interval={}s)",
         cfg.latitude, cfg.longitude, cfg.poll_interval_secs);
 
-    let client = reqwest::Client::new();
+    // Client borné (connect 5 s / total 15 s) — audit 2026-06 §6.
+    let client = super::shared_client();
     let mut ticker = interval(Duration::from_secs(cfg.poll_interval_secs));
 
     // Poll immediately then on interval
     loop {
         ticker.tick().await;
-        match fetch(&client, cfg.latitude, cfg.longitude).await {
+        match fetch(client, cfg.latitude, cfg.longitude).await {
             Ok(snap) => {
                 debug!("Open-Meteo: {:?}", snap);
                 {
@@ -75,6 +76,7 @@ async fn run(
                     s.humidity_pct  = snap.humidity_pct;
                     s.pressure_hpa  = snap.pressure_hpa;
                     s.wind_speed_ms = snap.wind_speed_ms;
+                    s.weather_last_read = Some(chrono::Utc::now());
                 }
                 bus.emit_live(LiveEvent::new("weather", &snap));
             }

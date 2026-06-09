@@ -26,7 +26,7 @@ pub mod exec;
 pub mod validate;
 
 pub use error::PromQlError;
-pub use exec::{Evaluator, InstantSample, RangeSeries};
+pub use exec::{Evaluator, InstantSample, RangeSeries, DEFAULT_MAX_RANGE_POINTS};
 pub use validate::validate;
 
 use promql_parser::parser::Expr;

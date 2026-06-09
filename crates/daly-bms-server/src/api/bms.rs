@@ -604,6 +604,14 @@ pub async fn ws_all(
     ws.on_upgrade(move |socket| handle_ws_all(socket, state))
 }
 
+/// Keepalive WebSocket (audit 2026-06 §13) : ping toutes les 30 s, coupure
+/// après 90 s sans aucune trame entrante (les clients RFC 6455 répondent
+/// Pong automatiquement). Sans cela, un client mort en silence (Wi-Fi coupé,
+/// onglet figé) retenait sa tâche + son récepteur broadcast pendant des
+/// minutes/heures, jusqu'au remplissage des buffers TCP.
+const WS_PING_INTERVAL_SECS: u64 = 30;
+const WS_IDLE_TIMEOUT_SECS:  u64 = 90;
+
 async fn handle_ws_all(socket: WebSocket, state: AppState) {
     let mut rx = state.subscribe_ws();
     let (mut sender, mut receiver) = socket.split();
@@ -616,22 +624,38 @@ async fn handle_ws_all(socket: WebSocket, state: AppState) {
         }
     }
 
+    let mut ping = tokio::time::interval(std::time::Duration::from_secs(WS_PING_INTERVAL_SECS));
+    let mut last_rx = tokio::time::Instant::now();
     loop {
         tokio::select! {
-            Ok(snaps) = rx.recv() => {
-                if let Ok(json) = serde_json::to_string(&*snaps) {
-                    if sender.send(Message::Text(json.into())).await.is_err() {
-                        break;
+            res = rx.recv() => match res {
+                Ok(snaps) => {
+                    if let Ok(json) = serde_json::to_string(&*snaps) {
+                        if sender.send(Message::Text(json.into())).await.is_err() {
+                            break;
+                        }
                     }
                 }
-            }
-            Some(msg) = receiver.next() => {
-                // Fermeture propre sur Close ou erreur
-                match msg {
-                    Ok(Message::Close(_)) | Err(_) => break,
-                    _ => {}
+                // Client lent : snapshots manqués, on continue (audit §13).
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::debug!(skipped = n, "WS /bms/stream : client en retard");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+            _ = ping.tick() => {
+                if last_rx.elapsed().as_secs() > WS_IDLE_TIMEOUT_SECS {
+                    tracing::debug!("WS /bms/stream : client inactif — fermeture");
+                    break;
+                }
+                if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
                 }
             }
+            msg = receiver.next() => match msg {
+                // Toute trame entrante (Pong compris) atteste que le client vit.
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => { last_rx = tokio::time::Instant::now(); }
+            },
         }
     }
 }
@@ -654,24 +678,39 @@ async fn handle_ws_single(socket: WebSocket, state: AppState, id: String) {
     let mut rx = state.subscribe_ws();
     let (mut sender, mut receiver) = socket.split();
 
+    let mut ping = tokio::time::interval(std::time::Duration::from_secs(WS_PING_INTERVAL_SECS));
+    let mut last_rx = tokio::time::Instant::now();
     loop {
         tokio::select! {
-            Ok(snaps) = rx.recv() => {
-                // Filtrer pour ce BMS uniquement
-                if let Some(snap) = snaps.iter().find(|s| s.address == addr) {
-                    if let Ok(json) = serde_json::to_string(snap) {
-                        if sender.send(Message::Text(json.into())).await.is_err() {
-                            break;
+            res = rx.recv() => match res {
+                Ok(snaps) => {
+                    // Filtrer pour ce BMS uniquement
+                    if let Some(snap) = snaps.iter().find(|s| s.address == addr) {
+                        if let Ok(json) = serde_json::to_string(snap) {
+                            if sender.send(Message::Text(json.into())).await.is_err() {
+                                break;
+                            }
                         }
                     }
                 }
-            }
-            Some(msg) = receiver.next() => {
-                match msg {
-                    Ok(Message::Close(_)) | Err(_) => break,
-                    _ => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::debug!(skipped = n, "WS /bms/:id/stream : client en retard");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+            _ = ping.tick() => {
+                if last_rx.elapsed().as_secs() > WS_IDLE_TIMEOUT_SECS {
+                    tracing::debug!("WS /bms/:id/stream : client inactif — fermeture");
+                    break;
+                }
+                if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
                 }
             }
+            msg = receiver.next() => match msg {
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => { last_rx = tokio::time::Instant::now(); }
+            },
         }
     }
 }
@@ -692,9 +731,20 @@ pub async fn ws_venus(
 async fn handle_ws_venus(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(40));
+    let mut ping = tokio::time::interval(std::time::Duration::from_secs(WS_PING_INTERVAL_SECS));
+    let mut last_rx = tokio::time::Instant::now();
 
     loop {
         tokio::select! {
+            _ = ping.tick() => {
+                if last_rx.elapsed().as_secs() > WS_IDLE_TIMEOUT_SECS {
+                    tracing::debug!("WS /venus/stream : client inactif — fermeture");
+                    break;
+                }
+                if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    break;
+                }
+            }
             _ = interval.tick() => {
                 // Récupérer les données actuelles
                 let mppts = state.venus_mppts_all().await;
@@ -719,12 +769,10 @@ async fn handle_ws_venus(socket: WebSocket, state: AppState) {
                     }
                 }
             }
-            Some(msg) = receiver.next() => {
-                match msg {
-                    Ok(Message::Close(_)) | Err(_) => break,
-                    _ => {}
-                }
-            }
+            msg = receiver.next() => match msg {
+                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(_)) => { last_rx = tokio::time::Instant::now(); }
+            },
         }
     }
 }

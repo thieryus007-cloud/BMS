@@ -54,17 +54,54 @@ pub struct LgSnapshot {
 // Client
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub struct LgThinqClient {
     http: reqwest::Client,
     cfg: LgThinqConfig,
+    /// Headers d'authentification pré-validés au démarrage (audit 2026-06 §4).
+    /// Un caractère invalide dans la config provoquait un `unwrap()` → panique
+    /// à chaque poll (crash-loop avec panic=abort). Désormais : erreur claire
+    /// à la construction, nommant le champ fautif.
+    base_headers: reqwest::header::HeaderMap,
+}
+
+/// Construit les headers fixes en validant chaque champ de config.
+fn build_base_headers(cfg: &LgThinqConfig) -> Result<reqwest::header::HeaderMap> {
+    use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+    let mut h = HeaderMap::new();
+    h.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {}", cfg.bearer_token))
+            .context("lg_thinq.bearer_token : caractère invalide pour un header HTTP")?,
+    );
+    if !cfg.api_key.is_empty() {
+        h.insert("x-api-key",
+            HeaderValue::from_str(&cfg.api_key)
+                .context("lg_thinq.api_key : caractère invalide pour un header HTTP")?);
+    }
+    if !cfg.country.is_empty() {
+        h.insert("x-country",
+            HeaderValue::from_str(&cfg.country)
+                .context("lg_thinq.country : caractère invalide pour un header HTTP")?);
+    }
+    if !cfg.client_id.is_empty() {
+        h.insert("x-client-id",
+            HeaderValue::from_str(&cfg.client_id)
+                .context("lg_thinq.client_id : caractère invalide pour un header HTTP")?);
+    }
+    h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    Ok(h)
 }
 
 impl LgThinqClient {
-    pub fn new(cfg: LgThinqConfig) -> Self {
-        Self {
-            http: reqwest::Client::new(),
-            cfg,
-        }
+    pub fn new(cfg: LgThinqConfig) -> Result<Self> {
+        let base_headers = build_base_headers(&cfg)?;
+        let http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(15))
+            .build()
+            .context("LG ThinQ : construction du client HTTP")?;
+        Ok(Self { http, cfg, base_headers })
     }
 
     fn state_url(&self) -> String {
@@ -76,31 +113,17 @@ impl LgThinqClient {
     }
 
     fn auth_headers(&self) -> reqwest::header::HeaderMap {
-        use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-        let mut h = HeaderMap::new();
-        h.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", self.cfg.bearer_token)).unwrap(),
-        );
-        if !self.cfg.api_key.is_empty() {
-            h.insert("x-api-key",
-                HeaderValue::from_str(&self.cfg.api_key).unwrap());
-        }
-        if !self.cfg.country.is_empty() {
-            h.insert("x-country",
-                HeaderValue::from_str(&self.cfg.country).unwrap());
-        }
-        if !self.cfg.client_id.is_empty() {
-            h.insert("x-client-id",
-                HeaderValue::from_str(&self.cfg.client_id).unwrap());
-        }
+        use reqwest::header::HeaderValue;
+        let mut h = self.base_headers.clone();
+        // x-message-id : hex de millis epoch — toujours ASCII valide, mais on
+        // évite tout unwrap : header simplement omis dans le cas impossible.
         let msg_id = format!("{:x}", std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis());
-        h.insert("x-message-id",
-            HeaderValue::from_str(&msg_id).unwrap());
-        h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        if let Ok(v) = HeaderValue::from_str(&msg_id) {
+            h.insert("x-message-id", v);
+        }
         h
     }
 
@@ -208,13 +231,22 @@ pub async fn spawn_poller(
     info!("LG ThinQ poller started (device={}, interval={}s)",
         cfg.device_id, cfg.poll_interval_secs);
 
-    let client = LgThinqClient::new(cfg.clone());
+    // Validation des headers au démarrage (audit 2026-06 §4) : config invalide
+    // → intégration désactivée avec erreur explicite, au lieu d'un crash-loop
+    // au premier poll.
+    let client = match LgThinqClient::new(cfg.clone()) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("LG ThinQ désactivé — config invalide : {e:#}");
+            return None;
+        }
+    };
 
+    let poller = client.clone();
     let cfg2   = cfg.clone();
     let bus2   = bus.clone();
     let state2 = state.clone();
     crate::supervise::spawn_critical(async move {
-        let poller = LgThinqClient::new(cfg2.clone());
         let vm_url = cfg2.vm_url.clone();
         let mut ticker = interval(Duration::from_secs(poller.cfg.poll_interval_secs));
         loop {
@@ -243,7 +275,7 @@ pub async fn spawn_poller(
                     }
                     let body = lines.join("\n");
                     let url  = format!("{}/api/v1/import/prometheus", vm_url);
-                    if let Err(e) = reqwest::Client::new().post(&url).body(body).send().await {
+                    if let Err(e) = super::shared_client().post(&url).body(body).send().await {
                         warn!("LG ThinQ VM write error: {e}");
                     }
 

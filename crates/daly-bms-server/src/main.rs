@@ -13,6 +13,7 @@ mod config;
 mod ats;
 mod console;
 mod et112;
+mod freshness;
 mod irradiance;
 mod shelly;
 mod tasmota;
@@ -126,6 +127,9 @@ struct ServerArgs {
     port:      Option<String>,
     /// Adresses BMS pour le mode hardware (ex: 0x01,0x02)
     bms_addrs: Vec<u8>,
+    /// `--check-config` : valide la config (parse + bornes) puis sort —
+    /// dry-run pour CI/déploiement (audit 2026-06 §12).
+    check_config: bool,
 }
 
 impl ServerArgs {
@@ -141,7 +145,9 @@ impl ServerArgs {
             .map(|w| Self::parse_addresses(&w[1]))
             .unwrap_or_default();
 
-        Self { port, bms_addrs }
+        let check_config = args.iter().any(|a| a == "--check-config");
+
+        Self { port, bms_addrs, check_config }
     }
 
     fn parse_addresses(s: &str) -> Vec<u8> {
@@ -228,6 +234,23 @@ async fn main() -> anyhow::Result<()> {
         config.serial.addresses = args.bms_addrs.iter()
             .map(|a| format!("{:#04x}", a))
             .collect();
+    }
+
+    // ── Validation des bornes (audit 2026-06 §12) ─────────────────────────────
+    // Échec = message nommant le champ fautif, avant tout démarrage de tâche.
+    // Ne s'applique qu'à une config chargée depuis un fichier : les valeurs
+    // par défaut internes sont saines par construction.
+    if config_from_file {
+        config.validate()?;
+    }
+
+    // `--check-config` : dry-run (parse + validation) pour CI/déploiement.
+    if args.check_config {
+        if config_from_file {
+            println!("Config OK");
+            return Ok(());
+        }
+        anyhow::bail!("--check-config : aucun fichier de config trouvé");
     }
 
     // ── Flags d'auto-détection ────────────────────────────────────────────────
@@ -324,10 +347,7 @@ async fn main() -> anyhow::Result<()> {
             writer_queue_depth: config.metrics_store.queue_depth,
             writer: metrics_store::WriterConfig::default(),
         };
-        match metrics_store::MetricsStore::open(
-            std::path::Path::new(&config.metrics_store.db_path),
-            opts,
-        ) {
+        match open_metrics_store_with_quarantine(&config.metrics_store.db_path, opts) {
             Ok(s) => {
                 info!(
                     db_path = %config.metrics_store.db_path,
@@ -728,7 +748,33 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("Monitor + watchdog désactivés via DALY_DISABLE_MONITOR (debug fuite mémoire)");
     }
 
+    // ── Export de la fraîcheur des sources (audit 2026-06 §18) ────────────────
+    // Toutes les 30 s : âge de la dernière donnée par source →
+    // `source_last_update_age_seconds{source=...}` dans metrics-store.
+    // Transforme les pannes silencieuses (« la donnée ne se rafraîchit
+    // plus ») en signal alertable (âge > N × intervalle de polling).
+    if let Some(store) = &state.metrics_store {
+        let writer = store.writer();
+        let freshness_state = state.clone();
+        spawn_critical(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                ticker.tick().await;
+                let ts = chrono::Utc::now().timestamp_millis();
+                for (source, age) in freshness_state.freshness.ages_seconds() {
+                    let sample =
+                        metrics_store::Sample::new("source_last_update_age_seconds", ts, age)
+                            .with_label("source", &source);
+                    // try_write : jamais bloquant ; pendant l'arrêt gracieux
+                    // le canal est fermé → échec silencieux attendu.
+                    let _ = writer.try_write(sample);
+                }
+            }
+        });
+    }
+
     // ── Serveur HTTP Axum ──────────────────────────────────────────────────────
+    let shutdown_state = state.clone();
     let router = api::build_router(state);
     let addr: SocketAddr = config.api.bind.parse()?;
 
@@ -739,6 +785,97 @@ async fn main() -> anyhow::Result<()> {
     let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router).await?;
+
+    // ── Arrêt gracieux SIGTERM/SIGINT (audit 2026-06 §5) ──────────────────────
+    // Le service redémarre tous les jours (RuntimeMaxSec) : sans arrêt propre,
+    // le batch metrics en file (fenêtre 250 ms + backlog) était perdu à chaque
+    // restart. Drain HTTP borné à 10 s : des WebSockets ouvertes ne doivent
+    // pas suspendre l'arrêt jusqu'au SIGKILL systemd (TimeoutStopSec 90 s).
+    let (shut_tx, shut_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        wait_for_shutdown_signal().await;
+        let _ = shut_tx.send(true);
+    });
+    let mut graceful_rx = shut_rx.clone();
+    let mut deadline_rx = shut_rx;
+    let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
+        let _ = graceful_rx.changed().await;
+    });
+    tokio::select! {
+        res = serve => { res?; }
+        _ = async {
+            let _ = deadline_rx.changed().await;
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        } => {
+            warn!("Arrêt : connexions HTTP/WS encore ouvertes après 10 s — fermeture forcée");
+        }
+    }
+
+    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+    if let Some(store) = &shutdown_state.metrics_store {
+        info!("Arrêt gracieux : flush du batch metrics-store…");
+        store.shutdown();
+    }
+    info!("Arrêt gracieux terminé");
     Ok(())
+}
+
+/// Ouvre la base metrics-store ; si l'ouverture échoue sur une **corruption
+/// avérée** (coupure brutale pendant un fsync, bitflip…), met le fichier en
+/// quarantaine (`<db>.corrupt.<timestamp>`) puis recrée une base vide
+/// (audit 2026-06 §15). Avant : le service tournait sans historique jusqu'à
+/// intervention manuelle. Le fichier en quarantaine est conservé pour
+/// autopsie/récupération — jamais supprimé automatiquement.
+///
+/// Les échecs NON liés à une corruption (verrou « Database already open »
+/// d'une seconde instance, permissions, disque plein) ne déclenchent JAMAIS
+/// la quarantaine : on ne déplace pas une base saine.
+fn open_metrics_store_with_quarantine(
+    db_path: &str,
+    opts: metrics_store::Options,
+) -> anyhow::Result<metrics_store::MetricsStore> {
+    let path = std::path::Path::new(db_path);
+    let err = match metrics_store::MetricsStore::open(path, opts.clone()) {
+        Ok(s) => return Ok(s),
+        Err(e) => e,
+    };
+    if !path.exists() || !metrics_store::MetricsStore::open_error_is_corruption(&err) {
+        return Err(err);
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let quarantine = format!("{db_path}.corrupt.{ts}");
+    error!(
+        "metrics-store : base corrompue ({err:#}) — quarantaine vers {quarantine} \
+         puis recréation d'une base vide"
+    );
+    std::fs::rename(path, &quarantine)
+        .map_err(|re| anyhow::anyhow!("quarantaine impossible ({re}) ; erreur d'origine : {err:#}"))?;
+    let store = metrics_store::MetricsStore::open(path, opts)?;
+    warn!(
+        "metrics-store recréé vide — l'historique corrompu est conservé dans {quarantine} \
+         (autopsie : docs/metriques-redb-architecture.md)"
+    );
+    Ok(store)
+}
+
+/// Résout au premier SIGTERM (systemd stop/restart) ou SIGINT (Ctrl-C).
+async fn wait_for_shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    match signal(SignalKind::terminate()) {
+        Ok(mut term) => {
+            tokio::select! {
+                _ = term.recv() => {}
+                r = tokio::signal::ctrl_c() => { let _ = r; }
+            }
+        }
+        Err(e) => {
+            // Improbable ; on retombe sur SIGINT seul plutôt que d'échouer.
+            warn!("Inscription SIGTERM impossible ({e}) — arrêt gracieux sur SIGINT uniquement");
+            let _ = tokio::signal::ctrl_c().await;
+        }
+    }
+    info!("Signal d'arrêt reçu — fermeture gracieuse en cours");
 }

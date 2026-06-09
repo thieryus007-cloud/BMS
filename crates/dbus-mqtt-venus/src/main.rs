@@ -102,7 +102,7 @@ struct Cli {
 /// retournait (D-Bus perdu) mourait silencieusement, le service restant « up »
 /// alors qu'un bridge était éteint. Les panics sont déjà fatals via
 /// `panic = "abort"` (profil release) ; ce helper couvre les retours propres.
-fn spawn_critical<F>(fut: F)
+pub(crate) fn spawn_critical<F>(fut: F)
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {

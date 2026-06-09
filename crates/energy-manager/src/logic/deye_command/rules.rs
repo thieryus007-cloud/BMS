@@ -252,4 +252,65 @@ mod tests {
         assert!(d.relay_on);
         assert!(!d.relay_off);
     }
+
+    // =========================================================================
+    // Rejeu de l'incident « micro-coupures 51,5 Hz » (audit 2026-06 §17).
+    // Cf. CLAUDE.md §8 : les DEYE s'auto-coupent à 51,5 Hz → le Shelly doit
+    // les couper AVANT (freq_hard = 51,3). Cette séquence déroule la machine
+    // d'états sur le scénario complet observé en prod : montée de fréquence,
+    // coupure, verrouillage anti-rebond, retour stable, restauration.
+    // =========================================================================
+    #[test]
+    fn scenario_montee_51_5_hz_coupe_avant_auto_trip_puis_restaure() {
+        let mut engine = e();
+
+        // 1. Fréquence nominale : aucun mouvement.
+        let d = eval(&mut engine, "On", 50.0, 0, false, false);
+        assert!(d.next_state.is_none() && !d.relay_off && !d.relay_on);
+
+        // 2. La fréquence monte (excédent PV off-grid) : 51,1 Hz → débounce.
+        let d = eval(&mut engine, "On", 51.1, 0, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("PendingCut"));
+        assert!(!d.relay_off, "coupure prématurée pendant le débounce");
+
+        // 3. POINT CRITIQUE : 51,5 Hz atteint pendant le débounce (seuil
+        //    d'auto-trip DEYE). La coupure doit être IMMÉDIATE (51,5 ≥ hard
+        //    51,3), sans attendre cut_delay — sinon le DEYE s'auto-coupe et
+        //    provoque la micro-coupure AC Out.
+        let d = eval(&mut engine, "PendingCut", 51.5, 1, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("Lockout"));
+        assert!(d.relay_off, "le relais doit couper avant l'auto-trip DEYE");
+
+        // 4. Anti-rebattement : fréquence retombée mais lockout non expiré →
+        //    on ne bouge pas (pas de cycle on/off rapide).
+        let d = eval(&mut engine, "Lockout", 50.6, 10, false, false);
+        assert!(d.next_state.is_none() && !d.relay_on);
+
+        // 5. Lockout expiré → passage Off (toujours relais coupé).
+        let d = eval(&mut engine, "Lockout", 50.2, 0, false, true);
+        assert_eq!(d.next_state.as_deref(), Some("Off"));
+        assert!(!d.relay_on);
+
+        // 6. Fréquence basse stable (≤ 50,3) → fenêtre de restauration.
+        let d = eval(&mut engine, "Off", 50.1, 0, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("PendingRestore"));
+
+        // 7. Stabilité pas encore prouvée (10 s < reenable 45 s) → on attend.
+        let d = eval(&mut engine, "PendingRestore", 50.1, 10, false, false);
+        assert!(d.next_state.is_none() && !d.relay_on, "restauration trop précoce");
+
+        // 8. 50 s stables → restauration effective.
+        let d = eval(&mut engine, "PendingRestore", 50.0, 50, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("On"));
+        assert!(d.relay_on);
+    }
+
+    #[test]
+    fn scenario_pic_brutal_51_5_hz_depuis_on() {
+        // Variante : montée si rapide que 51,5 Hz est vu directement depuis
+        // On (pas de passage PendingCut observable au tick précédent).
+        let d = eval(&mut e(), "On", 51.5, 0, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("Lockout"));
+        assert!(d.relay_off, "coupure immédiate requise à 51,5 Hz");
+    }
 }

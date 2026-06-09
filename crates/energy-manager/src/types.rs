@@ -179,6 +179,10 @@ pub struct EnergyState {
     pub humidity_pct: Option<f64>,
     pub pressure_hpa: Option<f64>,
     pub wind_speed_ms: Option<f64>,
+    /// Horodatage du dernier fetch Open-Meteo réussi (audit 2026-06 §18) —
+    /// permet d'exporter l'âge de la donnée météo et d'alerter si elle
+    /// devient périmée (API down → la logique tournerait sur du stale).
+    pub weather_last_read: Option<DateTime<Utc>>,
 
     // --- Solar production counters ---
     pub mppt_yield_today_kwh: f64,

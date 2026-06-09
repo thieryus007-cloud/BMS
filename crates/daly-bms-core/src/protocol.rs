@@ -433,4 +433,129 @@ mod tests {
         assert_eq!(pc_address_for(2), 0x41);
         assert_eq!(pc_address_for(3), 0x42);
     }
+
+    // =========================================================================
+    // Corpus de trames malformées (audit 2026-06 §17) — frontière d'entrée
+    // RS485 : tout ce que le bus peut produire (bruit, collisions, réponses
+    // tronquées) doit être rejeté proprement, jamais paniquer ni mal parser.
+    // =========================================================================
+
+    /// Construit une trame réponse valide (checksum correct) pour les tests.
+    fn valid_response(addr: u8, data_id: u8, data: [u8; 8]) -> [u8; FRAME_LEN] {
+        let mut f = [0u8; FRAME_LEN];
+        f[0] = START_FLAG;
+        f[1] = addr;
+        f[2] = data_id;
+        f[3] = DATA_LEN;
+        f[4..12].copy_from_slice(&data);
+        f[12] = checksum(&f[..12]);
+        f
+    }
+
+    #[test]
+    fn parse_rejects_empty_and_truncated() {
+        use crate::error::DalyError;
+        assert!(matches!(
+            ResponseFrame::parse(&[]),
+            Err(DalyError::InvalidFrame { len: 0, .. })
+        ));
+        for n in 1..FRAME_LEN {
+            let buf = vec![0xA5u8; n];
+            assert!(
+                matches!(ResponseFrame::parse(&buf), Err(DalyError::InvalidFrame { .. })),
+                "trame de {n} octets acceptée à tort"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_rejects_bad_start_flag() {
+        use crate::error::DalyError;
+        let mut f = valid_response(0x01, 0x90, [0; 8]);
+        f[0] = 0x00; // bruit de bus typique
+        assert!(matches!(
+            ResponseFrame::parse(&f),
+            Err(DalyError::InvalidStartFlag(0x00))
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_corrupted_checksum() {
+        use crate::error::DalyError;
+        let mut f = valid_response(0x01, 0x90, [0x12, 0x34, 0, 0, 0, 0, 0, 0]);
+        f[5] ^= 0xFF; // bitflip dans les données → checksum invalide
+        assert!(matches!(
+            ResponseFrame::parse(&f),
+            Err(DalyError::Checksum { .. })
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_shifted_frame() {
+        // Désynchronisation : un octet résiduel précède une trame valide.
+        // La lecture par fenêtre fixe de 13 octets voit [garbage + 12 octets]
+        // → doit être rejetée (start flag ou checksum), jamais acceptée.
+        let valid = valid_response(0x01, 0x90, [1, 2, 3, 4, 5, 6, 7, 8]);
+        let mut stream = vec![0x42u8];
+        stream.extend_from_slice(&valid);
+        assert!(ResponseFrame::parse(&stream[..FRAME_LEN]).is_err());
+    }
+
+    #[test]
+    fn parse_accepts_valid_frame_with_trailing_bytes() {
+        // Le parseur ne lit que FRAME_LEN octets — des octets de la trame
+        // suivante déjà bufferisés ne doivent pas l'invalider.
+        let valid = valid_response(0x02, 0x93, [9, 8, 7, 6, 5, 4, 3, 2]);
+        let mut stream = valid.to_vec();
+        stream.extend_from_slice(&[0xA5, 0x01, 0x90]);
+        let frame = ResponseFrame::parse(&stream).expect("trame valide rejetée");
+        assert_eq!(frame.address(), 0x02);
+        assert_eq!(frame.data_id(), 0x93);
+        assert_eq!(frame.data(), &[9, 8, 7, 6, 5, 4, 3, 2]);
+    }
+
+    #[test]
+    fn parse_garbage_noise_never_panics() {
+        // Bruit pseudo-aléatoire déterministe (LCG) : aucun input de 13 octets
+        // ne doit paniquer — erreur propre ou trame (im)probablement valide.
+        let mut seed: u32 = 0xDEAD_BEEF;
+        for _ in 0..10_000 {
+            let mut buf = [0u8; FRAME_LEN];
+            for b in buf.iter_mut() {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                *b = (seed >> 24) as u8;
+            }
+            let _ = ResponseFrame::parse(&buf); // ne doit pas paniquer
+        }
+    }
+
+    #[test]
+    fn validate_for_rejects_crossed_responses() {
+        use crate::error::DalyError;
+        // Réponse d'un autre BMS (collision bus partagé).
+        let f = ResponseFrame::parse(&valid_response(0x02, 0x90, [0; 8])).unwrap();
+        assert!(matches!(
+            f.validate_for(0x01, DataId::PackStatus),
+            Err(DalyError::UnexpectedAddress { expected: 0x01, actual: 0x02 })
+        ));
+        // Bon BMS mais mauvaise commande (réponse retardée d'une autre requête).
+        let f = ResponseFrame::parse(&valid_response(0x01, 0x93, [0; 8])).unwrap();
+        assert!(matches!(
+            f.validate_for(0x01, DataId::PackStatus),
+            Err(DalyError::UnexpectedDataId { .. })
+        ));
+    }
+
+    #[test]
+    fn decode_edge_values_are_finite() {
+        // Bornes d'encodage : aucun NaN/inf ne doit sortir des décodeurs.
+        let max = [0xFFu8, 0xFF, 0, 0, 0, 0, 0, 0];
+        let zero = [0x00u8, 0x00, 0, 0, 0, 0, 0, 0];
+        assert!(decode_voltage(&max, 0).is_finite());      // 6553,5 V (hors plage physique mais fini)
+        assert!(decode_voltage(&zero, 0).is_finite());
+        assert!((decode_current(&zero, 0) - (-3000.0)).abs() < 0.01); // 0 raw = -3000 A
+        assert!(decode_current(&max, 0).is_finite());
+        assert!((decode_temperature(0) - (-40.0)).abs() < 0.01);      // 0 raw = -40 °C
+        assert!((decode_temperature(255) - 215.0).abs() < 0.01);
+    }
 }

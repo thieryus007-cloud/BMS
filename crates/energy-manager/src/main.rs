@@ -38,6 +38,12 @@ async fn main() -> anyhow::Result<()> {
     info!("Config loaded — portal_id={}, mqtt={}:{}",
         cfg.victron.portal_id, cfg.mqtt.host, cfg.mqtt.port);
 
+    // `--check-config` : dry-run parse + validation (audit 2026-06 §12).
+    if std::env::args().any(|a| a == "--check-config") {
+        println!("Config OK");
+        return Ok(());
+    }
+
     // --- Rules loader (disk-first with embedded fallback) ---
     let rules_dir = cfg.rules.dir.as_deref().map(Path::new);
     let loader    = Arc::new(RulesLoader::new(rules_dir));
@@ -110,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
     // --- Module monitoring Pi5 (métriques système + tokio).
     //     Publication MQTT vers `santuario/em/metrics` — daly-bms souscrit
     //     et écrit dans redb. L'ancien POST VM est conservé pour compat. ---
-    monitoring::spawn(cfg.water_heater.vm_url.clone(), bus.clone());
+    monitoring::spawn(cfg.water_heater.vm_url.clone(), bus.clone(), state.clone());
 
     info!("energy-manager fully started");
 
@@ -126,14 +132,39 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Wait forever (all work happens in spawned tasks)
-    std::future::pending::<()>().await;
+    // Tout le travail vit dans les tâches spawnées — le main attend le signal
+    // d'arrêt (audit 2026-06 §5) : SIGTERM (systemd stop/restart) ou SIGINT.
+    // Sortie propre (code 0) + notification STOPPING au lieu d'une mort brute.
+    wait_for_shutdown_signal().await;
+    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+    info!("Arrêt gracieux energy-manager");
     Ok(())
+}
+
+/// Résout au premier SIGTERM ou SIGINT.
+async fn wait_for_shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    match signal(SignalKind::terminate()) {
+        Ok(mut term) => {
+            tokio::select! {
+                _ = term.recv() => {}
+                r = tokio::signal::ctrl_c() => { let _ = r; }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Inscription SIGTERM impossible ({e}) — arrêt sur SIGINT uniquement");
+            let _ = tokio::signal::ctrl_c().await;
+        }
+    }
+    info!("Signal d'arrêt reçu — fermeture gracieuse en cours");
 }
 
 /// Subscribes to MQTT retained topics for persist restoration.
 fn spawn_persist_watcher(bus: AppBus, state: Arc<RwLock<EnergyState>>) {
-    tokio::spawn(async move {
+    // spawn_critical (audit 2026-06 §9) : la boucle sort normalement sur
+    // RecvError::Closed — la restauration des baselines s'arrêtait alors en
+    // silence. Fin de boucle = restart propre par systemd.
+    supervise::spawn_critical(async move {
         let mut rx = bus.subscribe_mqtt();
         loop {
             let msg = match rx.recv().await {

@@ -62,7 +62,7 @@ async fn write_wh_metrics(vm_url: &str, mode: WaterHeaterMode, temp: Option<f64>
     }
     let body = lines.join("\n");
     let url = format!("{}/api/v1/import/prometheus", vm_url);
-    if let Err(e) = reqwest::Client::new()
+    if let Err(e) = crate::http_clients::shared_client()
         .post(&url)
         .body(body)
         .send()

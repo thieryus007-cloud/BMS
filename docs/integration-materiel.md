@@ -115,6 +115,33 @@ Bus `/dev/ttyUSB0` — paramètres : 9600 bauds, 8N1 :
 
 > **Adresses déjà prises (à ne pas réutiliser)** : `0x01`, `0x02`, `0x03`, `0x05`, `0x06`, `0x07`, `0x08`, `0x09`.
 
+### 2.1 Chemin série stable `/dev/serial/by-id` (audit 2026-06 §14)
+
+`/dev/ttyUSB0` est un nom **instable** : après un débranchement/rebranchement
+de l'adaptateur USB-RS485 (ou un glitch USB), le kernel peut ré-énumérer le
+périphérique en `/dev/ttyUSB1`. `SharedBus::reopen()` rouvre alors l'ancien
+chemin — qui n'existe plus, ou pire, désigne **un autre adaptateur**.
+
+udev crée automatiquement un symlink stable par identité matérielle
+(VID:PID + numéro de série) :
+
+```bash
+ls -l /dev/serial/by-id/
+# ex : usb-FTDI_USB-RS485_Cable_FT0ABCDE-if00-port0 -> ../../ttyUSB0
+```
+
+Recommandation : référencer ce chemin dans `Config.toml` —
+
+```toml
+[serial]
+port = "/dev/serial/by-id/usb-FTDI_USB-RS485_Cable_FT0ABCDE-if00-port0"
+```
+
+Aucun changement de code nécessaire : `reopen()` rouvre le même symlink,
+qui suit le périphérique quelle que soit sa ré-énumération. (Si l'adaptateur
+n'expose pas de numéro de série unique, utiliser `/dev/serial/by-path/` —
+stable tant que le port USB physique ne change pas.)
+
 ---
 
 ## 3. Services D-Bus production (NanoPi)
