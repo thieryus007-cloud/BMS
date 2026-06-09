@@ -83,18 +83,28 @@ impl Default for TierPolicy {
 
 struct Inner {
     db: Arc<Database>,
-    writer_tx: parking_lot::Mutex<Option<mpsc::Sender<writer::WriterMsg>>>,
+    /// Émetteur conservé pour `writer()` même après `shutdown()` : les
+    /// écritures tardives échouent alors en `Closed` (déjà géré par les
+    /// producteurs `try_write`) au lieu de paniquer sur un `expect`.
+    writer_tx: mpsc::Sender<writer::WriterMsg>,
+    /// Sentinelle d'arrêt — prise une seule fois (`Option::take`), ce qui
+    /// rend `shutdown()` / `Drop` idempotents entre eux.
+    shutdown_tx: parking_lot::Mutex<Option<mpsc::Sender<writer::WriterMsg>>>,
     writer_handle: parking_lot::Mutex<Option<thread::JoinHandle<()>>>,
 }
 
-impl Drop for Inner {
-    fn drop(&mut self) {
+impl Inner {
+    /// Arrête le thread writer : envoie la sentinelle `Shutdown` puis joint
+    /// le thread (le batch en file est commité avant l'arrêt, sans perte).
+    /// Idempotent — appelé par `MetricsStore::shutdown()` (arrêt gracieux
+    /// SIGTERM, audit 2026-06 §5) et par `Drop`.
+    fn shutdown_writer(&self) {
         // 1. Signale l'arrêt au thread writer via une sentinelle in-band.
         //    Contrairement à la simple fermeture du canal, cela arrête le
         //    writer **même si des `Writer` clones survivent** côté appelant
         //    (sinon `blocking_recv` ne retournerait jamais `None` et le
         //    `join()` ci-dessous bloquerait indéfiniment — correctif R2).
-        if let Some(tx) = self.writer_tx.lock().take() {
+        if let Some(tx) = self.shutdown_tx.lock().take() {
             // `try_send` (non bloquant) : `Drop` peut s'exécuter dans un
             // runtime tokio où `blocking_send` paniquerait. Si la file est
             // pleine, on laisse au writer le temps de drainer puis on
@@ -119,6 +129,12 @@ impl Drop for Inner {
         if let Some(h) = self.writer_handle.lock().take() {
             let _ = h.join();
         }
+    }
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        self.shutdown_writer();
     }
 }
 
@@ -153,22 +169,26 @@ impl MetricsStore {
 
         Ok(Self {
             inner: Arc::new(Inner {
+                writer_tx: writer_tx.clone(),
                 db,
-                writer_tx: parking_lot::Mutex::new(Some(writer_tx)),
+                shutdown_tx: parking_lot::Mutex::new(Some(writer_tx)),
                 writer_handle: parking_lot::Mutex::new(Some(writer_handle)),
             }),
         })
     }
 
     pub fn writer(&self) -> Writer {
-        let tx = self
-            .inner
-            .writer_tx
-            .lock()
-            .as_ref()
-            .expect("writer channel encore ouvert tant que MetricsStore est vivant")
-            .clone();
-        Writer { tx }
+        Writer { tx: self.inner.writer_tx.clone() }
+    }
+
+    /// Arrêt gracieux explicite (audit 2026-06 §5) : draine et commite le
+    /// batch en file puis joint le thread writer. À appeler avant la sortie
+    /// du process (SIGTERM) — les clones d'état retenus par les tâches de
+    /// fond empêchent le `Drop` naturel de s'exécuter à temps. Idempotent ;
+    /// les écritures ultérieures échouent en `Closed` (gérées par les
+    /// producteurs), aucune panique.
+    pub fn shutdown(&self) {
+        self.inner.shutdown_writer();
     }
 
     pub fn reader(&self) -> Reader {

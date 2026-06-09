@@ -3,6 +3,13 @@ Description=DalyBMS Server — Rust RS485 BMS monitor
 Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
 After=network.target mosquitto-broker.service
 Wants=network.target mosquitto-broker.service
+# La base metrics-store vit sur le NVMe (audit 2026-06 §7) : sans cette
+# dépendance, un montage NVMe en échec/retard au boot faisait créer la base
+# sur la rootfs (SD) sous /mnt/nvme → remplissage de la SD + base « fantôme »
+# masquée au montage suivant. RequiresMountsFor ordonne le service après le
+# mount et le fait échouer proprement (retry systemd) si le montage manque.
+# (Sans entrée fstab pour /mnt/nvme, la directive est sans effet.)
+RequiresMountsFor=/mnt/nvme/daly-bms
 # Pas de rate-limit sur les redémarrages (clé Unit, pas Service)
 StartLimitIntervalSec=0
 
@@ -65,6 +72,20 @@ RestartSec=5s
 # activating tant que `systemctl restart energy-manager` ne rend pas la
 # main, et inversement). Cf. docs/diagnostic-depannage.md §10.
 RuntimeMaxSec=86400
+
+# Garde mémoire (audit 2026-06 §11) — à n'activer qu'AVEC la borne de points
+# PromQL (§3, query_max_points) : sans elle, un dashboard 30 j légitime
+# (VmPeak 367 Mo observé en 2026-05) serait tué en plein vol.
+# MemoryHigh : reclaim souple (ralentit, ne tue pas). MemoryMax : filet dur —
+# l'OOM killer ne vise plus que ce service au lieu de tout le Pi.
+# Baseline RSS ~30-40 Mo + fuite résiduelle ~6,6 Mo/h ≈ 200 Mo avant le
+# restart quotidien (RuntimeMaxSec) → marges confortables.
+MemoryHigh=256M
+MemoryMax=512M
+
+# Arrêt : SIGTERM → arrêt gracieux (drain HTTP 10 s + flush metrics-store,
+# audit 2026-06 §5). 20 s laissent la marge avant SIGKILL.
+TimeoutStopSec=20
 
 # Accès au port série RS485 (/dev/ttyUSB* ou /dev/ttyACM*)
 SupplementaryGroups=dialout

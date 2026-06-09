@@ -126,9 +126,31 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Wait forever (all work happens in spawned tasks)
-    std::future::pending::<()>().await;
+    // Tout le travail vit dans les tâches spawnées — le main attend le signal
+    // d'arrêt (audit 2026-06 §5) : SIGTERM (systemd stop/restart) ou SIGINT.
+    // Sortie propre (code 0) + notification STOPPING au lieu d'une mort brute.
+    wait_for_shutdown_signal().await;
+    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+    info!("Arrêt gracieux energy-manager");
     Ok(())
+}
+
+/// Résout au premier SIGTERM ou SIGINT.
+async fn wait_for_shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    match signal(SignalKind::terminate()) {
+        Ok(mut term) => {
+            tokio::select! {
+                _ = term.recv() => {}
+                r = tokio::signal::ctrl_c() => { let _ = r; }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Inscription SIGTERM impossible ({e}) — arrêt sur SIGINT uniquement");
+            let _ = tokio::signal::ctrl_c().await;
+        }
+    }
+    info!("Signal d'arrêt reçu — fermeture gracieuse en cours");
 }
 
 /// Subscribes to MQTT retained topics for persist restoration.

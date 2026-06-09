@@ -729,6 +729,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── Serveur HTTP Axum ──────────────────────────────────────────────────────
+    let shutdown_state = state.clone();
     let router = api::build_router(state);
     let addr: SocketAddr = config.api.bind.parse()?;
 
@@ -739,6 +740,56 @@ async fn main() -> anyhow::Result<()> {
     let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router).await?;
+
+    // ── Arrêt gracieux SIGTERM/SIGINT (audit 2026-06 §5) ──────────────────────
+    // Le service redémarre tous les jours (RuntimeMaxSec) : sans arrêt propre,
+    // le batch metrics en file (fenêtre 250 ms + backlog) était perdu à chaque
+    // restart. Drain HTTP borné à 10 s : des WebSockets ouvertes ne doivent
+    // pas suspendre l'arrêt jusqu'au SIGKILL systemd (TimeoutStopSec 90 s).
+    let (shut_tx, shut_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        wait_for_shutdown_signal().await;
+        let _ = shut_tx.send(true);
+    });
+    let mut graceful_rx = shut_rx.clone();
+    let mut deadline_rx = shut_rx;
+    let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
+        let _ = graceful_rx.changed().await;
+    });
+    tokio::select! {
+        res = serve => { res?; }
+        _ = async {
+            let _ = deadline_rx.changed().await;
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        } => {
+            warn!("Arrêt : connexions HTTP/WS encore ouvertes après 10 s — fermeture forcée");
+        }
+    }
+
+    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+    if let Some(store) = &shutdown_state.metrics_store {
+        info!("Arrêt gracieux : flush du batch metrics-store…");
+        store.shutdown();
+    }
+    info!("Arrêt gracieux terminé");
     Ok(())
+}
+
+/// Résout au premier SIGTERM (systemd stop/restart) ou SIGINT (Ctrl-C).
+async fn wait_for_shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    match signal(SignalKind::terminate()) {
+        Ok(mut term) => {
+            tokio::select! {
+                _ = term.recv() => {}
+                r = tokio::signal::ctrl_c() => { let _ = r; }
+            }
+        }
+        Err(e) => {
+            // Improbable ; on retombe sur SIGINT seul plutôt que d'échouer.
+            warn!("Inscription SIGTERM impossible ({e}) — arrêt gracieux sur SIGINT uniquement");
+            let _ = tokio::signal::ctrl_c().await;
+        }
+    }
+    info!("Signal d'arrêt reçu — fermeture gracieuse en cours");
 }
