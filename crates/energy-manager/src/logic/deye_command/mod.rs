@@ -230,8 +230,11 @@ async fn run(
                 let now = Utc::now();
                 let (grid_connected, restore_blocked) = read_gates(&state, &cfg, now).await;
                 // Refresh observability fields (1 Hz) for /api/rules-status.
+                // deye_on is synced here too (not only on transition) so it can never
+                // diverge from the state machine — e.g. at startup before any transition.
                 {
                     let mut s = state.write().await;
+                    s.deye_on              = matches!(deye_sm, DeyeState::On | DeyeState::PendingCut(_));
                     s.deye_state           = Some(state_name(&deye_sm).to_string());
                     s.deye_restore_blocked = restore_blocked;
                 }
