@@ -153,7 +153,17 @@ impl DalyPort {
             "← réponse reçue"
         );
 
-        let frame = ResponseFrame::parse(&buf)?;
+        // Resynchronisation (audit 2026-06 §8) : une trame invalide signifie
+        // un flux probablement décalé (réponse tardive, octets parasites).
+        // On purge le buffer RX avant de rendre le bus, sinon le décalage
+        // persiste sur les transactions suivantes (rafales d'erreurs CRC).
+        let frame = match ResponseFrame::parse(&buf) {
+            Ok(f) => f,
+            Err(e) => {
+                guard.flush_rx().await;
+                return Err(e);
+            }
+        };
 
         // Sur un bus RS485 partagé, BMS 0x01 (master) peut répondre en
         // premier même si la requête cible BMS 0x02. On tente alors de
@@ -181,13 +191,17 @@ impl DalyPort {
                     }
                 }
             }
+            guard.flush_rx().await; // resync (audit 2026-06 §8)
             return Err(DalyError::UnexpectedAddress {
                 expected: bms_address,
                 actual:   frame.address(),
             });
         }
 
-        frame.validate_for(bms_address, cmd)?;
+        if let Err(e) = frame.validate_for(bms_address, cmd) {
+            guard.flush_rx().await; // resync (audit 2026-06 §8)
+            return Err(e);
+        }
         debug!(
             bms = format!("{:#04x}", bms_address),
             cmd = format!("{:#04x}", cmd as u8),
@@ -250,8 +264,18 @@ impl DalyPort {
                 "← trame multi reçue"
             );
 
-            let frame = ResponseFrame::parse(&buf)?;
-            frame.validate_for(bms_address, cmd)?;
+            // Resync sur trame invalide (audit 2026-06 §8) — cf. send_command.
+            let frame = match ResponseFrame::parse(&buf) {
+                Ok(f) => f,
+                Err(e) => {
+                    guard.flush_rx().await;
+                    return Err(e);
+                }
+            };
+            if let Err(e) = frame.validate_for(bms_address, cmd) {
+                guard.flush_rx().await;
+                return Err(e);
+            }
             frames.push(frame);
         }
 

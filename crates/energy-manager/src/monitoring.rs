@@ -27,12 +27,14 @@ pub fn spawn(vm_url: String, bus: AppBus) {
     let task_mon = TaskMonitor::new();
     let vm_url_mon = vm_url.clone();
     let bus_mon    = bus.clone();
-    tokio::spawn(task_mon.instrument(async move {
+    // spawn_critical (audit 2026-06 §9) : boucles de service longue durée —
+    // leur fin inattendue laissait le monitoring éteint en silence.
+    crate::supervise::spawn_critical(task_mon.instrument(async move {
         run_monitoring_loop(vm_url_mon, bus_mon).await;
     }));
 
     // Exporteur métriques tokio → VM (toutes les 60s)
-    tokio::spawn(async move {
+    crate::supervise::spawn_critical(async move {
         let mut ivals  = task_mon.intervals();
         let mut ticker = interval(Duration::from_secs(60));
         let client     = reqwest::Client::builder()

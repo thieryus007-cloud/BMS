@@ -160,7 +160,12 @@ impl SwitchManager {
                 }
             };
             info!(index = idx, topic = %topic, "Switch contrôlable — tâche commande MQTT lancée");
-            tokio::spawn(async move {
+            // spawn_critical (audit 2026-06 §9) : cette boucle sort normalement
+            // si le canal de commandes ferme — le switch devenait alors
+            // silencieusement « lecture seule » (ATS/Tongou inertes) tandis que
+            // le service paraissait sain. Désormais : fin de boucle = restart
+            // propre par le superviseur.
+            crate::spawn_critical(async move {
                 run_command_forwarder(cmd_rx, client, topic).await;
             });
         }

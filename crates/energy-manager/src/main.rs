@@ -155,7 +155,10 @@ async fn wait_for_shutdown_signal() {
 
 /// Subscribes to MQTT retained topics for persist restoration.
 fn spawn_persist_watcher(bus: AppBus, state: Arc<RwLock<EnergyState>>) {
-    tokio::spawn(async move {
+    // spawn_critical (audit 2026-06 §9) : la boucle sort normalement sur
+    // RecvError::Closed — la restauration des baselines s'arrêtait alors en
+    // silence. Fin de boucle = restart propre par systemd.
+    supervise::spawn_critical(async move {
         let mut rx = bus.subscribe_mqtt();
         loop {
             let msg = match rx.recv().await {
