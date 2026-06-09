@@ -182,6 +182,9 @@ async fn run(
 
                 } else if *t == t_connected {
                     if let Some(v) = msg.victron_value::<i64>() {
+                        // Track the physical grid connection so read_gates detects a real
+                        // outage (Connected==0) even when IgnoreAcIn1 stays 0.
+                        state.write().await.ac_connected = Some(v);
                         if v == 1 {
                             let now = Utc::now();
                             let new_state = apply_decision(
@@ -366,8 +369,20 @@ async fn send_shelly(bus: &AppBus, shelly_id: &str, channels: &[u8], on: bool) {
 /// Returns `(grid_connected, restore_blocked)`.
 async fn read_gates(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig, now: DateTime<Utc>) -> (bool, bool) {
     let s = state.read().await;
-    let grid_connected = s.ac_ignore.map(|v| v == 0).unwrap_or(true);
-    (grid_connected, restore_blocked(&s, cfg, now))
+    (is_grid_connected(s.ac_ignore, s.ac_connected), restore_blocked(&s, cfg, now))
+}
+
+/// Whether the Victron is grid-tied (NOT islanded). The DEYE cut logic must stay active
+/// whenever the Victron forms the AC-Out grid and can frequency-shift the DEYE — which
+/// happens both on a deliberate ignore (`IgnoreAcIn1 == 1`) AND on a real grid outage
+/// (`ActiveIn/Connected == 0`, where `IgnoreAcIn1` may remain 0).
+///
+/// The grid is considered connected only when *neither* signal indicates islanding.
+/// Unknown signals keep the conservative "assume connected" default — identical to the
+/// previous `ac_ignore`-only behaviour, so this degrades gracefully if `ac_connected`
+/// has not been observed yet.
+fn is_grid_connected(ac_ignore: Option<i64>, ac_connected: Option<i64>) -> bool {
+    ac_ignore != Some(1) && ac_connected != Some(0)
 }
 
 /// Structural PV-excess guard. While the battery is full, irradiance is strong and
@@ -392,4 +407,34 @@ fn restore_blocked(s: &EnergyState, cfg: &DeyeConfig, now: DateTime<Utc>) -> boo
     soc >= cfg.restore_soc_pct
         && irradiance >= cfg.restore_irradiance_wm2
         && current >= -1.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_grid_connected;
+
+    #[test]
+    fn grid_tied_when_connected_and_not_ignored() {
+        assert!(is_grid_connected(Some(0), Some(1)));
+    }
+
+    #[test]
+    fn islanded_on_deliberate_ignore() {
+        // ESS running off-battery while physically still connected → frequency shifting active.
+        assert!(!is_grid_connected(Some(1), Some(1)));
+    }
+
+    #[test]
+    fn islanded_on_real_outage_even_if_ignore_stays_zero() {
+        // Real grid loss: ActiveIn/Connected drops to 0 while IgnoreAcIn1 may remain 0.
+        assert!(!is_grid_connected(Some(0), Some(0)));
+    }
+
+    #[test]
+    fn unknown_signals_assume_connected() {
+        // Graceful degradation: no data → previous ac_ignore-only "assume connected" default.
+        assert!(is_grid_connected(None, None));
+        assert!(is_grid_connected(Some(0), None));
+        assert!(!is_grid_connected(Some(1), None));
+    }
 }
