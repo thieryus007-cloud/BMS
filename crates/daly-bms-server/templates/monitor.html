@@ -509,12 +509,13 @@ async function fetchRulesStatus() {
   const safe = p => p.catch(() => null);
 
   // Fetch local BMS/irradiance/inverter data from daly-bms-server
-  const [bms1r, bms2r, irrR, invR, emR] = await Promise.all([
+  const [bms1r, bms2r, irrR, invR, emR, shR] = await Promise.all([
     safe(fetch('/api/v1/bms/1/status').then(r => r.ok ? r.json() : null)),
     safe(fetch('/api/v1/bms/2/status').then(r => r.ok ? r.json() : null)),
     safe(fetch('/api/v1/irradiance/status').then(r => r.ok ? r.json() : null)),
     safe(fetch('/api/v1/venus/inverter').then(r => r.ok ? r.json() : null)),
     safe(fetch(EM_BASE + '/api/rules-status').then(r => r.ok ? r.json() : null)),
+    safe(fetch('/api/v1/shelly').then(r => r.ok ? r.json() : null)),
   ]);
 
   // ── SOC — SmartShunt Victron (valeur exacte utilisée par l'energy-manager) ─
@@ -619,6 +620,11 @@ async function fetchRulesStatus() {
     const deyeAcCon = deye?.ac_connected ?? null;     // 1=connecté, 0=panne réseau
     const deyeMpptFull = deye?.mppt_full ?? false;    // l'état MPPT signale batterie pleine
     const mpptStates = [deye?.mppt_273_state, deye?.mppt_289_state];
+    // Real per-channel relay state from the Shelly Pro 2PM (daly-bms-server). output=true ⇒
+    // relay closed ⇒ DEYE powered. One Shelly device → take the first.
+    const shellySnap = (shR?.shelly && shR.shelly.length) ? shR.shelly[0].snapshot : null;
+    const ch0 = shellySnap?.channel_0?.output ?? null;
+    const ch1 = shellySnap?.channel_1?.output ?? null;
     // Combined islanding predicate from the energy-manager; fall back to ac_ignore.
     const gridConn  = deye?.grid_connected ?? (acIgnore != null ? !acIgnore : null);
     // Relay status derived from the state machine (single source of truth) so the
@@ -661,10 +667,10 @@ async function fetchRulesStatus() {
     if (dGrid) {
       // Réseau / îlotage
       let resVal, resColor, resDetail = null;
-      if (gridConn == null)        { resVal = '—';            resColor = GREY; }
-      else if (gridConn)           { resVal = 'Connecté';     resColor = GREEN; }
-      else if (deyeAcCon === 0)    { resVal = 'Panne réseau'; resColor = RED; }
-      else                         { resVal = 'Îloté';        resColor = AMBER; resDetail = 'mode batterie'; }
+      if (gridConn == null)  { resVal = '—';        resColor = GREY; }
+      else if (gridConn)     { resVal = 'Connecté'; resColor = GREEN; }
+      else                   { resVal = 'Off-Grid'; resColor = AMBER;
+                               resDetail = deyeAcCon === 0 ? 'réseau absent' : 'AC-in ignoré'; }
 
       const fColor = deyeFreq == null ? GREY
         : deyeFreq >= 51.3 ? RED : deyeFreq >= 51.0 ? AMBER : GREEN;
@@ -686,9 +692,14 @@ async function fetchRulesStatus() {
                   deyeBlock ? AMBER : GREEN,
                   deyeBlock ? 'excédent : batterie pleine + soleil' : 'fréquence ≤ 50,3 Hz'));
       }
-      rows.push(statusRow('Relais (2 DEYE)',
-                relayOn == null ? '—' : relayOn ? 'Fermé · DEYE actifs' : 'Ouvert · DEYE coupés',
-                relayOn == null ? GREY : relayOn ? GREEN : AMBER,
+      // Canaux Shelly — état réel de chaque relais (un canal par DEYE), sur la même ligne.
+      const chTag = (lbl, out) => {
+        const c = out == null ? '#94a3b8' : out ? GREEN : AMBER;
+        const t = out == null ? '—' : out ? 'Fermé (ON)' : 'Ouvert (OFF)';
+        return `${lbl} <span style="color:${c};">${t}</span>`;
+      };
+      rows.push(statusRow('Canaux Shelly',
+                `${chTag('C0', ch0)} &nbsp; ${chTag('C1', ch1)}`, GREY,
                 deyeState ? (phaseFr[deyeState] || deyeState) : null));
       dGrid.innerHTML = rows.join('');
     }
