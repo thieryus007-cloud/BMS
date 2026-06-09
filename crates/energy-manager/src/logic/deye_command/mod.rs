@@ -182,10 +182,18 @@ async fn run(
 
                 } else if *t == t_connected {
                     if let Some(v) = msg.victron_value::<i64>() {
-                        // Track the physical grid connection so read_gates detects a real
-                        // outage (Connected==0) even when IgnoreAcIn1 stays 0.
-                        state.write().await.ac_connected = Some(v);
-                        if v == 1 {
+                        // Track the physical grid connection (so read_gates can detect a real
+                        // outage) and only force an immediate reconnect when this makes us
+                        // *truly* grid-connected — not merely physically reconnected while the
+                        // ESS still deliberately ignores AC-in (ac_ignore==1) and keeps
+                        // frequency-shifting. Otherwise the ticker would re-cut 1 s later and
+                        // thrash the relay. Consistent with read_gates / is_grid_connected.
+                        let truly_connected = {
+                            let mut s = state.write().await;
+                            s.ac_connected = Some(v);
+                            is_grid_connected(s.ac_ignore, s.ac_connected)
+                        };
+                        if truly_connected {
                             let now = Utc::now();
                             let new_state = apply_decision(
                                 rule_engine.evaluate(
