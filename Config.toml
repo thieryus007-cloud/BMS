@@ -557,7 +557,8 @@ mppt1_instance       = 273             # SmartSolar MPPT 1
 mppt2_instance       = 289             # SmartSolar MPPT 2
 pvinverter_instance  = 32              # ET112 Micro-Onduleurs
 shelly_deye_id       = "shellypro2pm-ec62608840a4"
-shelly_deye_channel  = 0
+shelly_deye_channel  = 0                # fallback mono-canal (hérité)
+shelly_deye_channels = [0, 1]           # un canal par DEYE — coupe/restaure les deux
 tasmota_waterheater_id = "tongou_3BC764"
 # SmartShunt device instance sur Venus OS — vérifier avec :
 #   ssh root@192.168.1.120 "dbus -y | grep battery"
@@ -591,11 +592,16 @@ pv_excess_threshold_w = 50.0          # W minimum pour déclencher l'excédent
 
 # --- Commande relais DEYE (via Shelly) ---
 [energy_manager.deye]
-freq_high_hz          = 52.0          # Hz — seuil de coupure
-freq_low_hz           = 50.3          # Hz — seuil de réactivation
-cut_delay_secs        = 15            # s — délai avant coupure
-reenable_delay_secs   = 45            # s — délai avant réactivation
-lockout_secs          = 120           # s — anti-oscillation après coupure
+freq_high_hz               = 51.0     # Hz — coupure débouncée (sous l'auto-trip DEYE 51.5)
+freq_hard_hz               = 51.3     # Hz — coupure immédiate (filet pré-trip)
+freq_low_hz                = 50.3     # Hz — seuil de réactivation
+cut_delay_secs             = 3        # s — débounce coupure (bat la rampe vers 51.5)
+reenable_delay_secs        = 45       # s — bas-soutenu avant réactivation
+lockout_secs               = 120      # s — anti-oscillation après coupure
+restore_soc_pct            = 95.0     # % — SOC ≥ → excédent structurel présumé → maintien coupé
+restore_irradiance_wm2     = 250.0    # W/m² — irradiance ≥ → soleil fort → maintien coupé
+corroboration_max_age_secs = 60       # s — fraîcheur SmartShunt (au-delà : fréquence seule, fail-open)
+relay_resync_secs          = 60       # s — ré-affirmation périodique de l'état des 2 canaux
 
 # --- Chauffe-eau LG ThinQ ---
 [energy_manager.water_heater]

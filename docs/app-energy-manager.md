@@ -322,61 +322,58 @@ ac_ignore == 1 ?
 
 ### 4.3 DEYE_COMMAND
 
-**Fichier** : `logic/deye_command.rs`
+**Fichier** : `logic/deye_command/` (`mod.rs` + `rules.rs`)
 
-**Rôle** : Machine d'états fréquence AC → couper/restaurer l'onduleur DEYE via relais Shelly.
+**Rôle** : Machine d'états fréquence AC → couper/restaurer les onduleurs DEYE via un Shelly Pro 2PM (**un canal par DEYE**). Le but est de **pré-empter l'auto-coupure des DEYE à 51,5 Hz** (qui provoque des micro-coupures sur AC Out) par une déconnexion relais propre et déterministe, dès 51,0 Hz.
 
 **Topics en entrée** :
 - `N/{pid}/vebus/{vb}/Ac/Out/L1/F` → fréquence AC (Hz)
 - `N/{pid}/vebus/{vb}/Ac/ActiveIn/Connected` → trigger reconnexion réseau (direct, **PAS via ac_ignore**)
+- État partagé (`EnergyState`) pour la corroboration : `soc_pct`, `battery_current_a`, `irradiance_wm2`, `shunt_last_seen_ts` (fraîcheur)
 
 > ⚠️ **Important** : `Ac/ActiveIn/Connected` déclenche **directement** le rule engine avec `grid_connected=true`. Ce n'est **PAS** une lecture de `ac_ignore` (qui vient de `IgnoreAcIn1`). Les deux topics sont distincts.
 
-**Règles GRL** (`deye_command.grl`) — 11 règles :
+**Conception en deux couches** :
+1. **Cœur fréquence** (autorité = mesure Victron, règle projet #13) — coupe/restaure sur seuils + hystérésis + timers.
+2. **Corroboration anti-rebattement** (SmartShunt + Irradiance, *fail-open*) — empêche une restauration prématurée tant qu'un excédent solaire **structurel** persiste (batterie pleine + soleil fort + non en décharge), pour éviter le cyclage du relais l'après-midi. Si les données SmartShunt sont périmées (> `corroboration_max_age_secs`), la garde s'efface → hystérésis fréquence seule.
 
-| État courant | Condition | → Nouvel état | Relay |
-|---|---|---|---|
-| On | freq ≥ 52 Hz | PendingCut | — |
-| PendingCut | 15 s écoulé + freq ≥ 52 Hz | Lockout | **OFF** |
-| Lockout | 120 s écoulé | Off | — |
-| Off | freq ≤ 50,3 Hz | PendingRestore | — |
-| PendingRestore | 45 s écoulé + freq ≤ 50,3 Hz | On | **ON** |
-| **Toute** | grid_connected==true (reconnect réseau) | On | **ON** (salience 200) |
+**Règles GRL** (`deye_command.grl`) :
+
+| État courant | Condition | → Nouvel état | Relay | Salience |
+|---|---|---|---|---|
+| On | freq ≥ `freq_hard_hz` (51,3) | Lockout | **OFF** (les 2 canaux) | 150 |
+| On | freq ≥ `freq_high_hz` (51,0), < hard | PendingCut | — | 100 |
+| PendingCut | freq ≥ `freq_hard_hz` | Lockout | **OFF** | 150 |
+| PendingCut | `cut_delay_secs` (3 s) écoulé + freq ≥ 51,0 | Lockout | **OFF** | 100 |
+| PendingCut | freq < 51,0 (annule) | On | — | 100 |
+| Lockout | `lockout_secs` (120 s) écoulé | Off | — | 100 |
+| Off | freq ≤ `freq_low_hz` (50,3) **et `restore_blocked==false`** | PendingRestore | — | 100 |
+| PendingRestore | `reenable_delay_secs` (45 s) écoulé + freq ≤ 50,3 | On | **ON** (les 2 canaux) | 100 |
+| **Toute** | `grid_connected==true` (reconnect réseau) | On | **ON** | 200 |
+
+`restore_blocked` (pré-calculé en Rust) = données SmartShunt fraîches **et** `soc ≥ restore_soc_pct` **et** `irradiance ≥ restore_irradiance_wm2` **et** `battery_current ≥ -1 A` (non en décharge).
 
 **Diagramme de la machine d'états** :
 ```
-         Grid reconnect (salience 200, override tout)
-         ├─ any state + grid==true → On + relay_on
-         │
-         ▼
-    ┌────────┐
-    │   On   │ ◄──────────── freq redescend < 52Hz (annule)
-    └──┬─────┘
-       │ freq ≥ 52Hz
-       ▼
-    ┌─────────────┐
-    │ PendingCut  │ ◄──────── freq redescend < 52Hz (annule)
-    │   (timer)   │
-    └──┬──────────┘
-       │ 15s + freq ≥ 52Hz
-       ▼
-    ┌─────────────┐   lockout_secs=120
-    │  Lockout    ├─────────────►  Off  ◄──┐
-    │   (120s)    │    (expire)           freq≤50.3Hz
-    └─────────────┘                        │
-                                      ┌─────────────┐
-                                      │PendingRestore│
-                                      │   (timer)    │
-                                      └──┬──────────┘
-                                         │ 45s + freq≤50.3Hz
-                                         ▼ relay_on
-                                        On
+         Grid reconnect (salience 200, override tout) → On + relay_on (2 canaux)
+                                   ▲
+    ┌────────┐  freq ≥ 51,0 (3 s)  │  ou  freq ≥ 51,3 (immédiat, salience 150)
+    │   On   ├─────────────────────┼──────────────────────────────┐
+    └────────┘ ◄── freq < 51,0     │                              ▼
+        ▲                          │                       ┌─────────────┐
+        │ restore autorisé         │                       │ PendingCut  │
+        │ (restore_blocked==false) │                       └──────┬──────┘
+   ┌────┴─────────┐  lockout 120 s   ┌─────────┐  3 s + freq haute │
+   │PendingRestore│◄─────────────────┤ Lockout │◄───── relay_off (2 canaux)
+   └──────────────┘                  └─────────┘
+        ▲ 45 s + freq ≤ 50,3            │ expire
+        └──────────────────── Off ◄─────┘
 ```
 
-**Commande Shelly MQTT transient** :
+**Commande Shelly MQTT transient** (envoyée sur **chaque** canal) :
 ```
 Topic   : {shelly_id}/rpc  (ex: shellypro2pm-ec62608840a4/rpc)
-Payload :
+Payload (pour chaque canal de shelly_deye_channels) :
 {
   "id": 1,
   "src": "energy-manager",
@@ -385,13 +382,16 @@ Payload :
 }
 ```
 
+**Re-synchronisation idempotente** : toutes les `relay_resync_secs` (60 s), l'état logique courant est ré-émis sur tous les canaux → le relais physique reconverge après un message MQTT manqué ou un reboot du Shelly. La première émission a lieu au démarrage (affirme l'état restauré). Log en `DEBUG` ; seules les transitions réelles sont en `INFO`.
+
 **Persistance de l'état DEYE** : L'état du relais (On/Off) est persisté en MQTT retained sur `santuario/persist/deye_state`. Au redémarrage, le service attend 3 secondes avant d'activer la logique DEYE pour laisser le broker MQTT livrer le message retained.
 
 États persistés :
 - `"On"` — DEYE actif (états `On` ou `PendingCut`)
 - `"Off"` — DEYE coupé (états `Off`, `Lockout`, `PendingRestore`)
 
-**Config** : `freq_high_hz=52.0`, `freq_low_hz=50.3`, `cut_delay_secs=15`, `reenable_delay_secs=45`, `lockout_secs=120`
+**Config** (`[energy_manager.deye]`) : `freq_high_hz=51.0`, `freq_hard_hz=51.3`, `freq_low_hz=50.3`, `cut_delay_secs=3`, `reenable_delay_secs=45`, `lockout_secs=120`, `restore_soc_pct=95.0`, `restore_irradiance_wm2=250.0`, `corroboration_max_age_secs=60`, `relay_resync_secs=60`.
+Canaux : `[energy_manager.victron] shelly_deye_channels = [0, 1]` (un canal par DEYE ; fallback mono-canal `shelly_deye_channel` si la liste est vide).
 
 ---
 

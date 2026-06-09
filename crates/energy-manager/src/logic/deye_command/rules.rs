@@ -45,19 +45,23 @@ impl DeyeRuleEngine {
         time_in_state_secs: u64,
         grid_connected: bool,
         cfg_freq_high: f64,
+        cfg_freq_hard: f64,
         cfg_freq_low: f64,
         cfg_cut_delay: u64,
         cfg_reenable_delay: u64,
         lockout_expired: bool,
+        restore_blocked: bool,
     ) -> anyhow::Result<DeyeDecision> {
         let facts = Facts::new();
         facts.set("DY.state",                  Value::String(state_str.to_string()));
         facts.set("DY.freq_high_exceeded",     Value::Boolean(freq_hz >= cfg_freq_high));
+        facts.set("DY.freq_hard_exceeded",     Value::Boolean(freq_hz >= cfg_freq_hard));
         facts.set("DY.freq_low_reached",       Value::Boolean(freq_hz <= cfg_freq_low));
         facts.set("DY.cut_delay_elapsed",      Value::Boolean(time_in_state_secs >= cfg_cut_delay));
         facts.set("DY.reenable_delay_elapsed", Value::Boolean(time_in_state_secs >= cfg_reenable_delay));
         facts.set("DY.lockout_expired",        Value::Boolean(lockout_expired));
         facts.set("DY.grid_connected",         Value::Boolean(grid_connected));
+        facts.set("DY.restore_blocked",        Value::Boolean(restore_blocked));
 
         self.engine
             .execute(&facts)
@@ -86,9 +90,15 @@ mod tests {
 
     fn e() -> DeyeRuleEngine { DeyeRuleEngine::new().unwrap() }
 
-    // Shorthand: evaluate with default config thresholds (52 Hz / 50.3 Hz / 15s / 45s)
+    // Shorthand: evaluate with default config thresholds
+    // (high 51.0 Hz / hard 51.3 Hz / low 50.3 Hz / cut 3s / reenable 45s, restore unblocked).
     fn eval(engine: &mut DeyeRuleEngine, state: &str, freq: f64, time_s: u64, grid: bool, lockout_exp: bool) -> DeyeDecision {
-        engine.evaluate(state, freq, time_s, grid, 52.0, 50.3, 15, 45, lockout_exp).unwrap()
+        engine.evaluate(state, freq, time_s, grid, 51.0, 51.3, 50.3, 3, 45, lockout_exp, false).unwrap()
+    }
+
+    // Variant exposing the restore-block guard.
+    fn eval_rb(engine: &mut DeyeRuleEngine, state: &str, freq: f64, time_s: u64, grid: bool, lockout_exp: bool, restore_blocked: bool) -> DeyeDecision {
+        engine.evaluate(state, freq, time_s, grid, 51.0, 51.3, 50.3, 3, 45, lockout_exp, restore_blocked).unwrap()
     }
 
     #[test]
@@ -101,8 +111,26 @@ mod tests {
 
     #[test]
     fn on_high_freq_transitions_pending_cut() {
-        let d = eval(&mut e(), "On", 52.5, 0, false, false);
+        // 51.1 Hz: above the soft cut (51.0) but below the hard cut (51.3) → debounced PendingCut.
+        let d = eval(&mut e(), "On", 51.1, 0, false, false);
         assert_eq!(d.next_state.as_deref(), Some("PendingCut"));
+        assert!(!d.relay_off);
+    }
+
+    #[test]
+    fn on_hard_freq_cuts_immediately() {
+        // 51.4 Hz ≥ hard threshold → straight to Lockout + relay_off, no debounce wait.
+        let d = eval(&mut e(), "On", 51.4, 0, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("Lockout"));
+        assert!(d.relay_off);
+    }
+
+    #[test]
+    fn pending_cut_hard_freq_cuts_immediately() {
+        // Hard threshold reached while waiting in PendingCut → cut now, even before cut_delay.
+        let d = eval(&mut e(), "PendingCut", 51.4, 1, false, false);
+        assert_eq!(d.next_state.as_deref(), Some("Lockout"));
+        assert!(d.relay_off);
     }
 
     #[test]
@@ -113,7 +141,8 @@ mod tests {
 
     #[test]
     fn pending_cut_delay_elapsed_high_freq_locks() {
-        let d = eval(&mut e(), "PendingCut", 52.5, 20, false, false);
+        // 51.1 Hz (soft, not hard) held past cut_delay → Lockout via the debounce path.
+        let d = eval(&mut e(), "PendingCut", 51.1, 5, false, false);
         assert_eq!(d.next_state.as_deref(), Some("Lockout"));
         assert!(d.relay_off);
     }
@@ -131,6 +160,14 @@ mod tests {
     }
 
     #[test]
+    fn off_low_freq_restore_blocked_stays_off() {
+        // Structural PV excess still present (battery full + sun) → hold DEYE off despite low freq.
+        let d = eval_rb(&mut e(), "Off", 50.1, 0, false, false, true);
+        assert!(d.next_state.is_none());
+        assert!(!d.relay_on);
+    }
+
+    #[test]
     fn pending_restore_elapsed_low_freq_restores() {
         let d = eval(&mut e(), "PendingRestore", 50.0, 50, false, false);
         assert_eq!(d.next_state.as_deref(), Some("On"));
@@ -145,6 +182,14 @@ mod tests {
     }
 
     #[test]
+    fn grid_reconnect_overrides_restore_block() {
+        // Even with a structural excess flagged, grid reconnect restores immediately.
+        let d = eval_rb(&mut e(), "Off", 50.0, 0, true, false, true);
+        assert_eq!(d.next_state.as_deref(), Some("On"));
+        assert!(d.relay_on);
+    }
+
+    #[test]
     fn grid_reconnect_from_lockout_restores_immediately() {
         let d = eval(&mut e(), "Lockout", 50.0, 0, true, false);
         assert_eq!(d.next_state.as_deref(), Some("On"));
@@ -153,8 +198,11 @@ mod tests {
 
     #[test]
     fn grid_reconnect_from_pending_cut_restores_immediately() {
-        let d = eval(&mut e(), "PendingCut", 52.5, 5, true, false);
+        // Hard freq + grid reconnect + cut_delay elapsed: grid override must win cleanly
+        // (no conflicting relay_off from the cut path).
+        let d = eval(&mut e(), "PendingCut", 51.4, 5, true, false);
         assert_eq!(d.next_state.as_deref(), Some("On"));
         assert!(d.relay_on);
+        assert!(!d.relay_off);
     }
 }
