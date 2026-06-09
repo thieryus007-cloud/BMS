@@ -481,6 +481,17 @@ function ruleRow(label, ok, valueStr, detail) {
   </div>`;
 }
 
+// Row with an explicit dot/value colour (green=normal, amber=attention, red=fault).
+// Used by the DEYE card where conditions are not simple pass/fail.
+function statusRow(label, valueStr, color, detail) {
+  return `<div style="display:flex;align-items:center;gap:0.55rem;font-family:monospace;font-size:0.73rem;">
+    <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;display:inline-block;background:${color};"></span>
+    <span style="color:#94a3b8;flex:1;">${label}</span>
+    <span style="color:${color};font-weight:600;">${valueStr}</span>
+    ${detail?`<span style="color:#475569;font-size:0.65rem;">${detail}</span>`:''}
+  </div>`;
+}
+
 function fmtTs(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -600,60 +611,76 @@ async function fetchRulesStatus() {
   // Card c) Relais DEYE
   // ══════════════════════════════════════════════════════════════════════════
   try {
+    const GREEN='#22c55e', AMBER='#eab308', RED='#ef4444', GREY='#64748b';
     const deye      = emR?.deye ?? null;
-    const deyeOn    = deye?.on ?? null;
     const deyeState = deye?.state ?? null;            // On/PendingCut/Lockout/Off/PendingRestore
     const deyeFreq  = deye?.freq_hz ?? null;
     const deyeBlock = deye?.restore_blocked ?? false;
     const deyeAcCon = deye?.ac_connected ?? null;     // 1=connecté, 0=panne réseau
     // Combined islanding predicate from the energy-manager; fall back to ac_ignore.
     const gridConn  = deye?.grid_connected ?? (acIgnore != null ? !acIgnore : null);
+    // Relay status derived from the state machine (single source of truth) so the
+    // badge, the relay box and the conclusion row can never contradict each other.
+    const relayOn = deyeState != null
+      ? (deyeState === 'On' || deyeState === 'PendingCut')
+      : (deye?.on ?? null);
+    // Human-readable phase
+    const phaseFr = { On:'Actifs', PendingCut:'Coupure imminente', Lockout:'Verrou anti-oscillation',
+                      Off:'Coupés', PendingRestore:'Restauration imminente' };
 
-    // Badge → état machine
+    // Badge → état machine (couleur = relais ON/OFF)
     const badge = document.getElementById('deye-state-badge');
     if (badge) {
-      badge.textContent = deyeState ?? (deyeOn === true ? 'ON' : deyeOn === false ? 'OFF' : '—');
-      const cut = deyeState === 'Lockout' || deyeState === 'Off' || deyeState === 'PendingRestore';
-      badge.style.background = deyeState == null ? '#1e293b' : cut ? '#1c1917' : '#14532d';
-      badge.style.color      = deyeState == null ? '#475569' : cut ? '#f87171' : '#4ade80';
+      badge.textContent = deyeState ?? (relayOn === true ? 'On' : relayOn === false ? 'Off' : '—');
+      badge.style.background = relayOn == null ? '#1e293b' : relayOn ? '#14532d' : '#3a2a0a';
+      badge.style.color      = relayOn == null ? '#475569' : relayOn ? '#4ade80' : '#fbbf24';
     }
     const dot = document.getElementById('deye-dot');
     if (dot) {
-      dot.style.background = deyeOn ? '#22c55e' : '#ef4444';
-      dot.style.boxShadow  = deyeOn ? '0 0 5px #22c55e66' : '';
+      dot.style.background = relayOn == null ? '#475569' : relayOn ? '#22c55e' : '#eab308';
+      dot.style.boxShadow  = relayOn ? '0 0 5px #22c55e66' : '';
     }
     const onEl = document.getElementById('deye-on-val');
     if (onEl) {
-      onEl.textContent = deyeOn === true ? 'Actif' : deyeOn === false ? 'Coupé' : '—';
-      onEl.style.color = deyeOn ? '#22c55e' : '#f87171';
+      onEl.textContent = relayOn === true ? 'Fermé (DEYE ON)' : relayOn === false ? 'Ouvert (DEYE OFF)' : '—';
+      onEl.style.color = relayOn == null ? '#94a3b8' : relayOn ? '#22c55e' : '#fbbf24';
     }
     const freqEl = document.getElementById('deye-freq-val');
     if (freqEl) {
       freqEl.textContent = deyeFreq != null ? deyeFreq.toFixed(2) + ' Hz' : '—';
       freqEl.style.color = deyeFreq == null ? '#94a3b8'
-        : deyeFreq >= 51.3 ? '#ef4444'
-        : deyeFreq >= 51.0 ? '#eab308'
-        : '#22c55e';
+        : deyeFreq >= 51.3 ? RED : deyeFreq >= 51.0 ? AMBER : GREEN;
     }
     const chEl = document.getElementById('deye-change-ts');
     if (chEl) chEl.textContent = fmtTs(deye?.last_change);
 
-    // Conditions for DEYE
+    // Conditions (couleurs : vert=normal, ambre=attention, rouge=anomalie réelle)
     const dGrid = document.getElementById('deye-rule-grid');
     if (dGrid) {
+      // Réseau / îlotage
+      let resVal, resColor, resDetail = null;
+      if (gridConn == null)        { resVal = '—';            resColor = GREY; }
+      else if (gridConn)           { resVal = 'Connecté';     resColor = GREEN; }
+      else if (deyeAcCon === 0)    { resVal = 'Panne réseau'; resColor = RED; }
+      else                         { resVal = 'Îloté';        resColor = AMBER; resDetail = 'mode batterie'; }
+
+      const fColor = deyeFreq == null ? GREY
+        : deyeFreq >= 51.3 ? RED : deyeFreq >= 51.0 ? AMBER : GREEN;
+
       const rows = [
-        ruleRow('Réseau connecté', gridConn === true,
-                gridConn == null ? '—' : (gridConn ? 'Connecté' : 'Îloté'),
-                deyeAcCon === 0 ? 'panne réseau' : null),
-        ruleRow('Fréquence < seuil coupure', deyeFreq != null ? deyeFreq < 51.0 : true,
-                deyeFreq != null ? deyeFreq.toFixed(2) + ' Hz' : '—', 'coupe ≥ 51,0/51,3'),
+        statusRow('Réseau', resVal, resColor, resDetail),
+        statusRow('Fréquence AC', deyeFreq != null ? deyeFreq.toFixed(2) + ' Hz' : '—', fColor, 'coupe ≥ 51,0 · dure ≥ 51,3'),
       ];
-      if (deyeOn === false) {
-        rows.push(ruleRow('Restauration autorisée', !deyeBlock,
-                  deyeBlock ? 'BLOQUÉE' : 'libre',
-                  deyeBlock ? 'batterie pleine + soleil' : null));
+      // Restauration : pertinente seulement quand le relais est ouvert (DEYE coupés)
+      if (relayOn === false) {
+        rows.push(statusRow('Restauration', deyeBlock ? 'En attente' : 'Autorisée',
+                  deyeBlock ? AMBER : GREEN,
+                  deyeBlock ? 'excédent : batterie pleine + soleil' : 'fréquence ≤ 50,3 Hz'));
       }
-      rows.push(ruleRow('Relais DEYE (2 canaux)', !!deyeOn, deyeOn != null ? (deyeOn ? 'ON' : 'OFF') : '—', null));
+      rows.push(statusRow('Relais (2 DEYE)',
+                relayOn == null ? '—' : relayOn ? 'Fermé · DEYE actifs' : 'Ouvert · DEYE coupés',
+                relayOn == null ? GREY : relayOn ? GREEN : AMBER,
+                deyeState ? (phaseFr[deyeState] || deyeState) : null));
       dGrid.innerHTML = rows.join('');
     }
   } catch(e) { console.warn('fetchRulesStatus/deye:', e); }
