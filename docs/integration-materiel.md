@@ -287,6 +287,47 @@ Shelly Pro 2PM (WiFi HTTP/MQTT)
 
 2 canaux, métriques : état (ON/OFF) × 2, puissance × 2, énergie totale × 2. Pour les endpoints REST complets → [./app-daly-bms-server.md].
 
+Les deux canaux pilotent **un DEYE chacun** ; ils sont commandés ensemble par la règle `deye_command` (cf. [./app-energy-manager.md] §4.3) — voir le mécanisme de curtailment ci-dessous.
+
+### 5.8 Curtailment PV — AC-couplé vs DC-couplé
+
+L'installation a **deux sources PV** avec deux mécanismes de réduction de production **fondamentalement différents**. Comprendre cette dissymétrie explique pourquoi un relais Shelly est nécessaire côté DEYE alors que les MPPT n'en ont pas besoin.
+
+| | **DC-couplé** — MPPT Victron (inst. 273/289) | **AC-couplé** — micro-onduleurs DEYE (AC Out) |
+|---|---|---|
+| Bridage | Régulation de charge (courant) | Décalage de fréquence |
+| Signal | Tension bus DC / ordres GX | Fréquence AC Out (≈ 50,2 → 51,5 Hz) |
+| Granularité | Continue, progressive | Continue jusqu'au **trip dur à 51,5 Hz** |
+| Transitoire | Aucun à-coup | Brutal au trip → micro-coupures |
+| Levier logiciel | (DVCC, **désactivé ici**) | Relais Shelly (ce projet) |
+
+**Côté MPPT (DC-couplé)** — pourquoi pas de relais :
+- Un MPPT est une source de courant régulée vers une **consigne de tension**. Batterie pleine ⇒ il tient la tension en **sortant du point de puissance maximale (MPP)** (vers Voc) → courant réduit, sans à-coup. C'est la régulation 3 étages **Bulk → Absorption → Float** (fin d'absorption au *tail current*, 2 A par défaut).
+- **DVCC** (Distributed Voltage and Current Control), s'il était activé, ferait distribuer par le GX/Cerbo les limites **CVL/CCL/DCL** (issues du BMS) à tous les chargeurs, qui « *disable their own charging algorithms and follow the battery's instructions directly* ». **DVCC n'est pas activé sur cette installation** et n'est **pas requis** : le bridage MPPT fonctionne via la courbe de charge propre du contrôleur.
+
+**Côté DEYE (AC-couplé)** — pourquoi un relais :
+- Ce sont des onduleurs réseau **non pilotables en courant**. Le seul levier Victron est le **décalage de fréquence** du MultiPlus, et leur **auto-coupure dure à 51,5 Hz** provoque les micro-coupures. → relais Shelly pour couper proprement **avant** (cf. §4.3 energy-manager).
+
+**Signal « batterie pleine » exploitable sans DVCC** : l'état de charge des MPPT est publié sur MQTT **indépendamment de DVCC** (la télémétrie n'a pas besoin du contrôle) :
+```
+N/{portal_id}/solarcharger/{273,289}/State   →  EnergyState.mppt_273.state / mppt_289.state
+```
+| Code | État | Interprétation côté DEYE |
+|---|---|---|
+| 0 | Off | MPPT inactif (nuit) |
+| 2 | Fault | défaut |
+| 3 | Bulk | batterie **en charge** (pas pleine) → DEYE utiles |
+| 4 | Absorption | batterie **presque pleine** |
+| 5 | Float | **batterie pleine** → excédent imminent |
+| 6 | Storage | **batterie pleine** (float prolongé) |
+| 7 | Equalize | égalisation (manuel) |
+| 11 | Other (Hub-1) | — |
+| 252 | External control | piloté par DVCC (non utilisé ici) |
+
+`Float`/`Storage` ⇒ batterie pleine, MPPT déjà bridé : c'est le **signal racine** qui *précède* la montée en fréquence côté DEYE.
+
+**Exploité par `deye_command`** (cf. [./app-energy-manager.md] §4.3, désactivable via `mppt_cut_enabled`) : dès qu'**un** MPPT atteint un état de `mppt_full_states` (défaut `[4,5,6]` = Absorption/Float/Storage), maintenu `mppt_cut_delay_secs` (10 s), les DEYE sont coupés (relais Shelly) pour **terminer la charge sur le seul MPPT** sans atteindre la fréquence haute. La fréquence (51,0/51,3 Hz) reste en filet de sécurité. Couper dès `Absorption` (4) plutôt que `Float` (5) coupe **plus tôt** (batterie ~85-90 %) — compromis : moins d'auto-consommation DEYE pendant le palier, mais aucune micro-coupure. Ajuster `mppt_full_states=[5,6]` pour ne couper qu'à `Float`.
+
 ---
 
 ## 6. Procédure : ajouter un BMS Daly

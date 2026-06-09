@@ -123,6 +123,8 @@ async fn run(
 
     let mut deye_sm   = initial_state;
     let mut last_freq: f64 = 50.0;
+    // Timestamp since which the MPPT-full condition has held continuously (debounce).
+    let mut mppt_full_since: Option<DateTime<Utc>> = None;
     let mut rx        = bus.subscribe_mqtt();
     let mut reload_rx = bus.subscribe_rule_reload();
     let mut ticker    = interval(Duration::from_secs(1));
@@ -149,7 +151,7 @@ async fn run(
                         last_freq = freq;
 
                         let now = Utc::now();
-                        let (connected, restore_blocked) = read_gates(&state, &cfg, now).await;
+                        let (connected, restore_blocked, _mppt_full) = read_gates(&state, &cfg, now).await;
                         if connected { continue; }
 
                         let new_state = apply_decision(
@@ -165,6 +167,7 @@ async fn run(
                                 cfg.reenable_delay_secs,
                                 lockout_expired(&deye_sm, now),
                                 restore_blocked,
+                                false,
                             ),
                             deye_sm,
                             now,
@@ -208,6 +211,7 @@ async fn run(
                                     cfg.reenable_delay_secs,
                                     false,
                                     false,
+                                    false,
                                 ),
                                 deye_sm,
                                 now,
@@ -228,7 +232,12 @@ async fn run(
 
             _ = ticker.tick() => {
                 let now = Utc::now();
-                let (grid_connected, restore_blocked) = read_gates(&state, &cfg, now).await;
+                let (grid_connected, restore_blocked, mppt_full) = read_gates(&state, &cfg, now).await;
+                // Debounce the MPPT-full signal before it is allowed to cut the DEYE.
+                mppt_full_since = if mppt_full { Some(mppt_full_since.unwrap_or(now)) } else { None };
+                let mppt_cut = mppt_full_since
+                    .map(|t| (now - t).num_seconds().max(0) as u64 >= cfg.mppt_cut_delay_secs)
+                    .unwrap_or(false);
                 // Refresh observability fields (1 Hz) for /api/rules-status.
                 // deye_on is synced here too (not only on transition) so it can never
                 // diverge from the state machine — e.g. at startup before any transition.
@@ -237,6 +246,7 @@ async fn run(
                     s.deye_on              = matches!(deye_sm, DeyeState::On | DeyeState::PendingCut(_));
                     s.deye_state           = Some(state_name(&deye_sm).to_string());
                     s.deye_restore_blocked = restore_blocked;
+                    s.deye_mppt_full       = mppt_full;
                 }
                 // Pass the real grid state: when grid-connected the GRL suppresses the
                 // cut rules (no spurious disconnect on a grid-frequency transient) and the
@@ -254,6 +264,7 @@ async fn run(
                         cfg.reenable_delay_secs,
                         lockout_expired(&deye_sm, now),
                         restore_blocked,
+                        mppt_cut,
                     ),
                     deye_sm,
                     now,
@@ -385,10 +396,28 @@ async fn send_shelly(bus: &AppBus, shelly_id: &str, channels: &[u8], on: bool) {
 }
 
 /// Reads the gating signals from shared state in a single lock acquisition.
-/// Returns `(grid_connected, restore_blocked)`.
-async fn read_gates(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig, now: DateTime<Utc>) -> (bool, bool) {
+/// Returns `(grid_connected, restore_blocked, mppt_full)`.
+async fn read_gates(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig, now: DateTime<Utc>) -> (bool, bool, bool) {
     let s = state.read().await;
-    (is_grid_connected(s.ac_ignore, s.ac_connected), restore_blocked(&s, cfg, now))
+    let grid_connected = is_grid_connected(s.ac_ignore, s.ac_connected);
+    let mppt_full = mppt_battery_full(&s, cfg);
+    // Restore is held off while the battery is full per EITHER the MPPT charge stage or
+    // the SmartShunt-based structural-excess guard.
+    let restore_blocked = mppt_full || smartshunt_battery_full(&s, cfg, now);
+    (grid_connected, restore_blocked, mppt_full)
+}
+
+/// Battery topping/full according to the MPPT charge stage (Absorption/Float/Storage on
+/// any solar charger). Pure solar-charger telemetry — works **without DVCC**. Returns
+/// false when the feature is disabled.
+fn mppt_battery_full(s: &EnergyState, cfg: &DeyeConfig) -> bool {
+    if !cfg.mppt_cut_enabled {
+        return false;
+    }
+    [s.mppt_273.state, s.mppt_289.state]
+        .into_iter()
+        .flatten()
+        .any(|st| cfg.mppt_full_states.contains(&st))
 }
 
 /// Whether the Victron is grid-tied (NOT islanded). The DEYE cut logic must stay active
@@ -404,14 +433,14 @@ pub(crate) fn is_grid_connected(ac_ignore: Option<i64>, ac_connected: Option<i64
     ac_ignore != Some(1) && ac_connected != Some(0)
 }
 
-/// Structural PV-excess guard. While the battery is full, irradiance is strong and
-/// the battery is not discharging, restoring the DEYE would immediately re-trigger a
-/// cut and thrash the relay — so hold them off.
+/// Structural PV-excess guard (SmartShunt). While the battery is full, irradiance is
+/// strong and the battery is not discharging, restoring the DEYE would immediately
+/// re-trigger a cut and thrash the relay — so hold them off.
 ///
 /// Fails OPEN: if the SmartShunt data is stale or absent, returns `false` so the
 /// frequency hysteresis alone governs restore. The AC-out frequency (Victron) stays
 /// the authority for cutting; this only ever *delays a restore*.
-fn restore_blocked(s: &EnergyState, cfg: &DeyeConfig, now: DateTime<Utc>) -> bool {
+fn smartshunt_battery_full(s: &EnergyState, cfg: &DeyeConfig, now: DateTime<Utc>) -> bool {
     let fresh = s
         .shunt_last_seen_ts
         .map(|ts| (now - ts).num_seconds() <= cfg.corroboration_max_age_secs as i64)

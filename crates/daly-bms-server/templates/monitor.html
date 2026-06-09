@@ -617,6 +617,8 @@ async function fetchRulesStatus() {
     const deyeFreq  = deye?.freq_hz ?? null;
     const deyeBlock = deye?.restore_blocked ?? false;
     const deyeAcCon = deye?.ac_connected ?? null;     // 1=connecté, 0=panne réseau
+    const deyeMpptFull = deye?.mppt_full ?? false;    // l'état MPPT signale batterie pleine
+    const mpptStates = [deye?.mppt_273_state, deye?.mppt_289_state];
     // Combined islanding predicate from the energy-manager; fall back to ac_ignore.
     const gridConn  = deye?.grid_connected ?? (acIgnore != null ? !acIgnore : null);
     // Relay status derived from the state machine (single source of truth) so the
@@ -667,9 +669,16 @@ async function fetchRulesStatus() {
       const fColor = deyeFreq == null ? GREY
         : deyeFreq >= 51.3 ? RED : deyeFreq >= 51.0 ? AMBER : GREEN;
 
+      // État de charge MPPT — pilote la coupure anticipée (sans DVCC)
+      const MPPT_STAGE = {0:'Off',2:'Fault',3:'Bulk',4:'Absorption',5:'Float',6:'Storage',7:'Equalize',11:'Hub-1',252:'Ext'};
+      const mpptLabels = mpptStates.map(st => st == null ? '—' : (MPPT_STAGE[st] || st)).join(' / ');
+
       const rows = [
         statusRow('Réseau', resVal, resColor, resDetail),
         statusRow('Fréquence AC', deyeFreq != null ? deyeFreq.toFixed(2) + ' Hz' : '—', fColor, 'coupe ≥ 51,0 · dure ≥ 51,3'),
+        statusRow('MPPT (charge)', mpptLabels,
+                  deyeMpptFull ? AMBER : (mpptStates.some(st => st === 3) ? GREEN : GREY),
+                  deyeMpptFull ? 'batterie pleine → coupe DEYE' : null),
       ];
       // Restauration : pertinente seulement quand le relais est ouvert (DEYE coupés)
       if (relayOn === false) {

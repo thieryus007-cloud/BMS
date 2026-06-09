@@ -314,6 +314,18 @@ pub struct DeyeConfig {
     /// so the physical relay reconverges after a missed command or Shelly reboot (seconds).
     #[serde(default = "default_relay_resync_secs")]
     pub relay_resync_secs: u64,
+    /// Cut the DEYE based on the MPPT charge stage (battery topping/full), on top of the
+    /// AC-frequency machine. Lets the battery finish charging on the DC-coupled MPPT alone,
+    /// pre-empting the AC-out frequency rise. Disable to fall back to frequency-only.
+    #[serde(default)]
+    pub mppt_cut_enabled: bool,
+    /// MPPT solar-charger State codes meaning "battery topping off / full" → cut & hold DEYE.
+    /// Default [4,5,6] = Absorption, Float, Storage (3=Bulk means the battery still charges).
+    #[serde(default = "default_mppt_full_states")]
+    pub mppt_full_states: Vec<i64>,
+    /// Debounce: the MPPT-full condition must hold this long before cutting (seconds).
+    #[serde(default = "default_mppt_cut_delay_secs")]
+    pub mppt_cut_delay_secs: u64,
 }
 
 fn default_freq_high() -> f64 { 51.0 }
@@ -326,6 +338,8 @@ fn default_restore_soc_pct() -> f64 { 95.0 }
 fn default_restore_irradiance_wm2() -> f64 { 250.0 }
 fn default_corroboration_max_age_secs() -> u64 { 60 }
 fn default_relay_resync_secs() -> u64 { 60 }
+fn default_mppt_full_states() -> Vec<i64> { vec![4, 5, 6] }
+fn default_mppt_cut_delay_secs() -> u64 { 10 }
 
 impl Default for DeyeConfig {
     fn default() -> Self {
@@ -340,6 +354,9 @@ impl Default for DeyeConfig {
             restore_irradiance_wm2: default_restore_irradiance_wm2(),
             corroboration_max_age_secs: default_corroboration_max_age_secs(),
             relay_resync_secs: default_relay_resync_secs(),
+            mppt_cut_enabled: false,
+            mppt_full_states: default_mppt_full_states(),
+            mppt_cut_delay_secs: default_mppt_cut_delay_secs(),
         }
     }
 }

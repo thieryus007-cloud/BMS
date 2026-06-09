@@ -162,6 +162,11 @@ struct DeyeCard {
     freq_hz:         Option<f64>,
     /// Physical grid connection (ActiveIn/Connected): 1=connected, 0=outage
     ac_connected:    Option<i64>,
+    /// MPPT charge stage signals a full battery (the MPPT-based cut driver)
+    mppt_full:       bool,
+    /// MPPT solar-charger State codes (3=Bulk, 4=Absorption, 5=Float, 6=Storage…)
+    mppt_273_state:  Option<i64>,
+    mppt_289_state:  Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -202,6 +207,9 @@ async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
             grid_connected:  crate::logic::deye_command::is_grid_connected(s.ac_ignore, s.ac_connected),
             freq_hz:         s.ac_frequency_hz,
             ac_connected:    s.ac_connected,
+            mppt_full:       s.deye_mppt_full,
+            mppt_273_state:  s.mppt_273.state,
+            mppt_289_state:  s.mppt_289.state,
         },
         soc_pct:        s.soc_pct,
         irradiance_wm2: s.irradiance_wm2,
