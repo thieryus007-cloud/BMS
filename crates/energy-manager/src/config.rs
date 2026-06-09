@@ -131,9 +131,14 @@ pub struct VictronConfig {
     /// Shelly device ID for DEYE relay (e.g. "shellypro2pm-ec62608840a4")
     #[serde(default)]
     pub shelly_deye_id: String,
-    /// Shelly switch channel for DEYE (0-indexed)
+    /// Shelly switch channel for DEYE (0-indexed) — legacy single-channel fallback.
     #[serde(default)]
     pub shelly_deye_channel: u8,
+    /// Shelly switch channels for the DEYE relays (0-indexed, one per DEYE).
+    /// When non-empty this takes precedence over `shelly_deye_channel`.
+    /// Example: `[0, 1]` to drive both channels of a Shelly Pro 2PM.
+    #[serde(default)]
+    pub shelly_deye_channels: Vec<u8>,
     /// Tasmota device ID for water heater relay (e.g. "tongou_3BC764")
     #[serde(default)]
     pub tasmota_waterheater_id: String,
@@ -274,9 +279,14 @@ impl Default for ChargeCurrent {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeyeConfig {
-    /// Frequency threshold to cut DEYE (Hz)
+    /// Frequency threshold to cut DEYE after `cut_delay_secs` debounce (Hz).
+    /// Set below the DEYE's own 51.5 Hz self-trip so the Shelly relay pre-empts it.
     #[serde(default = "default_freq_high")]
     pub freq_high_hz: f64,
+    /// Hard frequency threshold for an immediate cut, bypassing the debounce (Hz).
+    /// Safety net if the frequency ramps quickly toward the 51.5 Hz self-trip.
+    #[serde(default = "default_freq_hard")]
+    pub freq_hard_hz: f64,
     /// Frequency threshold to re-enable DEYE (Hz)
     #[serde(default = "default_freq_low")]
     pub freq_low_hz: f64,
@@ -289,22 +299,47 @@ pub struct DeyeConfig {
     /// Anti-oscillation lockout after cut (seconds)
     #[serde(default = "default_lockout_secs")]
     pub lockout_secs: u64,
+    /// Battery SOC at/above which a structural PV excess is assumed, blocking
+    /// DEYE restore to avoid relay thrashing while the battery stays full (%).
+    #[serde(default = "default_restore_soc_pct")]
+    pub restore_soc_pct: f64,
+    /// Irradiance at/above which a structural PV excess is assumed (W/m²).
+    #[serde(default = "default_restore_irradiance_wm2")]
+    pub restore_irradiance_wm2: f64,
+    /// Max age of SmartShunt data for the restore-block guard to apply (seconds).
+    /// Beyond this the guard fails open → frequency-only hysteresis takes over.
+    #[serde(default = "default_corroboration_max_age_secs")]
+    pub corroboration_max_age_secs: u64,
+    /// Period at which the desired relay state is re-asserted on every channel,
+    /// so the physical relay reconverges after a missed command or Shelly reboot (seconds).
+    #[serde(default = "default_relay_resync_secs")]
+    pub relay_resync_secs: u64,
 }
 
-fn default_freq_high() -> f64 { 52.0 }
+fn default_freq_high() -> f64 { 51.0 }
+fn default_freq_hard() -> f64 { 51.3 }
 fn default_freq_low() -> f64 { 50.3 }
-fn default_cut_delay_secs() -> u64 { 15 }
+fn default_cut_delay_secs() -> u64 { 3 }
 fn default_reenable_delay_secs() -> u64 { 45 }
 fn default_lockout_secs() -> u64 { 120 }
+fn default_restore_soc_pct() -> f64 { 95.0 }
+fn default_restore_irradiance_wm2() -> f64 { 250.0 }
+fn default_corroboration_max_age_secs() -> u64 { 60 }
+fn default_relay_resync_secs() -> u64 { 60 }
 
 impl Default for DeyeConfig {
     fn default() -> Self {
         Self {
             freq_high_hz: default_freq_high(),
+            freq_hard_hz: default_freq_hard(),
             freq_low_hz: default_freq_low(),
             cut_delay_secs: default_cut_delay_secs(),
             reenable_delay_secs: default_reenable_delay_secs(),
             lockout_secs: default_lockout_secs(),
+            restore_soc_pct: default_restore_soc_pct(),
+            restore_irradiance_wm2: default_restore_irradiance_wm2(),
+            corroboration_max_age_secs: default_corroboration_max_age_secs(),
+            relay_resync_secs: default_relay_resync_secs(),
         }
     }
 }

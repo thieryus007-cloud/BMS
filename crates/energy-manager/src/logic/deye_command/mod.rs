@@ -77,12 +77,19 @@ async fn run(
     let t_connected = format!("N/{pid}/vebus/{vb}/Ac/ActiveIn/Connected");
 
     let shelly_id = &vic.shelly_deye_id;
-    let channel   = vic.shelly_deye_channel;
+    // One channel per DEYE. Prefer the multi-channel list; fall back to the
+    // legacy single-channel field for backward compatibility.
+    let channels: Vec<u8> = if vic.shelly_deye_channels.is_empty() {
+        vec![vic.shelly_deye_channel]
+    } else {
+        vic.shelly_deye_channels.clone()
+    };
 
     if shelly_id.is_empty() {
         info!("DEYE control disabled — shelly_deye_id not configured");
         return;
     }
+    info!("DEYE control: shelly={shelly_id} channels={channels:?}");
 
     let src = loader.load("deye_command");
     let mut rule_engine = match rules::DeyeRuleEngine::with_source(&src) {
@@ -119,6 +126,10 @@ async fn run(
     let mut rx        = bus.subscribe_mqtt();
     let mut reload_rx = bus.subscribe_rule_reload();
     let mut ticker    = interval(Duration::from_secs(1));
+    // Periodic idempotent re-assert of the relay state on every channel, so the
+    // physical Shelly reconverges after a missed command or a reboot. The first
+    // tick fires immediately, asserting the restored state at startup.
+    let mut resync    = interval(Duration::from_secs(cfg.relay_resync_secs.max(1)));
 
     loop {
         tokio::select! {
@@ -137,12 +148,10 @@ async fn run(
                     if let Some(freq) = msg.victron_value::<f64>() {
                         last_freq = freq;
 
-                        let connected = {
-                            state.read().await.ac_ignore.map(|v| v == 0).unwrap_or(true)
-                        };
+                        let now = Utc::now();
+                        let (connected, restore_blocked) = read_gates(&state, &cfg, now).await;
                         if connected { continue; }
 
-                        let now = Utc::now();
                         let new_state = apply_decision(
                             rule_engine.evaluate(
                                 state_name(&deye_sm),
@@ -150,17 +159,19 @@ async fn run(
                                 time_in_state_secs(&deye_sm, now),
                                 false,
                                 cfg.freq_high_hz,
+                                cfg.freq_hard_hz,
                                 cfg.freq_low_hz,
                                 cfg.cut_delay_secs,
                                 cfg.reenable_delay_secs,
                                 lockout_expired(&deye_sm, now),
+                                restore_blocked,
                             ),
                             deye_sm,
                             now,
                             &cfg,
                             &bus,
                             shelly_id,
-                            channel,
+                            &channels,
                         ).await;
                         if new_state != deye_sm {
                             deye_sm = new_state;
@@ -180,9 +191,11 @@ async fn run(
                                     0,
                                     true,
                                     cfg.freq_high_hz,
+                                    cfg.freq_hard_hz,
                                     cfg.freq_low_hz,
                                     cfg.cut_delay_secs,
                                     cfg.reenable_delay_secs,
+                                    false,
                                     false,
                                 ),
                                 deye_sm,
@@ -190,7 +203,7 @@ async fn run(
                                 &cfg,
                                 &bus,
                                 shelly_id,
-                                channel,
+                                &channels,
                             ).await;
                             if new_state != deye_sm {
                                 deye_sm = new_state;
@@ -204,6 +217,7 @@ async fn run(
 
             _ = ticker.tick() => {
                 let now = Utc::now();
+                let (_connected, restore_blocked) = read_gates(&state, &cfg, now).await;
                 let new_state = apply_decision(
                     rule_engine.evaluate(
                         state_name(&deye_sm),
@@ -211,23 +225,31 @@ async fn run(
                         time_in_state_secs(&deye_sm, now),
                         false,
                         cfg.freq_high_hz,
+                        cfg.freq_hard_hz,
                         cfg.freq_low_hz,
                         cfg.cut_delay_secs,
                         cfg.reenable_delay_secs,
                         lockout_expired(&deye_sm, now),
+                        restore_blocked,
                     ),
                     deye_sm,
                     now,
                     &cfg,
                     &bus,
                     shelly_id,
-                    channel,
+                    &channels,
                 ).await;
                 if new_state != deye_sm {
                     deye_sm = new_state;
                     persist_deye_state(&bus, &deye_sm).await;
                     update_deye_state(&state, &deye_sm).await;
                 }
+            }
+
+            _ = resync.tick() => {
+                // Re-assert the current logical relay state on every channel (idempotent).
+                let desired_on = matches!(deye_sm, DeyeState::On | DeyeState::PendingCut(_));
+                send_shelly(&bus, shelly_id, &channels, desired_on).await;
             }
 
             Ok(name) = reload_rx.recv() => {
@@ -262,6 +284,7 @@ async fn update_deye_state(state: &Arc<RwLock<EnergyState>>, deye: &DeyeState) {
     s.deye_last_change = Some(Utc::now());
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_decision(
     decision: anyhow::Result<rules::DeyeDecision>,
     current: DeyeState,
@@ -269,7 +292,7 @@ async fn apply_decision(
     cfg: &DeyeConfig,
     bus: &AppBus,
     shelly_id: &str,
-    channel: u8,
+    channels: &[u8],
 ) -> DeyeState {
     let d = match decision {
         Ok(d)  => d,
@@ -280,10 +303,10 @@ async fn apply_decision(
     };
 
     if d.relay_off {
-        send_shelly(bus, shelly_id, channel, false).await;
+        send_shelly(bus, shelly_id, channels, false).await;
     }
     if d.relay_on {
-        send_shelly(bus, shelly_id, channel, true).await;
+        send_shelly(bus, shelly_id, channels, true).await;
     }
 
     let Some(next_name) = d.next_state else {
@@ -319,14 +342,51 @@ async fn apply_decision(
     }
 }
 
-async fn send_shelly(bus: &AppBus, shelly_id: &str, channel: u8, on: bool) {
-    let topic   = publish::shelly_rpc(shelly_id);
-    let payload = json!({
-        "id":     1,
-        "src":    "energy-manager",
-        "method": "Switch.Set",
-        "params": { "id": channel, "on": on }
-    });
-    bus.publish(MqttOutgoing::transient(topic, &payload)).await;
-    info!("DEYE Shelly: switch {} = {}", channel, if on { "ON" } else { "OFF" });
+/// Sends a `Switch.Set` to every DEYE channel (idempotent on the Shelly side).
+/// Logged at DEBUG because it also runs on each periodic re-assert; real state
+/// transitions are logged at INFO by `apply_decision`.
+async fn send_shelly(bus: &AppBus, shelly_id: &str, channels: &[u8], on: bool) {
+    let topic = publish::shelly_rpc(shelly_id);
+    for &channel in channels {
+        let payload = json!({
+            "id":     1,
+            "src":    "energy-manager",
+            "method": "Switch.Set",
+            "params": { "id": channel, "on": on }
+        });
+        bus.publish(MqttOutgoing::transient(topic.clone(), &payload)).await;
+    }
+    tracing::debug!("DEYE Shelly: channels {channels:?} = {}", if on { "ON" } else { "OFF" });
+}
+
+/// Reads the gating signals from shared state in a single lock acquisition.
+/// Returns `(grid_connected, restore_blocked)`.
+async fn read_gates(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig, now: DateTime<Utc>) -> (bool, bool) {
+    let s = state.read().await;
+    let grid_connected = s.ac_ignore.map(|v| v == 0).unwrap_or(true);
+    (grid_connected, restore_blocked(&s, cfg, now))
+}
+
+/// Structural PV-excess guard. While the battery is full, irradiance is strong and
+/// the battery is not discharging, restoring the DEYE would immediately re-trigger a
+/// cut and thrash the relay — so hold them off.
+///
+/// Fails OPEN: if the SmartShunt data is stale or absent, returns `false` so the
+/// frequency hysteresis alone governs restore. The AC-out frequency (Victron) stays
+/// the authority for cutting; this only ever *delays a restore*.
+fn restore_blocked(s: &EnergyState, cfg: &DeyeConfig, now: DateTime<Utc>) -> bool {
+    let fresh = s
+        .shunt_last_seen_ts
+        .map(|ts| (now - ts).num_seconds() <= cfg.corroboration_max_age_secs as i64)
+        .unwrap_or(false);
+    if !fresh {
+        return false;
+    }
+    let Some(soc) = s.soc_pct else { return false };
+    let irradiance = s.irradiance_wm2.unwrap_or(0.0);
+    // Sign convention: + = charging, - = discharging. Allow 1 A of noise around zero.
+    let current = s.battery_current_a.unwrap_or(0.0);
+    soc >= cfg.restore_soc_pct
+        && irradiance >= cfg.restore_irradiance_wm2
+        && current >= -1.0
 }

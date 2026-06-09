@@ -3,12 +3,15 @@
 //
 // Input facts (injected from Rust before evaluate):
 //   DY.state                  (string: "On"|"PendingCut"|"Off"|"PendingRestore"|"Lockout")
-//   DY.freq_high_exceeded     (bool, pre-computed: freq_hz >= freq_high_hz)
+//   DY.freq_high_exceeded     (bool, pre-computed: freq_hz >= freq_high_hz)  — debounced cut
+//   DY.freq_hard_exceeded     (bool, pre-computed: freq_hz >= freq_hard_hz)  — immediate cut
 //   DY.freq_low_reached       (bool, pre-computed: freq_hz <= freq_low_hz)
 //   DY.cut_delay_elapsed      (bool, pre-computed: time_in_state_secs >= cut_delay_secs)
 //   DY.reenable_delay_elapsed (bool, pre-computed: time_in_state_secs >= reenable_delay_secs)
 //   DY.lockout_expired        (bool, pre-computed: now >= lockout_until)
 //   DY.grid_connected         (bool)
+//   DY.restore_blocked        (bool, pre-computed: fresh structural PV excess — battery
+//                              full + strong irradiance + not discharging → hold DEYE off)
 //
 // Output facts (read from Rust after execute):
 //   DY.next_state             (string, absent if no transition)
@@ -20,12 +23,34 @@
 // The rule engine fires all matching rules; higher-salience fires first but
 // lower-salience can still overwrite the same fact without this guard.
 
+// ── Hard cut: immediate, pre-empts the DEYE 51.5 Hz self-trip (salience 150) ──
+// Fires above grid-reconnect priority guards (grid_connected==false) but below the
+// salience-200 reconnect rules, and is mutually exclusive with the debounced
+// DY_On_HighFreq path (which carries `freq_hard_exceeded == false`).
+
+rule "DY_On_HardFreq" salience 150 no-loop {
+    when
+        DY.state == "On" && DY.freq_hard_exceeded == true && DY.grid_connected == false
+    then
+        DY.next_state = "Lockout";
+        DY.relay_off = true;
+}
+
+rule "DY_PendingCut_HardFreq" salience 150 no-loop {
+    when
+        DY.state == "PendingCut" && DY.freq_hard_exceeded == true && DY.grid_connected == false
+    then
+        DY.next_state = "Lockout";
+        DY.relay_off = true;
+}
+
 // ── Normal state machine transitions (salience 100) ─────────────────────────
 
-// On → PendingCut when frequency exceeds threshold
+// On → PendingCut when frequency exceeds the soft threshold (but not the hard one,
+// which is handled immediately above). Guarded against the grid-reconnect override.
 rule "DY_On_HighFreq" salience 100 no-loop {
     when
-        DY.state == "On" && DY.freq_high_exceeded == true
+        DY.state == "On" && DY.freq_high_exceeded == true && DY.freq_hard_exceeded == false && DY.grid_connected == false
     then
         DY.next_state = "PendingCut";
 }
@@ -38,10 +63,11 @@ rule "DY_PendingCut_FreqDrop" salience 100 no-loop {
         DY.next_state = "On";
 }
 
-// PendingCut → Lockout after delay (only if frequency is still high)
+// PendingCut → Lockout after delay (only if frequency is still high).
+// Grid guard prevents this from overwriting a salience-200 reconnect into Lockout.
 rule "DY_PendingCut_Elapsed" salience 100 no-loop {
     when
-        DY.state == "PendingCut" && DY.cut_delay_elapsed == true && DY.freq_high_exceeded == true
+        DY.state == "PendingCut" && DY.cut_delay_elapsed == true && DY.freq_high_exceeded == true && DY.grid_connected == false
     then
         DY.next_state = "Lockout";
         DY.relay_off = true;
@@ -55,10 +81,12 @@ rule "DY_Lockout_Expired" salience 100 no-loop {
         DY.next_state = "Off";
 }
 
-// Off → PendingRestore when frequency drops to low threshold (guard: grid not connected)
+// Off → PendingRestore when frequency drops to low threshold, UNLESS a fresh
+// structural PV excess is still present (restore_blocked) — that would just
+// re-trigger a cut, thrashing the relay. Guard: grid not connected.
 rule "DY_Off_LowFreq" salience 100 no-loop {
     when
-        DY.state == "Off" && DY.freq_low_reached == true && DY.grid_connected == false
+        DY.state == "Off" && DY.freq_low_reached == true && DY.grid_connected == false && DY.restore_blocked == false
     then
         DY.next_state = "PendingRestore";
 }
