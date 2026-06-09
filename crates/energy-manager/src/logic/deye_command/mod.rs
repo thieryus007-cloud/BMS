@@ -229,6 +229,12 @@ async fn run(
             _ = ticker.tick() => {
                 let now = Utc::now();
                 let (grid_connected, restore_blocked) = read_gates(&state, &cfg, now).await;
+                // Refresh observability fields (1 Hz) for /api/rules-status.
+                {
+                    let mut s = state.write().await;
+                    s.deye_state           = Some(state_name(&deye_sm).to_string());
+                    s.deye_restore_blocked = restore_blocked;
+                }
                 // Pass the real grid state: when grid-connected the GRL suppresses the
                 // cut rules (no spurious disconnect on a grid-frequency transient) and the
                 // salience-200 reconnect rules self-heal the relay back to On.
@@ -294,8 +300,10 @@ async fn persist_deye_state(bus: &AppBus, state: &DeyeState) {
 /// Updates EnergyState with DEYE relay info for the REST /api/rules-status endpoint.
 async fn update_deye_state(state: &Arc<RwLock<EnergyState>>, deye: &DeyeState) {
     let mut s = state.write().await;
-    s.deye_on          = matches!(deye, DeyeState::On | DeyeState::PendingCut(_));
-    s.deye_last_change = Some(Utc::now());
+    s.deye_on            = matches!(deye, DeyeState::On | DeyeState::PendingCut(_));
+    s.deye_state         = Some(state_name(deye).to_string());
+    s.deye_lockout_until = match deye { DeyeState::Lockout(until) => Some(*until), _ => None };
+    s.deye_last_change   = Some(Utc::now());
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -389,7 +397,7 @@ async fn read_gates(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig, now: Dat
 /// Unknown signals keep the conservative "assume connected" default — identical to the
 /// previous `ac_ignore`-only behaviour, so this degrades gracefully if `ac_connected`
 /// has not been observed yet.
-fn is_grid_connected(ac_ignore: Option<i64>, ac_connected: Option<i64>) -> bool {
+pub(crate) fn is_grid_connected(ac_ignore: Option<i64>, ac_connected: Option<i64>) -> bool {
     ac_ignore != Some(1) && ac_connected != Some(0)
 }
 

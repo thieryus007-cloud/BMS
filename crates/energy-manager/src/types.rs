@@ -164,6 +164,10 @@ pub struct EnergyState {
     pub deye_lockout_until: Option<DateTime<Utc>>,
     /// Persisted DEYE state from retained MQTT (set by persist watcher at startup)
     pub deye_persisted_state: Option<String>,
+    /// Current state-machine state name (On/PendingCut/Lockout/Off/PendingRestore) — observability.
+    pub deye_state: Option<String>,
+    /// Whether DEYE restore is currently held off by the structural-excess guard — observability.
+    pub deye_restore_blocked: bool,
 
     // --- Irradiance ---
     pub irradiance_wm2: Option<f64>,

@@ -596,7 +596,7 @@ wscat -c ws://localhost:8080/ws/bms/1/stream
 | `/dashboard/tasmota` | `tasmota.html` | Liste des appareils Tasmota |
 | `/dashboard/tasmota/:id` | `tasmota_detail.html` | Détail Tasmota (état relais, mesures énergie) |
 | `/dashboard/ats` | `ats.html` | État ATS CHINT (source active, tensions, commandes) |
-| `/dashboard/monitor` | `monitor.html` | Santé RS485 (CRC errors, timeouts, taux succès par appareil) |
+| `/dashboard/monitor` | `monitor.html` | Règles système (courant Victron, chauffe-eau LG, relais DEYE : état machine, fréquence, gardes îlotage/restore — via `:8081/api/rules-status`) + santé RS485 (CRC, timeouts, taux succès par appareil) |
 | `/dashboard/console` | `console.html` | Console logs WebSocket temps réel |
 | `/dashboard/visualization` | `visualization.html` | Diagramme flux d'énergie (ReactFlow / schéma SVG) |
 | `/dashboard/history` | `history.html` | Historique long terme (requête redb, sélecteur de période) |
