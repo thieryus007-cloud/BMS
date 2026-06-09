@@ -29,7 +29,7 @@ jobs:
     name: test + clippy (x86_64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # La toolchain (version, composants) vient de rust-toolchain.toml.
       - name: Install toolchain (rust-toolchain.toml)
@@ -59,7 +59,7 @@ jobs:
     name: cargo-deny (advisories + licences)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
@@ -86,7 +86,7 @@ jobs:
             linker: arm-linux-gnueabihf-gcc
             bins: "--bin dbus-mqtt-venus --bin daly-bms-server"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install toolchain (rust-toolchain.toml)
         run: rustup show
