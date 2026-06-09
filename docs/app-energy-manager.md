@@ -326,6 +326,22 @@ ac_ignore == 1 ?
 
 **Rôle** : Machine d'états fréquence AC → couper/restaurer les onduleurs DEYE via un Shelly Pro 2PM (**un canal par DEYE**). Le but est de **pré-empter l'auto-coupure des DEYE à 51,5 Hz** (qui provoque des micro-coupures sur AC Out) par une déconnexion relais propre et déterministe, dès 51,0 Hz.
 
+> 📘 **Contexte — curtailment PV : AC-couplé vs DC-couplé**
+> L'installation a deux sources PV avec deux mécanismes de bridage **distincts** :
+> - **DC-couplé** (MPPT Victron sur Lynx, inst. 273/289) : bridage **continu et progressif** par la régulation de charge du MPPT (Bulk → Absorption → Float). Batterie pleine ⇒ le MPPT tient sa tension de consigne en **sortant du point de puissance maximale (MPP)** → courant réduit, **sans à-coup**. DVCC (désactivé ici) n'ajouterait qu'un contrôle centralisé CVL/CCL depuis le GX ; il **n'est pas requis** pour ce bridage ni pour publier l'état.
+> - **AC-couplé** (micro-onduleurs DEYE sur AC Out) : onduleurs réseau **non pilotables en courant**. Seul levier = le **décalage de fréquence** du MultiPlus (≈ 50,2 → 51,5 Hz), avec un **trip dur et brutal à 51,5 Hz** → micro-coupures. D'où ce module + le relais Shelly.
+>
+> Conséquence : le Victron a un levier **fin et continu** sur le DC-couplé (courant), mais seulement un levier **grossier et discret** sur l'AC-couplé (fréquence).
+>
+> **Signal « batterie pleine » exploitable (sans DVCC)** : l'état des MPPT
+> `N/{pid}/solarcharger/{273,289}/State` est publié sur MQTT **indépendamment de DVCC**
+> (la télémétrie ≠ le contrôle) et **déjà** stocké dans `EnergyState`
+> (`mppt_273.state`, `mppt_289.state`). Codes : `0`=Off, `2`=Fault, `3`=Bulk,
+> `4`=Absorption, `5`=Float, `6`=Storage, `7`=Equalize, `11`=Other(Hub-1),
+> `252`=External control. `Float`/`Storage` ⇒ batterie pleine (MPPT déjà bridé) →
+> excédent imminent côté DEYE ; `Bulk`/`Absorption` ⇒ la batterie accepte encore de la charge.
+> Voir [./integration-materiel.md] pour le détail matériel.
+
 **Topics en entrée** :
 - `N/{pid}/vebus/{vb}/Ac/Out/L1/F` → fréquence AC (Hz)
 - `N/{pid}/vebus/{vb}/Ac/ActiveIn/Connected` → reconnexion réseau (`v==1`) **et** état physique de connexion stocké dans `ac_connected`
