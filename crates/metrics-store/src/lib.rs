@@ -482,6 +482,23 @@ mod tests {
             for s in &series {
                 assert_eq!(s.samples.len(), 4, "labels = {:?}", s.labels);
             }
+
+            // Garde-fou audit 2026-06 §3 : nombre de pas borné par
+            // `max_range_points` (sémantique Prometheus).
+            let mut ev_small = Evaluator::new(&reader);
+            ev_small.max_range_points = 3;
+            // 4 pas (100s, 103s, 106s, 109s) > 3 → refus explicite.
+            let err = ev_small.eval_range(&expr, 100_000, 109_000, 3_000).unwrap_err();
+            assert!(
+                err.message().contains("maximum resolution"),
+                "message inattendu : {}", err.message()
+            );
+            // 4 pas pour une borne de 4 → accepté (limite inclusive).
+            ev_small.max_range_points = 4;
+            assert!(ev_small.eval_range(&expr, 100_000, 109_000, 3_000).is_ok());
+            // 0 = garde désactivée.
+            ev_small.max_range_points = 0;
+            assert!(ev_small.eval_range(&expr, 100_000, 109_000, 3_000).is_ok());
         }
         let _ = std::fs::remove_file(&path);
     }

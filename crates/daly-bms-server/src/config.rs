@@ -452,6 +452,11 @@ pub struct MetricsStoreConfig {
     #[serde(default = "default_metrics_query_backend")]
     #[allow(dead_code)]
     pub default_backend: String,
+    /// Borne du nombre de points par requête `query_range` (audit 2026-06 §3).
+    /// Défaut 11 000 = limite Prometheus. 0 = désactivé (déconseillé : une
+    /// requête à step minuscule peut allouer sans limite — OOM du Pi).
+    #[serde(default = "default_metrics_query_max_points")]
+    pub query_max_points: i64,
 }
 
 fn default_metrics_db_path() -> String { "/mnt/nvme/daly-bms/metrics.redb".into() }
@@ -462,6 +467,7 @@ fn default_metrics_raw_days() -> u32 { 30 }
 fn default_metrics_hourly_days() -> u32 { 365 }
 fn default_metrics_daily_days() -> u32 { 5 * 365 }
 fn default_metrics_query_backend() -> String { "redb".into() }
+fn default_metrics_query_max_points() -> i64 { metrics_store::promql::DEFAULT_MAX_RANGE_POINTS }
 
 impl Default for MetricsStoreConfig {
     fn default() -> Self {
@@ -475,6 +481,7 @@ impl Default for MetricsStoreConfig {
             hourly_retention_days: default_metrics_hourly_days(),
             daily_retention_days: default_metrics_daily_days(),
             default_backend: default_metrics_query_backend(),
+            query_max_points: default_metrics_query_max_points(),
         }
     }
 }

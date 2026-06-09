@@ -277,7 +277,8 @@ pub async fn run_query_range(state: &AppState, params: &RangeParams) -> Response
         Err(e) => return err_response(e),
     };
     let reader = store.reader();
-    let ev = Evaluator::new(&reader);
+    let mut ev = Evaluator::new(&reader);
+    ev.max_range_points = state.config.metrics_store.query_max_points;
     let series: Vec<RangeSeries> = match ev.eval_range(&expr, params.start, params.end, params.step) {
         Ok(v) => v,
         Err(e) => return err_response(e),

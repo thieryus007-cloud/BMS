@@ -13,7 +13,7 @@ pub async fn spawn(bus: AppBus, state: Arc<RwLock<EnergyState>>, bms_server_url:
 
 async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>, bus: AppBus, loader: Arc<RulesLoader>) {
     let url = format!("{}/api/v1/irradiance/status", bms_server_url.trim_end_matches('/'));
-    let client = reqwest::Client::new();
+    let client = crate::http_clients::shared_client();
     let mut ticker = interval(Duration::from_secs(30));
     let mut reload_rx = bus.subscribe_rule_reload();
 

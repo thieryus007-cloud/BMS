@@ -418,8 +418,9 @@ impl AppState {
             .clone()
             .ok_or_else(|| anyhow::anyhow!("metrics-store backend not configured"))?;
         let query = query.to_string();
+        let max_points = self.config.metrics_store.query_max_points;
         tokio::task::spawn_blocking(move || {
-            redb_query_range_inner(&store, &query, start_ms, end_ms, step_ms)
+            redb_query_range_inner(&store, &query, start_ms, end_ms, step_ms, max_points)
         })
         .await
         .map_err(|e| anyhow::anyhow!("redb worker panic: {e}"))?
@@ -453,12 +454,14 @@ fn redb_query_range_inner(
     start_ms: i64,
     end_ms: i64,
     step_ms: i64,
+    max_points: i64,
 ) -> anyhow::Result<serde_json::Value> {
     use metrics_store::promql::{parse_and_validate, Evaluator};
     let expr = parse_and_validate(query)
         .map_err(|e| anyhow::anyhow!("PromQL: {}", e.message()))?;
     let reader = store.reader();
-    let ev = Evaluator::new(&reader);
+    let mut ev = Evaluator::new(&reader);
+    ev.max_range_points = max_points;
     let series = ev
         .eval_range(&expr, start_ms, end_ms, step_ms)
         .map_err(|e| anyhow::anyhow!("PromQL exec: {}", e.message()))?;

@@ -186,7 +186,7 @@ async fn writer_task(
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
 ) {
-    let http_client = reqwest::Client::new();
+    let http_client = crate::http_clients::shared_client();
     let api_url     = format!("{}/api/v1/solar/mppt-yield", cfg.bms_server_url);
     let mut ticker  = interval(Duration::from_secs(1));
 

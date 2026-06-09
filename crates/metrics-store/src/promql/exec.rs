@@ -149,11 +149,22 @@ fn tier_for_range(range_ms: i64) -> Tier {
     }
 }
 
+/// Nombre maximum de pas pour `eval_range` — même limite que Prometheus
+/// (« maximum resolution of 11,000 points ») et que `MAX_SUBQUERY_STEPS`.
+/// Garde-fou mémoire (audit 2026-06 §3) : sans borne, une requête à step
+/// minuscule sur une grande plage alloue sans limite (367 Mo observés en
+/// prod sur un dashboard 30 j). Grafana calcule `step` pour ~1 point/pixel
+/// (≤ ~2 000 points) : aucune requête légitime n'est affectée.
+pub const DEFAULT_MAX_RANGE_POINTS: i64 = 11_000;
+
 pub struct Evaluator<'r> {
     reader: &'r Reader,
     /// Lookback pour les instant vector selectors (analogue à Prometheus,
     /// défaut 5 min).
     pub lookback_ms: i64,
+    /// Borne du nombre de pas d'`eval_range` (cf. [`DEFAULT_MAX_RANGE_POINTS`]).
+    /// Surchargeable par l'appelant (config `[metrics_store] query_max_points`).
+    pub max_range_points: i64,
     /// Transaction de lecture redb partagée sur toute la durée de l'évaluation.
     /// Lazy-initialisée au premier accès via `txn()`.
     read_txn: OnceCell<ReadTransaction>,
@@ -176,6 +187,7 @@ impl<'r> Evaluator<'r> {
         Self {
             reader,
             lookback_ms: 5 * 60_000,
+            max_range_points: DEFAULT_MAX_RANGE_POINTS,
             read_txn: OnceCell::new(),
             series_catalog: OnceCell::new(),
             match_cache: RefCell::new(HashMap::new()),
@@ -188,6 +200,7 @@ impl<'r> Evaluator<'r> {
         Self {
             reader,
             lookback_ms: lookback.as_millis() as i64,
+            max_range_points: DEFAULT_MAX_RANGE_POINTS,
             read_txn: OnceCell::new(),
             series_catalog: OnceCell::new(),
             match_cache: RefCell::new(HashMap::new()),
@@ -210,6 +223,15 @@ impl<'r> Evaluator<'r> {
         }
         if end_ms < start_ms {
             return Err(PromQlError::Execution("end < start".into()));
+        }
+        // Garde-fou mémoire (audit 2026-06 §3) — sémantique Prometheus.
+        let steps = (end_ms - start_ms) / step_ms + 1;
+        if self.max_range_points > 0 && steps > self.max_range_points {
+            return Err(PromQlError::Execution(format!(
+                "exceeded maximum resolution of {} points beyond which time series data \
+                 is not returned ({} points requested — try increasing the query step)",
+                self.max_range_points, steps
+            )));
         }
         // M1 : le cache est keyé par adresse mémoire de `VectorSelector`.
         // On le vide avant toute évaluation pour qu'une réutilisation de

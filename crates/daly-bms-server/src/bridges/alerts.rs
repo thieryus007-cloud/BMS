@@ -468,8 +468,21 @@ fn build_rules(cfg: &AlertsConfig) -> Vec<AlertRule> {
 // =============================================================================
 
 async fn send_telegram(token: &str, chat_id: &str, message: &str) -> anyhow::Result<()> {
+    // Client borné et réutilisé (audit 2026-06 §6) : appelé depuis la boucle
+    // de l'AlertEngine — sans timeout, une connexion gelée vers Telegram
+    // suspendait l'évaluation des alertes.
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client = CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|e| {
+                tracing::warn!("client Telegram : builder en échec ({e}) — fallback sans timeouts");
+                reqwest::Client::new()
+            })
+    });
     let url = format!("https://api.telegram.org/bot{}/sendMessage", token);
-    let client = reqwest::Client::new();
     client
         .post(&url)
         .json(&serde_json::json!({
