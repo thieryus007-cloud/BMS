@@ -217,13 +217,16 @@ async fn run(
 
             _ = ticker.tick() => {
                 let now = Utc::now();
-                let (_connected, restore_blocked) = read_gates(&state, &cfg, now).await;
+                let (grid_connected, restore_blocked) = read_gates(&state, &cfg, now).await;
+                // Pass the real grid state: when grid-connected the GRL suppresses the
+                // cut rules (no spurious disconnect on a grid-frequency transient) and the
+                // salience-200 reconnect rules self-heal the relay back to On.
                 let new_state = apply_decision(
                     rule_engine.evaluate(
                         state_name(&deye_sm),
                         last_freq,
                         time_in_state_secs(&deye_sm, now),
-                        false,
+                        grid_connected,
                         cfg.freq_high_hz,
                         cfg.freq_hard_hz,
                         cfg.freq_low_hz,

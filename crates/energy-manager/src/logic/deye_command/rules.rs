@@ -175,6 +175,16 @@ mod tests {
     }
 
     #[test]
+    fn on_hard_freq_grid_connected_no_cut() {
+        // Grid-connected: a high/hard frequency transient must NOT cut the DEYE
+        // (the ticker passes the real grid state, suppressing the cut rules).
+        let d = eval(&mut e(), "On", 51.4, 30, true, false);
+        assert!(d.next_state.is_none());
+        assert!(!d.relay_off);
+        assert!(!d.relay_on);
+    }
+
+    #[test]
     fn grid_reconnect_from_off_restores_immediately() {
         let d = eval(&mut e(), "Off", 50.0, 0, true, false);
         assert_eq!(d.next_state.as_deref(), Some("On"));
