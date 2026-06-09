@@ -155,6 +155,26 @@ sudo mkdir -p "$DB_DIR"
 sudo chown "$DALY_USER:$DALY_USER" "$DB_DIR"
 info "db_path = $DB_PATH (parent owner=$DALY_USER) ✓"
 
+# ── 3.quater Vérification config DEYE (nouveaux paramètres, non destructif) ──
+# La règle deye_command a évolué : coupure relais à 51,0 Hz (et non 52,0),
+# pilotage des DEUX canaux Shelly, et coupure anticipée sur l'état de charge
+# des MPPT. Ces réglages vivent dans [energy_manager.deye] / [energy_manager.victron].
+# Le script ne réécrit JAMAIS la config prod (cf. §3) : on se contente d'alerter
+# si le fichier déployé ne contient pas les nouvelles clés — sinon les correctifs
+# DEYE resteraient inactifs silencieusement (ancien freq_high_hz=52,0 conservé).
+step "Vérification config DEYE…"
+DEYE_STALE=false
+grep -q '^[[:space:]]*shelly_deye_channels' "$CONF" || DEYE_STALE=true
+grep -q '^[[:space:]]*mppt_cut_enabled'     "$CONF" || DEYE_STALE=true
+if $DEYE_STALE; then
+    warn "Config DEYE incomplète dans $CONF (shelly_deye_channels / mppt_cut_enabled absents)."
+    warn "→ Les corrections DEYE (coupure 51,0 Hz, 2 canaux Shelly, coupure MPPT) ne seront PAS actives."
+    warn "  Appliquer (écrase la config — vérifier les autres réglages d'abord) :"
+    warn "    sudo cp Config.toml $CONF && sudo systemctl restart energy-manager"
+else
+    info "Config DEYE à jour (shelly_deye_channels + mppt_cut_enabled présents) ✓"
+fi
+
 # ── 4. NVMe monté ? ──────────────────────────────────────────────────────────
 mountpoint -q /mnt/nvme || warn "/mnt/nvme non monté — vérifier /etc/fstab"
 
