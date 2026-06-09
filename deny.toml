@@ -1,0 +1,66 @@
+# cargo-deny — chaîne d'approvisionnement (audit 2026-06 §16)
+#
+# Vérifié en CI (job `cargo-deny`, bloquant — base assainie le 2026-06-09 :
+# aws-lc-sys 0.41, lettre 0.11.22, rustls-webpki 0.103.13 via cargo update).
+# Exécution locale : `cargo install cargo-deny && cargo deny check`
+
+[graph]
+# Cibles de production uniquement (évite les advisories de dépendances
+# spécifiques à des plateformes qu'on ne livre pas).
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",      # Pi5
+    "armv7-unknown-linux-gnueabihf",  # NanoPi
+]
+
+[advisories]
+# RUSTSEC : vulnérabilités et crates non maintenus.
+# `deny` = la CI échoue sur vulnérabilité connue (sécurité d'abord) ;
+# unmaintained/yanked en warn pour commencer.
+yanked = "warn"
+# Acquittements explicites (réévaluer à chaque montée de version) :
+ignore = [
+    # bincode 1.x non maintenu — encode les valeurs metrics-store sur disque :
+    # migrer changerait le format de la base redb (hors périmètre sans plan
+    # de migration). Pas de vulnérabilité connue, juste « unmaintained ».
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1.x = format on-disk metrics-store ; migration planifiée séparément" },
+    # rustls-pemfile non maintenu — transitif, pas de chemin de migration.
+    { id = "RUSTSEC-2025-0134", reason = "transitif (reqwest/rumqttc), aucun upgrade disponible" },
+    # rustls-webpki 0.102 via rumqttc 0.25 (rustls 0.22) : les correctifs sont
+    # en 0.103.12+, inaccessibles sans bump rumqttc (changement d'API MQTT).
+    # Chemin vulnérable = validation X.509 TLS ; ce déploiement utilise MQTT
+    # EN CLAIR sur localhost/LAN (pas de MQTT-TLS). Réévaluer dès que rumqttc
+    # passe à rustls 0.23.
+    { id = "RUSTSEC-2026-0049", reason = "webpki 0.102 figé par rumqttc ; MQTT sans TLS ici" },
+    { id = "RUSTSEC-2026-0098", reason = "webpki 0.102 figé par rumqttc ; MQTT sans TLS ici" },
+    { id = "RUSTSEC-2026-0099", reason = "webpki 0.102 figé par rumqttc ; MQTT sans TLS ici" },
+    { id = "RUSTSEC-2026-0104", reason = "webpki 0.102 figé par rumqttc ; MQTT sans TLS ici" },
+]
+
+[licenses]
+# Licences permissives compatibles avec le projet (MIT).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+    "OpenSSL",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Doublons de versions : inévitables avec 400+ deps — warn (information),
+# pas deny. Les réduire fait gagner du temps de build et du binaire.
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
