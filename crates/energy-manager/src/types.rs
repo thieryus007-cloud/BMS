@@ -168,6 +168,8 @@ pub struct EnergyState {
     pub deye_state: Option<String>,
     /// Whether DEYE restore is currently held off by the structural-excess guard — observability.
     pub deye_restore_blocked: bool,
+    /// Whether the MPPT charge stage signals a full battery (the MPPT-based cut driver) — observability.
+    pub deye_mppt_full: bool,
 
     // --- Irradiance ---
     pub irradiance_wm2: Option<f64>,

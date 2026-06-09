@@ -246,6 +246,7 @@ async fn run(
                     s.deye_on              = matches!(deye_sm, DeyeState::On | DeyeState::PendingCut(_));
                     s.deye_state           = Some(state_name(&deye_sm).to_string());
                     s.deye_restore_blocked = restore_blocked;
+                    s.deye_mppt_full       = mppt_full;
                 }
                 // Pass the real grid state: when grid-connected the GRL suppresses the
                 // cut rules (no spurious disconnect on a grid-frequency transient) and the
