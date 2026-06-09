@@ -1,0 +1,40 @@
+name: Fuzz
+
+# Fuzzing hebdomadaire des frontières d'entrée (audit 2026-06 §17) :
+# parseur de trames Daly (RS485) et parseur PromQL (HTTP). Hors du chemin
+# CI bloquant — workflow indépendant, planifié + déclenchable à la main.
+on:
+  schedule:
+    - cron: "17 3 * * 1"   # lundi 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [daly_frame_parse, promql_parse]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly (requis par libFuzzer)
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo install cargo-fuzz --locked
+
+      - name: Fuzz ${{ matrix.target }} (10 min)
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=600
+        working-directory: .
+
+      - name: Upload crash artifacts (si trouvés)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

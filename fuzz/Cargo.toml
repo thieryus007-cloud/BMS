@@ -1,0 +1,39 @@
+# Harnais cargo-fuzz (audit 2026-06 §17) — workspace AUTONOME : exclu du
+# workspace racine (la table [workspace] vide ci-dessous), donc jamais dans
+# le chemin de `cargo test/clippy/deny` ni des cross-builds.
+#
+# Exécution locale :
+#   cargo install cargo-fuzz
+#   cargo +nightly fuzz run daly_frame_parse -- -max_total_time=60
+#   cargo +nightly fuzz run promql_parse    -- -max_total_time=60
+#
+# CI : workflow `fuzz.yml` (hebdomadaire + déclenchement manuel).
+[package]
+name    = "daly-bms-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+daly-bms-core = { path = "../crates/daly-bms-core" }
+metrics-store = { path = "../crates/metrics-store" }
+
+[[bin]]
+name = "daly_frame_parse"
+path = "fuzz_targets/daly_frame_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "promql_parse"
+path = "fuzz_targets/promql_parse.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

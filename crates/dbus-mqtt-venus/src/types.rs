@@ -557,3 +557,137 @@ pub struct IoPayload {
     #[serde(rename = "ExternalRelay")]
     pub external_relay: i32,
 }
+
+// =============================================================================
+// Golden tests payloads MQTT → structs (audit 2026-06 §17)
+// =============================================================================
+// Le contrat d'interface du bridge : les JSON ci-dessous reproduisent
+// exactement la forme publiée par daly-bms-server (bridges/mqtt.rs,
+// build_venus_payload / publish_et112_snapshot). Toute évolution côté
+// publieur qui casserait la désérialisation NanoPi doit casser ces tests.
+#[cfg(test)]
+mod golden_tests {
+    use super::*;
+
+    /// Payload batterie complet, copie fidèle de `build_venus_payload`.
+    const BATTERY_GOLDEN: &str = r#"{
+        "Dc": { "Power": -245.7, "Voltage": 53.2, "Current": -4.62, "Temperature": 18.0 },
+        "InstalledCapacity": 360.0,
+        "ConsumedAmphours": 42.5,
+        "Capacity": 317.5,
+        "Soc": 88.2,
+        "TimeToGo": 64800,
+        "Balancing": 0,
+        "SystemSwitch": 1,
+        "Alarms": {
+            "LowVoltage": 0, "HighVoltage": 0, "LowSoc": 0,
+            "HighChargeCurrent": 0, "HighDischargeCurrent": 0, "HighCurrent": 0,
+            "CellImbalance": 1, "HighChargeTemperature": 0, "LowChargeTemperature": 0,
+            "LowCellVoltage": 0, "LowTemperature": 0, "HighTemperature": 0,
+            "FuseBlown": 0
+        },
+        "System": {
+            "MinVoltageCellId": 3, "MinCellVoltage": 3.312,
+            "MaxVoltageCellId": 14, "MaxCellVoltage": 3.341,
+            "MinTemperatureCellId": 1, "MinCellTemperature": 17.0,
+            "MaxTemperatureCellId": 2, "MaxCellTemperature": 19.0,
+            "NrOfCellsPerBattery": 16, "NrOfModulesOnline": 1,
+            "NrOfModulesOffline": 0, "NrOfModulesBlockingCharge": 0,
+            "NrOfModulesBlockingDischarge": 0
+        },
+        "Io": { "AllowToCharge": 1, "AllowToDischarge": 1, "AllowToBalance": 1, "ExternalRelay": 0 }
+    }"#;
+
+    #[test]
+    fn battery_payload_golden_roundtrip() {
+        let p: VenusPayload =
+            serde_json::from_str(BATTERY_GOLDEN).expect("payload batterie nominal rejeté");
+        assert!((p.dc.voltage - 53.2).abs() < 1e-9);
+        assert!((p.dc.current - (-4.62)).abs() < 1e-9);
+        assert!((p.soc - 88.2).abs() < 1e-9);
+        assert_eq!(p.time_to_go, 64800);
+        assert_eq!(p.alarms.cell_imbalance, 1);
+        assert_eq!(p.alarms.low_voltage, 0);
+        assert_eq!(p.system.min_voltage_cell_id, 3);
+        assert_eq!(p.system.nr_of_cells_per_battery, 16);
+        assert_eq!(p.io.allow_to_charge, 1);
+        assert_eq!(p.io.external_relay, 0);
+    }
+
+    #[test]
+    fn battery_payload_tolerates_unknown_fields() {
+        // Compat ascendante : un champ ajouté côté publieur (version plus
+        // récente du serveur) ne doit JAMAIS casser le bridge NanoPi.
+        let with_extra = BATTERY_GOLDEN.replacen(
+            "\"Soc\": 88.2,",
+            "\"Soc\": 88.2, \"ChampFutur\": {\"x\": 1},",
+            1,
+        );
+        assert!(serde_json::from_str::<VenusPayload>(&with_extra).is_ok());
+    }
+
+    #[test]
+    fn battery_payload_rejects_missing_required_section() {
+        // Contrat : un payload sans section "Dc" est rejeté à la
+        // désérialisation (le manager conserve alors les dernières valeurs
+        // valides au lieu de publier des zéros sur D-Bus).
+        let without_dc = BATTERY_GOLDEN.replacen("\"Dc\":", "\"DcX\":", 1);
+        assert!(serde_json::from_str::<VenusPayload>(&without_dc).is_err());
+    }
+
+    #[test]
+    fn grid_payload_monophase_keeps_l2_l3_absent() {
+        // ET112 monophasé (publish_et112_snapshot) : seuls L1 + totaux sont
+        // publiés. L2/L3 doivent rester None — c'est ce qui permet à
+        // grid_service de dériver /Ac/NumberOfPhases=1 (pas de phases
+        // fantômes à 0 W dans VRM, cf. CLAUDE.md §8).
+        let golden = r#"{
+            "Ac": {
+                "L1": {
+                    "Voltage": 233.1, "Current": 2.94, "Power": 685.0,
+                    "Energy": { "Forward": 1234.5, "Reverse": 12.3 }
+                },
+                "Power": 685.0,
+                "Energy": { "Forward": 1234.5, "Reverse": 12.3 }
+            },
+            "DeviceType": 340,
+            "IsGenericEnergyMeter": 1,
+            "ProductName": "ET112 addr=0x09",
+            "CustomName": "Réseau EDF"
+        }"#;
+        let p: GridPayload = serde_json::from_str(golden).expect("payload grid mono rejeté");
+        let l1 = p.ac.l1.expect("L1 absent");
+        assert!((l1.voltage - 233.1).abs() < 1e-9);
+        assert!(p.ac.l2.is_none(), "L2 fantôme détecté");
+        assert!(p.ac.l3.is_none(), "L3 fantôme détecté");
+        assert_eq!(p.device_type, 340);
+        assert_eq!(p.is_generic_energy_meter, 1);
+    }
+
+    #[test]
+    fn pvinverter_payload_golden() {
+        let golden = r#"{
+            "Ac": {
+                "L1": {
+                    "Voltage": 234.0, "Current": 3.1, "Power": 726.0,
+                    "Energy": { "Forward": 2456.7, "Reverse": 0.0 }
+                },
+                "Power": 726.0,
+                "Energy": { "Forward": 2456.7, "Reverse": 0.0 }
+            },
+            "StatusCode": 7,
+            "ErrorCode": 0,
+            "Position": 0,
+            "IsGenericEnergyMeter": 1,
+            "ProductName": "ET112 addr=0x07",
+            "CustomName": "Micro-Onduleurs"
+        }"#;
+        let p: PvinverterPayload =
+            serde_json::from_str(golden).expect("payload pvinverter rejeté");
+        assert_eq!(p.status_code, 7);
+        assert_eq!(p.error_code, 0);
+        assert_eq!(p.position, 0);
+        assert_eq!(p.product_name.as_deref(), Some("ET112 addr=0x07"));
+        assert!(p.ac.l1.is_some());
+    }
+}
