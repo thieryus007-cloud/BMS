@@ -76,6 +76,7 @@ async fn run(
                     s.humidity_pct  = snap.humidity_pct;
                     s.pressure_hpa  = snap.pressure_hpa;
                     s.wind_speed_ms = snap.wind_speed_ms;
+                    s.weather_last_read = Some(chrono::Utc::now());
                 }
                 bus.emit_live(LiveEvent::new("weather", &snap));
             }

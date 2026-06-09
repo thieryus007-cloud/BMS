@@ -13,6 +13,7 @@ mod config;
 mod ats;
 mod console;
 mod et112;
+mod freshness;
 mod irradiance;
 mod shelly;
 mod tasmota;
@@ -745,6 +746,31 @@ async fn main() -> anyhow::Result<()> {
         monitor::spawn_all(state.clone());
     } else {
         tracing::warn!("Monitor + watchdog désactivés via DALY_DISABLE_MONITOR (debug fuite mémoire)");
+    }
+
+    // ── Export de la fraîcheur des sources (audit 2026-06 §18) ────────────────
+    // Toutes les 30 s : âge de la dernière donnée par source →
+    // `source_last_update_age_seconds{source=...}` dans metrics-store.
+    // Transforme les pannes silencieuses (« la donnée ne se rafraîchit
+    // plus ») en signal alertable (âge > N × intervalle de polling).
+    if let Some(store) = &state.metrics_store {
+        let writer = store.writer();
+        let freshness_state = state.clone();
+        spawn_critical(async move {
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                ticker.tick().await;
+                let ts = chrono::Utc::now().timestamp_millis();
+                for (source, age) in freshness_state.freshness.ages_seconds() {
+                    let sample =
+                        metrics_store::Sample::new("source_last_update_age_seconds", ts, age)
+                            .with_label("source", &source);
+                    // try_write : jamais bloquant ; pendant l'arrêt gracieux
+                    // le canal est fermé → échec silencieux attendu.
+                    let _ = writer.try_write(sample);
+                }
+            }
+        });
     }
 
     // ── Serveur HTTP Axum ──────────────────────────────────────────────────────

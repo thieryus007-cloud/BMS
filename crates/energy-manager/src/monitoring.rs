@@ -21,7 +21,11 @@ use crate::types::MqttOutgoing;
 // =============================================================================
 
 /// Spawne l'agent de monitoring en arrière-plan.
-pub fn spawn(vm_url: String, bus: AppBus) {
+pub fn spawn(
+    vm_url: String,
+    bus: AppBus,
+    state: std::sync::Arc<tokio::sync::RwLock<crate::types::EnergyState>>,
+) {
     use tokio_metrics::TaskMonitor;
 
     let task_mon = TaskMonitor::new();
@@ -30,7 +34,7 @@ pub fn spawn(vm_url: String, bus: AppBus) {
     // spawn_critical (audit 2026-06 §9) : boucles de service longue durée —
     // leur fin inattendue laissait le monitoring éteint en silence.
     crate::supervise::spawn_critical(task_mon.instrument(async move {
-        run_monitoring_loop(vm_url_mon, bus_mon).await;
+        run_monitoring_loop(vm_url_mon, bus_mon, state).await;
     }));
 
     // Exporteur métriques tokio → VM (toutes les 60s)
@@ -57,7 +61,11 @@ pub fn spawn(vm_url: String, bus: AppBus) {
 // Boucle principale
 // =============================================================================
 
-async fn run_monitoring_loop(vm_url: String, bus: AppBus) {
+async fn run_monitoring_loop(
+    vm_url: String,
+    bus: AppBus,
+    state: std::sync::Arc<tokio::sync::RwLock<crate::types::EnergyState>>,
+) {
     tracing::info!("energy-manager monitoring démarré (intervalle: 60s)");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -125,6 +133,26 @@ async fn run_monitoring_loop(vm_url: String, bus: AppBus) {
                 "em_process_mem_mb{{process=\"{}\"}} {} {}",
                 name, mem, ts_ms
             ));
+        }
+
+        // Fraîcheur des sources HTTP externes (audit 2026-06 §18) : âge de la
+        // dernière donnée Open-Meteo / LG ThinQ. Une API en panne laissait la
+        // logique tourner sur des valeurs périmées sans aucun signal.
+        {
+            let now = chrono::Utc::now();
+            let s = state.read().await;
+            for (source, last) in [
+                ("open_meteo", s.weather_last_read),
+                ("lg_thinq",   s.water_heater_last_read),
+            ] {
+                if let Some(t) = last {
+                    let age = (now - t).num_seconds().max(0);
+                    lines.push(format!(
+                        "em_source_last_update_age_seconds{{source=\"{}\"}} {} {}",
+                        source, age, ts_ms
+                    ));
+                }
+            }
         }
 
         write_to_vm(&client, &vm_url, &lines.join("\n")).await;

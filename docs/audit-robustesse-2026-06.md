@@ -1,5 +1,15 @@
 # Audit robustesse — juin 2026
 
+> **État d'implémentation (2026-06-09)** : **§3 → §18 IMPLÉMENTÉS** (branche
+> `claude/jolly-pascal-0uaha9`, commits `feat(robustesse)`/`test(robustesse)`).
+> Restent **§1 et §2** (sécurité), qui demandent une action de l'utilisateur :
+> §1 = révoquer/régénérer le token LG ThinQ puis basculer les secrets vers
+> `/etc/daly-bms/.env` ; §2 = middleware api_key + CORS (à activer en
+> connaissance de cause). Nouveaux outils livrés : `--check-config` (dry-run
+> sur les deux binaires), métrique `source_last_update_age_seconds{source=…}`
+> (+ `em_source_last_update_age_seconds` côté energy-manager), harnais
+> `cargo fuzz` (`fuzz/`), job CI `cargo-deny` bloquant.
+
 > Second audit de robustesse du workspace (le premier, non versionné, est référencé
 > dans le code par « audit robustesse §1–§8 » : supervision `spawn_critical`,
 > `SharedBus::reopen()`, toolchain épinglée, CI…).

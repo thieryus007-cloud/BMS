@@ -24,6 +24,7 @@
 | Nettoyer disque (build) | `rm -rf target/armv7-unknown-linux-gnueabihf target/debug target/release && rm -rf ~/.cargo/registry/cache ~/.cargo/registry/src && sudo apt-get clean` (≈ -2,6 G ; garde `target/aarch64`). Reset total : `cargo clean` |
 | Nb séries en base | `curl -s http://localhost:8080/api/v1/redb/series \| jq '.data \| length'` |
 | Healthcheck backend | `curl -s http://localhost:8080/-/healthy` |
+| Valider Config.toml avant déploiement | `DALY_CONFIG=Config.toml daly-bms-server --check-config` et `ENERGY_CONFIG=Config.toml energy-manager --check-config` (dry-run : parse + bornes + typos — audit 2026-06 §12) |
 | Diag pic réseau (capture immédiate) | `sudo bash scripts/netdiag.sh` |
 | Diag pic réseau (veille auto-capture) | `sudo bash scripts/netdiag.sh --watch` → rapport `/tmp/netdiag-*.txt` |
 | Logs energy-manager | `journalctl -u energy-manager -f` |
@@ -327,6 +328,9 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Dashboard Grafana ET112 vide alors que les données existent | **Format du label `address`** : le backend écrit `address="0x07/0x08/0x09"` (hex, `redb_writes.rs::write_et112`). Les requêtes PromQL doivent utiliser `address="0x07"`, **jamais** `address="7"` (décimal → 0 série). Vérif : `curl -s 'localhost:8080/api/v1/query?query=et112_power_w' \| jq '.data.result[].metric'`. |
 | Widget météo "Température: -" | Limitation Venus OS — inévitable, non fixable |
 | `mbpoll` sans réponse | daly-bms monopolise le port — `sudo systemctl stop daly-bms` d'abord |
+| `/dev/ttyUSB0` devient `ttyUSB1` après débranchement USB | Chemin udev stable : `ls -l /dev/serial/by-id/` → `[serial] port = "/dev/serial/by-id/usb-…"` (suit le périphérique à la ré-énumération, `reopen()` inchangé). Cf. docs/integration-materiel.md §2.1 |
+| Une source ne se rafraîchit plus (valeurs figées, aucune erreur) | Requêter `source_last_update_age_seconds{source=...}` (bms_0x01, et112_0x07, venus_mppt, irradiance, ats…) et `em_source_last_update_age_seconds` (open_meteo, lg_thinq). Âge > 5× l'intervalle de polling = source morte (audit 2026-06 §18) |
+| metrics-store ne s'ouvre plus après coupure brutale | Quarantaine auto au boot : base corrompue renommée `metrics.redb.corrupt.<ts>` + base vide recréée (audit §15). L'ancien fichier reste sur le NVMe pour autopsie |
 | Dashboard affiche cumul brut | Vérifier `pvinv_baseline` retained MQTT (`santuario/persist/pvinv_baseline`) |
 | energy-manager ne démarre pas | `journalctl -u energy-manager -n 50` — souvent TOML manquant ou `.env` absent |
 | `missing field energy_manager` | `sudo cp Config.toml /etc/daly-bms/config.toml` — section `[energy_manager]` absente |
@@ -380,3 +384,4 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Alertes (AlertEngine natif, règles, hysteresis, notifications) | `docs/alertes.md` |
 | Ajouter un appareil / BMS Daly, ATS CHINT, ET112, PRALRAN | `docs/integration-materiel.md` |
 | Dépannage, netdiag réseau, debug onduleur/SmartShunt, memory-leak | `docs/diagnostic-depannage.md` |
+| **Audit robustesse 2026-06** — 18 axes (§3-§18 implémentés ; §1-§2 sécurité en attente d'action utilisateur) | `docs/audit-robustesse-2026-06.md` |
