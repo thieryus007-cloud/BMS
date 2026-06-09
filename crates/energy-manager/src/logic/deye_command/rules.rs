@@ -51,6 +51,7 @@ impl DeyeRuleEngine {
         cfg_reenable_delay: u64,
         lockout_expired: bool,
         restore_blocked: bool,
+        mppt_cut: bool,
     ) -> anyhow::Result<DeyeDecision> {
         let facts = Facts::new();
         facts.set("DY.state",                  Value::String(state_str.to_string()));
@@ -62,6 +63,7 @@ impl DeyeRuleEngine {
         facts.set("DY.lockout_expired",        Value::Boolean(lockout_expired));
         facts.set("DY.grid_connected",         Value::Boolean(grid_connected));
         facts.set("DY.restore_blocked",        Value::Boolean(restore_blocked));
+        facts.set("DY.mppt_cut",               Value::Boolean(mppt_cut));
 
         self.engine
             .execute(&facts)
@@ -93,12 +95,17 @@ mod tests {
     // Shorthand: evaluate with default config thresholds
     // (high 51.0 Hz / hard 51.3 Hz / low 50.3 Hz / cut 3s / reenable 45s, restore unblocked).
     fn eval(engine: &mut DeyeRuleEngine, state: &str, freq: f64, time_s: u64, grid: bool, lockout_exp: bool) -> DeyeDecision {
-        engine.evaluate(state, freq, time_s, grid, 51.0, 51.3, 50.3, 3, 45, lockout_exp, false).unwrap()
+        engine.evaluate(state, freq, time_s, grid, 51.0, 51.3, 50.3, 3, 45, lockout_exp, false, false).unwrap()
     }
 
     // Variant exposing the restore-block guard.
     fn eval_rb(engine: &mut DeyeRuleEngine, state: &str, freq: f64, time_s: u64, grid: bool, lockout_exp: bool, restore_blocked: bool) -> DeyeDecision {
-        engine.evaluate(state, freq, time_s, grid, 51.0, 51.3, 50.3, 3, 45, lockout_exp, restore_blocked).unwrap()
+        engine.evaluate(state, freq, time_s, grid, 51.0, 51.3, 50.3, 3, 45, lockout_exp, restore_blocked, false).unwrap()
+    }
+
+    // Variant exposing the MPPT-based cut signal (battery topping/full per the MPPT stage).
+    fn eval_mppt(engine: &mut DeyeRuleEngine, state: &str, freq: f64, grid: bool, mppt_cut: bool) -> DeyeDecision {
+        engine.evaluate(state, freq, 0, grid, 51.0, 51.3, 50.3, 3, 45, false, false, mppt_cut).unwrap()
     }
 
     #[test]
@@ -131,6 +138,36 @@ mod tests {
         let d = eval(&mut e(), "PendingCut", 51.4, 1, false, false);
         assert_eq!(d.next_state.as_deref(), Some("Lockout"));
         assert!(d.relay_off);
+    }
+
+    #[test]
+    fn mppt_full_cuts_even_at_low_freq() {
+        // Battery topping/full per MPPT → cut the DEYE even though AC frequency is nominal.
+        let d = eval_mppt(&mut e(), "On", 50.0, false, true);
+        assert_eq!(d.next_state.as_deref(), Some("Lockout"));
+        assert!(d.relay_off);
+    }
+
+    #[test]
+    fn mppt_full_pending_cut_locks() {
+        let d = eval_mppt(&mut e(), "PendingCut", 50.0, false, true);
+        assert_eq!(d.next_state.as_deref(), Some("Lockout"));
+        assert!(d.relay_off);
+    }
+
+    #[test]
+    fn mppt_full_grid_connected_no_cut() {
+        // Grid-tied: the MPPT-based cut is suppressed (frequency-shift only happens off-grid).
+        let d = eval_mppt(&mut e(), "On", 50.0, true, true);
+        assert!(d.next_state.is_none());
+        assert!(!d.relay_off);
+    }
+
+    #[test]
+    fn mppt_not_full_low_freq_stays_on() {
+        let d = eval_mppt(&mut e(), "On", 50.0, false, false);
+        assert!(d.next_state.is_none());
+        assert!(!d.relay_off);
     }
 
     #[test]

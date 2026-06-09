@@ -324,7 +324,9 @@ N/{portal_id}/solarcharger/{273,289}/State   →  EnergyState.mppt_273.state / m
 | 11 | Other (Hub-1) | — |
 | 252 | External control | piloté par DVCC (non utilisé ici) |
 
-`Float`/`Storage` ⇒ batterie pleine, MPPT déjà bridé : c'est le **signal racine** qui *précède* la montée en fréquence côté DEYE. Avec deux MPPT, « batterie pleine » = aucun MPPT en `Bulk`/`Absorption` et au moins un en `Float`/`Storage`.
+`Float`/`Storage` ⇒ batterie pleine, MPPT déjà bridé : c'est le **signal racine** qui *précède* la montée en fréquence côté DEYE.
+
+**Exploité par `deye_command`** (cf. [./app-energy-manager.md] §4.3, désactivable via `mppt_cut_enabled`) : dès qu'**un** MPPT atteint un état de `mppt_full_states` (défaut `[4,5,6]` = Absorption/Float/Storage), maintenu `mppt_cut_delay_secs` (10 s), les DEYE sont coupés (relais Shelly) pour **terminer la charge sur le seul MPPT** sans atteindre la fréquence haute. La fréquence (51,0/51,3 Hz) reste en filet de sécurité. Couper dès `Absorption` (4) plutôt que `Float` (5) coupe **plus tôt** (batterie ~85-90 %) — compromis : moins d'auto-consommation DEYE pendant le palier, mais aucune micro-coupure. Ajuster `mppt_full_states=[5,6]` pour ne couper qu'à `Float`.
 
 ---
 

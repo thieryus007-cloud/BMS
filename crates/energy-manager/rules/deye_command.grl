@@ -10,8 +10,10 @@
 //   DY.reenable_delay_elapsed (bool, pre-computed: time_in_state_secs >= reenable_delay_secs)
 //   DY.lockout_expired        (bool, pre-computed: now >= lockout_until)
 //   DY.grid_connected         (bool)
-//   DY.restore_blocked        (bool, pre-computed: fresh structural PV excess — battery
-//                              full + strong irradiance + not discharging → hold DEYE off)
+//   DY.restore_blocked        (bool, pre-computed: structural PV excess — battery full
+//                              (MPPT stage and/or SmartShunt) → hold DEYE off)
+//   DY.mppt_cut               (bool, pre-computed: battery topping/full per the MPPT charge
+//                              stage, debounced → cut DEYE early, finish charge on MPPT alone)
 //
 // Output facts (read from Rust after execute):
 //   DY.next_state             (string, absent if no transition)
@@ -44,21 +46,43 @@ rule "DY_PendingCut_HardFreq" salience 150 no-loop {
         DY.relay_off = true;
 }
 
+// ── MPPT-based early cut (salience 130) ─────────────────────────────────────
+// Battery topping/full per the MPPT charge stage (Absorption/Float/Storage) → cut the
+// DEYE now, so the charge finishes on the DC-coupled MPPT alone, pre-empting the AC-out
+// frequency rise. Guarded against the grid-reconnect override (salience 200).
+rule "DY_On_MpptFull" salience 130 no-loop {
+    when
+        DY.state == "On" && DY.mppt_cut == true && DY.grid_connected == false
+    then
+        DY.next_state = "Lockout";
+        DY.relay_off = true;
+}
+
+rule "DY_PendingCut_MpptFull" salience 130 no-loop {
+    when
+        DY.state == "PendingCut" && DY.mppt_cut == true && DY.grid_connected == false
+    then
+        DY.next_state = "Lockout";
+        DY.relay_off = true;
+}
+
 // ── Normal state machine transitions (salience 100) ─────────────────────────
 
 // On → PendingCut when frequency exceeds the soft threshold (but not the hard one,
-// which is handled immediately above). Guarded against the grid-reconnect override.
+// which is handled immediately above). Guarded against the grid-reconnect override and
+// the MPPT cut (so neither higher-salience Lockout is downgraded back to PendingCut).
 rule "DY_On_HighFreq" salience 100 no-loop {
     when
-        DY.state == "On" && DY.freq_high_exceeded == true && DY.freq_hard_exceeded == false && DY.grid_connected == false
+        DY.state == "On" && DY.freq_high_exceeded == true && DY.freq_hard_exceeded == false && DY.mppt_cut == false && DY.grid_connected == false
     then
         DY.next_state = "PendingCut";
 }
 
-// PendingCut: cancel if frequency drops back (mutually exclusive with _Elapsed)
+// PendingCut: cancel if frequency drops back (mutually exclusive with _Elapsed).
+// Guarded by mppt_cut==false so it doesn't cancel an MPPT-driven cut at low frequency.
 rule "DY_PendingCut_FreqDrop" salience 100 no-loop {
     when
-        DY.state == "PendingCut" && DY.freq_high_exceeded == false
+        DY.state == "PendingCut" && DY.freq_high_exceeded == false && DY.mppt_cut == false
     then
         DY.next_state = "On";
 }

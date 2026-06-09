@@ -360,17 +360,20 @@ ac_ignore == 1 ?
 
 | État courant | Condition | → Nouvel état | Relay | Salience |
 |---|---|---|---|---|
+| On / PendingCut | `mppt_cut==true` (batterie pleine côté MPPT, débouncé) | Lockout | **OFF** (les 2 canaux) | 130 |
 | On | freq ≥ `freq_hard_hz` (51,3) | Lockout | **OFF** (les 2 canaux) | 150 |
 | On | freq ≥ `freq_high_hz` (51,0), < hard | PendingCut | — | 100 |
 | PendingCut | freq ≥ `freq_hard_hz` | Lockout | **OFF** | 150 |
 | PendingCut | `cut_delay_secs` (3 s) écoulé + freq ≥ 51,0 | Lockout | **OFF** | 100 |
-| PendingCut | freq < 51,0 (annule) | On | — | 100 |
+| PendingCut | freq < 51,0 (annule, si `mppt_cut==false`) | On | — | 100 |
 | Lockout | `lockout_secs` (120 s) écoulé | Off | — | 100 |
 | Off | freq ≤ `freq_low_hz` (50,3) **et `restore_blocked==false`** | PendingRestore | — | 100 |
 | PendingRestore | `reenable_delay_secs` (45 s) écoulé + freq ≤ 50,3 | On | **ON** (les 2 canaux) | 100 |
 | **Toute** | `grid_connected==true` (reconnect réseau) | On | **ON** | 200 |
 
-`restore_blocked` (pré-calculé en Rust) = données SmartShunt fraîches **et** `soc ≥ restore_soc_pct` **et** `irradiance ≥ restore_irradiance_wm2` **et** `battery_current ≥ -1 A` (non en décharge).
+**`mppt_cut`** (coupure anticipée, salience 130 — désactivable via `mppt_cut_enabled`) : un MPPT (273/289) est dans un état « batterie pleine » (`mppt_full_states`, défaut `[4,5,6]` = Absorption/Float/Storage), maintenu `mppt_cut_delay_secs` (10 s). But : **couper les DEYE dès le palier d'absorption** pour terminer la charge sur le seul MPPT (DC-couplé, sans à-coup), **avant** toute montée en fréquence. La fréquence (51,0/51,3) reste en filet.
+
+**`restore_blocked`** (pré-calculé en Rust) = `mppt_battery_full` (un MPPT dans `mppt_full_states`) **OU** garde SmartShunt (données fraîches **et** `soc ≥ restore_soc_pct` **et** `irradiance ≥ restore_irradiance_wm2` **et** `battery_current ≥ -1 A`). Tant qu'elle est vraie, pas de restauration → les DEYE restent coupés jusqu'à ce que les MPPT repassent en charge (Bulk) et que la fréquence soit basse.
 
 **Diagramme de la machine d'états** :
 ```
@@ -409,7 +412,7 @@ Payload (pour chaque canal de shelly_deye_channels) :
 - `"On"` — DEYE actif (états `On` ou `PendingCut`)
 - `"Off"` — DEYE coupé (états `Off`, `Lockout`, `PendingRestore`)
 
-**Config** (`[energy_manager.deye]`) : `freq_high_hz=51.0`, `freq_hard_hz=51.3`, `freq_low_hz=50.3`, `cut_delay_secs=3`, `reenable_delay_secs=45`, `lockout_secs=120`, `restore_soc_pct=95.0`, `restore_irradiance_wm2=250.0`, `corroboration_max_age_secs=60`, `relay_resync_secs=60`.
+**Config** (`[energy_manager.deye]`) : `freq_high_hz=51.0`, `freq_hard_hz=51.3`, `freq_low_hz=50.3`, `cut_delay_secs=3`, `reenable_delay_secs=45`, `lockout_secs=120`, `restore_soc_pct=95.0`, `restore_irradiance_wm2=250.0`, `corroboration_max_age_secs=60`, `relay_resync_secs=60`, `mppt_cut_enabled=true`, `mppt_full_states=[4,5,6]`, `mppt_cut_delay_secs=10`.
 Canaux : `[energy_manager.victron] shelly_deye_channels = [0, 1]` (un canal par DEYE ; fallback mono-canal `shelly_deye_channel` si la liste est vide).
 
 ---
@@ -1021,6 +1024,9 @@ restore_soc_pct            = 95.0   # SOC ≥ → excédent structurel → maint
 restore_irradiance_wm2     = 250.0  # Irradiance ≥ → soleil fort → maintien coupé
 corroboration_max_age_secs = 60     # Fraîcheur SmartShunt (au-delà : fréquence seule, fail-open)
 relay_resync_secs          = 60     # Ré-affirmation périodique de l'état des 2 canaux
+mppt_cut_enabled           = true   # Coupe les DEYE sur l'état de charge MPPT (sans DVCC)
+mppt_full_states           = [4, 5, 6]  # Codes State « batterie pleine » (4=Absorption…)
+mppt_cut_delay_secs        = 10     # Débounce du signal MPPT-plein avant coupure
 
 [energy_manager.water_heater]
 solar_min_w            = 2000.0   # Production min pour HEAT_PUMP (non utilisé par la règle GRL)
