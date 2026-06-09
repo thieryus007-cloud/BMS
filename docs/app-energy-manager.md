@@ -919,13 +919,27 @@ websocat ws://192.168.1.141:8081/live
   },
   "deye": {
     "on": true,
-    "last_change": null
+    "state": "On",
+    "last_change": null,
+    "restore_blocked": false,
+    "grid_connected": true,
+    "freq_hz": 50.01,
+    "ac_connected": 1
   },
   "soc_pct": null,
   "irradiance_wm2": null,
   "ac_ignore": null
 }
 ```
+
+Champs `deye` :
+- `state` — état machine : `On` / `PendingCut` / `Lockout` / `Off` / `PendingRestore`.
+- `restore_blocked` — restauration différée par la garde d'excédent structurel (batterie pleine + soleil + non en décharge).
+- `grid_connected` — prédicat d'îlotage combiné (`ac_ignore != 1` **et** `ac_connected != 0`).
+- `freq_hz` — fréquence AC-Out pilotant les seuils.
+- `ac_connected` — connexion physique réseau (`1`=connecté, `0`=panne).
+
+Ces champs alimentent la carte **« Règles système → Gestion Relais DEYE »** de `/dashboard/monitor`.
 
 ---
 
@@ -976,15 +990,21 @@ mppt2_instance       = 289             # MPPT 2
 pvinverter_instance  = 32
 smartshunt           = 274             # Instance SmartShunt (batterie)
 shelly_deye_id       = "shellypro2pm-ec62608840a4"
-shelly_deye_channel  = 0               # Canal du relais Shelly
+shelly_deye_channel  = 0               # Fallback mono-canal (hérité)
+shelly_deye_channels = [0, 1]          # Un canal par DEYE — coupe/restaure les deux
 tasmota_waterheater_id = "tongou_3BC764"
 
 [energy_manager.deye]
-freq_high_hz         = 52.0   # Seuil de coupure DEYE
-freq_low_hz          = 50.3   # Seuil de réactivation
-cut_delay_secs       = 15     # Délai avant coupure (PendingCut → Lockout)
-reenable_delay_secs  = 45     # Délai avant réactivation (PendingRestore → On)
-lockout_secs         = 120    # Durée du verrou anti-oscillation (Lockout → Off)
+freq_high_hz               = 51.0   # Seuil de coupure débouncée (sous l'auto-trip DEYE 51.5)
+freq_hard_hz               = 51.3   # Seuil de coupure immédiate (filet pré-trip)
+freq_low_hz                = 50.3   # Seuil de réactivation
+cut_delay_secs             = 3      # Délai avant coupure (PendingCut → Lockout)
+reenable_delay_secs        = 45     # Délai avant réactivation (PendingRestore → On)
+lockout_secs               = 120    # Durée du verrou anti-oscillation (Lockout → Off)
+restore_soc_pct            = 95.0   # SOC ≥ → excédent structurel → maintien coupé
+restore_irradiance_wm2     = 250.0  # Irradiance ≥ → soleil fort → maintien coupé
+corroboration_max_age_secs = 60     # Fraîcheur SmartShunt (au-delà : fréquence seule, fail-open)
+relay_resync_secs          = 60     # Ré-affirmation périodique de l'état des 2 canaux
 
 [energy_manager.water_heater]
 solar_min_w            = 2000.0   # Production min pour HEAT_PUMP (non utilisé par la règle GRL)

@@ -165,21 +165,26 @@
       <div>
         <div style="font-family:monospace;font-size:0.7rem;font-weight:700;color:#38bdf8;margin-bottom:0.4rem;display:flex;justify-content:space-between;">
           <span>🔌 Gestion Relais DEYE</span>
-          <span id="deye-state-badge" style="font-size:0.68rem;padding:1px 6px;border-radius:4px;background:#1e293b;color:#475569;">—</span>
+          <span id="deye-state-badge" style="font-size:0.68rem;padding:1px 6px;border-radius:4px;background:#1e293b;color:#475569;" title="État machine : On / PendingCut / Lockout / Off / PendingRestore">—</span>
         </div>
         <div style="display:flex;gap:0.4rem;margin-bottom:0.4rem;">
           <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;display:flex;align-items:center;gap:0.5rem;">
             <span id="deye-dot" style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:#475569;"></span>
             <div>
-              <div style="font-size:0.6rem;color:#64748b;">Relais</div>
+              <div style="font-size:0.6rem;color:#64748b;">Relais (2 canaux)</div>
               <div id="deye-on-val" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#94a3b8;">—</div>
             </div>
           </div>
           <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;">
-            <div style="font-size:0.6rem;color:#64748b;">Dernier changement</div>
+            <div style="font-size:0.6rem;color:#64748b;">Fréquence AC</div>
+            <div id="deye-freq-val" style="font-family:monospace;font-size:0.8rem;font-weight:700;color:#94a3b8;">—</div>
+          </div>
+          <div style="background:#1e293b;border-radius:5px;padding:0.35rem 0.5rem;flex:1;">
+            <div style="font-size:0.6rem;color:#64748b;">Dernier chgt</div>
             <div id="deye-change-ts" style="font-family:monospace;font-size:0.7rem;color:#64748b;">—</div>
           </div>
         </div>
+        <div style="font-family:monospace;font-size:0.6rem;color:#475569;margin-bottom:0.35rem;">Coupe ≥ 51,0 Hz (dur ≥ 51,3) · restaure ≤ 50,3 Hz · 2 DEYE</div>
         <div id="deye-rule-grid" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
       </div>
 
@@ -595,14 +600,22 @@ async function fetchRulesStatus() {
   // Card c) Relais DEYE
   // ══════════════════════════════════════════════════════════════════════════
   try {
-    const deye = emR?.deye ?? null;
-    const deyeOn = deye?.on ?? null;
+    const deye      = emR?.deye ?? null;
+    const deyeOn    = deye?.on ?? null;
+    const deyeState = deye?.state ?? null;            // On/PendingCut/Lockout/Off/PendingRestore
+    const deyeFreq  = deye?.freq_hz ?? null;
+    const deyeBlock = deye?.restore_blocked ?? false;
+    const deyeAcCon = deye?.ac_connected ?? null;     // 1=connecté, 0=panne réseau
+    // Combined islanding predicate from the energy-manager; fall back to ac_ignore.
+    const gridConn  = deye?.grid_connected ?? (acIgnore != null ? !acIgnore : null);
 
+    // Badge → état machine
     const badge = document.getElementById('deye-state-badge');
     if (badge) {
-      badge.textContent   = deyeOn === true ? 'ON' : deyeOn === false ? 'OFF' : '—';
-      badge.style.background = deyeOn ? '#14532d' : '#1c1917';
-      badge.style.color      = deyeOn ? '#4ade80' : '#78716c';
+      badge.textContent = deyeState ?? (deyeOn === true ? 'ON' : deyeOn === false ? 'OFF' : '—');
+      const cut = deyeState === 'Lockout' || deyeState === 'Off' || deyeState === 'PendingRestore';
+      badge.style.background = deyeState == null ? '#1e293b' : cut ? '#1c1917' : '#14532d';
+      badge.style.color      = deyeState == null ? '#475569' : cut ? '#f87171' : '#4ade80';
     }
     const dot = document.getElementById('deye-dot');
     if (dot) {
@@ -611,8 +624,16 @@ async function fetchRulesStatus() {
     }
     const onEl = document.getElementById('deye-on-val');
     if (onEl) {
-      onEl.textContent = deyeOn === true ? 'Actif' : deyeOn === false ? 'Inactif' : '—';
-      onEl.style.color = deyeOn ? '#22c55e' : '#94a3b8';
+      onEl.textContent = deyeOn === true ? 'Actif' : deyeOn === false ? 'Coupé' : '—';
+      onEl.style.color = deyeOn ? '#22c55e' : '#f87171';
+    }
+    const freqEl = document.getElementById('deye-freq-val');
+    if (freqEl) {
+      freqEl.textContent = deyeFreq != null ? deyeFreq.toFixed(2) + ' Hz' : '—';
+      freqEl.style.color = deyeFreq == null ? '#94a3b8'
+        : deyeFreq >= 51.3 ? '#ef4444'
+        : deyeFreq >= 51.0 ? '#eab308'
+        : '#22c55e';
     }
     const chEl = document.getElementById('deye-change-ts');
     if (chEl) chEl.textContent = fmtTs(deye?.last_change);
@@ -620,10 +641,20 @@ async function fetchRulesStatus() {
     // Conditions for DEYE
     const dGrid = document.getElementById('deye-rule-grid');
     if (dGrid) {
-      dGrid.innerHTML = [
-        ruleRow('Grid déconnecté',   gridOffOk, acIgnore != null ? (acIgnore ? 'ACTIF' : 'Normal') : '—', null),
-        ruleRow('Relais DEYE actif', !!deyeOn,  deyeOn != null ? (deyeOn ? 'ON' : 'OFF') : '—', null),
-      ].join('');
+      const rows = [
+        ruleRow('Réseau connecté', gridConn === true,
+                gridConn == null ? '—' : (gridConn ? 'Connecté' : 'Îloté'),
+                deyeAcCon === 0 ? 'panne réseau' : null),
+        ruleRow('Fréquence < seuil coupure', deyeFreq != null ? deyeFreq < 51.0 : true,
+                deyeFreq != null ? deyeFreq.toFixed(2) + ' Hz' : '—', 'coupe ≥ 51,0/51,3'),
+      ];
+      if (deyeOn === false) {
+        rows.push(ruleRow('Restauration autorisée', !deyeBlock,
+                  deyeBlock ? 'BLOQUÉE' : 'libre',
+                  deyeBlock ? 'batterie pleine + soleil' : null));
+      }
+      rows.push(ruleRow('Relais DEYE (2 canaux)', !!deyeOn, deyeOn != null ? (deyeOn ? 'ON' : 'OFF') : '—', null));
+      dGrid.innerHTML = rows.join('');
     }
   } catch(e) { console.warn('fetchRulesStatus/deye:', e); }
 }

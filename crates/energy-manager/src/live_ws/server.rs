@@ -150,8 +150,18 @@ struct ChargeCurrent {
 
 #[derive(Serialize)]
 struct DeyeCard {
-    on:            bool,
-    last_change:   Option<DateTime<Utc>>,
+    on:              bool,
+    /// State-machine state: On / PendingCut / Lockout / Off / PendingRestore
+    state:           Option<String>,
+    last_change:     Option<DateTime<Utc>>,
+    /// Restore held off by the structural-excess guard (battery full + sun + not discharging)
+    restore_blocked: bool,
+    /// Combined islanding predicate (ac_ignore != 1 && ac_connected != 0)
+    grid_connected:  bool,
+    /// AC-out frequency driving the cut/restore thresholds (Hz)
+    freq_hz:         Option<f64>,
+    /// Physical grid connection (ActiveIn/Connected): 1=connected, 0=outage
+    ac_connected:    Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -185,8 +195,13 @@ async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
             last_ts:      s.last_charge_ts,
         },
         deye: DeyeCard {
-            on:          s.deye_on,
-            last_change: s.deye_last_change,
+            on:              s.deye_on,
+            state:           s.deye_state.clone(),
+            last_change:     s.deye_last_change,
+            restore_blocked: s.deye_restore_blocked,
+            grid_connected:  crate::logic::deye_command::is_grid_connected(s.ac_ignore, s.ac_connected),
+            freq_hz:         s.ac_frequency_hz,
+            ac_connected:    s.ac_connected,
         },
         soc_pct:        s.soc_pct,
         irradiance_wm2: s.irradiance_wm2,
