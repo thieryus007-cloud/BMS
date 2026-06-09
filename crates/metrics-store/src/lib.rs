@@ -195,6 +195,39 @@ impl MetricsStore {
         Reader { db: self.inner.db.clone() }
     }
 
+    /// Diagnostique si une erreur retournée par [`MetricsStore::open`] signale
+    /// une base **corrompue** (vs. verrou déjà pris par une autre instance,
+    /// permissions, disque plein…). Sert à décider une mise en quarantaine
+    /// automatique au démarrage (audit 2026-06 §15) : on ne déplace JAMAIS
+    /// une base saine simplement verrouillée ou inaccessible.
+    pub fn open_error_is_corruption(err: &anyhow::Error) -> bool {
+        for cause in err.chain() {
+            if let Some(e) = cause.downcast_ref::<redb::DatabaseError>() {
+                return matches!(
+                    e,
+                    redb::DatabaseError::Storage(redb::StorageError::Corrupted(_))
+                        | redb::DatabaseError::RepairAborted
+                        | redb::DatabaseError::UpgradeRequired(_)
+                );
+            }
+            if let Some(e) = cause.downcast_ref::<redb::TransactionError>() {
+                return matches!(
+                    e,
+                    redb::TransactionError::Storage(redb::StorageError::Corrupted(_))
+                );
+            }
+            if let Some(redb::CommitError::Storage(s)) =
+                cause.downcast_ref::<redb::CommitError>()
+            {
+                return matches!(s, redb::StorageError::Corrupted(_));
+            }
+            if let Some(e) = cause.downcast_ref::<redb::StorageError>() {
+                return matches!(e, redb::StorageError::Corrupted(_));
+            }
+        }
+        false
+    }
+
     /// Démarre la tâche de maintenance (compaction raw→hourly→daily).
     /// `interval_hours` contrôle la fréquence (défaut recommandé : 6 h ⇒
     /// 4 passes par jour). Cf. plan §9.1.

@@ -38,6 +38,12 @@ async fn main() -> anyhow::Result<()> {
     info!("Config loaded — portal_id={}, mqtt={}:{}",
         cfg.victron.portal_id, cfg.mqtt.host, cfg.mqtt.port);
 
+    // `--check-config` : dry-run parse + validation (audit 2026-06 §12).
+    if std::env::args().any(|a| a == "--check-config") {
+        println!("Config OK");
+        return Ok(());
+    }
+
     // --- Rules loader (disk-first with embedded fallback) ---
     let rules_dir = cfg.rules.dir.as_deref().map(Path::new);
     let loader    = Arc::new(RulesLoader::new(rules_dir));

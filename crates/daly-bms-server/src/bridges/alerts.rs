@@ -122,6 +122,15 @@ impl AlertEngine {
     /// Crée le moteur d'alertes et initialise la base SQLite.
     pub fn new(cfg: AlertsConfig) -> anyhow::Result<Arc<Self>> {
         let db = Connection::open(&cfg.db_path)?;
+        // Audit 2026-06 §10 : WAL (les lectures API ne bloquent plus l'INSERT
+        // d'un orage d'alertes, et inversement) + busy_timeout (un verrou
+        // transitoire attend au lieu d'échouer en SQLITE_BUSY).
+        db.busy_timeout(std::time::Duration::from_millis(5000))?;
+        let journal_mode: String =
+            db.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
+        if !journal_mode.eq_ignore_ascii_case("wal") {
+            warn!(mode = %journal_mode, "SQLite alertes : WAL indisponible — mode conservé");
+        }
         init_db(&db)?;
 
         let engine = Arc::new(Self {
@@ -136,7 +145,7 @@ impl AlertEngine {
     /// Évalue toutes les règles sur un snapshot et envoie les notifications.
     ///
     /// `shunt_current_a` : courant SmartShunt courant (None si non disponible).
-    pub async fn evaluate(&self, snap: &BmsSnapshot, shunt_current_a: Option<f32>) {
+    pub async fn evaluate(self: &Arc<Self>, snap: &BmsSnapshot, shunt_current_a: Option<f32>) {
         let ctx = AlertContext { snap, cfg: &self.cfg, shunt_current_a };
 
         // Collecter les actions (sans tenir le Mutex pendant les await)
@@ -193,7 +202,7 @@ impl AlertEngine {
         // Envoyer notifications hors du lock
         for (addr, rule_id, description, severity, value, triggered) in notifications {
             let event = if triggered { "triggered" } else { "cleared" };
-            self.log_event(addr, rule_id, description, severity, event, value);
+            self.log_event(addr, rule_id, description, severity, event, value).await;
 
             let icon   = if triggered { "🔴" } else { "✅" };
             let action = if triggered { "DÉCLENCHÉE" } else { "EFFACÉE" };
@@ -210,14 +219,26 @@ impl AlertEngine {
         }
     }
 
-    fn log_event(&self, addr: u8, rule_id: &str, description: &str, severity: &str, event: &str, value: f32) {
-        if let Ok(db) = self.db.lock() {
-            let _ = db.execute(
-                "INSERT INTO alert_events \
-                 (bms_address, rule_id, description, severity, event, value, timestamp) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))",
-                params![addr, rule_id, description, severity, event, value],
-            );
+    /// Journalise un événement. I/O SQLite déportée en `spawn_blocking`
+    /// (audit 2026-06 §10) : l'INSERT bloquait un worker tokio pendant
+    /// l'écriture disque — sensible en cas d'orage d'alertes + disque lent.
+    async fn log_event(self: &Arc<Self>, addr: u8, rule_id: &str, description: &str, severity: &str, event: &str, value: f32) {
+        let engine = self.clone();
+        let (rule_id, description, severity, event) =
+            (rule_id.to_string(), description.to_string(), severity.to_string(), event.to_string());
+        let res = tokio::task::spawn_blocking(move || {
+            if let Ok(db) = engine.db.lock() {
+                let _ = db.execute(
+                    "INSERT INTO alert_events \
+                     (bms_address, rule_id, description, severity, event, value, timestamp) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))",
+                    params![addr, rule_id, description, severity, event, value],
+                );
+            }
+        })
+        .await;
+        if let Err(e) = res {
+            error!("AlertEngine log_event : tâche blocking en échec : {e}");
         }
     }
 

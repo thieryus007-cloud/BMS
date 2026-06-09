@@ -126,6 +126,9 @@ struct ServerArgs {
     port:      Option<String>,
     /// Adresses BMS pour le mode hardware (ex: 0x01,0x02)
     bms_addrs: Vec<u8>,
+    /// `--check-config` : valide la config (parse + bornes) puis sort —
+    /// dry-run pour CI/déploiement (audit 2026-06 §12).
+    check_config: bool,
 }
 
 impl ServerArgs {
@@ -141,7 +144,9 @@ impl ServerArgs {
             .map(|w| Self::parse_addresses(&w[1]))
             .unwrap_or_default();
 
-        Self { port, bms_addrs }
+        let check_config = args.iter().any(|a| a == "--check-config");
+
+        Self { port, bms_addrs, check_config }
     }
 
     fn parse_addresses(s: &str) -> Vec<u8> {
@@ -228,6 +233,23 @@ async fn main() -> anyhow::Result<()> {
         config.serial.addresses = args.bms_addrs.iter()
             .map(|a| format!("{:#04x}", a))
             .collect();
+    }
+
+    // ── Validation des bornes (audit 2026-06 §12) ─────────────────────────────
+    // Échec = message nommant le champ fautif, avant tout démarrage de tâche.
+    // Ne s'applique qu'à une config chargée depuis un fichier : les valeurs
+    // par défaut internes sont saines par construction.
+    if config_from_file {
+        config.validate()?;
+    }
+
+    // `--check-config` : dry-run (parse + validation) pour CI/déploiement.
+    if args.check_config {
+        if config_from_file {
+            println!("Config OK");
+            return Ok(());
+        }
+        anyhow::bail!("--check-config : aucun fichier de config trouvé");
     }
 
     // ── Flags d'auto-détection ────────────────────────────────────────────────
@@ -324,10 +346,7 @@ async fn main() -> anyhow::Result<()> {
             writer_queue_depth: config.metrics_store.queue_depth,
             writer: metrics_store::WriterConfig::default(),
         };
-        match metrics_store::MetricsStore::open(
-            std::path::Path::new(&config.metrics_store.db_path),
-            opts,
-        ) {
+        match open_metrics_store_with_quarantine(&config.metrics_store.db_path, opts) {
             Ok(s) => {
                 info!(
                     db_path = %config.metrics_store.db_path,
@@ -773,6 +792,47 @@ async fn main() -> anyhow::Result<()> {
     }
     info!("Arrêt gracieux terminé");
     Ok(())
+}
+
+/// Ouvre la base metrics-store ; si l'ouverture échoue sur une **corruption
+/// avérée** (coupure brutale pendant un fsync, bitflip…), met le fichier en
+/// quarantaine (`<db>.corrupt.<timestamp>`) puis recrée une base vide
+/// (audit 2026-06 §15). Avant : le service tournait sans historique jusqu'à
+/// intervention manuelle. Le fichier en quarantaine est conservé pour
+/// autopsie/récupération — jamais supprimé automatiquement.
+///
+/// Les échecs NON liés à une corruption (verrou « Database already open »
+/// d'une seconde instance, permissions, disque plein) ne déclenchent JAMAIS
+/// la quarantaine : on ne déplace pas une base saine.
+fn open_metrics_store_with_quarantine(
+    db_path: &str,
+    opts: metrics_store::Options,
+) -> anyhow::Result<metrics_store::MetricsStore> {
+    let path = std::path::Path::new(db_path);
+    let err = match metrics_store::MetricsStore::open(path, opts.clone()) {
+        Ok(s) => return Ok(s),
+        Err(e) => e,
+    };
+    if !path.exists() || !metrics_store::MetricsStore::open_error_is_corruption(&err) {
+        return Err(err);
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let quarantine = format!("{db_path}.corrupt.{ts}");
+    error!(
+        "metrics-store : base corrompue ({err:#}) — quarantaine vers {quarantine} \
+         puis recréation d'une base vide"
+    );
+    std::fs::rename(path, &quarantine)
+        .map_err(|re| anyhow::anyhow!("quarantaine impossible ({re}) ; erreur d'origine : {err:#}"))?;
+    let store = metrics_store::MetricsStore::open(path, opts)?;
+    warn!(
+        "metrics-store recréé vide — l'historique corrompu est conservé dans {quarantine} \
+         (autopsie : docs/metriques-redb-architecture.md)"
+    );
+    Ok(store)
 }
 
 /// Résout au premier SIGTERM (systemd stop/restart) ou SIGINT (Ctrl-C).
