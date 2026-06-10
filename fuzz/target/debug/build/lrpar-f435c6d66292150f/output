@@ -1,4 +1,0 @@
-cargo:rustc-env=VERGEN_BUILD_TIMESTAMP=2026-06-09T19:19:30.477965093Z
-cargo:rerun-if-changed=build.rs
-cargo:rerun-if-env-changed=VERGEN_IDEMPOTENT
-cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH
