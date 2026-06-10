@@ -552,6 +552,13 @@ mod tests {
             // 0 = garde désactivée.
             ev_small.max_range_points = 0;
             assert!(ev_small.eval_range(&expr, 100_000, 109_000, 3_000).is_ok());
+            // Bornes extrêmes : la soustraction saturante doit déclencher la
+            // limite au lieu de wrapper en négatif (et la contourner).
+            ev_small.max_range_points = 3;
+            let err = ev_small
+                .eval_range(&expr, i64::MIN + 1, i64::MAX - 1, 1)
+                .unwrap_err();
+            assert!(err.message().contains("maximum resolution"));
         }
         let _ = std::fs::remove_file(&path);
     }

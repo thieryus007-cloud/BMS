@@ -225,7 +225,12 @@ impl<'r> Evaluator<'r> {
             return Err(PromQlError::Execution("end < start".into()));
         }
         // Garde-fou mémoire (audit 2026-06 §3) — sémantique Prometheus.
-        let steps = (end_ms - start_ms) / step_ms + 1;
+        // NB : `step_ms > 0` et `end_ms ≥ start_ms` sont garantis par les
+        // gardes ci-dessus ; l'arithmétique saturante neutralise l'overflow
+        // i64 sur des bornes extrêmes (le wrap silencieux en release rendrait
+        // `steps` négatif et contournerait la limite ; le `+ 1` peut lui-même
+        // déborder après saturation de la soustraction).
+        let steps = (end_ms.saturating_sub(start_ms) / step_ms).saturating_add(1);
         if self.max_range_points > 0 && steps > self.max_range_points {
             return Err(PromQlError::Execution(format!(
                 "exceeded maximum resolution of {} points beyond which time series data \
