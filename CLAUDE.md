@@ -14,6 +14,7 @@
 
 | Quand | Commande |
 |-------|----------|
+| **Déploiement courant (≈90 %)** | `sudo bash scripts/deploy.sh` (sync+build+config+binaires ciblés+vérif ; `--dry-run` pour prévisualiser) |
 | Récupérer le code | `make sync` |
 | Appliquer Config.toml | `sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart daly-bms` |
 | Logs BMS | `journalctl -u daly-bms -f` |
@@ -66,6 +67,13 @@ make build-venus-v7 && make install-venus-v7
 ```
 1. Claude Code → git add + commit + push
 2. Pi5 → make sync
+
+## ⇒ VOIE PRINCIPALE (≈90 % des cas) : sudo bash scripts/deploy.sh
+##   sync + build incrémental + applique Config.toml (diff+backup) + ne redémarre
+##   QUE ce qui a changé + vérif santé. Options : --no-config / --no-build / --dry-run.
+##   Déploiement COMPLET (Grafana, mosquitto, validation métriques) → scripts/deploy-pi5.sh
+
+# Détail manuel (si besoin de cibler une seule étape) :
 3a. Config seule        : sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart daly-bms
 3b. Code Rust/HTML      : make build-arm → stop → cp binaire → start
 3c. Venus code          : make build-venus-v7 && make install-venus-v7
@@ -74,6 +82,11 @@ make build-venus-v7 && make install-venus-v7
 3f. Config seule (energy): sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart energy-manager
 3g. Grafana dashboards  : bash scripts/deploy-pi5.sh (ou manuellement : sudo cp contrib/grafana/dashboards/*.json /var/lib/grafana/dashboards/ && sudo systemctl restart grafana-server)
 ```
+
+> **`scripts/deploy.sh` vs `scripts/deploy-pi5.sh`** : `deploy.sh` = quotidien
+> (code + config + binaires, redémarrages ciblés, **applique** Config.toml avec
+> backup). `deploy-pi5.sh` = complet/infra (Grafana, bridge mosquitto, validation
+> métriques, auto-réparations ; **n'écrase pas** Config.toml en prod, alerte seulement).
 
 ---
 
@@ -162,6 +175,9 @@ contrib/grafana/                        ← provisioning Grafana complet
      bilan énergie J/J-1, alertes multi-critères — cf. docs/metriques-promql-reference.md §9)
   provisioning/datasources/daly-metrics.yaml        ← datasource PromQL → :8080
   provisioning/dashboards/daly-bms.yaml             ← provider → /var/lib/grafana/dashboards
+scripts/deploy.sh                       ← déploiement COURANT (≈90 %) : sync + build + applique
+                                          Config.toml (diff+backup) + redémarrages CIBLÉS + vérif.
+                                          `--no-config` / `--no-build` / `--dry-run`.
 scripts/setup-grafana.sh                ← installation Grafana (première fois)
 scripts/deploy-pi5.sh                   ← déploiement complet (binaires + mosquitto.conf + Grafana + validation)
                                           ⚠ NE déploie PAS Config.toml si /etc/daly-bms/config.toml existe
