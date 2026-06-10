@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
-# Déploiement Pi5 — daly-bms-server + energy-manager + validation
+# Déploiement Pi5 — SCRIPT UNIQUE (daly-bms-server + energy-manager + infra).
+#
+# Voie unique de déploiement Pi5 : sync → build → config → unités systemd →
+# mosquitto/Grafana → déploiement CIBLÉ (ne redémarre que ce qui a changé) →
+# validation. Remplace l'ancien duo deploy.sh / deploy-pi5.sh (fusionnés ici
+# pour éviter les divergences — cf. audit : deploy.sh oubliait les unités
+# systemd, d'où des limites mémoire non appliquées).
 #
 # Usage (depuis ~/Daly-BMS-Rust sur le Pi5) :
-#   bash scripts/deploy-pi5.sh                  # full deploy + validation
-#   bash scripts/deploy-pi5.sh --no-build       # skip make build-arm
-#   bash scripts/deploy-pi5.sh --no-validate    # skip script test-api.sh
+#   bash scripts/deploy-pi5.sh                  # sync + build + déploiement ciblé + infra + validation
+#   bash scripts/deploy-pi5.sh --dry-run        # montre le plan (code/config/binaires/unités), n'écrit RIEN
+#   bash scripts/deploy-pi5.sh --no-sync        # garder le code local (pas de make sync)
+#   bash scripts/deploy-pi5.sh --no-build       # utiliser les binaires déjà compilés dans target/
+#   bash scripts/deploy-pi5.sh --apply-config   # appliquer Config.toml du repo → prod (diff + backup)
+#   bash scripts/deploy-pi5.sh --no-validate    # sauter scripts/test-api.sh
+# (options combinables ; --dry-run l'emporte sur toute écriture.)
+#
+# Config.toml : PRÉSERVÉE par défaut (la prod fait foi). Le script ne fait que
+# bootstrap (si absente) + auto-réparations ciblées (port série, metrics_store).
+# Pour pousser une vraie modif de config du repo → --apply-config (avec backup).
 #
 # Architecture post-migration redb (cf. docs/metriques-redb-architecture.md) :
-# - metrics-store (redb à /mnt/nvme/daly-bms/metrics.redb) est la TSDB
-#   primaire, sert toutes les lectures via le dispatcher PromQL local
-#   (`/api/v1/query[_range]`, `/api/v1/chart/*`, `/api/v1/history/*`,
-#    `/api/v1/dashboards/*`, `/api/v1/redb/*`).
-# - VictoriaMetrics retiré (Phase 5 cleanup). Le script désactive le
-#   service victoriametrics.service s'il tourne encore et archive le
-#   data dir.
-# - Le dashboard custom `/dashboard/history` lit aussi metrics-store
-#   donc suit le toggle `[metrics_store].default_backend`.
+# metrics-store (redb /mnt/nvme/daly-bms/metrics.redb) est la TSDB primaire ;
+# VictoriaMetrics retiré (Phase 5) — le service est désactivé s'il traîne encore.
 
 set -euo pipefail
 
@@ -25,30 +32,33 @@ step()  { echo -e "${CYAN}[>>]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[!!]${NC} $*"; }
 error() { echo -e "${RED}[XX]${NC} $*" >&2; exit 1; }
 
+DO_SYNC=true
 DO_BUILD=true
 DO_VALIDATE=true
+APPLY_CONFIG=false
+DRY_RUN=false
 for arg in "$@"; do
     case "$arg" in
-        --no-build)    DO_BUILD=false ;;
-        --no-validate) DO_VALIDATE=false ;;
+        --no-sync)      DO_SYNC=false ;;
+        --no-build)     DO_BUILD=false ;;
+        --no-validate)  DO_VALIDATE=false ;;
+        --apply-config) APPLY_CONFIG=true ;;
+        --dry-run)      DRY_RUN=true ;;
         -h|--help)
-            sed -n '/^# Usage/,/^$/p' "$0" | sed 's/^# //'
+            sed -n '/^# Usage/,/^$/p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
+        *) error "Argument inconnu : $arg (voir --help)" ;;
     esac
 done
+$DRY_RUN && warn "DRY-RUN : aucune écriture (config / binaires / unités / restart) ne sera appliquée."
 
-# Compilation et `git` doivent tourner sous l'utilisateur appelant (pas root) :
-# `rustup`/`cargo` sont installés dans son `~/.cargo` et le dépôt lui appartient.
-# Sous `sudo`, le PATH de root n'inclut pas `~/.cargo/bin` → « rustup: not found ».
-# `as_user` ré-exécute la commande dans un shell de login de cet utilisateur
-# (PATH chargé via ~/.profile / ~/.cargo/env). L'install (cp /usr/local/bin,
-# systemctl) reste en root.
-#
-# `$PWD` et la commande sont passés en **paramètres positionnels** ($1, $2) au
-# shell de login (et non interpolés dans la chaîne) pour éviter toute double
-# expansion / injection si le chemin ou la commande contient des caractères
-# spéciaux (revue Gemini).
+# Compilation et `git` tournent sous l'utilisateur appelant (pas root) :
+# `rustup`/`cargo` sont dans son `~/.cargo`, le dépôt lui appartient. Sous `sudo`,
+# le PATH de root n'inclut pas `~/.cargo/bin` → « rustup: not found ». `as_user`
+# ré-exécute dans un shell de login de cet utilisateur. L'install (cp, systemctl)
+# reste en root. `$PWD` + commande passés en paramètres positionnels pour éviter
+# toute double expansion / injection (revue Gemini).
 RUN_USER="${SUDO_USER:-$(id -un)}"
 as_user() {
     if [ "$(id -un)" = "root" ] && [ "$RUN_USER" != "root" ]; then
@@ -58,281 +68,315 @@ as_user() {
     fi
 }
 
-# ── 1. Récupération du code ───────────────────────────────────────────────────
-step "Synchronisation du dépôt…"
-as_user "make sync" || error "make sync a échoué"
-info "Code à jour"
+ARM_DIR=target/aarch64-unknown-linux-gnu/release
+CONF=/etc/daly-bms/config.toml
+# Suivi des changements pour le déploiement ciblé (§6).
+CONFIG_CHANGED=false          # config (appliquée ou auto-réparée) → restart des 2 services
+declare -A UNIT_CHANGED       # par service → restart même si binaire identique
+bin_for() { case "$1" in daly-bms) echo daly-bms-server ;; energy-manager) echo energy-manager ;; esac; }
 
-# ── 2. Compilation croisée aarch64 (sous l'utilisateur appelant, pas root) ────
-if $DO_BUILD; then
+# ── 1. Récupération du code ───────────────────────────────────────────────────
+if $DO_SYNC; then
+    step "Synchronisation du dépôt (branche courante)…"
+    if $DRY_RUN; then
+        as_user "git fetch origin \$(git rev-parse --abbrev-ref HEAD)" || true
+        warn "[dry-run] commits entrants :"
+        as_user "git --no-pager log --oneline HEAD..FETCH_HEAD" 2>/dev/null || true
+    else
+        as_user "make sync" || error "make sync a échoué"
+        info "Code à jour"
+    fi
+else
+    warn "Sync skippé (--no-sync) — code local conservé"
+fi
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo '?')
+info "Code : branche '$BRANCH' @ $COMMIT"
+
+# ── 2. Compilation croisée aarch64 (sous l'utilisateur appelant) ──────────────
+# Build inconditionnel (le cache Cargo rend un build sans changement quasi
+# instantané) ; c'est le diff binaire en §6 qui décide du redémarrage.
+if $DRY_RUN; then
+    warn "[dry-run] build sauté — comparaison sur les binaires déjà présents dans $ARM_DIR"
+elif $DO_BUILD; then
     step "Compilation daly-bms-server (aarch64) — user: $RUN_USER…"
     as_user "make build-arm" || error "make build-arm a échoué"
     info "daly-bms-server compilé"
-
     step "Compilation energy-manager (aarch64) — user: $RUN_USER…"
     as_user "make build-energy-arm" || error "make build-energy-arm a échoué"
     info "energy-manager compilé"
 else
-    warn "Build skippé (--no-build)"
+    warn "Build skippé (--no-build) — binaires existants dans $ARM_DIR"
 fi
 
-# ── 3. Déploiement Config.toml (uniquement si /etc/daly-bms/config.toml absent) ──
-#
-# IMPORTANT — le Config.toml du repo est un TEMPLATE par défaut destiné à
-# l'initialisation. Sur un Pi5 déjà en prod, la config a été calibrée par
-# l'opérateur (cache_mb, enabled flags, etc.) ; la copier aveuglément
-# ÉCRASERAIT ces réglages. On NE copie donc que si le fichier de
-# destination n'existe pas (bootstrap initial).
-#
-# Pour appliquer des changements de config en cours d'exploitation, l'opérateur
-# édite /etc/daly-bms/config.toml manuellement OU passe explicitement par :
-#   sudo cp Config.toml /etc/daly-bms/config.toml   # ÉCRASE
-CONF=/etc/daly-bms/config.toml
+# ── 3. Config.toml ────────────────────────────────────────────────────────────
+# Défaut : PRÉSERVER (la prod a été calibrée par l'opérateur). --apply-config
+# pour pousser le repo (diff + backup). Bootstrap si la cible est absente.
 if [[ ! -f "$CONF" ]]; then
     step "Première installation : copie Config.toml → $CONF…"
-    sudo mkdir -p /etc/daly-bms
-    sudo cp Config.toml "$CONF"
-    info "Config.toml initialisée"
+    if $DRY_RUN; then warn "[dry-run] $CONF absent → serait créé depuis le repo"
+    else
+        sudo mkdir -p /etc/daly-bms
+        sudo cp Config.toml "$CONF"
+        CONFIG_CHANGED=true
+        info "Config.toml initialisée"
+    fi
+elif $APPLY_CONFIG; then
+    if sudo cmp -s Config.toml "$CONF"; then
+        info "Config identique à la prod — rien à appliquer"
+    else
+        warn "Différences config (prod ◀ repo) :"
+        sudo diff "$CONF" Config.toml || true
+        if $DRY_RUN; then warn "[dry-run] la config ci-dessus serait appliquée (backup auto)"
+        else
+            BACKUP="$CONF.bak-$(date +%Y%m%d_%H%M%S)"
+            sudo cp "$CONF" "$BACKUP"
+            sudo cp Config.toml "$CONF"
+            CONFIG_CHANGED=true
+            info "Config appliquée — backup : $BACKUP"
+        fi
+    fi
 else
-    info "$CONF existe déjà — préservé (pas d'écrasement)"
+    info "$CONF préservé (pas d'écrasement ; --apply-config pour pousser le repo)"
 fi
 
-# ── 3.bis Auto-réparation : port série vide → /dev/ttyUSB0 ──────────────────
-# Un port vide déclenche l'auto-détection qui échoue si le BMS ne répond pas
-# dans la fenêtre de scan au démarrage. Le port est fixe sur ce Pi5.
-step "Vérification port série…"
-SERIAL_PORT=$(awk '/^\[serial\]/,/^\[/' "$CONF" \
-    | grep -E '^port' | sed -E 's/.*=\s*"([^"]*)".*/\1/' | head -1)
-if [[ -z "$SERIAL_PORT" ]]; then
-    warn "[serial].port vide — réparation : /dev/ttyUSB0"
-    sudo sed -i '/^\[serial\]/,/^\[/{s|^port = ""|port = "/dev/ttyUSB0"|}' "$CONF"
-    info "[serial].port forcé à /dev/ttyUSB0 ✓"
-else
-    info "[serial].port = $SERIAL_PORT ✓"
-fi
+# ── 3.bis Auto-réparations ciblées (ne réécrivent QUE la clé fautive) ─────────
+# Ces correctifs évitent un service mort au boot ; ils s'appliquent même sans
+# --apply-config car ils ne touchent pas aux réglages calibrés par l'opérateur.
+if [[ -f "$CONF" ]]; then
+    # Port série vide → auto-détection qui échoue si le BMS tarde. Port fixe ici.
+    step "Vérification port série…"
+    SERIAL_PORT=$(awk '/^\[serial\]/,/^\[/' "$CONF" \
+        | grep -E '^port' | sed -E 's/.*=\s*"([^"]*)".*/\1/' | head -1)
+    if [[ -z "$SERIAL_PORT" ]]; then
+        if $DRY_RUN; then warn "[dry-run] [serial].port vide → serait forcé à /dev/ttyUSB0"
+        else
+            warn "[serial].port vide — réparation : /dev/ttyUSB0"
+            sudo sed -i '/^\[serial\]/,/^\[/{s|^port = ""|port = "/dev/ttyUSB0"|}' "$CONF"
+            CONFIG_CHANGED=true
+            info "[serial].port forcé à /dev/ttyUSB0 ✓"
+        fi
+    else
+        info "[serial].port = $SERIAL_PORT ✓"
+    fi
 
-# ── 3.ter Auto-réparation des flags critiques (post-Phase 5.1) ───────────────
-# metrics-store est maintenant la SEULE TSDB de lecture — si elle est
-# désactivée par accident (cp Config.toml, sed mal ciblé, etc.), le service
-# n'a plus de backend et le dashboard custom + Grafana retournent vide.
-# Cette étape détecte ces cas et applique la réparation automatiquement
-# (avec backup horodaté).
-step "Vérification config critique (auto-répare si besoin)…"
-
-# Check 1 : section [metrics_store] présente
-if ! grep -q '^\[metrics_store\]' "$CONF"; then
-    error "Section [metrics_store] absente de $CONF — éditer manuellement avant de relancer"
-fi
-
-# Check 2 : metrics_store.enabled = true
-METRICS_ENABLED=$(awk '/^\[metrics_store\]/,/^\[/' "$CONF" \
-    | grep -E '^enabled' | sed -E 's/.*=\s*(true|false).*/\1/' | head -1)
-if [[ "$METRICS_ENABLED" != "true" ]]; then
-    BACKUP="$CONF.before-autorepair-$(date +%Y%m%d_%H%M%S)"
-    warn "[metrics_store].enabled = '$METRICS_ENABLED' — réparation en cours (backup → $BACKUP)"
-    sudo cp "$CONF" "$BACKUP"
-    sudo sed -i '/^\[metrics_store\]/,/^\[/ {s/^enabled = false$/enabled = true/}' "$CONF"
+    # metrics-store = seule TSDB de lecture ; désactivée par accident = dashboards vides.
+    step "Vérification config critique (metrics_store)…"
+    grep -q '^\[metrics_store\]' "$CONF" || error "Section [metrics_store] absente de $CONF — éditer manuellement"
     METRICS_ENABLED=$(awk '/^\[metrics_store\]/,/^\[/' "$CONF" \
         | grep -E '^enabled' | sed -E 's/.*=\s*(true|false).*/\1/' | head -1)
     if [[ "$METRICS_ENABLED" != "true" ]]; then
-        error "Échec de la réparation [metrics_store].enabled — éditer manuellement $CONF"
+        if $DRY_RUN; then warn "[dry-run] [metrics_store].enabled='$METRICS_ENABLED' → serait forcé à true"
+        else
+            BACKUP="$CONF.before-autorepair-$(date +%Y%m%d_%H%M%S)"
+            warn "[metrics_store].enabled = '$METRICS_ENABLED' — réparation (backup → $BACKUP)"
+            sudo cp "$CONF" "$BACKUP"
+            sudo sed -i '/^\[metrics_store\]/,/^\[/ {s/^enabled = false$/enabled = true/}' "$CONF"
+            CONFIG_CHANGED=true
+            info "[metrics_store].enabled forcé à true ✓"
+        fi
+    else
+        info "[metrics_store].enabled = true ✓"
     fi
-    info "[metrics_store].enabled forcé à true ✓"
-else
-    info "[metrics_store].enabled = true ✓"
+
+    # db_path : parent doit exister et appartenir à l'utilisateur du service.
+    DB_PATH=$(grep -E '^db_path' "$CONF" | sed -E 's/.*=\s*"([^"]+)".*/\1/' | head -1)
+    DB_PATH="${DB_PATH:-/mnt/nvme/daly-bms/metrics.redb}"
+    DB_DIR=$(dirname "$DB_PATH")
+    DALY_USER=$(systemctl show daly-bms --property=User --value 2>/dev/null || echo dalybms)
+    DALY_USER="${DALY_USER:-dalybms}"
+    if $DRY_RUN; then info "[dry-run] db_path = $DB_PATH (parent owner attendu : $DALY_USER)"
+    else
+        sudo mkdir -p "$DB_DIR"
+        sudo chown "$DALY_USER:$DALY_USER" "$DB_DIR"
+        info "db_path = $DB_PATH (parent owner=$DALY_USER) ✓"
+    fi
+
+    # Config DEYE : alerte non destructive si les nouvelles clés manquent.
+    step "Vérification config DEYE…"
+    DEYE_STALE=false
+    grep -q '^[[:space:]]*shelly_deye_channels' "$CONF" || DEYE_STALE=true
+    grep -q '^[[:space:]]*mppt_cut_enabled'     "$CONF" || DEYE_STALE=true
+    if $DEYE_STALE; then
+        warn "Config DEYE incomplète (shelly_deye_channels / mppt_cut_enabled absents) →"
+        warn "  corrections DEYE inactives. Appliquer : bash scripts/deploy-pi5.sh --apply-config"
+    else
+        info "Config DEYE à jour ✓"
+    fi
 fi
 
-# Check 3 : db_path résolvable, parent writable par dalybms
-DB_PATH=$(grep -E '^db_path' "$CONF" | sed -E 's/.*=\s*"([^"]+)".*/\1/' | head -1)
-DB_PATH="${DB_PATH:-/mnt/nvme/daly-bms/metrics.redb}"
-DB_DIR=$(dirname "$DB_PATH")
-if [[ ! -d "$DB_DIR" ]]; then
-    warn "Répertoire $DB_DIR absent — création"
-fi
-DALY_USER=$(systemctl show daly-bms --property=User --value 2>/dev/null || echo dalybms)
-DALY_USER="${DALY_USER:-dalybms}"
-sudo mkdir -p "$DB_DIR"
-sudo chown "$DALY_USER:$DALY_USER" "$DB_DIR"
-info "db_path = $DB_PATH (parent owner=$DALY_USER) ✓"
-
-# ── 3.quater Vérification config DEYE (nouveaux paramètres, non destructif) ──
-# La règle deye_command a évolué : coupure relais à 51,0 Hz (et non 52,0),
-# pilotage des DEUX canaux Shelly, et coupure anticipée sur l'état de charge
-# des MPPT. Ces réglages vivent dans [energy_manager.deye] / [energy_manager.victron].
-# Le script ne réécrit JAMAIS la config prod (cf. §3) : on se contente d'alerter
-# si le fichier déployé ne contient pas les nouvelles clés — sinon les correctifs
-# DEYE resteraient inactifs silencieusement (ancien freq_high_hz=52,0 conservé).
-step "Vérification config DEYE…"
-DEYE_STALE=false
-grep -q '^[[:space:]]*shelly_deye_channels' "$CONF" || DEYE_STALE=true
-grep -q '^[[:space:]]*mppt_cut_enabled'     "$CONF" || DEYE_STALE=true
-if $DEYE_STALE; then
-    warn "Config DEYE incomplète dans $CONF (shelly_deye_channels / mppt_cut_enabled absents)."
-    warn "→ Les corrections DEYE (coupure 51,0 Hz, 2 canaux Shelly, coupure MPPT) ne seront PAS actives."
-    warn "  Appliquer (écrase la config — vérifier les autres réglages d'abord) :"
-    warn "    sudo cp Config.toml $CONF && sudo systemctl restart energy-manager"
-else
-    info "Config DEYE à jour (shelly_deye_channels + mppt_cut_enabled présents) ✓"
-fi
-
-# ── 4. NVMe monté ? ──────────────────────────────────────────────────────────
+# ── 4. NVMe monté + retrait VictoriaMetrics (Phase 5) ─────────────────────────
 mountpoint -q /mnt/nvme || warn "/mnt/nvme non monté — vérifier /etc/fstab"
-
-# Phase 5 cleanup : VictoriaMetrics retiré du code (commit 5aa9b89+).
-# Si le service victoriametrics tourne encore sur ce Pi5, le désactiver
-# explicitement pour libérer ~135 Mo de RSS et le port :8428.
 if systemctl is-active --quiet victoriametrics 2>/dev/null; then
-    warn "victoriametrics.service est encore actif — désactivation (Phase 5 retrait)"
-    sudo systemctl stop victoriametrics
-    sudo systemctl disable victoriametrics
-    info "victoriametrics.service stoppé + disabled"
-    # /mnt/nvme/victoria-metrics conservé en lecture seule pour rollback
-    if [[ -d /mnt/nvme/victoria-metrics ]]; then
-        sudo mv /mnt/nvme/victoria-metrics /mnt/nvme/victoria-metrics.archive-$(date +%Y%m%d) 2>/dev/null || true
-        info "Data dir VM archivée (rollback possible pendant 30 j)"
+    if $DRY_RUN; then warn "[dry-run] victoriametrics actif → serait stoppé + disabled (Phase 5)"
+    else
+        warn "victoriametrics.service encore actif — désactivation (Phase 5 retrait)"
+        sudo systemctl stop victoriametrics
+        sudo systemctl disable victoriametrics
+        info "victoriametrics.service stoppé + disabled"
+        if [[ -d /mnt/nvme/victoria-metrics ]]; then
+            sudo mv /mnt/nvme/victoria-metrics /mnt/nvme/victoria-metrics.archive-$(date +%Y%m%d) 2>/dev/null || true
+            info "Data dir VM archivée (rollback possible 30 j)"
+        fi
     fi
 else
     info "VictoriaMetrics non installé / déjà retiré"
 fi
 
-# ── 5. systemd unit (si modifié dans le repo, redéployer) ───────────────────
-if ! sudo diff -q contrib/daly-bms.service /etc/systemd/system/daly-bms.service >/dev/null 2>&1; then
-    step "Mise à jour /etc/systemd/system/daly-bms.service…"
-    sudo cp contrib/daly-bms.service /etc/systemd/system/
-    sudo systemctl daemon-reload
-    info "Unit systemd daly-bms mis à jour"
-fi
-if [[ -f contrib/energy-manager.service ]] \
-   && ! sudo diff -q contrib/energy-manager.service /etc/systemd/system/energy-manager.service >/dev/null 2>&1; then
-    step "Mise à jour /etc/systemd/system/energy-manager.service…"
-    sudo cp contrib/energy-manager.service /etc/systemd/system/
-    sudo systemctl daemon-reload
-    info "Unit systemd energy-manager mis à jour"
-fi
+# ── 5. Unités systemd (redéployer si modifiées dans le repo) ──────────────────
+# Un changement d'unité impose un restart du service concerné MÊME si le binaire
+# est identique (cas typique : ajout de MemoryHigh/Max, RequiresMountsFor…).
+for svc in daly-bms energy-manager; do
+    src="contrib/${svc}.service"
+    dst="/etc/systemd/system/${svc}.service"
+    [[ -f "$src" ]] || continue
+    if sudo diff -q "$src" "$dst" >/dev/null 2>&1; then
+        info "Unité $svc à jour"
+    else
+        UNIT_CHANGED[$svc]=1
+        if $DRY_RUN; then
+            warn "[dry-run] unité $svc modifiée → serait copiée + daemon-reload + restart $svc"
+            sudo diff "$dst" "$src" 2>/dev/null | sed 's/^/    /' || true
+        else
+            step "Mise à jour $dst…"
+            sudo cp "$src" "$dst"
+            sudo systemctl daemon-reload
+            info "Unité systemd $svc mise à jour (restart en §6)"
+        fi
+    fi
+done
 
-# ── 5.bis Mosquitto bridge config (si modifié dans le repo) ──────────────────
-# Le bridge MQTT Pi5→NanoPi est défini dans contrib/mosquitto/mosquitto.conf
-# (règles `out` santuario/*). Toute nouvelle famille de topic (ex: santuario/grid/#
-# pour les ET112 acload/grid) DOIT y figurer, sinon le NanoPi ne reçoit rien.
-# Déploiement sécurisé : backup → copie → verify-no-loop.sh → restart, avec
-# restauration automatique si la validation anti-boucle échoue (règle projet n°11).
+# ── 5.bis Mosquitto bridge (si modifié) — backup + verify-no-loop + restart ────
 MOSQ_SRC=contrib/mosquitto/mosquitto.conf
 MOSQ_DST=/etc/mosquitto/mosquitto.conf
 if [[ -f "$MOSQ_SRC" ]] && ! sudo diff -q "$MOSQ_SRC" "$MOSQ_DST" >/dev/null 2>&1; then
-    step "Mise à jour mosquitto.conf (bridge topics)…"
-    MOSQ_BAK="${MOSQ_DST}.bak-$(date +%Y%m%d_%H%M%S)"
-    sudo cp "$MOSQ_DST" "$MOSQ_BAK" 2>/dev/null || true
-    sudo cp "$MOSQ_SRC" "$MOSQ_DST"
-    if [[ -x /usr/local/bin/verify-no-loop.sh ]]; then
-        if ! sudo /usr/local/bin/verify-no-loop.sh; then
-            warn "verify-no-loop a échoué — restauration de mosquitto.conf depuis $MOSQ_BAK"
-            [[ -f "$MOSQ_BAK" ]] && sudo cp "$MOSQ_BAK" "$MOSQ_DST"
-            error "Bridge mosquitto invalide (risque de boucle) — config restaurée, déploiement interrompu"
-        fi
-        info "Bridge validé (aucune boucle)"
+    if $DRY_RUN; then warn "[dry-run] mosquitto.conf modifié → serait déployé (après verify-no-loop) + restart broker"
     else
-        warn "verify-no-loop.sh absent — bridge NON validé (vérifier manuellement les règles 'out')"
+        step "Mise à jour mosquitto.conf (bridge topics)…"
+        MOSQ_BAK="${MOSQ_DST}.bak-$(date +%Y%m%d_%H%M%S)"
+        sudo cp "$MOSQ_DST" "$MOSQ_BAK" 2>/dev/null || true
+        sudo cp "$MOSQ_SRC" "$MOSQ_DST"
+        if [[ -x /usr/local/bin/verify-no-loop.sh ]]; then
+            if ! sudo /usr/local/bin/verify-no-loop.sh; then
+                warn "verify-no-loop a échoué — restauration depuis $MOSQ_BAK"
+                [[ -f "$MOSQ_BAK" ]] && sudo cp "$MOSQ_BAK" "$MOSQ_DST"
+                error "Bridge mosquitto invalide (risque de boucle) — config restaurée, déploiement interrompu"
+            fi
+            info "Bridge validé (aucune boucle)"
+        else
+            warn "verify-no-loop.sh absent — bridge NON validé (vérifier les règles 'out')"
+        fi
+        sudo systemctl restart mosquitto-broker
+        info "mosquitto.conf déployé + broker redémarré"
     fi
-    sudo systemctl restart mosquitto-broker
-    info "mosquitto.conf déployé + mosquitto-broker redémarré"
 else
     info "mosquitto.conf déjà à jour (ou absent du repo)"
 fi
 
-# ── 6. Déploiement daly-bms-server ───────────────────────────────────────────
-step "Déploiement daly-bms-server…"
-sudo systemctl stop daly-bms
-sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/
-sudo systemctl start daly-bms
-sleep 4
+# ── 6. Déploiement CIBLÉ des binaires ─────────────────────────────────────────
+# Redémarre un service ssi : binaire différent, OU unité changée (§5), OU config
+# changée (§3/§3.bis). Évite les interruptions de service inutiles.
+step "Déploiement des binaires (diff vs installé)…"
+RESTARTED=()
+for svc in daly-bms energy-manager; do
+    bin="$(bin_for "$svc")"
+    built="$ARM_DIR/$bin"
+    installed="/usr/local/bin/$bin"
+    [[ -f "$built" ]] || { warn "$built absent (build skippé ?) — $svc ignoré"; continue; }
 
-if ! systemctl is-active --quiet daly-bms; then
-    error "daly-bms n'a pas démarré — vérifier : journalctl -u daly-bms -n 50"
-fi
-info "daly-bms actif"
+    reason=""
+    sudo cmp -s "$built" "$installed" 2>/dev/null || reason="binaire"
+    [[ "${UNIT_CHANGED[$svc]:-}" == "1" ]] && reason="${reason:+$reason+}unité"
+    $CONFIG_CHANGED && reason="${reason:+$reason+}config"
 
-# Inspection des logs de boot
-BOOT_LOG=$(journalctl -u daly-bms --since "30 seconds ago" --no-pager 2>/dev/null)
-echo "$BOOT_LOG" | grep -q 'metrics-store ouvert' && info "metrics-store ouvert ✓" || warn "metrics-store : init non détectée"
+    if [[ -z "$reason" ]]; then
+        info "$svc inchangé — aucun redéploiement"
+        continue
+    fi
+    if $DRY_RUN; then
+        warn "[dry-run] $svc serait redéployé ($reason)"
+        continue
+    fi
+    step "Déploiement $svc ($reason)…"
+    sudo systemctl stop "$svc"
+    sudo cp "$built" "$installed"
+    sudo systemctl start "$svc"
+    RESTARTED+=("$svc")
+    # Healthcheck immédiat (laisse le temps au Type=notify de signaler READY).
+    sleep 4
+    if systemctl is-active --quiet "$svc"; then
+        info "$svc actif"
+    else
+        error "$svc n'a pas démarré — journalctl -u $svc -n 50"
+    fi
+    if [[ "$svc" == "daly-bms" ]]; then
+        journalctl -u daly-bms --since "30 seconds ago" --no-pager 2>/dev/null \
+            | grep -q 'metrics-store ouvert' && info "metrics-store ouvert ✓" \
+            || warn "metrics-store : init non détectée (vérifier les logs)"
+    fi
+done
 
-# ── 7. Déploiement energy-manager ────────────────────────────────────────────
-sleep 2
-step "Déploiement energy-manager…"
-sudo systemctl stop energy-manager
-sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/
-sudo systemctl start energy-manager
-sleep 2
-if systemctl is-active --quiet energy-manager; then
-    info "energy-manager actif"
-else
-    error "energy-manager n'a pas démarré — vérifier : journalctl -u energy-manager -n 50"
-fi
-
-# ── 7.bis Déploiement Grafana ────────────────────────────────────────────────
-# Datasource provisionnée par fichier, dashboards importés via API
-# (contourne le bug "restricted database access" de Grafana 11+).
-if systemctl list-unit-files grafana-server.service &>/dev/null; then
+# ── 7. Grafana (datasource + dashboards) ──────────────────────────────────────
+if $DRY_RUN; then
+    warn "[dry-run] Grafana : datasource + import dashboards non exécutés"
+elif systemctl list-unit-files grafana-server.service &>/dev/null; then
     step "Déploiement Grafana (datasource + dashboards)…"
-
-    # Nettoyage des anciennes datasources
     sudo rm -f /etc/grafana/provisioning/datasources/victoriametrics.yaml
     sudo rm -f /etc/grafana/provisioning/datasources/redb.yaml
-    # Datasource (fonctionne par fichier)
     sudo install -d -m 755 -o root -g grafana /etc/grafana/provisioning/datasources
     sudo install -m 644 -o root -g grafana \
         contrib/grafana/provisioning/datasources/daly-metrics.yaml \
         /etc/grafana/provisioning/datasources/
-    # Supprimer le provisioning fichier des dashboards (bug Grafana 11+)
     sudo rm -f /etc/grafana/provisioning/dashboards/daly-bms.yaml
     sudo rm -f /etc/grafana/provisioning/dashboards/dashboards.yaml
     sudo rm -rf /etc/grafana/dashboards
     info "Datasource provisionnée, providers dashboards nettoyés"
-
-    # Redémarrer pour prendre en compte la datasource
     sudo systemctl restart grafana-server
     sleep 4
-
     if systemctl is-active --quiet grafana-server; then
         info "grafana-server actif — import des dashboards via API…"
         sudo bash scripts/fix-grafana.sh 2>&1 | tail -25
     else
-        warn "grafana-server ne démarre pas — voir : journalctl -u grafana-server -n 30"
+        warn "grafana-server ne démarre pas — journalctl -u grafana-server -n 30"
     fi
 else
-    info "Grafana non installé — installer avec : bash scripts/setup-grafana.sh --nvme"
+    info "Grafana non installé — bash scripts/setup-grafana.sh --nvme"
 fi
 
-# ── 8. Validation API ────────────────────────────────────────────────────────
-if $DO_VALIDATE; then
+# ── 8. Validation API ──────────────────────────────────────────────────────────
+if $DRY_RUN; then
+    warn "[dry-run] validation API (test-api.sh) non exécutée"
+elif $DO_VALIDATE; then
     echo ""
     step "Validation des endpoints API (test-api.sh)…"
     if [[ -x scripts/test-api.sh ]]; then
-        if bash scripts/test-api.sh; then
-            info "Validation API : tous les tests passent ✓"
-        else
-            warn "Validation API : 1+ test(s) en échec — voir sortie ci-dessus"
-        fi
+        if bash scripts/test-api.sh; then info "Validation API : tous les tests passent ✓"
+        else warn "Validation API : 1+ test(s) en échec — voir ci-dessus"; fi
     else
-        warn "scripts/test-api.sh manquant ou non exécutable — skip validation"
+        warn "scripts/test-api.sh manquant/non exécutable — skip"
     fi
 fi
 
 # ── 9. Résumé ─────────────────────────────────────────────────────────────────
 echo ""
+if $DRY_RUN; then
+    echo -e "${YELLOW}═══════════════════════════════════════${NC}"
+    echo -e "${YELLOW}  DRY-RUN terminé — rien n'a été appliqué${NC}"
+    echo -e "${YELLOW}═══════════════════════════════════════${NC}"
+    exit 0
+fi
 echo -e "${GREEN}═══════════════════════════════════════${NC}"
 echo -e "${GREEN}  Déploiement terminé ✓${NC}"
 echo -e "${GREEN}═══════════════════════════════════════${NC}"
 echo ""
-systemctl status daly-bms energy-manager --no-pager 2>/dev/null \
-    | grep -E "^●|Active:" || true
-echo ""
-# Version git du binaire déployé — utile pour confirmer que le bon code tourne.
-COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
-BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
-info "Code déployé : branche '$BRANCH' au commit $COMMIT"
+if [[ ${#RESTARTED[@]} -eq 0 ]]; then
+    info "Aucun service redémarré (rien n'avait changé)."
+else
+    info "Services redémarrés : ${RESTARTED[*]}"
+fi
+info "Code déployé : branche '$BRANCH' @ $COMMIT"
 
-# Comptage des séries en base + check de présence des nouvelles métriques.
-# Laisse 8 s au backend pour traiter les premiers snapshots après restart.
+# Comptage des séries + présence des métriques clés (8 s pour les 1ers snapshots).
 echo ""
 step "Patientons 8 s avant comptage des séries…"
 sleep 8
@@ -353,6 +397,7 @@ NEW_METRICS=(
     em_cpu_percent em_memory_percent
     dc_pv_power_w pvinv_power_w solar_yield_kwh solar_total_wh
     ats_voltage_v ats_freq_hz total_solar_power
+    source_last_update_age_seconds
 )
 SERIES_JSON=$(curl -s http://localhost:8080/api/v1/redb/series 2>/dev/null || echo '{}')
 PRESENT=0; MISSING=()
@@ -363,10 +408,10 @@ for m in "${NEW_METRICS[@]}"; do
         MISSING+=("$m")
     fi
 done
-info "Nouvelles métriques présentes : $PRESENT / ${#NEW_METRICS[@]}"
+info "Métriques présentes : $PRESENT / ${#NEW_METRICS[@]}"
 if (( ${#MISSING[@]} > 0 )); then
     warn "Manquantes : ${MISSING[*]}"
-    warn "→ vérifier les payloads MQTT amont (NanoPi dbus-mqtt-venus, energy-manager) :"
+    warn "→ vérifier les payloads MQTT amont :"
     warn "    timeout 5 mosquitto_sub -h 127.0.0.1 -t 'santuario/#' -v"
 fi
 
@@ -375,19 +420,11 @@ step "État des services :"
 for svc in daly-bms energy-manager grafana-server mosquitto-broker; do
     if systemctl list-unit-files "${svc}.service" &>/dev/null; then
         STATUS=$(systemctl is-active "$svc" 2>/dev/null || echo "absent")
-        if [[ "$STATUS" == "active" ]]; then
-            info "$svc : actif"
-        else
-            warn "$svc : $STATUS"
-        fi
+        [[ "$STATUS" == "active" ]] && info "$svc : actif" || warn "$svc : $STATUS"
     fi
 done
-
-# Healthcheck Grafana si actif
 if systemctl is-active --quiet grafana-server 2>/dev/null; then
-    if curl -sf http://localhost:3000/api/health -o /dev/null --max-time 3; then
-        info "Grafana healthcheck OK (http://$(hostname -I 2>/dev/null | awk '{print $1}'):3000)"
-    else
-        warn "Grafana healthcheck échoué — voir : journalctl -u grafana-server -n 30"
-    fi
+    curl -sf http://localhost:3000/api/health -o /dev/null --max-time 3 \
+        && info "Grafana healthcheck OK" \
+        || warn "Grafana healthcheck échoué — journalctl -u grafana-server -n 30"
 fi

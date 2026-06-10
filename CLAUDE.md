@@ -14,7 +14,7 @@
 
 | Quand | Commande |
 |-------|----------|
-| **Déploiement courant (≈90 %)** | `sudo bash scripts/deploy.sh` (sync+build+config+binaires ciblés+vérif ; `--dry-run` pour prévisualiser) |
+| **Déploiement Pi5 (script unique)** | `sudo bash scripts/deploy-pi5.sh` (sync + build + config + unités systemd + binaires ciblés + Grafana/mosquitto + validation). Aperçu : `--dry-run`. Pousser la config repo : `--apply-config`. |
 | Récupérer le code | `make sync` |
 | Appliquer Config.toml | `sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart daly-bms` |
 | Logs BMS | `journalctl -u daly-bms -f` |
@@ -68,10 +68,13 @@ make build-venus-v7 && make install-venus-v7
 1. Claude Code → git add + commit + push
 2. Pi5 → make sync
 
-## ⇒ VOIE PRINCIPALE (≈90 % des cas) : sudo bash scripts/deploy.sh
-##   sync + build incrémental + applique Config.toml (diff+backup) + ne redémarre
-##   QUE ce qui a changé + vérif santé. Options : --no-config / --no-build / --dry-run.
-##   Déploiement COMPLET (Grafana, mosquitto, validation métriques) → scripts/deploy-pi5.sh
+## ⇒ VOIE UNIQUE Pi5 : sudo bash scripts/deploy-pi5.sh
+##   sync → build → config (PRÉSERVÉE par défaut) → unités systemd (daemon-reload)
+##   → mosquitto/Grafana → déploiement CIBLÉ (ne redémarre QUE ce qui a changé :
+##   binaire OU unité OU config) → validation. Flags : --dry-run (aperçu, aucune
+##   écriture), --apply-config (pousser Config.toml du repo, avec backup),
+##   --no-sync / --no-build / --no-validate.
+##   NanoPi (dbus-mqtt-venus) reste séparé : make build-venus-v7 && make install-venus-v7
 
 # Détail manuel (si besoin de cibler une seule étape) :
 3a. Config seule        : sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart daly-bms
@@ -83,10 +86,11 @@ make build-venus-v7 && make install-venus-v7
 3g. Grafana dashboards  : bash scripts/deploy-pi5.sh (ou manuellement : sudo cp contrib/grafana/dashboards/*.json /var/lib/grafana/dashboards/ && sudo systemctl restart grafana-server)
 ```
 
-> **`scripts/deploy.sh` vs `scripts/deploy-pi5.sh`** : `deploy.sh` = quotidien
-> (code + config + binaires, redémarrages ciblés, **applique** Config.toml avec
-> backup). `deploy-pi5.sh` = complet/infra (Grafana, bridge mosquitto, validation
-> métriques, auto-réparations ; **n'écrase pas** Config.toml en prod, alerte seulement).
+> **Script de déploiement unique** : `scripts/deploy-pi5.sh` (l'ancien duo
+> `deploy.sh`/`deploy-pi5.sh` a été fusionné — `deploy.sh` oubliait les unités
+> systemd, d'où des limites mémoire non appliquées). Il combine déploiement
+> ciblé (ne redémarre que ce qui a changé), `--dry-run`, et **préserve**
+> `Config.toml` par défaut (`--apply-config` pour pousser le repo avec backup).
 
 ---
 
@@ -175,13 +179,12 @@ contrib/grafana/                        ← provisioning Grafana complet
      bilan énergie J/J-1, alertes multi-critères — cf. docs/metriques-promql-reference.md §9)
   provisioning/datasources/daly-metrics.yaml        ← datasource PromQL → :8080
   provisioning/dashboards/daly-bms.yaml             ← provider → /var/lib/grafana/dashboards
-scripts/deploy.sh                       ← déploiement COURANT (≈90 %) : sync + build + applique
-                                          Config.toml (diff+backup) + redémarrages CIBLÉS + vérif.
-                                          `--no-config` / `--no-build` / `--dry-run`.
 scripts/setup-grafana.sh                ← installation Grafana (première fois)
-scripts/deploy-pi5.sh                   ← déploiement complet (binaires + mosquitto.conf + Grafana + validation)
-                                          ⚠ NE déploie PAS Config.toml si /etc/daly-bms/config.toml existe
-                                          (préserve la prod) → `sudo cp Config.toml /etc/daly-bms/config.toml` manuel.
+scripts/deploy-pi5.sh                   ← SCRIPT DE DÉPLOIEMENT UNIQUE Pi5 : sync + build + config
+                                          + unités systemd + mosquitto/Grafana + déploiement CIBLÉ
+                                          (ne redémarre que ce qui a changé) + validation.
+                                          Flags : --dry-run, --apply-config, --no-sync/--no-build/--no-validate.
+                                          ⚠ PRÉSERVE Config.toml par défaut (--apply-config pour pousser le repo + backup).
                                           ⚠ NE déploie PAS le NanoPi → `make install-venus-v7` séparément.
 ```
 
