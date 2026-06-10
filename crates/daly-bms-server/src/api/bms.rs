@@ -609,6 +609,14 @@ pub async fn ws_all(
 /// Pong automatiquement). Sans cela, un client mort en silence (Wi-Fi coupé,
 /// onglet figé) retenait sa tâche + son récepteur broadcast pendant des
 /// minutes/heures, jusqu'au remplissage des buffers TCP.
+///
+/// NB : les Pings ENTRANTS (client → serveur) n'ont pas besoin d'être gérés
+/// ici — tungstenite y répond automatiquement au niveau protocole
+/// (`set_additional(Frame::pong(...))` à la lecture), y compris après
+/// `socket.split()` (le BiLock donne à `poll_next` l'accès `&mut` complet).
+/// Doc axum `Message::Ping` : « will be automatically responded to by the
+/// server ». Répondre manuellement produirait des doubles Pongs. On compte
+/// simplement ces trames comme preuve de vie (`last_rx`).
 const WS_PING_INTERVAL_SECS: u64 = 30;
 const WS_IDLE_TIMEOUT_SECS:  u64 = 90;
 
