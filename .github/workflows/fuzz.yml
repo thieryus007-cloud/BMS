@@ -20,7 +20,7 @@ jobs:
       matrix:
         target: [daly_frame_parse, promql_parse]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install nightly (requis par libFuzzer)
         run: |
