@@ -182,13 +182,15 @@ async fn mqtt_task(
 }
 
 async fn writer_task(
-    cfg: SolarConfig,
+    // `bms_server_url` n'est plus utilisé : la télémétrie part en MQTT
+    // (topic `santuario/em/solar`) au lieu d'un POST HTTP 1 Hz. Le champ
+    // de config est conservé pour ne pas casser les Config.toml existants
+    // (détection de clés inconnues, audit 2026-06 §12).
+    _cfg: SolarConfig,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
 ) {
-    let http_client = crate::http_clients::shared_client();
-    let api_url     = format!("{}/api/v1/solar/mppt-yield", cfg.bms_server_url);
-    let mut ticker  = interval(Duration::from_secs(1));
+    let mut ticker = interval(Duration::from_secs(1));
 
     loop {
         ticker.tick().await;
@@ -214,15 +216,11 @@ async fn writer_task(
             "total_yield_kwh": total_yield,
             "house_power_w":   house_power,
         });
-        if let Err(e) = http_client
-            .post(&api_url)
-            .json(&body)
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await
-        {
-            warn!("Solar API POST error: {e}");
-        }
+        // Publication MQTT (QoS de transient, non retenu) — daly-bms-server
+        // souscrit à `santuario/em/solar` et alimente ses RwLock + metrics-store
+        // exactement comme l'ancien handler POST /api/v1/solar/mppt-yield
+        // (conservé en fallback).
+        bus.publish(MqttOutgoing::transient(publish::EM_SOLAR, &body)).await;
 
         bus.emit_live(LiveEvent::new("solar", json!({
             "solar_total_w": solar_total,

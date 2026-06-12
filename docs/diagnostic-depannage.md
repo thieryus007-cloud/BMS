@@ -54,6 +54,7 @@
   - [§14 Phase B livré (commit b73024f) — tower-http 0.5 → 0.6](#14-phase-b-livre-commit-b73024f--tower-http-05--06)
   - [§15 Status final — investigation close](#15-status-final--investigation-close)
   - [§16 Phase C (commit 018e363) — axum 0.7 → 0.8](#16-phase-c-commit-018e363--axum-07--08)
+  - [§17 Phase D (2026-06) — root cause du résiduel : trafic HTTP passif 1 Hz](#17-phase-d-2026-06--root-cause-du-residuel--trafic-http-passif-1-hz)
 - [Voir aussi](#voir-aussi)
 - [Sources consolidées](#sources-consolidees)
 
@@ -753,6 +754,8 @@ com.victronenergy.meteo
 > **STATUT INITIAL : NON RÉSOLU** — Fuite linéaire confirmée par mesure terrain.
 > **STATUT FINAL : TERMINÉE** (commit 018e363) — Réduction -82 % (6.6 MB/h → 1.18 MB/h).
 > Voir §15 (status final) et §16.4 (synthèse 3 phases).
+> **Phase D (2026-06)** : root cause du résiduel identifiée (trafic HTTP passif
+> 1 Hz d'energy-manager) et corrigée — voir §17.
 >
 > Les numéros de section (§1–§16) sont préservés car certains commentaires du code source
 > y font référence (notamment `api/mod.rs` §13, `daly-bms.service` §10,
@@ -1397,6 +1400,57 @@ est passée de 6.6 MB/h à 1.18 MB/h (-82 %). Avec le workaround
 Pour pousser plus loin (futur, optionnel) : audit du code applicatif
 pour réduire les allocations transitoires (`json!`/`format!` patterns),
 mais le ROI devient marginal sous 1.18 MB/h.
+
+---
+
+### §17 Phase D (2026-06) — root cause du résiduel : trafic HTTP passif 1 Hz
+
+#### §17.1 — Le point aveugle des bisections
+
+Relecture à froid de §9.1 : aucune bisection n'a jamais coupé le **POST HTTP
+1 Hz** qu'energy-manager envoyait vers `/api/v1/solar/mppt-yield`
+(`logic/solar_power::writer_task`, `interval(Duration::from_secs(1))`).
+3 600 requêtes/heure traversaient la stack Axum 24 h/24, même « sans aucun
+client externe » — le régime qualifié de « passif » ne l'était pas.
+
+Le calcul colle avec la pente résiduelle de §16.3 :
+1 184 kB/h ÷ 3 600 req/h ≈ **330 octets/requête** — même ordre de grandeur
+que les ~296 o/req mesurés par valgrind en §13.2. Les phases B/C ont réduit
+le coût par requête (-82 %), jamais le débit de requêtes. Cela explique
+aussi pourquoi « arrêter energy-manager » faisait tomber la pente (§1) :
+on attribuait l'effet aux messages MQTT entrants, mais l'arrêt coupait
+aussi le POST 1 Hz.
+
+#### §17.2 — Correctifs appliqués
+
+| Axe | Changement | Effet attendu |
+|-----|-----------|----------------|
+| A | Télémétrie solaire **MQTT** : `santuario/em/solar` (1 Hz conservé) au lieu du POST HTTP. Handler `handle_em_solar_topic` (bridges/mqtt.rs), sémantique identique à `set_mppt_yield` (conservé en fallback). | -3 600 req HTTP/h → suppression du moteur du résiduel |
+| B | Auto-télémétrie mémoire : agent monitor exporte toutes les 30 s `process_rss_bytes` + `process_jemalloc_{allocated,active,resident,mapped,retained}_bytes` (tikv-jemalloc-ctl, feature `stats`) → dashboard Grafana **« 21 - Mémoire daly-bms »** (`daly-mem-21`). | Diagnostic définitif fuite vs rétention, sans heaptrack/valgrind |
+| C1 | `redb_writes::push()` : construction **paresseuse** du `Sample` (closure `FnOnce`) — l'ancien passage par valeur jetait ~80 % des constructions (snapshots ~1 Hz, écriture 1×/5 s). | -churn d'allocations continu |
+| C2 | AlertEngine sur **canal mpsc dédié** (`alert_tx`) au lieu d'un abonnement permanent au broadcast `ws_tx` — la garde `receiver_count() > 0` de `on_snapshot` était toujours vraie, forçant un clone de `latest_snapshots()` à chaque poll même sans client WS. | -churn, garde broadcast à nouveau effective |
+| C3 | `TraceLayer` retiré (api/mod.rs) : span + allocations par requête sans aucun consommateur (`RUST_LOG=info`). | -churn par requête |
+| — | Page `/dashboard/history` + `/api/v1/dashboards/*` + `/api/v1/history/energy` retirés (Grafana = unique outil d'historique). Supprime aussi les bursts `eval_range` lourds historiques (§2.2, VmPeak 367 Mo). | -code mort, -surface mémoire |
+
+Trafic HTTP passif restant : irradiance GET 1/30 s (energy-manager) +
+water-heater POST 1/300 s + sondes TCP watchdog/monitor. ≈ 132 req/h,
+soit ~3,6 % de l'ancien débit.
+
+#### §17.3 — Protocole de validation
+
+1. Déployer, attendre 1 h de régime stable, puis :
+   `awk '/^VmRSS|^Anonymous/' /proc/$(pidof daly-bms-server)/smaps_rollup`
+   sur 1 h (méthode §9.4). Attendu : pente << 1,18 MB/h.
+2. Dashboard Grafana 21 sur 24 h : si `allocated` plat et RSS plat →
+   envisager d'allonger `RuntimeMaxSec` (86400 → 604800) dans
+   `contrib/daly-bms.service`. Garder `MemoryHigh`/`MemoryMax` comme filet.
+3. Si une pente subsiste : la courbe `allocated` tranche désormais seule
+   (croît = fuite applicative à chasser ; plate = tuning decay jemalloc).
+
+#### §17.4 — Statut
+
+Correctifs livrés sur branche `claude/quirky-galileo-qvn74g`. Validation
+terrain (étapes ci-dessus) à faire après déploiement Pi5.
 
 ---
 

@@ -52,4 +52,12 @@ tokio-metrics = { workspace = true }
 # fragmentation glibc confirmée. Switch jemalloc résoud le problème
 # sans appel manuel à trim.
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
+# Feature "stats" : compile jemalloc avec --enable-stats (requis par le ctl).
+tikv-jemallocator = { version = "0.6", features = ["stats"] }
+# Introspection jemalloc (stats.allocated/active/resident/mapped/retained)
+# exportée toutes les 30 s dans metrics-store par l'agent monitor →
+# dashboard Grafana « 21 - Mémoire daly-bms ». Permet de distinguer une
+# vraie fuite Rust (allocated croît) d'une rétention allocateur (resident
+# croît, allocated plat) sans outillage externe (heaptrack/valgrind ont
+# tous échoué en prod — cf. docs/diagnostic-depannage.md §9.2/§17).
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"] }

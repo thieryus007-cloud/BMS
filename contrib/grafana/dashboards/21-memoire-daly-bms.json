@@ -1,0 +1,288 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Auto-télémétrie mémoire du process daly-bms-server — RSS kernel vs statistiques allocateur jemalloc (investigation fuite RSS, docs/diagnostic-depannage.md §17). Diagnostic : si jemalloc allocated croît linéairement, la fuite est applicative (objets Rust retenus) ; si allocated reste plat alors que resident/RSS montent, c'est de la rétention/fragmentation allocateur.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "RSS vs jemalloc — la courbe qui tranche",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Mémoire process — RSS / resident / active / allocated",
+      "description": "allocated = octets vivants alloués par le code Rust. Une pente linéaire ici = vraie fuite applicative. RSS qui monte avec allocated plat = rétention allocateur (tuning decay jemalloc, pas chasse au leak).",
+      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_rss_bytes",
+          "legendFormat": "RSS (kernel)",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_jemalloc_resident_bytes",
+          "legendFormat": "jemalloc resident",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_jemalloc_active_bytes",
+          "legendFormat": "jemalloc active",
+          "refId": "C"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_jemalloc_allocated_bytes",
+          "legendFormat": "jemalloc allocated (heap Rust vivant)",
+          "refId": "D"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "min", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "drawStyle": "line",
+            "spanNulls": true
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Pente 1 h — allocated (fuite applicative ?)",
+      "description": "Δ de jemalloc allocated sur 1 h. Durablement > 0 = fuite Rust réelle.",
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_jemalloc_allocated_bytes - (process_jemalloc_allocated_bytes offset 1h)",
+          "legendFormat": "Δ allocated 1h",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 1048576, "color": "orange" },
+              { "value": 5242880, "color": "red" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Pente 1 h — RSS",
+      "description": "Δ du RSS kernel sur 1 h. Référence historique : 6,6 Mo/h avant les fixes, 1,18 Mo/h après axum 0.8.",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_rss_bytes - (process_rss_bytes offset 1h)",
+          "legendFormat": "Δ RSS 1h",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 2097152, "color": "orange" },
+              { "value": 8388608, "color": "red" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "RSS courant",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_rss_bytes",
+          "legendFormat": "RSS",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 268435456, "color": "orange" },
+              { "value": 536870912, "color": "red" }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Détail allocateur",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "jemalloc — mapped / retained",
+      "description": "mapped = VM mappée par jemalloc. retained = pages rendues au kernel mais conservées en espace d'adressage (ne compte pas dans le RSS).",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_jemalloc_mapped_bytes",
+          "legendFormat": "mapped",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_jemalloc_retained_bytes",
+          "legendFormat": "retained",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "drawStyle": "line",
+            "spanNulls": true
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Fragmentation — écart RSS vs allocated",
+      "description": "Différence entre la mémoire résidente kernel et le heap Rust vivant : métadonnées jemalloc + pages dirty non rendues + code/stacks. Une dérive lente ici sans dérive d'allocated = rétention allocateur.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_rss_bytes - process_jemalloc_allocated_bytes",
+          "legendFormat": "RSS − allocated",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "daly-metrics" },
+          "expr": "process_jemalloc_resident_bytes - process_jemalloc_active_bytes",
+          "legendFormat": "resident − active",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "drawStyle": "line",
+            "spanNulls": true
+          },
+          "mappings": []
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "daly-bms",
+    "memoire",
+    "jemalloc",
+    "diagnostic"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "21 - Mémoire daly-bms (RSS / jemalloc)",
+  "uid": "daly-mem-21",
+  "version": 1
+}

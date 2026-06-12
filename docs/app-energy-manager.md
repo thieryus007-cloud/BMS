@@ -223,7 +223,7 @@ Les modules sont démarrés séquentiellement dans `main.rs`, chacun recevant un
 
 | Fichier | Rôle | Entrées MQTT | Sorties |
 |---------|------|--------------|---------|
-| `solar_power.rs` | Puissance solaire temps réel, baseline journalière | MPPT power/yield, PVInverter power/energy | `solar_power` (1/s), POST daly-bms, LiveEvent `solar` |
+| `solar_power.rs` | Puissance solaire temps réel, baseline journalière | MPPT power/yield, PVInverter power/energy | `solar_power` (1/s), MQTT `santuario/em/solar` (1/s), LiveEvent `solar` |
 | `meteo.rs` | Publication météo Venus + reset minuit | état partagé | MQTT `santuario/meteo/venus`, `santuario/heat/1/venus`, `solar_persist` (1/jour) |
 | `inverter.rs` | Données onduleur VEBus | `N/.../vebus/...` | EnergyState, LiveEvent `inverter`, MQTT `santuario/inverter/venus` |
 | `smartshunt.rs` | Données batterie SmartShunt + intégration Ah | `N/.../system/0/Dc/Battery/...` | EnergyState, LiveEvent `battery`, MQTT `santuario/system/venus` |
@@ -500,7 +500,10 @@ pvinv_yield_today_kwh = (kwh_current - baseline).max(0.0)
 
 **Sorties** :
 - MQTT retained `santuario/persist/pvinv_baseline` (format `"{day}:{kwh:.3}"`)
-- HTTP POST (toutes les 1 s) → `{bms_server}/api/v1/solar/mppt-yield`
+- MQTT `santuario/em/solar` (toutes les 1 s) → consommé par daly-bms-server
+  (remplace l'ancien POST HTTP `/api/v1/solar/mppt-yield`, conservé en fallback
+  côté serveur — la rétention par requête HTTP était le moteur de la fuite RSS
+  résiduelle, cf. `docs/diagnostic-depannage.md` §17)
 - WebSocket live `"solar"`
 
 **Nom du measurement** configurable : `solar.power_measurement` (défaut : `"solar_power"`).

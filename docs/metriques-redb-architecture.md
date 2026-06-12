@@ -42,7 +42,7 @@ construite sur [`redb`](https://crates.io/crates/redb) (B-tree embarqué,
 mono-fichier, MVCC). Elle est l'**unique** backend de métriques du système
 depuis le retrait de VictoriaMetrics (cf. §10). Toutes les valeurs mesurées
 (RS485, D-Bus/MQTT Victron, energy-manager) y sont écrites, et toutes les
-lectures (Grafana, dashboard custom `/dashboard/history`) passent par un
+lectures (Grafana) passent par un
 **shim PromQL** qui évalue les requêtes directement sur le `Reader` redb.
 
 La crate expose trois objets principaux (`crates/metrics-store/src/lib.rs`) :
@@ -110,7 +110,6 @@ La crate expose trois objets principaux (`crates/metrics-store/src/lib.rs`) :
                         └───────────────┬───────────────┘
                                         ▼
                         Grafana datasource (Prometheus-compat)
-                        + dashboard custom /dashboard/history
 ```
 
 Points clés :
@@ -1218,10 +1217,10 @@ sudo systemctl stop daly-bms
 sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/
 sudo systemctl start daly-bms
 
-# 1. Le dashboard custom /dashboard/history doit afficher les courbes
-#    avec le même historique qu'avant (puisque redb a l'historique post-import)
+# 1. Les graphes (Grafana / /api/v1/chart/history) doivent afficher les
+#    courbes avec le même historique qu'avant (redb a l'historique post-import).
+#    NB 2026-06 : /dashboard/history et /api/v1/history/energy ont été retirés.
 curl -s "http://127.0.0.1:8080/api/v1/chart/history?minutes=60" | jq '.solar | length'
-curl -s "http://127.0.0.1:8080/api/v1/history/energy?period=day" | jq 'keys'
 
 # 2. Test côte à côte (toggle backend) pour confirmer la parité
 sudo sed -i 's/^default_backend = "redb"$/default_backend = "vm"/' /etc/daly-bms/config.toml

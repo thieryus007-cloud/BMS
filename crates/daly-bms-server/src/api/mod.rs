@@ -7,12 +7,10 @@ pub mod bms;
 pub mod ats;
 pub mod alerts;
 pub mod console;
-pub mod dashboards;
 pub mod et112;
 pub mod tasmota;
 pub mod shelly;
 pub mod chart;
-pub mod history;
 pub mod promql;
 pub mod redb;
 pub mod health;
@@ -25,7 +23,6 @@ use axum::{
     routing::{get, post},
 };
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::trace::TraceLayer;
 
 /// Construit le router principal de l'application.
 pub fn build_router(state: AppState) -> Router {
@@ -105,17 +102,9 @@ pub fn build_router(state: AppState) -> Router {
         // ── Chart historique (Tsink) ──────────────────────────────────────────
         .route("/api/v1/chart/history",           get(chart::get_chart_history))
         .route("/api/v1/chart/edge-history",      get(chart::get_edge_history))
-        .route("/api/v1/history/energy",          get(history::get_energy_history))
-
-        // ── Dashboards (catalogue panels Grafana + data + layouts) ────────────
-        .route("/api/v1/dashboards/catalog",         get(dashboards::get_catalog))
-        .route("/api/v1/dashboards/panel/{id}/data",  get(dashboards::get_panel_data))
-        .route(
-            "/api/v1/dashboards/layout",
-            get(dashboards::get_layout)
-                .post(dashboards::set_layout)
-                .delete(dashboards::delete_layout),
-        )
+        // NB : /api/v1/history/energy et /api/v1/dashboards/* ont été retirés
+        // avec la page /dashboard/history — l'historique vit dans Grafana
+        // (datasource PromQL /api/v1/query_range ci-dessous).
 
         // ── Tasmota ──────────────────────────────────────────────────────────
         .route("/api/v1/tasmota",                 get(tasmota::list_tasmota))
@@ -170,11 +159,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ws/console",            get(console::ws_console))
 
         // ── Middlewares ───────────────────────────────────────────────────────
-        // tower-http upgrade 0.5 → 0.6 a refactoré le pattern BoxCloneService
-        // qui causait ~80 % des allocations linéaires par requête HTTP en 0.5
-        // (cf. docs/diagnostic-depannage.md §13). Avec 0.6, CorsLayer +
-        // TraceLayer ne fuient plus → on peut tout réactiver.
+        // CorsLayer requis pour Grafana (port 3000 → 8080 cross-origin).
+        // TraceLayer retiré définitivement (investigation RSS §17) : il créait
+        // un span + allocations par requête alors qu'aucun consommateur
+        // n'exploite ces spans (RUST_LOG=info). tower-http 0.6 avait déjà
+        // corrigé la fuite BoxCloneService de la 0.5 (cf. §13), il s'agit ici
+        // de churn évitable, pas d'une fuite.
         .layer(cors)
-        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

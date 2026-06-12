@@ -530,6 +530,7 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
         ("santuario/system/venus", SUB_QOS),
         ("santuario/em/metrics", SUB_QOS),
         ("santuario/em/water_heater", SUB_QOS),
+        ("santuario/em/solar", SUB_QOS),
     ];
 
     for (topic, qos) in &topics {
@@ -593,6 +594,8 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
                         handle_em_metrics_topic(&state, &json);
                     } else if topic == "santuario/em/water_heater" {
                         handle_wh_metrics_topic(&state, &json);
+                    } else if topic == "santuario/em/solar" {
+                        handle_em_solar_topic(&state, &json).await;
                     }
                 }
             }
@@ -957,6 +960,53 @@ fn handle_em_metrics_topic(state: &AppState, json: &Value) {
         net_tx_bps:     f("net_tx_bps"),
     };
     crate::redb_writes::write_em_metrics(&store.writer(), &state.redb_rl, &payload);
+}
+
+/// Traite le topic `santuario/em/solar` — télémétrie solaire agrégée publiée
+/// à 1 Hz par energy-manager (`logic/solar_power::writer_task`).
+///
+/// Remplace l'ancien POST HTTP 1 Hz vers `/api/v1/solar/mppt-yield` (la
+/// rétention par requête de la stack HTTP était le moteur de la fuite RSS
+/// résiduelle — cf. docs/diagnostic-depannage.md §17). Sémantique identique
+/// au handler `api::system::set_mppt_yield`, conservé en fallback.
+///
+/// Payload : `{ "solar_total_w": 1234.0, "dc_pv_power_w": 1000.0,
+///              "pvinv_power_w": 234.0, "mppt_power_w": 1000.0,
+///              "total_yield_kwh": 12.5, "house_power_w": 800.0 }`
+async fn handle_em_solar_topic(state: &AppState, json: &Value) {
+    let f = |k: &str| json.get(k).and_then(|v| v.as_f64()).map(|v| v as f32);
+
+    if let Some(kwh) = f("total_yield_kwh").or_else(|| f("mppt_yield_kwh")) {
+        *state.mppt_yield_kwh.write().await = kwh;
+        if let Some(store) = &state.metrics_store {
+            crate::redb_writes::write_solar_yield(&store.writer(), &state.redb_rl, kwh);
+        }
+    }
+    // dc_pv_power_w est prioritaire ; mppt_power_w est l'alias rétrocompat.
+    let dc_pv_in = f("dc_pv_power_w").or_else(|| f("mppt_power_w"));
+    if let Some(v) = dc_pv_in {
+        *state.dc_pv_power_w.write().await = v;
+        *state.mppt_power_w.write().await  = v;
+    }
+    let pvinv_in = f("pvinv_power_w");
+    if let Some(v) = pvinv_in {
+        *state.pvinv_power_w.write().await = v;
+    }
+    if dc_pv_in.is_some() || pvinv_in.is_some() {
+        if let Some(store) = &state.metrics_store {
+            crate::redb_writes::write_solar_components(
+                &store.writer(), &state.redb_rl, dc_pv_in, pvinv_in);
+        }
+    }
+    if let Some(tw) = f("solar_total_w") {
+        *state.solar_total_w.write().await = tw;
+        if let Some(store) = &state.metrics_store {
+            crate::redb_writes::write_solar_total(&store.writer(), &state.redb_rl, tw);
+        }
+    }
+    if let Some(hw) = f("house_power_w") {
+        *state.house_power_w.write().await = hw;
+    }
 }
 
 /// Traite le topic `santuario/em/water_heater` — état chauffe-eau LG ThinQ.

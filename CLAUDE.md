@@ -35,8 +35,9 @@
 
 ### Perses (Pi5, port 8090)
 
-> ⚠️ Perses a été remplacé par le dashboard custom interne (`/dashboard/history`).
-> Tous les fichiers et scripts d'installation ont été retirés.
+> ⚠️ Perses a été remplacé par Grafana (`:3000`). La page custom `/dashboard/history`
+> et les API `/api/v1/dashboards/*` + `/api/v1/history/energy` ont été retirées
+> (2026-06, axe « churn mémoire » — Grafana est l'unique outil d'historique).
 
 ### NanoPi (`root@192.168.1.120`)
 
@@ -113,7 +114,7 @@ Pi5 (192.168.1.141, pi5compute)
     └── publication MQTT → consommée par daly-bms-server (writes metrics-store)
   grafana-server (systemd, :3000)
     ├── Datasource : "Daly Metrics (redb)" → http://127.0.0.1:8080 (UID: daly-metrics)
-    ├── 20 dashboards provisionés dans /var/lib/grafana/dashboards/
+    ├── 21 dashboards provisionés dans /var/lib/grafana/dashboards/
     └── Données NVMe optionnel (/mnt/nvme/grafana)
 
 NanoPi (192.168.1.120, root)
@@ -174,9 +175,10 @@ crates/dbus-mqtt-venus/src/             ← bridge MQTT→D-Bus NanoPi
 contrib/daly-bms.service                ← unité systemd daly-bms-server
 contrib/energy-manager.service          ← unité systemd energy-manager
 contrib/grafana/                        ← provisioning Grafana complet
-  dashboards/01-bms.json … 20-alertes-avancees.json ← 20 dashboards JSON
+  dashboards/01-bms.json … 21-memoire-daly-bms.json ← 21 dashboards JSON
     (17→20 = dashboards évolués PromQL avancé : flotte/SLO, rendement PV,
-     bilan énergie J/J-1, alertes multi-critères — cf. docs/metriques-promql-reference.md §9)
+     bilan énergie J/J-1, alertes multi-critères — cf. docs/metriques-promql-reference.md §9 ;
+     21 = mémoire process RSS/jemalloc — diagnostic fuite, cf. docs/diagnostic-depannage.md §17)
   provisioning/datasources/daly-metrics.yaml        ← datasource PromQL → :8080
   provisioning/dashboards/daly-bms.yaml             ← provider → /var/lib/grafana/dashboards
 scripts/setup-grafana.sh                ← installation Grafana (première fois)
@@ -249,6 +251,11 @@ ssh root@192.168.1.120 "dbus -y | grep victronenergy"
 | `pvinverter/{n}/venus` | `pvinverter.mqtt_{n}` |
 | `meteo/venus` | `meteo` (singleton) |
 
+Topics internes `santuario/em/*` (energy-manager → daly-bms-server, pas de D-Bus) :
+`em/metrics` (système EM), `em/water_heater` (LG ThinQ), `em/solar` (télémétrie
+solaire 1 Hz — remplace l'ancien POST HTTP `/api/v1/solar/mppt-yield`, conservé
+en fallback ; cf. docs/diagnostic-depannage.md §17).
+
 ---
 
 ## 7. API ENDPOINTS (extraits — voir `crates/daly-bms-server/src/api/mod.rs`)
@@ -299,7 +306,6 @@ GET  /api/v1/et112/:addr/history
 
 # Charts / History
 GET  /api/v1/chart/history            GET  /api/v1/chart/edge-history
-GET  /api/v1/history/energy
 
 # Tasmota / Shelly
 GET  /api/v1/tasmota                  GET  /api/v1/tasmota/:id/status
@@ -324,7 +330,7 @@ WS   /ws/venus/stream                 WS   /ws/console
 Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 `/dashboard/et112`, `/dashboard/et112/:addr`, `/dashboard/tasmota`,
 `/dashboard/tasmota/:id`, `/dashboard/ats`, `/dashboard/monitor`,
-`/dashboard/console`, `/dashboard/visualization`, `/dashboard/history`,
+`/dashboard/console`, `/dashboard/visualization`,
 `/dashboard/alerts`, `/dashboard/logs`, `/dashboard/settings`.
 
 ---
@@ -348,6 +354,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Widget météo "Température: -" | Limitation Venus OS — inévitable, non fixable |
 | `mbpoll` sans réponse | daly-bms monopolise le port — `sudo systemctl stop daly-bms` d'abord |
 | `/dev/ttyUSB0` devient `ttyUSB1` après débranchement USB | Chemin udev stable : `ls -l /dev/serial/by-id/` → `[serial] port = "/dev/serial/by-id/usb-…"` (suit le périphérique à la ré-énumération, `reopen()` inchangé). Cf. docs/integration-materiel.md §2.1 |
+| RSS de daly-bms-server qui croît (suspicion fuite) | Dashboard Grafana « 21 - Mémoire daly-bms » : `process_jemalloc_allocated_bytes` qui croît = fuite applicative ; plat avec RSS qui monte = rétention allocateur. Métriques exportées toutes les 30 s par l'agent monitor (docs/diagnostic-depannage.md §17) |
 | Une source ne se rafraîchit plus (valeurs figées, aucune erreur) | Requêter `source_last_update_age_seconds{source=...}` (bms_0x01, et112_0x07, venus_mppt, irradiance, ats…) et `em_source_last_update_age_seconds` (open_meteo, lg_thinq). Âge > 5× l'intervalle de polling = source morte (audit 2026-06 §18) |
 | metrics-store ne s'ouvre plus après coupure brutale | Quarantaine auto au boot : base corrompue renommée `metrics.redb.corrupt.<ts>` + base vide recréée (audit §15). L'ancien fichier reste sur le NVMe pour autopsie |
 | Dashboard affiche cumul brut | Vérifier `pvinv_baseline` retained MQTT (`santuario/persist/pvinv_baseline`) |
@@ -378,7 +385,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 11. Broker MQTT = Mosquitto natif systemd (`mosquitto-broker.service`). Plus de Docker — config dans `contrib/mosquitto/mosquitto.conf`, déployée vers `/etc/mosquitto/mosquitto.conf`. Toujours valider avec `sudo /usr/local/bin/verify-no-loop.sh` après modif des topics bridge.
 12. Secrets : ne jamais committer `.env`.
 13. **Source de vérité métrique** : les valeurs mesurées par Victron (D-Bus/MQTT) et lues sur RS485 sont **prioritaires sur tout calcul dérivé**. Ne jamais remplacer une mesure firmware par un V×I recalculé, ni écraser un champ direct par un agrégat système. Les sommes (`solar_total = mppt+pvinv`) sont OK car ce sont des agrégats explicites, pas des recalculs d'une valeur déjà disponible.
-14. **Dashboards Grafana** : les 15 JSON dans `contrib/grafana/dashboards/` doivent être au format **provisioning** (pas export). Ne jamais inclure `__inputs`/`__requires`. Le datasource UID doit être `daly-metrics` (pas `${datasource}`). `scripts/deploy-pi5.sh` déploie automatiquement.
+14. **Dashboards Grafana** : les 21 JSON dans `contrib/grafana/dashboards/` doivent être au format **provisioning** (pas export). Ne jamais inclure `__inputs`/`__requires`. Le datasource UID doit être `daly-metrics` (pas `${datasource}`). `scripts/deploy-pi5.sh` déploie automatiquement.
 15. **CI** : `.github/workflows/ci.yml` (build natif + tests + `clippy -D warnings` + cross-build aarch64/armv7) garde le code vert. Toolchain épinglée dans `rust-toolchain.toml` (1.94.1). Le cross-build armv7 n'utilise **jamais** `target-cpu=native` (cf. SIGILL §8). Garder clippy propre ; pour faire taire un lint, `#[allow(...)]` ciblé.
 16. **Supervision (fail-fast)** : les boucles de service longue durée passent par `spawn_critical` (helper dans chaque binaire ; `supervise.rs` pour energy-manager). Si une boucle retourne (ou panique, via `panic=abort`), le process s'arrête → redémarrage par systemd (`Restart=on-failure`) / runit. **Ne jamais** `spawn_critical` une tâche transitoire (one-shot, timer, traitement par-snapshot) : elle se termine normalement et provoquerait un exit. Conséquence : plus de bridge/poll mort silencieux pendant que le service paraît « up ».
 17. **Réouverture port série** : `SharedBus::reopen()` rouvre `/dev/ttyUSB0` après déconnexion USB / ré-énumération. `poll_loop` la déclenche sur `DalyError::Serial` **et** `DalyError::Io` (backoff + reopen). Bus partagé → ET112/ATS/PRALRAN repartent aussi. Plus besoin de redémarrer le service à la main après un débranchement USB.
@@ -398,7 +405,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Déployer (Pi5 + NanoPi), procédures détaillées, restauration git | `docs/deploiement-exploitation.md` |
 | Architecture redb (schéma, tiering) + historique migration VM→redb | `docs/metriques-redb-architecture.md` |
 | Catalogue des métriques + requêtes & conformité PromQL | `docs/metriques-promql-reference.md` |
-| Grafana — 20 dashboards (liste, datasource, provisioning) | `docs/grafana-dashboards.md` |
+| Grafana — 21 dashboards (liste, datasource, provisioning) | `docs/grafana-dashboards.md` |
 | MQTT / Mosquitto (topics, bridge, anti-boucle, migration Docker→natif) | `docs/mqtt-mosquitto.md` |
 | Alertes (AlertEngine natif, règles, hysteresis, notifications) | `docs/alertes.md` |
 | Ajouter un appareil / BMS Daly, ATS CHINT, ET112, PRALRAN | `docs/integration-materiel.md` |

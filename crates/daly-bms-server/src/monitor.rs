@@ -55,7 +55,64 @@ pub async fn run_monitor_agent(state: AppState) {
         // Les métriques système sont écrites dans metrics-store (redb) via
         // on_monitor_snapshot (hook d'écriture côté state.rs).
         state.on_monitor_snapshot(snap).await;
+
+        // Auto-télémétrie mémoire (investigation RSS §17 — axe B) : RSS
+        // kernel + stats jemalloc → metrics-store. Visualisé dans le
+        // dashboard Grafana « 21 - Mémoire daly-bms » : permet de
+        // distinguer fuite applicative (allocated croît) et rétention
+        // allocateur (resident/RSS croissent, allocated plat).
+        write_process_memory_metrics(&state).await;
     }
+}
+
+// =============================================================================
+// Auto-télémétrie mémoire du process (RSS + jemalloc)
+// =============================================================================
+
+async fn write_process_memory_metrics(state: &AppState) {
+    let Some(store) = &state.metrics_store else { return };
+    let stats = crate::redb_writes::ProcessMemoryStats {
+        rss_bytes: read_self_rss_bytes().await,
+        ..jemalloc_stats()
+    };
+    crate::redb_writes::write_process_memory(&store.writer(), &state.redb_rl, &stats);
+}
+
+/// VmRSS du process courant en octets (lu dans /proc/self/status).
+async fn read_self_rss_bytes() -> Option<u64> {
+    let content = tokio::fs::read_to_string("/proc/self/status").await.ok()?;
+    let kb: u64 = content
+        .lines()
+        .find(|l| l.starts_with("VmRSS:"))?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()?;
+    Some(kb * 1024)
+}
+
+/// Statistiques jemalloc via mallctl (tikv-jemalloc-ctl). `epoch::advance()`
+/// est obligatoire avant lecture : les compteurs agrégés ne sont rafraîchis
+/// qu'au passage d'epoch. Coût négligeable à 1 appel / 30 s.
+#[cfg(not(target_env = "msvc"))]
+fn jemalloc_stats() -> crate::redb_writes::ProcessMemoryStats {
+    use tikv_jemalloc_ctl::{epoch, stats};
+    if epoch::advance().is_err() {
+        return crate::redb_writes::ProcessMemoryStats::default();
+    }
+    crate::redb_writes::ProcessMemoryStats {
+        rss_bytes:          None,
+        jemalloc_allocated: stats::allocated::read().ok().map(|v| v as u64),
+        jemalloc_active:    stats::active::read().ok().map(|v| v as u64),
+        jemalloc_resident:  stats::resident::read().ok().map(|v| v as u64),
+        jemalloc_mapped:    stats::mapped::read().ok().map(|v| v as u64),
+        jemalloc_retained:  stats::retained::read().ok().map(|v| v as u64),
+    }
+}
+
+#[cfg(target_env = "msvc")]
+fn jemalloc_stats() -> crate::redb_writes::ProcessMemoryStats {
+    crate::redb_writes::ProcessMemoryStats::default()
 }
 
 // =============================================================================
