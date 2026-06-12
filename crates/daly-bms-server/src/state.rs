@@ -661,25 +661,6 @@ impl AppState {
                 .or_insert_with(|| BmsRingBuffer::new(self.config.serial.ring_buffer_size))
                 .push(snap.clone());
         }
-        // AlertEngine : canal mpsc dédié (et non le broadcast ws_tx, cf. doc du
-        // champ `alert_tx`). `try_reserve` avant clone : si la boucle d'alertes
-        // prend du retard (ex: notification Telegram lente, jusqu'à 10 s), on
-        // jette le snapshot SANS l'avoir cloné (review gemini) plutôt que de
-        // bloquer le chemin de poll RS485. Sans risque de désynchronisation
-        // durable : les règles sont à NIVEAU (chaque évaluation re-dérive
-        // l'état depuis le snapshot courant), un drop ne fait que décaler
-        // trigger/clear au prochain snapshot (~1 s).
-        if let Some(tx) = &self.alert_tx {
-            match tx.try_reserve() {
-                Ok(permit) => permit.send(snap.clone()),
-                Err(_) => {
-                    tracing::warn!(
-                        bms = format_args!("{:#04x}", snap.address),
-                        "AlertEngine saturé — snapshot non évalué (réévalué au prochain poll)"
-                    );
-                }
-            }
-        }
         // Broadcast WebSocket : skip si aucun client connecté (évite d'allouer
         // et retenir Arc<Vec<BmsSnapshot>> dans le ring du broadcast). Depuis
         // que l'AlertEngine a son canal dédié, receiver_count() ne compte que
@@ -691,6 +672,34 @@ impl AppState {
         // Écriture redb (rate-limitée 1/5s par série).
         if let Some(store) = &self.metrics_store {
             crate::redb_writes::write_bms(&store.writer(), &self.redb_rl, &snap);
+        }
+        // AlertEngine en DERNIER : canal mpsc dédié (et non le broadcast ws_tx,
+        // cf. doc du champ `alert_tx`). `try_reserve()` réserve un slot AVANT
+        // tout clone ; placé en fin de fonction, `snap` n'est plus utilisé
+        // ailleurs → on transfère sa propriété via `permit.send(snap)` sans
+        // aucun clone (review gemini). Si le canal est saturé (boucle d'alertes
+        // en retard, ex: notification Telegram lente ≤ 10 s) on jette le
+        // snapshot — sans désynchronisation durable : les règles sont à NIVEAU
+        // (chaque évaluation re-dérive l'état depuis le snapshot courant), un
+        // drop décale juste trigger/clear au prochain poll (~1 s). Un canal
+        // FERMÉ signale en revanche une panne (boucle morte) → error, pas warn.
+        if let Some(tx) = &self.alert_tx {
+            use tokio::sync::mpsc::error::TrySendError;
+            match tx.try_reserve() {
+                Ok(permit) => permit.send(snap),
+                Err(TrySendError::Full(())) => {
+                    tracing::warn!(
+                        bms = format_args!("{:#04x}", snap.address),
+                        "AlertEngine saturé — snapshot non évalué (réévalué au prochain poll)"
+                    );
+                }
+                Err(TrySendError::Closed(())) => {
+                    tracing::error!(
+                        bms = format_args!("{:#04x}", snap.address),
+                        "AlertEngine arrêté — canal fermé (la boucle d'alertes a quitté)"
+                    );
+                }
+            }
         }
     }
     /// Retourne le dernier snapshot de chaque BMS.
