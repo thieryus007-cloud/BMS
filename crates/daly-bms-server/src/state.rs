@@ -662,19 +662,22 @@ impl AppState {
                 .push(snap.clone());
         }
         // AlertEngine : canal mpsc dédié (et non le broadcast ws_tx, cf. doc du
-        // champ `alert_tx`). `try_send` : si la boucle d'alertes prend du
-        // retard (ex: notification Telegram lente, jusqu'à 10 s), on jette le
-        // snapshot plutôt que de bloquer le chemin de poll RS485. Sans risque
-        // de désynchronisation durable : les règles sont à NIVEAU (chaque
-        // évaluation re-dérive l'état depuis le snapshot courant), un drop ne
-        // fait que décaler trigger/clear au prochain snapshot (~1 s). On le
-        // loggue quand même pour ne pas perdre l'information (review gemini).
+        // champ `alert_tx`). `try_reserve` avant clone : si la boucle d'alertes
+        // prend du retard (ex: notification Telegram lente, jusqu'à 10 s), on
+        // jette le snapshot SANS l'avoir cloné (review gemini) plutôt que de
+        // bloquer le chemin de poll RS485. Sans risque de désynchronisation
+        // durable : les règles sont à NIVEAU (chaque évaluation re-dérive
+        // l'état depuis le snapshot courant), un drop ne fait que décaler
+        // trigger/clear au prochain snapshot (~1 s).
         if let Some(tx) = &self.alert_tx {
-            if tx.try_send(snap.clone()).is_err() {
-                tracing::warn!(
-                    bms = format_args!("{:#04x}", snap.address),
-                    "AlertEngine saturé — snapshot non évalué (réévalué au prochain poll)"
-                );
+            match tx.try_reserve() {
+                Ok(permit) => permit.send(snap.clone()),
+                Err(_) => {
+                    tracing::warn!(
+                        bms = format_args!("{:#04x}", snap.address),
+                        "AlertEngine saturé — snapshot non évalué (réévalué au prochain poll)"
+                    );
+                }
             }
         }
         // Broadcast WebSocket : skip si aucun client connecté (évite d'allouer
