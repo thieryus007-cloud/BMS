@@ -24,6 +24,12 @@ ignore = [
     # migrer changerait le format de la base redb (hors périmètre sans plan
     # de migration). Pas de vulnérabilité connue, juste « unmaintained ».
     { id = "RUSTSEC-2025-0141", reason = "bincode 1.x = format on-disk metrics-store ; migration planifiée séparément" },
+    # paste non maintenu — proc-macro transitif de tikv-jemalloc-ctl (télémétrie
+    # mémoire RSS/jemalloc, axe B — docs/diagnostic-depannage.md §17). Code
+    # exécuté UNIQUEMENT à la compilation (expansion de macros), absent du
+    # binaire livré. Pas de vulnérabilité, juste « unmaintained ».
+    # Réévaluer si tikv-jemalloc-ctl migre vers pastey.
+    { id = "RUSTSEC-2024-0436", reason = "paste = proc-macro compile-time de tikv-jemalloc-ctl ; rien dans le binaire" },
     # rustls-pemfile non maintenu — transitif, pas de chemin de migration.
     { id = "RUSTSEC-2025-0134", reason = "transitif (reqwest/rumqttc), aucun upgrade disponible" },
     # rustls-webpki 0.102 via rumqttc 0.25 (rustls 0.22) : les correctifs sont
