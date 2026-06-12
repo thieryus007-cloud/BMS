@@ -1,7 +1,7 @@
 # Dependabot (audit 2026-06 §16) — cadence mensuelle, volume limité :
 # les PRs se mergent manuellement, la CI (tests + clippy + cross-builds
-# aarch64/armv7 + cargo-deny) sert de filet. Cargo.lock committé = les
-# montées de versions sont explicites, jamais subies.
+# aarch64/armv7) sert de filet. Cargo.lock committé = les montées de
+# versions sont explicites, jamais subies.
 version: 2
 updates:
   - package-ecosystem: cargo

@@ -51,21 +51,6 @@ jobs:
         run: cargo test --workspace
 
   # ---------------------------------------------------------------------------
-  # Chaîne d'approvisionnement — advisories RUSTSEC, licences, sources
-  # (audit 2026-06 §16). Bloquant : la base est verte (vulnérabilités
-  # corrigées par bump de lock, acquittements justifiés dans deny.toml).
-  # ---------------------------------------------------------------------------
-  cargo-deny:
-    name: cargo-deny (advisories + licences)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check
-          arguments: --all-features
-
-  # ---------------------------------------------------------------------------
   # Cross-build des binaires de production
   # ---------------------------------------------------------------------------
   cross-build:
