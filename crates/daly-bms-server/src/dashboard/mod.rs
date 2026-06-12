@@ -775,19 +775,6 @@ pub async fn dashboard_console() -> Response {
 }
 
 // =============================================================================
-// Dashboard Historique Énergie (Tsink)
-// =============================================================================
-
-#[derive(Template)]
-#[template(path = "history.html")]
-struct HistoryTemplate {}
-
-/// Page historique énergie — graphes kWh, W, Ah, charge/décharge.
-pub async fn dashboard_history() -> Response {
-    render(HistoryTemplate {})
-}
-
-// =============================================================================
 // Dashboard Alertes
 // =============================================================================
 
@@ -820,6 +807,5 @@ pub fn build_dashboard_router() -> Router<AppState> {
         .route("/dashboard/console",           get(dashboard_console))
         .route("/dashboard/visualization",     get(dashboard_visualization))
         .route("/visualization",               get(dashboard_visualization))
-        .route("/dashboard/history",           get(dashboard_history))
         .route("/dashboard/alerts",            get(dashboard_alerts))
 }

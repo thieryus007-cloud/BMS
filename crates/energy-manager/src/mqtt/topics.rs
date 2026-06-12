@@ -124,6 +124,11 @@ pub mod publish {
     pub const METEO_VENUS:    &str = "santuario/meteo/venus";
     pub const INVERTER_VENUS: &str = "santuario/inverter/venus";
     pub const SYSTEM_VENUS:   &str = "santuario/system/venus";
+    /// Télémétrie solaire agrégée 1 Hz → consommée par daly-bms-server.
+    /// Remplace l'ancien POST HTTP 1 Hz vers /api/v1/solar/mppt-yield : la
+    /// rétention par requête HTTP côté serveur était le moteur de la fuite
+    /// RSS résiduelle (cf. docs/diagnostic-depannage.md §17).
+    pub const EM_SOLAR:        &str = "santuario/em/solar";
     pub const PVINV_BASELINE:  &str = "santuario/persist/pvinv_baseline";
     pub const YIELD_YESTERDAY: &str = "santuario/persist/yield_yesterday";
     pub const DEYE_STATE:      &str = "santuario/persist/deye_state";

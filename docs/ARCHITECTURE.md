@@ -44,7 +44,7 @@ transverse**. Tous les documents vivent dans `docs/`.
 | [deploiement-exploitation.md](./deploiement-exploitation.md) | Build (cibles Makefile), workflow de déploiement Pi5 + NanoPi, services systemd, logs/rétention, restauration git, conventions Git. |
 | [metriques-redb-architecture.md](./metriques-redb-architecture.md) | Moteur TSDB **redb** : schéma, encodage, write/read path, tiering & rétention. Annexe historique : migration VictoriaMetrics → redb. |
 | [metriques-promql-reference.md](./metriques-promql-reference.md) | **Catalogue des métriques** (labels hex), requêtes PromQL par appareil, roadmap d'implémentation, audit de conformité PromQL. |
-| [grafana-dashboards.md](./grafana-dashboards.md) | Grafana : installation, datasource (UID `daly-metrics`), provisioning, **20 dashboards**, monitoring PV. |
+| [grafana-dashboards.md](./grafana-dashboards.md) | Grafana : installation, datasource (UID `daly-metrics`), provisioning, **21 dashboards**, monitoring PV. |
 | [mqtt-mosquitto.md](./mqtt-mosquitto.md) | Architecture MQTT : Mosquitto natif systemd, topics `santuario/*`, bridge `pi5-nanopi`, anti-boucle, migration Docker → natif. |
 | [alertes.md](./alertes.md) | **AlertEngine** natif Rust : règles + hysteresis, persistance SQLite, notifications Telegram/SMTP, API alertes. |
 | [integration-materiel.md](./integration-materiel.md) | Inventaire RS485/D-Bus, **ajout d'un BMS Daly**, ATS CHINT, ET112, PRALRAN, Tasmota/Shelly. |
@@ -117,7 +117,7 @@ Détails : [intégration matériel](./integration-materiel.md) · [MQTT](./mqtt-
 | **energy-manager** | Pi5 | 8081 | Automatisation énergie (solaire, DEYE, chauffe-eau, charge, météo) | [app-energy-manager.md](./app-energy-manager.md) |
 | **Mosquitto** | Pi5 | 1883 / 9001 | Broker MQTT natif systemd, bridge `pi5-nanopi` | [mqtt-mosquitto.md](./mqtt-mosquitto.md) |
 | **metrics-store (redb)** | Pi5 | (embarqué :8080) | TSDB pure-Rust, tiering raw 30 j / hourly 365 j / daily 5 ans | [metriques-redb-architecture.md](./metriques-redb-architecture.md) |
-| **grafana-server** | Pi5 | 3000 | Visualisation (datasource PromQL → :8080), 20 dashboards | [grafana-dashboards.md](./grafana-dashboards.md) |
+| **grafana-server** | Pi5 | 3000 | Visualisation (datasource PromQL → :8080), 21 dashboards | [grafana-dashboards.md](./grafana-dashboards.md) |
 | **dbus-mqtt-venus** | NanoPi | — | Bridge MQTT → D-Bus Venus OS (zbus) | [app-dbus-mqtt-venus.md](./app-dbus-mqtt-venus.md) |
 
 ---

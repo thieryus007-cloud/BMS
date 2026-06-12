@@ -2,7 +2,7 @@
 
 > Guide complet de l'intégration Grafana sur le Raspberry Pi 5 : installation automatique
 > ou manuelle, configuration de la datasource PromQL vers `daly-bms-server` (redb,
-> UID `daly-metrics`), provisioning complet, catalogue des 20 dashboards, monitoring
+> UID `daly-metrics`), provisioning complet, catalogue des 21 dashboards, monitoring
 > PV solaire et dépannage.
 > Fait partie de l'[architecture documentaire](./ARCHITECTURE.md).
 > Dernière consolidation : 2026-06-07.
@@ -36,7 +36,7 @@
   - [6.2 Via fix-grafana.sh (import API — contourne bug Grafana 11+)](#62-via-fix-grafanash-import-api--contourne-bug-grafana-11)
   - [6.3 Copie manuelle](#63-copie-manuelle)
   - [6.4 Commandes Grafana de référence rapide](#64-commandes-grafana-de-reference-rapide)
-- [7. Catalogue des 20 dashboards](#7-catalogue-des-20-dashboards)
+- [7. Catalogue des 21 dashboards](#7-catalogue-des-21-dashboards)
   - [7.1 Dashboards 01 à 16 — Vue opérationnelle](#71-dashboards-01-a-16--vue-operationnelle)
   - [7.2 Dashboards 17 à 20 — PromQL avancé (Flotte, PV, Bilan, Alertes)](#72-dashboards-17-a-20--promql-avance-flotte-pv-bilan-alertes)
 - [8. Monitoring PV solaire — Dashboard comparaison 5 ans](#8-monitoring-pv-solaire--dashboard-comparaison-5-ans)
@@ -65,7 +65,7 @@ une datasource de type Prometheus (UID `daly-metrics`) pointant sur
 │   Grafana       │ ←────────────── │ daly-bms-server (redb :8080)         │
 │   (:3000)       │  /api/v1/query  │   (Stockage metrics-store — redb)    │
 │                 │  /query_range   │   Tiering raw 30 j / hourly 365 j /  │
-│   20 dashboards │  /labels        │   daily 5 ans                        │
+│   21 dashboards │  /labels        │   daily 5 ans                        │
 │   provisionnés  │                 │   Alimenté par :                     │
 └─────────────────┘                 │    - polling RS485 (BMS, ET112, ATS) │
                                     │    - MQTT (energy-manager, Victron)  │
@@ -76,7 +76,7 @@ une datasource de type Prometheus (UID `daly-metrics`) pointant sur
 les plugins sont stockés sur `/mnt/nvme/grafana` au lieu de la SD/eMMC — fortement
 recommandé en production.
 
-**20 dashboards provisionés** dans `/var/lib/grafana/dashboards/`, tous au format
+**21 dashboards provisionés** dans `/var/lib/grafana/dashboards/`, tous au format
 provisioning (pas export), tous utilisant l'UID datasource `daly-metrics`.
 
 > ⚠️ **Note architecture** : `daly-bms-server` embarque le metrics-store redb directement
@@ -150,7 +150,7 @@ Installation Grafana terminée
   URL          : http://192.168.1.141:3000
   Login        : admin / admin  (changer à la 1ʳᵉ connexion)
   Datasource   : Daly Metrics (redb) → http://127.0.0.1:8080  (provisionnée)
-  Dashboards   : 20 dashboards Grafana (dossier Daly-BMS)
+  Dashboards   : 21 dashboards Grafana (dossier Daly-BMS)
   Données NVMe : /mnt/nvme/grafana/
 
   Logs         : journalctl -u grafana-server -f
@@ -308,7 +308,7 @@ Paramètres clés :
 | `manageAlerts` | `false` | Ne pas déléguer les alertes à Grafana |
 
 > **IMPORTANT** : L'UID `daly-metrics` est la valeur de référence utilisée par les
-> 20 dashboards. Ne jamais utiliser `${datasource}` (format export) ni changer cet UID.
+> 21 dashboards. Ne jamais utiliser `${datasource}` (format export) ni changer cet UID.
 
 ### 4.2 Configuration manuelle via l'interface Grafana
 
@@ -386,7 +386,8 @@ contrib/grafana/
 │   ├── 17-flotte-sante.json
 │   ├── 18-rendement-pv.json
 │   ├── 19-bilan-energie.json
-│   └── 20-alertes-avancees.json
+│   ├── 20-alertes-avancees.json
+│   └── 21-memoire-daly-bms.json
 └── provisioning/
     ├── datasources/
     │   └── daly-metrics.yaml        ← datasource PromQL → :8080
@@ -407,7 +408,8 @@ Déployé vers (sur le Pi5) :
 ├── 01-bms.json
 ├── 02-et112.json
 ... (20 fichiers)
-└── 20-alertes-avancees.json
+├── 20-alertes-avancees.json
+└── 21-memoire-daly-bms.json
 ```
 
 ### 5.2 Provider dashboards (daly-bms.yaml)
@@ -483,7 +485,7 @@ print('OK — format provisioning correct')
 ### 6.1 Via deploy-pi5.sh (méthode standard)
 
 `scripts/deploy-pi5.sh` déploie l'ensemble (binaires + mosquitto.conf + Grafana) en une
-seule commande. Il inclut automatiquement le déploiement des 20 dashboards Grafana.
+seule commande. Il inclut automatiquement le déploiement des 21 dashboards Grafana.
 
 ```bash
 # Déploiement complet (binaires + dashboards)
@@ -574,7 +576,7 @@ sudo systemctl restart grafana-server
 
 ---
 
-## 7. Catalogue des 20 dashboards
+## 7. Catalogue des 21 dashboards
 
 Tous les dashboards sont dans le dossier Grafana **Daly-BMS**, provisionnés depuis
 `/var/lib/grafana/dashboards/`. Chaque JSON respecte les règles de format provisioning
@@ -896,6 +898,31 @@ Requêtes PromQL caractéristiques :
 (victron_inverter_state == 0) and (solar_total_w > 100)
 ```
 
+#### Dashboard 21 — Mémoire daly-bms (RSS / jemalloc)
+**Fichier** : `21-memoire-daly-bms.json` | **UID** : `daly-mem-21` | **Tags** : `daly-bms`, `memoire`, `jemalloc`, `diagnostic`
+
+Auto-télémétrie mémoire du process `daly-bms-server` (investigation fuite RSS,
+`docs/diagnostic-depannage.md` §17). Les métriques sont exportées toutes les 30 s
+par l'agent monitor via `tikv-jemalloc-ctl`.
+
+Panels :
+- **RSS / resident / active / allocated** : la courbe qui tranche — `allocated`
+  qui croît = fuite applicative ; `allocated` plat avec RSS qui monte =
+  rétention allocateur.
+- **Pente 1 h** (stats) : Δ `allocated` et Δ RSS sur 1 h (référence
+  historique : 6,6 Mo/h avant fixes, 1,18 Mo/h après axum 0.8).
+- **mapped / retained** et **écarts RSS−allocated, resident−active**
+  (fragmentation).
+
+Requêtes PromQL caractéristiques :
+```promql
+# Fuite applicative ? (durablement > 0 = oui)
+process_jemalloc_allocated_bytes - (process_jemalloc_allocated_bytes offset 1h)
+
+# Rétention allocateur
+process_rss_bytes - process_jemalloc_allocated_bytes
+```
+
 ---
 
 ## 8. Monitoring PV solaire — Dashboard comparaison 5 ans
@@ -947,7 +974,7 @@ copier le fichier `metrics.redb` pour archivage externe.
 
 Le dashboard `pv-solar-5y` (titre : *PV Solaire - Monitoring & Comparaison 5 Ans*) est
 un dashboard autonome disponible dans `docs/Solar_PV.json` et `docs/grafana-pv_dashboard.json`.
-Il est distinct des 20 dashboards provisionnés (il est orienté import manuel ou intégration
+Il est distinct des 21 dashboards provisionnés (il est orienté import manuel ou intégration
 dans une présentation PV).
 
 **Structure en sections (rows)** :
@@ -975,7 +1002,7 @@ dans une présentation PV).
 | Variable template | `$datasource` (type datasource Prometheus) |
 
 > ⚠️ Ce dashboard utilise `${datasource}` comme variable de template (format import),
-> contrairement aux 20 dashboards provisionnés qui utilisent directement l'UID
+> contrairement aux 21 dashboards provisionnés qui utilisent directement l'UID
 > `daly-metrics`. Lors d'un import manuel, sélectionner la datasource "Daly Metrics (redb)".
 
 ### 8.3 Requêtes PromQL pour le monitoring PV

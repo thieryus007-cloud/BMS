@@ -380,6 +380,14 @@ pub struct AppState {
     pub shelly_client: Arc<tokio::sync::Mutex<Option<rumqttc::AsyncClient>>>,
     /// Moteur d'alertes (None si alerts.db_path vide dans la config).
     pub alert_engine: Option<Arc<AlertEngine>>,
+    /// Canal dédié vers la boucle AlertEngine (None si alertes désactivées).
+    ///
+    /// L'AlertEngine n'est volontairement PAS abonné au broadcast `ws_tx` :
+    /// un abonné permanent rendait la garde `receiver_count() > 0` de
+    /// `on_snapshot` toujours vraie, donc chaque snapshot clonait
+    /// `latest_snapshots()` même sans aucun client WebSocket (churn
+    /// d'allocations continu — investigation RSS, docs/diagnostic-depannage.md §17).
+    pub alert_tx: Option<tokio::sync::mpsc::Sender<BmsSnapshot>>,
     /// Backend TSDB redb (metrics-store) : SEULE source de vérité pour les
     /// lectures et écritures de séries temporelles. `None` uniquement si
     /// désactivé dans la config (mode dégradé pour debug).
@@ -387,10 +395,6 @@ pub struct AppState {
     /// Rate limiter pour les écritures redb depuis les `on_*_snapshot()`.
     /// Empêche un sample d'être poussé plus d'1× / 5 s par série.
     pub redb_rl: crate::redb_writes::RateLimiter,
-    /// Catalogue de panels (importés depuis docs/grafana-ess_dashboard.json au démarrage).
-    pub dashboard_catalog: crate::dashboards::Catalog,
-    /// Persistance SQLite des layouts dashboard (None si init a échoué — fallback localStorage côté UI).
-    pub dashboard_storage: Option<crate::dashboards::storage::LayoutStorage>,
     /// Registre de fraîcheur des sources (audit 2026-06 §18) — alimenté par
     /// les funnels `on_*`, exporté périodiquement en métrique
     /// `source_last_update_age_seconds{source=...}`.
@@ -405,9 +409,8 @@ impl AppState {
     /// Exécute une requête PromQL sur plage temporelle via le shim redb
     /// (`metrics-store::promql`). Le travail synchrone (open reader + eval
     /// PromQL + B-tree scans) est déporté sur `tokio::task::spawn_blocking`
-    /// pour ne pas monopoliser un worker de l'exécuteur async —
-    /// particulièrement important quand un caller comme `api/history.rs`
-    /// lance 9 requêtes en parallèle via `tokio::join!`.
+    /// pour ne pas monopoliser un worker de l'exécuteur async (plusieurs
+    /// requêtes Grafana peuvent arriver en parallèle).
     ///
     /// Retourne le format JSON Prometheus standard.
     pub async fn dispatched_query_range(
@@ -538,6 +541,7 @@ impl AppState {
         config: AppConfig,
         log_buffer: LogBuffer,
         alert_engine: Option<Arc<AlertEngine>>,
+        alert_tx: Option<tokio::sync::mpsc::Sender<BmsSnapshot>>,
         metrics_store: Option<Arc<metrics_store::MetricsStore>>,
     ) -> Self {
         let (ws_tx, _) = broadcast::channel(WS_BROADCAST_CAPACITY);
@@ -559,14 +563,6 @@ impl AppState {
         for dev in &config.tasmota.devices {
             tasmota_buffers.insert(dev.id, TasmotaRingBuffer::new(tasmota_ring_size));
         }
-        // Init dashboard layout storage (SQLite séparée du fichier d'alertes)
-        let dashboard_storage = {
-            let path = crate::dashboards::storage::LayoutStorage::default_path(&config.alerts.db_path);
-            match crate::dashboards::storage::LayoutStorage::open(&path) {
-                Ok(s)  => { tracing::info!(db = %path.display(), "Dashboard layout storage ouvert"); Some(s) }
-                Err(e) => { tracing::error!(error = %e, db = %path.display(), "Dashboard storage init failed — fallback localStorage côté UI"); None }
-            }
-        };
         Self {
             config: Arc::new(config),
             buffers: Arc::new(RwLock::new(buffers)),
@@ -600,10 +596,9 @@ impl AppState {
             shelly_latest: Arc::new(RwLock::new(BTreeMap::new())),
             shelly_client: Arc::new(tokio::sync::Mutex::new(None)),
             alert_engine,
+            alert_tx,
             metrics_store,
             redb_rl: crate::redb_writes::RateLimiter::new(),
-            dashboard_catalog: crate::dashboards::Catalog::load_default(),
-            dashboard_storage,
             freshness: Arc::new(crate::freshness::FreshnessRegistry::new()),
         }
     }
@@ -666,8 +661,17 @@ impl AppState {
                 .or_insert_with(|| BmsRingBuffer::new(self.config.serial.ring_buffer_size))
                 .push(snap.clone());
         }
+        // AlertEngine : canal mpsc dédié (et non le broadcast ws_tx, cf. doc du
+        // champ `alert_tx`). `try_send` : si la boucle d'alertes prend du
+        // retard (ex: notification Telegram lente), on jette le snapshot
+        // plutôt que de bloquer le chemin de poll RS485.
+        if let Some(tx) = &self.alert_tx {
+            let _ = tx.try_send(snap.clone());
+        }
         // Broadcast WebSocket : skip si aucun client connecté (évite d'allouer
-        // et retenir Arc<Vec<BmsSnapshot>> dans le ring du broadcast).
+        // et retenir Arc<Vec<BmsSnapshot>> dans le ring du broadcast). Depuis
+        // que l'AlertEngine a son canal dédié, receiver_count() ne compte que
+        // de vrais clients /ws/bms/stream.
         if self.ws_tx.receiver_count() > 0 {
             let latest = self.latest_snapshots().await;
             let _ = self.ws_tx.send(Arc::new(latest));

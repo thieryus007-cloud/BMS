@@ -618,7 +618,7 @@ curl -s "http://localhost:8080/api/v1/redb/query_range?query=solar_total_w&start
 > Backend : **redb** (`/mnt/nvme/daly-bms/metrics.redb`), interrogé via le **shim PromQL** de `daly-bms-server` sur le port **8080**.
 > URL API : `http://192.168.1.141:8080/api/v1/query?query=<PROMQL>`
 > Range   : `http://192.168.1.141:8080/api/v1/query_range?query=<PROMQL>&start=…&end=…&step=…`
-> Visualisation : dashboard custom interne **`/dashboard/history`** et **Grafana** (`:3000`, datasource « Daly Metrics (redb) »).
+> Visualisation : **Grafana** (`:3000`, datasource « Daly Metrics (redb) ») — la page custom `/dashboard/history` a été retirée en 2026-06.
 
 > ℹ️ **Sous-ensemble PromQL supporté** — Le shim redb n'implémente qu'un sous-ensemble audité de PromQL (cf. `crates/metrics-store/src/promql/validate.rs` et `./metriques-redb-architecture.md` §6.5). Toute construction hors liste blanche est rejetée avec `status=error`, `errorType=bad_data`.
 >
@@ -1251,7 +1251,6 @@ venus_shunt_power_w
 # Vérification : nombre de métriques présentes (valeurs distinctes de __name__)
 # curl http://192.168.1.141:8080/api/v1/label/__name__/values | jq '.data | length'
 # (NB : /api/v1/labels renvoie les NOMS de labels — bms_id, address… — pas les métriques)
-# ou via le dashboard custom /dashboard/history (sélecteur de série)
 
 # Dernier point de chaque métrique (vérification fraîcheur)
 {__name__=~"bms_soc|venus_shunt_soc_percent|solar_total_w|ats_active_source|tasmota_power_on"}

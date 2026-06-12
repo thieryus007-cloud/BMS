@@ -21,7 +21,6 @@ mod state;
 mod api;
 mod bridges;
 mod dashboard;
-mod dashboards;
 mod monitor;
 mod redb_writes;
 
@@ -382,6 +381,19 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    // ── Canal dédié AlertEngine ────────────────────────────────────────────────
+    // mpsc borné (et non un abonnement au broadcast ws_tx) : un abonné
+    // permanent rendait la garde receiver_count() de on_snapshot toujours
+    // vraie → clone de tous les snapshots à chaque poll même sans client WS
+    // (cf. docs/diagnostic-depannage.md §17). Capacité 64 : à 1 snapshot/s/BMS,
+    // ~20 s de marge si l'évaluation est ralentie par une notification.
+    let (alert_tx, alert_rx) = if alert_engine.is_some() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<daly_bms_core::types::BmsSnapshot>(64);
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+
     // ── État partagé ───────────────────────────────────────────────────────────
     // metrics-store (redb) est la seule TSDB (lecture + écriture via le Writer du shim).
     let metrics_store_arc = metrics_store.as_ref().map(|s| std::sync::Arc::new(s.clone()));
@@ -389,6 +401,7 @@ async fn main() -> anyhow::Result<()> {
         config.clone(),
         log_buffer,
         alert_engine.clone(),
+        alert_tx,
         metrics_store_arc,
     );
 
@@ -412,10 +425,10 @@ async fn main() -> anyhow::Result<()> {
             async move { mqtt::run_mqtt_bridge(s, c, m).await }
         });
     }
-    if let Some(ref engine) = alert_engine {
+    if let (Some(ref engine), Some(rx)) = (&alert_engine, alert_rx) {
         spawn_critical({
             let (s, e) = (state.clone(), engine.clone());
-            async move { alerts::run_alert_engine(s, e).await }
+            async move { alerts::run_alert_engine(s, e, rx).await }
         });
     }
 

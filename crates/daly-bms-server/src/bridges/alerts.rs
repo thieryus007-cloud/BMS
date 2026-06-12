@@ -560,25 +560,25 @@ fn init_db(conn: &Connection) -> rusqlite::Result<()> {
 
 /// Démarre la boucle d'évaluation en arrière-plan.
 /// Accepte un `Arc<AlertEngine>` déjà créé (partagé avec l'API REST via AppState).
-pub async fn run_alert_engine(state: AppState, engine: Arc<AlertEngine>) {
+///
+/// Consomme le canal mpsc dédié `alert_tx`/`rx` (rempli par
+/// `AppState::on_snapshot`) — et non plus le broadcast WebSocket : un abonné
+/// permanent rendait la garde `receiver_count()` de `on_snapshot` toujours
+/// vraie et forçait un clone de tous les snapshots à chaque poll, même sans
+/// client WS (churn mémoire continu, cf. docs/diagnostic-depannage.md §17).
+pub async fn run_alert_engine(
+    state: AppState,
+    engine: Arc<AlertEngine>,
+    mut rx: tokio::sync::mpsc::Receiver<BmsSnapshot>,
+) {
     info!(db = %engine.cfg.db_path, "AlertEngine démarré");
 
-    let mut rx = state.subscribe_ws();
-    loop {
-        match rx.recv().await {
-            Ok(snaps) => {
-                // Lire le courant SmartShunt une seule fois pour tous les BMS
-                let shunt_current_a = state.venus_smartshunt_get().await
-                    .and_then(|s| s.current_a);
-
-                for snap in snaps.iter() {
-                    engine.evaluate(snap, shunt_current_a).await;
-                }
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                warn!("AlertEngine : {} snapshots manqués", n);
-            }
-            Err(_) => break,
-        }
+    // `recv()` ne retourne `None` que si tous les Sender sont droppés — le
+    // clone détenu par AppState vit aussi longtemps que le process, la boucle
+    // est donc effectivement infinie (compatible spawn_critical).
+    while let Some(snap) = rx.recv().await {
+        let shunt_current_a = state.venus_smartshunt_get().await
+            .and_then(|s| s.current_a);
+        engine.evaluate(&snap, shunt_current_a).await;
     }
 }

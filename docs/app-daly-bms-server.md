@@ -274,7 +274,6 @@ crates/daly-bms-server/
     ├── monitor.html           → /dashboard/monitor
     ├── console.html           → /dashboard/console
     ├── visualization.html     → /dashboard/visualization
-    ├── history.html           → /dashboard/history
     ├── alerts.html            → /dashboard/alerts
     ├── logs.html              → /dashboard/logs
     └── settings.html          → /dashboard/settings
@@ -510,7 +509,10 @@ Voir [./integration-materiel.md](./integration-materiel.md) pour les registres M
 |---------|----------|-------------|
 | `GET` | `/api/v1/chart/history` | Données historiques agrégées pour graphiques (paramètres : `metric`, `from`, `to`, `step`) |
 | `GET` | `/api/v1/chart/edge-history` | Historique des transitions / événements (alarmes, changements état MOS) |
-| `GET` | `/api/v1/history/energy` | Bilan énergétique historique (production, consommation, balance réseau) |
+
+> `/api/v1/history/energy` et `/api/v1/dashboards/*` ont été retirés en 2026-06
+> avec la page `/dashboard/history` — l'historique long terme vit dans Grafana
+> (datasource PromQL). Cf. `docs/diagnostic-depannage.md` §17.
 
 ### 6.10 Tasmota / Shelly
 
@@ -599,7 +601,6 @@ wscat -c ws://localhost:8080/ws/bms/1/stream
 | `/dashboard/monitor` | `monitor.html` | Règles système (courant Victron, chauffe-eau LG, relais DEYE : état machine, fréquence, gardes îlotage/restore — via `:8081/api/rules-status`) + santé RS485 (CRC, timeouts, taux succès par appareil) |
 | `/dashboard/console` | `console.html` | Console logs WebSocket temps réel |
 | `/dashboard/visualization` | `visualization.html` | Diagramme flux d'énergie (ReactFlow / schéma SVG) |
-| `/dashboard/history` | `history.html` | Historique long terme (requête redb, sélecteur de période) |
 | `/dashboard/alerts` | `alerts.html` | Alertes actives + historique |
 | `/dashboard/logs` | `logs.html` | Logs systèmes (rotation fichiers) |
 | `/dashboard/settings` | `settings.html` | Paramètres configurables (seuils alarmes, affichage) |
@@ -621,12 +622,9 @@ Fonctionnalités du détail BMS (`/dashboard/bms/:id`) :
 - Historique temps réel basé sur le ring buffer 3600 snapshots (environ 1 heure).
 - Graphiques ECharts SVG (pas de canvas, compatible SSR).
 
-Dashboard historique (`/dashboard/history`) :
-
-- Remplace Perses (retiré en mai 2026).
-- Visualisation native des séries redb sans dépendance externe.
-- Sélecteur de période : 6h, 24h, 7j, 30j, custom.
-- Métriques disponibles : SOC, tensions, courant, puissance, ET112, irradiance.
+Historique long terme : la page `/dashboard/history` (qui avait remplacé
+Perses en mai 2026) a été retirée en 2026-06 — Grafana (`:3000`) est
+désormais l'unique outil d'historique (cf. `docs/grafana-dashboards.md`).
 
 ### 8.3 Génération ECharts et pipeline temps réel
 

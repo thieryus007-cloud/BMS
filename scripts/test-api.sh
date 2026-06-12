@@ -157,15 +157,14 @@ else
     ko "POST /api/v1/query_range" "HTTP $code"
 fi
 
-# ── 5. Dashboard custom interne ──────────────────────────────────────────────
-section "5. Routes dashboard interne (/dashboard/history)"
+# ── 5. Chart history (graphes internes) ─────────────────────────────────────
+# NB 2026-06 : /dashboard/history et /api/v1/history/energy ont été retirés
+# (Grafana = unique outil d'historique).
+section "5. Routes chart history"
 assert_json_nonempty "GET /api/v1/chart/history?minutes=60" \
     "/api/v1/chart/history?minutes=60" '.solar | length'
 assert_json_field "GET /api/v1/chart/history?minutes=60 (.ok)" \
     "/api/v1/chart/history?minutes=60" '.ok // true' 'true'
-
-assert_json_field "GET /api/v1/history/energy?period=day" \
-    "/api/v1/history/energy?period=day" '.ok // true' 'true'
 
 # ── 6. PromQL avec label matcher (Grafana panels) ───────────────────────────
 section "6. PromQL avec label matchers"
