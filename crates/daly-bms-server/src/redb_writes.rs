@@ -64,7 +64,10 @@ impl RateLimiter {
         // unwrap_or_else pour rester safe si un panic a empoisonné le mutex.
         let mut map = self.last_writes.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(last) = map.get_mut(key) {
-            if now.duration_since(*last) < min_interval {
+            // saturating : Instant est monotone donc now >= *last en pratique,
+            // mais on reste explicite (et duration_since ne sature que depuis
+            // Rust 1.60 — autant ne laisser aucune ambiguïté).
+            if now.saturating_duration_since(*last) < min_interval {
                 return false;
             }
             *last = now;
