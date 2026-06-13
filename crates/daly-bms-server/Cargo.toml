@@ -52,8 +52,16 @@ tokio-metrics = { workspace = true }
 # fragmentation glibc confirmée. Switch jemalloc résoud le problème
 # sans appel manuel à trim.
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-# Feature "stats" : compile jemalloc avec --enable-stats (requis par le ctl).
-tikv-jemallocator = { version = "0.6", features = ["stats"] }
+# Features jemalloc :
+#  - "stats"     : compile avec --enable-stats (requis par le ctl ; dashboard 21).
+#  - "profiling" : compile avec --enable-prof → permet le heap profiling
+#                  (jeprof) pour localiser une fuite applicative au call-stack
+#                  près. COÛT NUL tant que prof n'est pas activé au runtime
+#                  (défaut prof:false). On l'active à la demande via un drop-in
+#                  systemd `_RJEM_MALLOC_CONF=prof:true,…` (cf.
+#                  docs/diagnostic-depannage.md §18) — sans rebuild ni écart
+#                  à la procédure `make sync && deploy-pi5.sh`.
+tikv-jemallocator = { version = "0.6", features = ["stats", "profiling"] }
 # Introspection jemalloc (stats.allocated/active/resident/mapped/retained)
 # exportée toutes les 30 s dans metrics-store par l'agent monitor →
 # dashboard Grafana « 21 - Mémoire daly-bms ». Permet de distinguer une

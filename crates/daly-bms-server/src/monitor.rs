@@ -62,8 +62,46 @@ pub async fn run_monitor_agent(state: AppState) {
         // distinguer fuite applicative (allocated croît) et rétention
         // allocateur (resident/RSS croissent, allocated plat).
         write_process_memory_metrics(&state).await;
+
+        // Heap profiling jemalloc à la demande (investigation fuite §18) :
+        // si `DALY_JEMALLOC_PROF=1` ET jemalloc compilé+activé avec prof, dump
+        // un profil toutes les ~5 min dans /tmp/jeprof.<ts>.heap. Diff de deux
+        // dumps via `jeprof` = call-stack exact de ce qui croît. No-op (et
+        // silencieux) en exploitation normale.
+        maybe_dump_jemalloc_profile();
     }
 }
+
+/// Dump périodique d'un profil heap jemalloc, gardé par `DALY_JEMALLOC_PROF`.
+/// Nécessite un binaire compilé avec la feature `profiling` (--enable-prof)
+/// ET `prof:true,prof_active:true` dans `_RJEM_MALLOC_CONF`. Dump 1 tick sur
+/// 10 (~5 min à 30 s/tick).
+#[cfg(not(target_env = "msvc"))]
+fn maybe_dump_jemalloc_profile() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static TICK: AtomicU64 = AtomicU64::new(0);
+
+    if std::env::var_os("DALY_JEMALLOC_PROF").is_none() {
+        return;
+    }
+    let n = TICK.fetch_add(1, Ordering::Relaxed);
+    if !n.is_multiple_of(10) {
+        return;
+    }
+    let ts = Utc::now().format("%Y%m%dT%H%M%S");
+    let path = format!("/tmp/jeprof.{ts}.heap");
+    let Ok(cpath) = std::ffi::CString::new(path.clone()) else { return };
+    // mallctl("prof.dump", NULL, NULL, &filename, sizeof(ptr)).
+    // Échoue proprement (ENOENT) si le binaire n'a pas prof compilé/activé.
+    let res = unsafe { tikv_jemalloc_ctl::raw::write(b"prof.dump\0", cpath.as_ptr()) };
+    match res {
+        Ok(()) => info!(profile = %path, "jemalloc heap profile écrit"),
+        Err(e) => warn!(error = %e, "jemalloc prof.dump a échoué (prof non activé ?)"),
+    }
+}
+
+#[cfg(target_env = "msvc")]
+fn maybe_dump_jemalloc_profile() {}
 
 // =============================================================================
 // Auto-télémétrie mémoire du process (RSS + jemalloc)
