@@ -128,10 +128,19 @@ for _ in $(seq 1 30); do
     if ls $HEAP_GLOB >/dev/null 2>&1; then first_ok=1; break; fi
 done
 if [ "$first_ok" -eq 0 ]; then
-    err "Aucun profil produit après activation → le profiling jemalloc n'est"
-    err "pas actif dans le binaire déployé. Redéploie la dernière version :"
-    err "  make sync && sudo bash scripts/deploy-pi5.sh"
-    err "Indice : journalctl -u $SVC -n 20 | grep -i prof"
+    err "Aucun profil produit après activation. Diagnostic automatique :"
+    err "── 1) logs de dump du service (prof.dump réussi ou échoué ?) ──"
+    journalctl -u "$SVC" --since "5 min ago" --no-pager 2>/dev/null \
+        | grep -i "prof\|jemalloc" | tail -15 >&2 || true
+    err "── 2) profils écrits quelque part (y compris /tmp privé) ? ──"
+    find /tmp /var/lib/daly-bms -name 'jeprof.*.heap' 2>/dev/null >&2 || true
+    err "── 3) le binaire a-t-il vraiment --enable-prof ? (opt.prof, doit être >0) ──"
+    grep -ac 'opt.prof' "$BIN" >&2 || true
+    err "──────────────────────────────────────────────────────────────"
+    err "Interprétation :"
+    err " • 'prof.dump a échoué' OU (3)=0  → build ARM sans --enable-prof effectif."
+    err " • 'heap profile écrit' + (2) trouve des fichiers → souci de chemin/visibilité."
+    err " • (1) vide → l'agent monitor ne tourne pas / DALY_JEMALLOC_PROF non vu."
     exit 1
 fi
 log "Profiling confirmé (1er profil capturé). Mesure pendant $DURATION…"
