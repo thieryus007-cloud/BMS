@@ -89,12 +89,24 @@ cat > "$DROPIN" <<'EOF'
 [Service]
 Environment=DALY_JEMALLOC_PROF=1
 Environment=_RJEM_MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
+# Marge de démarrage : l'ouverture de la base redb (grosse / récupération)
+# peut être lente, et READY n'est envoyé qu'après. Évite un kill systemd.
+TimeoutStartSec=300
 EOF
 systemctl daemon-reload
 systemctl restart "$SVC"
-sleep 5
-if ! systemctl is-active --quiet "$SVC"; then
-    err "$SVC n'a pas redémarré avec le profiling :"
+# Attendre que le service soit ACTIF (l'ouverture redb peut être lente — on
+# poll jusqu'à 300 s au lieu d'un sleep fixe).
+log "Attente du démarrage de $SVC (≤ 300 s)…"
+up=0
+for _ in $(seq 1 60); do
+    sleep 5
+    if systemctl is-active --quiet "$SVC"; then up=1; break; fi
+    # échec définitif (failed) → inutile d'attendre la fin du timeout
+    if systemctl is-failed --quiet "$SVC"; then break; fi
+done
+if [ "$up" -eq 0 ]; then
+    err "$SVC n'a pas démarré avec le profiling :"
     journalctl -u "$SVC" -n 30 --no-pager >&2 || true
     exit 1
 fi
