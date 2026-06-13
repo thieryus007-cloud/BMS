@@ -29,8 +29,11 @@ err() { printf '\033[1;31m[compact]\033[0m %s\n' "$*" >&2; }
 [ "$(id -u)" -eq 0 ] || { err "À lancer avec sudo."; exit 1; }
 [ -f "$CONF" ] || { err "Config introuvable : $CONF"; exit 1; }
 
-# Le binaire doit supporter --compact-db (grep -c, jamais grep -q sous pipefail).
-if [ "$(strings "$BIN" 2>/dev/null | grep -c 'compact-db' || true)" -eq 0 ]; then
+# Le binaire doit supporter --compact-db. On utilise `grep -a` (scan de TOUS
+# les octets du fichier) et non `strings` : selon le système, `strings` ne
+# scanne que certaines sections ELF et rate la chaîne dans un binaire release
+# (constaté sur le Pi5). Pas de pipe → pas de SIGPIPE sous pipefail.
+if ! grep -a -q 'compact-db' "$BIN" 2>/dev/null; then
     err "Le binaire déployé ne supporte pas --compact-db."
     err "Déploie d'abord : make sync && sudo bash scripts/deploy-pi5.sh"
     exit 1
