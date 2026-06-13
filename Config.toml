@@ -420,7 +420,10 @@ cache_mb = 16
 queue_depth = 10000
 # Intervalle de la passe de compaction tiered (heures, 0 = désactivé).
 maintenance_interval_hours = 6
-raw_retention_days = 30
+# Données brutes (pleine résolution) conservées 7 j ; au-delà, agrégation
+# horaire/journalière (historique préservé à résolution réduite). 30 j de raw
+# faisaient grossir la base à plusieurs Go → démarrages lents (cf. scripts/compact-redb.sh).
+raw_retention_days = 7
 hourly_retention_days = 365
 daily_retention_days = 1825   # 5 ans
 

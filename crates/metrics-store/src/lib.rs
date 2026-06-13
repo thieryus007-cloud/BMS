@@ -252,6 +252,60 @@ impl MetricsStore {
     }
 }
 
+/// Rapport d'une compaction hors-ligne ([`compact_database`]).
+#[derive(Debug, Clone, Copy)]
+pub struct CompactionReport {
+    pub bytes_before: u64,
+    pub bytes_after: u64,
+    /// Stats de la passe de tiering (buckets écrits + points purgés).
+    pub tiering: tiering::CompactionStats,
+    /// `true` si la compaction physique redb a effectivement réécrit le fichier.
+    pub physically_compacted: bool,
+}
+
+/// Compaction COMPLÈTE d'une base redb **hors-ligne** (le service ne doit PAS
+/// tourner — redb est mono-process). Deux phases :
+///
+/// 1. **Tiering** ([`MetricsStore::compact_now`]) : purge `raw → hourly → daily`
+///    selon `policy`. Les données brutes plus vieilles que `raw_retention_days`
+///    deviennent des agrégats horaires (l'historique long terme est CONSERVÉ,
+///    à résolution réduite). Cela libère des pages *logiquement*.
+/// 2. **Compaction physique** (`redb::Database::compact`, en boucle jusqu'à
+///    `false`) : réécrit le fichier sans les pages libres → le fichier
+///    rétrécit réellement sur le disque.
+///
+/// Sans la phase 1, la phase 2 ne récupère que l'espace déjà libre ; c'est la
+/// phase 1 qui réduit le volume de données brutes.
+pub fn compact_database(db_path: &Path, policy: &TierPolicy) -> Result<CompactionReport> {
+    let bytes_before = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
+
+    // Phase 1 — tiering. Bloc fermé : le writer est joint et l'`Arc<Database>`
+    // libéré à la sortie du bloc, donc le fichier est entièrement relâché
+    // avant la phase 2 (sinon `compact` échouerait, base déjà ouverte).
+    let tiering = {
+        let store = MetricsStore::open(db_path, Options::default())?;
+        let stats = store.compact_now(policy)?;
+        store.shutdown();
+        stats
+    };
+
+    // Phase 2 — compaction physique (accès exclusif). `compact()` renvoie
+    // `true` tant qu'une passe supplémentaire est possible ; on itère (borné).
+    let mut db = Builder::new().create(db_path)?;
+    let mut physically_compacted = false;
+    for _ in 0..16 {
+        match db.compact() {
+            Ok(true) => physically_compacted = true,
+            Ok(false) => break,
+            Err(e) => return Err(anyhow::anyhow!("redb compact: {e}")),
+        }
+    }
+    drop(db);
+
+    let bytes_after = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
+    Ok(CompactionReport { bytes_before, bytes_after, tiering, physically_compacted })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

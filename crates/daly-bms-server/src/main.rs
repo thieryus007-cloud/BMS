@@ -129,6 +129,9 @@ struct ServerArgs {
     /// `--check-config` : valide la config (parse + bornes) puis sort —
     /// dry-run pour CI/déploiement (audit 2026-06 §12).
     check_config: bool,
+    /// `--compact-db` : compacte la base redb hors-ligne (tiering + compaction
+    /// physique) puis sort. À lancer service ARRÊTÉ (redb mono-process).
+    compact_db: bool,
 }
 
 impl ServerArgs {
@@ -145,8 +148,9 @@ impl ServerArgs {
             .unwrap_or_default();
 
         let check_config = args.iter().any(|a| a == "--check-config");
+        let compact_db   = args.iter().any(|a| a == "--compact-db");
 
-        Self { port, bms_addrs, check_config }
+        Self { port, bms_addrs, check_config, compact_db }
     }
 
     fn parse_addresses(s: &str) -> Vec<u8> {
@@ -250,6 +254,34 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
         anyhow::bail!("--check-config : aucun fichier de config trouvé");
+    }
+
+    // `--compact-db` : compaction hors-ligne de la base redb puis sortie.
+    // À lancer service ARRÊTÉ (redb mono-process) — sinon "Database already open".
+    if args.compact_db {
+        let db_path = std::path::PathBuf::from(&config.metrics_store.db_path);
+        let policy = metrics_store::TierPolicy {
+            raw_retention_days:    config.metrics_store.raw_retention_days,
+            hourly_retention_days: config.metrics_store.hourly_retention_days,
+            daily_retention_days:  config.metrics_store.daily_retention_days,
+        };
+        println!(
+            "Compaction de {} (raw_retention_days={})…",
+            db_path.display(), policy.raw_retention_days
+        );
+        let r = metrics_store::compact_database(&db_path, &policy)?;
+        let mb = |b: u64| b as f64 / 1_048_576.0;
+        println!(
+            "Tiering : {} buckets écrits, {} points purgés.",
+            r.tiering.buckets_written, r.tiering.points_purged
+        );
+        println!(
+            "Fichier : {:.0} Mo → {:.0} Mo (récupéré {:.0} Mo, compaction physique : {}).",
+            mb(r.bytes_before), mb(r.bytes_after),
+            mb(r.bytes_before.saturating_sub(r.bytes_after)),
+            if r.physically_compacted { "oui" } else { "non" }
+        );
+        return Ok(());
     }
 
     // ── Flags d'auto-détection ────────────────────────────────────────────────
