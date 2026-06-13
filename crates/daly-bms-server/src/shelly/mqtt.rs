@@ -53,6 +53,13 @@ where
         cache.insert(dev.id, ShellyCache::default());
     }
 
+    // Tâche de polling périodique spawnée à chaque (re)connexion. On conserve
+    // son handle pour ABORTER la précédente avant d'en spawner une nouvelle :
+    // sans cela, chaque reconnexion MQTT laissait une tâche zombie qui tickait
+    // toutes les 30 s pour toujours sur un client mort (fuite de tâches +
+    // mémoire à chaque flap du broker — investigation RSS).
+    let mut poll_handle: Option<tokio::task::JoinHandle<()>> = None;
+
     loop {
         let mut opts = MqttOptions::new(
             format!("{}-{}", RPC_SRC, uuid::Uuid::new_v4()),
@@ -90,9 +97,14 @@ where
 
         // Tâche de polling périodique (30 s) via RPC Switch.GetStatus.
         // Permet d'obtenir l'état initial et de rafraîchir même sans changement d'état.
+        // Aborte la tâche de la connexion précédente avant d'en spawner une
+        // nouvelle (sinon fuite de tâches à chaque reconnexion).
+        if let Some(h) = poll_handle.take() {
+            h.abort();
+        }
         let poll_client  = client.clone();
         let poll_devices = devices.clone();
-        tokio::spawn(async move {
+        poll_handle = Some(tokio::spawn(async move {
             let mut ticker = tokio::time::interval(Duration::from_secs(30));
             loop {
                 ticker.tick().await;
@@ -114,7 +126,7 @@ where
                     }
                 }
             }
-        });
+        }));
 
         loop {
             match eventloop.poll().await {
