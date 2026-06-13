@@ -54,6 +54,14 @@ impl RateLimiter {
         Self::default()
     }
 
+    /// Garde-fou anti-cardinalité. La map est keyée par `metric:labels` ; une
+    /// source à cardinalité non bornée (ex: noms de process transitoires
+    /// `kworker/…`, `ps`, jobs cron) la ferait croître sans limite en heap
+    /// anonyme. Au-delà de ce seuil on purge tout le suivi (conséquence
+    /// bénigne : une rafale d'écritures autorisées le temps que le rate-limit
+    /// se re-remplisse). Nos séries légitimes se comptent en centaines.
+    const MAX_KEYS: usize = 16_384;
+
     /// Retourne `true` si l'écriture est autorisée (et marque le timestamp).
     ///
     /// `get_mut` + mise à jour en place : la `String` de la clé n'est allouée
@@ -73,6 +81,9 @@ impl RateLimiter {
             *last = now;
             true
         } else {
+            if map.len() >= Self::MAX_KEYS {
+                map.clear();
+            }
             map.insert(key.to_string(), now);
             true
         }

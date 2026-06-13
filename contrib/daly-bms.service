@@ -33,22 +33,20 @@ Environment=MALLOC_ARENA_MAX=2
 
 # Tuning jemalloc (tikv-jemallocator utilise le préfixe `_RJEM_` pour
 # éviter les conflits avec d'autres jemalloc embarqués).
-# Observation prod 18 mai 2026 : un dashboard 30 jours fait grimper
-# VmPeak à 367 Mo (eval_range sur ~270 séries × 43k itérations) et
-# jemalloc retient ~55 Mo après libération avec les defaults (delay 10s
-# avant retour des pages au kernel). Configuration agressive :
-#   narenas:2             — limite à 2 arenas (défaut = 4×N_CPU = 16 sur Pi5)
-#                           ATTENTION : MALLOC_ARENA_MAX ci-dessus est
-#                           glibc-only, jemalloc l'ignore. Ce narenas est
-#                           le VRAI équivalent. Voir mesures 2026-05-19 :
-#                           +11 MB persistants après nav /dashboard/history,
-#                           imputables à la rétention multi-arena.
-#   dirty_decay_ms:1000   — pages dirty rendues après 1 s (vs 10 s)
+# Objectif : rendre les pages au kernel rapidement pour que le RSS
+# redescende après chaque pic, sans high-water mark.
+#   dirty_decay_ms:1000   — pages dirty rendues après 1 s (vs 10 s par défaut)
 #   muzzy_decay_ms:0      — pages muzzy rendues IMMÉDIATEMENT
 #   background_thread:true — un thread dédié fait le purging en arrière-plan
-# Effet : RSS retombe au baseline ~30-40 Mo après chaque burst, plus
-# de high-water mark.
-Environment=_RJEM_MALLOC_CONF=narenas:2,dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
+#
+# ⚠ narenas:2 RETIRÉ (2026-06). L'investigation §9.1 a mesuré que limiter
+# à 2 arenas EMPIRE la rétention sous concurrence (le runtime tokio + le
+# thread writer redb + le background_thread jemalloc se disputent 2 arenas →
+# fragmentation accrue, ~7-8 MB/h « pire »). On laisse jemalloc choisir le
+# nombre d'arenas (défaut = 4×N_CPU). Le diagnostic fuite-vs-rétention se
+# fait désormais via le dashboard Grafana « 21 - Mémoire daly-bms »
+# (process_jemalloc_allocated_bytes vs process_jemalloc_resident_bytes).
+Environment=_RJEM_MALLOC_CONF=dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
 
 ExecStart=/usr/local/bin/daly-bms-server
 
