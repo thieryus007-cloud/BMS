@@ -86,9 +86,19 @@ RuntimeMaxSec=86400
 MemoryHigh=256M
 MemoryMax=512M
 
-# Arrêt : SIGTERM → arrêt gracieux (drain HTTP 10 s + flush metrics-store,
-# audit 2026-06 §5). 20 s laissent la marge avant SIGKILL.
-TimeoutStopSec=20
+# Arrêt : SIGTERM → arrêt gracieux (drain HTTP + flush metrics-store, audit
+# 2026-06 §5). 60 s : laisse le flush + commit final redb se terminer sur une
+# grosse base (3-4 Go) AVANT le SIGKILL. Sans cette marge, un SIGKILL en plein
+# commit laisse la base à rouvrir en RÉCUPÉRATION au démarrage suivant
+# (lent → dépasse TimeoutStartSec → boucle de restart en échec).
+TimeoutStopSec=60
+
+# Démarrage : READY=1 (Type=notify) n'est envoyé qu'APRÈS l'ouverture de
+# metrics-store (redb). Sur une grosse base — surtout après un arrêt non
+# gracieux nécessitant une récupération — l'ouverture peut prendre > 90 s
+# (défaut systemd). 300 s évitent que systemd tue un démarrage légitime mais
+# lent (ce qui aggraverait la corruption et créerait une boucle d'échec).
+TimeoutStartSec=300
 
 # Accès au port série RS485 (/dev/ttyUSB* ou /dev/ttyACM*)
 SupplementaryGroups=dialout
