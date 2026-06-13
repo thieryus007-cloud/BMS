@@ -55,6 +55,7 @@
   - [§15 Status final — investigation close](#15-status-final--investigation-close)
   - [§16 Phase C (commit 018e363) — axum 0.7 → 0.8](#16-phase-c-commit-018e363--axum-07--08)
   - [§17 Phase D (2026-06) — root cause du résiduel : trafic HTTP passif 1 Hz](#17-phase-d-2026-06--root-cause-du-residuel--trafic-http-passif-1-hz)
+  - [§18 Phase E (2026-06-13) — la fuite est une VRAIE fuite heap](#18-phase-e-2026-06-13--la-fuite-est-une-vraie-fuite-heap-mesures-terrain)
 - [Voir aussi](#voir-aussi)
 - [Sources consolidées](#sources-consolidees)
 
@@ -1451,6 +1452,85 @@ soit ~3,6 % de l'ancien débit.
 
 Correctifs livrés sur branche `claude/quirky-galileo-qvn74g`. Validation
 terrain (étapes ci-dessus) à faire après déploiement Pi5.
+
+---
+
+### §18 Phase E (2026-06-13) — la fuite est une VRAIE fuite heap (mesures terrain)
+
+#### §18.1 — Mesures décisives
+
+Binaire phase D confirmé en place (`strings … | grep dashboard/history = 0`,
+métrique `process_jemalloc_allocated_bytes` présente). RSS 37 → ~100 Mo en
+~12 h (≈ 3,7 MB/h). `smaps_rollup` + stats jemalloc :
+
+| Métrique | Valeur | Lecture |
+|----------|--------|---------|
+| `Rss` | 100 704 kB | — |
+| `Anonymous` / `Private_Dirty` | 90 016 kB | **tout est en heap anonyme** |
+| `Pss_File` | 9 046 kB | mmap/redb négligeable, **pas** la cause |
+| jemalloc `allocated` | 70,5 Mo | **mémoire VIVANTE réellement détenue** |
+| séries redb | 1 036 | pas d'explosion de cardinalité |
+| fichier redb | 3,8 Go | problème disque séparé (voir §18.4) |
+
+Conclusion sans ambiguïté : `allocated` (70 Mo) ≈ `Anonymous` (90 Mo) ⇒ ce
+n'est **ni** de la rétention allocateur (sinon `allocated` ≪ `resident`),
+**ni** du mmap redb (`Pss_File` minuscule), **ni** de la cardinalité (1 036
+séries). C'est une **vraie fuite applicative/dépendance** : du code retient
+des allocations vivantes, libérées seulement au restart. Le baseline bas
+après restart (37 Mo) avec la même base 3,8 Go montre que la croissance est
+une **accumulation runtime par opération**, pas un coût lié à la taille de la
+base.
+
+#### §18.2 — Candidats structurels éliminés par audit code
+
+- Aucune collection applicative non bornée (tous les `insert`/`push` sont
+  keyés par identifiants stables ou des `Vec` locaux transitoires).
+- Pas de transaction redb en lecture longue-durée (les `OnceCell<ReadTransaction>`
+  de l'`Evaluator` sont par-requête ; aucun reader ne pin la MVCC).
+- Corrigés au passage (réels mais marginaux) : fuite de tâches Shelly à
+  chaque reconnexion, `RateLimiter` non borné (noms de process transitoires),
+  `narenas:2` (rétention pire — retiré). Cf. commit phase E.
+
+#### §18.3 — Localiser la fuite au call-stack : heap profiling jemalloc
+
+Le binaire est désormais compilé avec `--enable-prof` (feature `profiling`,
+coût nul tant qu'inactif). Procédure (sans rebuild, sans écart à
+`make sync && deploy-pi5.sh`) :
+
+```bash
+# 1. Activer le profiling via un drop-in systemd + le flag de dump périodique
+sudo systemctl edit daly-bms
+#   [Service]
+#   Environment=DALY_JEMALLOC_PROF=1
+#   Environment=_RJEM_MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
+sudo systemctl restart daly-bms
+
+# 2. Laisser tourner ≥ 2-3 h. Des profils tombent dans /tmp/jeprof.<ts>.heap
+#    (~1 toutes les 5 min, via l'agent monitor).
+ls -la /tmp/jeprof.*.heap
+
+# 3. Installer jeprof si besoin
+sudo apt-get install -y libjemalloc-dev    # fournit /usr/bin/jeprof
+
+# 4. DIFF entre un profil ancien et un récent = ce qui a CRÛ (la fuite)
+jeprof --show_bytes --text \
+  --base=/tmp/jeprof.<ANCIEN>.heap \
+  /usr/local/bin/daly-bms-server /tmp/jeprof.<RECENT>.heap | head -40
+```
+
+Le haut du diff donne la pile d'allocation responsable (notre code vs
+tokio/hyper/rumqttc/redb). **Désactiver après diagnostic** :
+`sudo systemctl revert daly-bms && sudo systemctl restart daly-bms`.
+
+#### §18.4 — Base redb à 3,8 Go (problème disque distinct)
+
+`raw_retention_days = 30` à ~100 écritures/s remplit la table raw sur des Go.
+Ce n'est pas la fuite RSS (mmap non résident) mais c'est volumineux et
+ralentit les commits/compactions. Recommandé : baisser
+`raw_retention_days` (ex. 7) dans `Config.toml` — les tiers hourly/daily
+conservent l'historique long terme. ⚠ redb ne rétrécit pas le fichier
+automatiquement (réutilise l'espace libéré) ; pour récupérer le disque,
+compaction redb ou recréation de la base.
 
 ---
 
