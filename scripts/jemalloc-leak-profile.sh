@@ -39,10 +39,17 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # --- Restauration garantie (succès, Ctrl-C, déconnexion, erreur) ------------
+# `ENABLED` n'est mis à 1 qu'une fois le profiling réellement activé : sur un
+# échec précoce (binaire sans prof, jeprof absent…) on ne redémarre PAS le
+# service inutilement.
 RESTORED=0
+ENABLED=0
 restore() {
     [ "$RESTORED" -eq 1 ] && return
     RESTORED=1
+    if [ "$ENABLED" -eq 0 ] && [ ! -f "$DROPIN" ]; then
+        return  # rien n'a été modifié → aucun redémarrage
+    fi
     log "Restauration : profiling OFF + redémarrage normal de $SVC…"
     rm -f "$DROPIN"
     systemctl daemon-reload
@@ -56,7 +63,11 @@ restore() {
 trap restore EXIT INT TERM HUP
 
 # --- 1. binaire compilé avec profiling ? ------------------------------------
-if ! strings "$BIN" 2>/dev/null | grep -q "prof.dump"; then
+# NB : on utilise `grep -c` (lit tout le flux) et NON `grep -q` : sous
+# `set -o pipefail`, `grep -q` ferme le tube au 1er match → `strings` reçoit
+# SIGPIPE (141) → la pipeline est vue en échec malgré un match (faux négatif).
+prof_strings=$(strings "$BIN" 2>/dev/null | grep -c "prof\.dump" || true)
+if [ "${prof_strings:-0}" -eq 0 ]; then
     err "Le binaire $BIN n'a PAS le profiling jemalloc compilé."
     err "Déploie la dernière version d'abord :  make sync && sudo bash scripts/deploy-pi5.sh"
     exit 1
