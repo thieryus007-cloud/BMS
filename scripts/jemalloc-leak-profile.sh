@@ -62,16 +62,12 @@ restore() {
 }
 trap restore EXIT INT TERM HUP
 
-# --- 1. binaire compilé avec profiling ? ------------------------------------
-# NB : on utilise `grep -c` (lit tout le flux) et NON `grep -q` : sous
-# `set -o pipefail`, `grep -q` ferme le tube au 1er match → `strings` reçoit
-# SIGPIPE (141) → la pipeline est vue en échec malgré un match (faux négatif).
-prof_strings=$(strings "$BIN" 2>/dev/null | grep -c "prof\.dump" || true)
-if [ "${prof_strings:-0}" -eq 0 ]; then
-    err "Le binaire $BIN n'a PAS le profiling jemalloc compilé."
-    err "Déploie la dernière version d'abord :  make sync && sudo bash scripts/deploy-pi5.sh"
-    exit 1
-fi
+# --- 1. (pas de pré-check par `strings`) ------------------------------------
+# Un test `strings | grep prof.dump` n'est PAS fiable : jemalloc stocke le
+# chemin CTL "prof.dump" en tokens séparés ("prof", "dump"), donc la chaîne
+# littérale n'apparaît pas contiguë dans le binaire. La vraie vérification se
+# fait au runtime (étape 5b) : on confirme qu'un profil est réellement produit
+# après activation — c'est le test du comportement, pas d'une heuristique.
 
 # --- 2. jeprof disponible ? -------------------------------------------------
 if ! command -v jeprof >/dev/null 2>&1; then
@@ -88,6 +84,7 @@ rm -f $HEAP_GLOB 2>/dev/null || true
 # --- 4. activer le profiling ------------------------------------------------
 log "Activation du profiling jemalloc (drop-in $DROPIN)…"
 mkdir -p "$DROPIN_DIR"
+ENABLED=1   # à partir d'ici, la restauration doit s'exécuter
 cat > "$DROPIN" <<'EOF'
 [Service]
 Environment=DALY_JEMALLOC_PROF=1
@@ -101,10 +98,29 @@ if ! systemctl is-active --quiet "$SVC"; then
     journalctl -u "$SVC" -n 30 --no-pager >&2 || true
     exit 1
 fi
-log "Profiling actif. Mesure pendant $DURATION."
+
+# --- 5. vérifier que le profiling produit RÉELLEMENT un profil --------------
+# L'agent monitor dumpe un profil dès son 1er tick (~30 s). Si rien n'apparaît
+# en ~2 min, c'est que le binaire n'a pas le profiling actif (--enable-prof
+# absent, ou prof inactif) → on échoue proprement (et la restauration remet
+# tout en état via le trap).
+log "Vérification du profiling (attente du 1er profil, ≤ 150 s)…"
+first_ok=0
+for _ in $(seq 1 30); do
+    sleep 5
+    if ls $HEAP_GLOB >/dev/null 2>&1; then first_ok=1; break; fi
+done
+if [ "$first_ok" -eq 0 ]; then
+    err "Aucun profil produit après activation → le profiling jemalloc n'est"
+    err "pas actif dans le binaire déployé. Redéploie la dernière version :"
+    err "  make sync && sudo bash scripts/deploy-pi5.sh"
+    err "Indice : journalctl -u $SVC -n 20 | grep -i prof"
+    exit 1
+fi
+log "Profiling confirmé (1er profil capturé). Mesure pendant $DURATION…"
 log "Le service écrit un profil dans $HEAP_GLOB toutes les ~5 min."
 
-# --- 5. attendre la fenêtre de mesure ---------------------------------------
+# --- 5b. attendre la fenêtre de mesure --------------------------------------
 sleep "$DURATION"
 
 # --- 6. analyse : diff premier → dernier profil -----------------------------
