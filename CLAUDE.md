@@ -22,6 +22,7 @@
 | Déployer binaire Pi5 | `sudo systemctl stop daly-bms && sudo cp target/aarch64-unknown-linux-gnu/release/daly-bms-server /usr/local/bin/ && sudo systemctl start daly-bms` |
 | Broker MQTT (status/logs) | `systemctl status mosquitto-broker` / `journalctl -u mosquitto-broker -f` |
 | Taille base redb | `du -sh /mnt/nvme/daly-bms/metrics.redb` |
+| Compacter la base redb (réduit le fichier, garde l'historique ; service arrêté pdt l'op) | `sudo bash scripts/compact-redb.sh 7` (abaisse raw_retention_days à 7 + tiering + compaction physique) |
 | Nettoyer disque (build) | `rm -rf target/armv7-unknown-linux-gnueabihf target/debug target/release && rm -rf ~/.cargo/registry/cache ~/.cargo/registry/src && sudo apt-get clean` (≈ -2,6 G ; garde `target/aarch64`). Reset total : `cargo clean` |
 | Nb séries en base | `curl -s http://localhost:8080/api/v1/redb/series \| jq '.data \| length'` |
 | Healthcheck backend | `curl -s http://localhost:8080/-/healthy` |
