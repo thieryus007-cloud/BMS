@@ -92,6 +92,11 @@ Environment=_RJEM_MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,dirty
 # Marge de démarrage : l'ouverture de la base redb (grosse / récupération)
 # peut être lente, et READY n'est envoyé qu'après. Évite un kill systemd.
 TimeoutStartSec=300
+# CRUCIAL : sans cela, l'unité a PrivateTmp=true → le service écrit ses
+# profils dans un /tmp PRIVÉ (namespace), invisible depuis le vrai /tmp où ce
+# script les cherche. On désactive l'isolation /tmp le temps de la mesure ;
+# la restauration (retrait du drop-in) rétablit PrivateTmp=true.
+PrivateTmp=false
 EOF
 systemctl daemon-reload
 systemctl restart "$SVC"
