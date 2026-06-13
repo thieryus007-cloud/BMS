@@ -147,7 +147,7 @@ if [[ -f "$CONF" ]]; then
     # Port série vide → auto-détection qui échoue si le BMS tarde. Port fixe ici.
     step "Vérification port série…"
     SERIAL_PORT=$(awk '/^\[serial\]/,/^\[/' "$CONF" \
-        | grep -E '^port' | sed -E 's/.*=\s*"([^"]*)".*/\1/' | head -1)
+        | grep -E '^port' | sed -E 's/.*=\s*"([^"]*)".*/\1/' | head -1 || true)
     if [[ -z "$SERIAL_PORT" ]]; then
         if $DRY_RUN; then warn "[dry-run] [serial].port vide → serait forcé à /dev/ttyUSB0"
         else
@@ -164,7 +164,7 @@ if [[ -f "$CONF" ]]; then
     step "Vérification config critique (metrics_store)…"
     grep -q '^\[metrics_store\]' "$CONF" || error "Section [metrics_store] absente de $CONF — éditer manuellement"
     METRICS_ENABLED=$(awk '/^\[metrics_store\]/,/^\[/' "$CONF" \
-        | grep -E '^enabled' | sed -E 's/.*=\s*(true|false).*/\1/' | head -1)
+        | grep -E '^enabled' | sed -E 's/.*=\s*(true|false).*/\1/' | head -1 || true)
     if [[ "$METRICS_ENABLED" != "true" ]]; then
         if $DRY_RUN; then warn "[dry-run] [metrics_store].enabled='$METRICS_ENABLED' → serait forcé à true"
         else
@@ -180,7 +180,7 @@ if [[ -f "$CONF" ]]; then
     fi
 
     # db_path : parent doit exister et appartenir à l'utilisateur du service.
-    DB_PATH=$(grep -E '^db_path' "$CONF" | sed -E 's/.*=\s*"([^"]+)".*/\1/' | head -1)
+    DB_PATH=$(grep -E '^db_path' "$CONF" | sed -E 's/.*=\s*"([^"]+)".*/\1/' | head -1 || true)
     DB_PATH="${DB_PATH:-/mnt/nvme/daly-bms/metrics.redb}"
     DB_DIR=$(dirname "$DB_PATH")
     DALY_USER=$(systemctl show daly-bms --property=User --value 2>/dev/null || echo dalybms)
@@ -302,12 +302,20 @@ for svc in daly-bms energy-manager; do
     sudo cp "$built" "$installed"
     sudo systemctl start "$svc"
     RESTARTED+=("$svc")
-    # Healthcheck immédiat (laisse le temps au Type=notify de signaler READY).
-    sleep 4
-    if systemctl is-active --quiet "$svc"; then
+    # Healthcheck : on POLL jusqu'à 300 s. READY (Type=notify) n'est envoyé
+    # qu'après l'ouverture de metrics-store (redb) ; sur une grosse base
+    # (plusieurs Go) ça peut prendre 1-2 min. Un `sleep 4` fixe faisait
+    # échouer le déploiement à tort sur un démarrage lent mais légitime.
+    svc_up=0
+    for _ in $(seq 1 60); do
+        if systemctl is-active --quiet "$svc"; then svc_up=1; break; fi
+        if systemctl is-failed --quiet "$svc"; then break; fi
+        sleep 5
+    done
+    if [[ "$svc_up" -eq 1 ]]; then
         info "$svc actif"
     else
-        error "$svc n'a pas démarré — journalctl -u $svc -n 50"
+        error "$svc n'a pas démarré (≤ 300 s) — journalctl -u $svc -n 50"
     fi
     if [[ "$svc" == "daly-bms" ]]; then
         journalctl -u daly-bms --since "30 seconds ago" --no-pager 2>/dev/null \
