@@ -29,15 +29,13 @@ err() { printf '\033[1;31m[compact]\033[0m %s\n' "$*" >&2; }
 [ "$(id -u)" -eq 0 ] || { err "À lancer avec sudo."; exit 1; }
 [ -f "$CONF" ] || { err "Config introuvable : $CONF"; exit 1; }
 
-# Le binaire doit supporter --compact-db. On utilise `grep -a` (scan de TOUS
-# les octets du fichier) et non `strings` : selon le système, `strings` ne
-# scanne que certaines sections ELF et rate la chaîne dans un binaire release
-# (constaté sur le Pi5). Pas de pipe → pas de SIGPIPE sous pipefail.
-if ! grep -a -q 'compact-db' "$BIN" 2>/dev/null; then
-    err "Le binaire déployé ne supporte pas --compact-db."
-    err "Déploie d'abord : make sync && sudo bash scripts/deploy-pi5.sh"
-    exit 1
-fi
+# NB : on ne détecte PAS le support de --compact-db par inspection du binaire.
+# En build release, LLVM compile les comparaisons de petites chaînes
+# (`a == "--compact-db"`) en comparaisons d'IMMÉDIATES — la chaîne littérale
+# n'apparaît pas dans le binaire alors que le flag fonctionne. `strings`/`grep`
+# donnent donc des faux négatifs. On exécute directement le flag (le binaire
+# déployé est forcément récent via deploy-pi5.sh) avec un `timeout` en filet
+# de sécurité (cf. exécution plus bas).
 
 # Redémarrage garanti du service quoi qu'il arrive.
 STOPPED=0
@@ -71,12 +69,18 @@ systemctl stop "$SVC"
 STOPPED=1
 sleep 3
 
-# 3. Compaction (peut durer plusieurs minutes).
-log "Compaction en cours (tiering + compaction physique)… patiente."
-if sudo -u "$DALY_USER" env DALY_CONFIG="$CONF" "$BIN" --compact-db; then
-    log "Compaction terminée."
-else
-    err "Compaction en échec — le service va être redémarré tel quel."
-fi
+# 3. Compaction (peut durer plusieurs minutes). `timeout` = filet de sécurité :
+#    si jamais le binaire était trop ancien (flag ignoré → il démarrerait le
+#    serveur au lieu de compacter et de sortir), on ne reste pas bloqué.
+log "Compaction en cours (tiering + compaction physique)… patiente (≤ 30 min)."
+set +e
+sudo -u "$DALY_USER" timeout 1800 env DALY_CONFIG="$CONF" "$BIN" --compact-db
+rc=$?
+set -e
+case "$rc" in
+    0)   log "Compaction terminée." ;;
+    124) err "Compaction interrompue (timeout 30 min) — base inchangée." ;;
+    *)   err "Compaction en échec (code $rc) — service redémarré tel quel." ;;
+esac
 
 # 4. Redémarrage via le trap EXIT.
