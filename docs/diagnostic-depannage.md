@@ -1494,33 +1494,37 @@ base.
 #### §18.3 — Localiser la fuite au call-stack : heap profiling jemalloc
 
 Le binaire est désormais compilé avec `--enable-prof` (feature `profiling`,
-coût nul tant qu'inactif). Procédure (sans rebuild, sans écart à
-`make sync && deploy-pi5.sh`) :
+coût nul tant qu'inactif). **Tout est automatisé par un script unique** qui
+active le profiling, mesure, produit le rapport, et REMET la configuration
+normale à la fin (y compris si interrompu — Ctrl-C, déconnexion, erreur) :
 
 ```bash
-# 1. Activer le profiling via un drop-in systemd + le flag de dump périodique
-sudo systemctl edit daly-bms
-#   [Service]
-#   Environment=DALY_JEMALLOC_PROF=1
-#   Environment=_RJEM_MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
-sudo systemctl restart daly-bms
+# Mesure 2 h par défaut (durée configurable : 30m, 3h, …)
+sudo bash scripts/jemalloc-leak-profile.sh 2h
 
-# 2. Laisser tourner ≥ 2-3 h. Des profils tombent dans /tmp/jeprof.<ts>.heap
-#    (~1 toutes les 5 min, via l'agent monitor).
-ls -la /tmp/jeprof.*.heap
-
-# 3. Installer jeprof si besoin
-sudo apt-get install -y libjemalloc-dev    # fournit /usr/bin/jeprof
-
-# 4. DIFF entre un profil ancien et un récent = ce qui a CRÛ (la fuite)
-jeprof --show_bytes --text \
-  --base=/tmp/jeprof.<ANCIEN>.heap \
-  /usr/local/bin/daly-bms-server /tmp/jeprof.<RECENT>.heap | head -40
+# Mesure longue sans garder le terminal ouvert :
+sudo tmux new -s prof 'bash scripts/jemalloc-leak-profile.sh 3h'
 ```
 
+Le script (`scripts/jemalloc-leak-profile.sh`) :
+1. vérifie que le binaire a le profiling compilé (sinon : déployer d'abord) ;
+2. installe `jeprof` au besoin (`libjemalloc-dev`) ;
+3. active le profiling via un drop-in systemd + redémarre `daly-bms` ;
+4. mesure (le service dumpe `/tmp/jeprof.*.heap` toutes les ~5 min) ;
+5. écrit un rapport `/tmp/jeprof/leak-report-*.txt` : le **diff** entre le
+   premier et le dernier profil = exactement ce qui a CRÛ (la fuite), au
+   call-stack près ;
+6. **rétablit** la config normale (profiling OFF) automatiquement.
+
 Le haut du diff donne la pile d'allocation responsable (notre code vs
-tokio/hyper/rumqttc/redb). **Désactiver après diagnostic** :
-`sudo systemctl revert daly-bms && sudo systemctl restart daly-bms`.
+tokio/hyper/rumqttc/redb) → c'est elle qu'on corrige.
+
+> Procédure manuelle équivalente (si besoin de piloter finement) : drop-in
+> `Environment=DALY_JEMALLOC_PROF=1` +
+> `Environment=_RJEM_MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,…`,
+> `systemctl restart daly-bms`, attendre, puis
+> `jeprof --show_bytes --text --base=<ancien> /usr/local/bin/daly-bms-server <récent>`.
+> Désactivation : `sudo systemctl revert daly-bms && sudo systemctl restart daly-bms`.
 
 #### §18.4 — Base redb à 3,8 Go (problème disque distinct)
 
