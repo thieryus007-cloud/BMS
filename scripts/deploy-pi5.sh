@@ -146,8 +146,7 @@ fi
 if [[ -f "$CONF" ]]; then
     # Port série vide → auto-détection qui échoue si le BMS tarde. Port fixe ici.
     step "Vérification port série…"
-    SERIAL_PORT=$(awk '/^\[serial\]/,/^\[/' "$CONF" \
-        | grep -E '^port' | sed -E 's/.*=\s*"([^"]*)".*/\1/' | head -1 || true)
+    SERIAL_PORT=$(awk -F'"' '/^\[serial\]/{s=1;next} /^\[/{s=0} s&&/^[[:space:]]*port[[:space:]]*=/{print $2;exit}' "$CONF" || true)
     if [[ -z "$SERIAL_PORT" ]]; then
         if $DRY_RUN; then warn "[dry-run] [serial].port vide → serait forcé à /dev/ttyUSB0"
         else
@@ -163,8 +162,7 @@ if [[ -f "$CONF" ]]; then
     # metrics-store = seule TSDB de lecture ; désactivée par accident = dashboards vides.
     step "Vérification config critique (metrics_store)…"
     grep -q '^\[metrics_store\]' "$CONF" || error "Section [metrics_store] absente de $CONF — éditer manuellement"
-    METRICS_ENABLED=$(awk '/^\[metrics_store\]/,/^\[/' "$CONF" \
-        | grep -E '^enabled' | sed -E 's/.*=\s*(true|false).*/\1/' | head -1 || true)
+    METRICS_ENABLED=$(awk '/^\[metrics_store\]/{s=1;next} /^\[/{s=0} s&&/^[[:space:]]*enabled[[:space:]]*=/{print $3;exit}' "$CONF" || true)
     if [[ "$METRICS_ENABLED" != "true" ]]; then
         if $DRY_RUN; then warn "[dry-run] [metrics_store].enabled='$METRICS_ENABLED' → serait forcé à true"
         else
@@ -180,7 +178,7 @@ if [[ -f "$CONF" ]]; then
     fi
 
     # db_path : parent doit exister et appartenir à l'utilisateur du service.
-    DB_PATH=$(grep -E '^db_path' "$CONF" | sed -E 's/.*=\s*"([^"]+)".*/\1/' | head -1 || true)
+    DB_PATH=$(awk -F'"' '/^[[:space:]]*db_path[[:space:]]*=/{print $2;exit}' "$CONF" || true)
     DB_PATH="${DB_PATH:-/mnt/nvme/daly-bms/metrics.redb}"
     DB_DIR=$(dirname "$DB_PATH")
     DALY_USER=$(systemctl show daly-bms --property=User --value 2>/dev/null || echo dalybms)
