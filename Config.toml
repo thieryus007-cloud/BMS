@@ -65,7 +65,7 @@ cors_allow_all = true
 
 [logging]
 # Niveau de logs (trace, debug, info, warn, error)
-level = "trace"
+level = "info"
 
 # Format des logs (pretty = coloré et lisible, json = pour parsing)
 format = "pretty"
