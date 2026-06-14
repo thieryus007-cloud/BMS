@@ -127,6 +127,17 @@ debug = true                     # Garde les symboles pour perf
 strip = "none"                   # Ne pas strip pour le profiling
 panic = "unwind"                 # Permet backtrace pour debug
 
+# Profile de SYMBOLISATION des profils jemalloc/jeprof.
+# IDENTIQUE à `release` (mêmes lto=fat, panic=abort, codegen-units, opt) — donc
+# le code (.text) est byte-à-byte le même que le binaire déployé — mais on
+# garde la table de symboles + les line-tables DWARF. Permet de résoudre les
+# adresses des .heap déjà capturés (issus du binaire release strippé) SANS
+# re-profiler : `jeprof <binaire-release-symbols> <heap>`.
+[profile.release-symbols]
+inherits = "release"
+strip = "none"
+debug = 1                        # line-tables (suffit pour addr2line/jeprof)
+
 # Profile "size" si espace disque critique (optionnel)
 [profile.release-size]
 inherits = "release"

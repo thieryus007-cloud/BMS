@@ -105,6 +105,17 @@ build-arm: check-arm-deps
 	@echo "✓ Binaire ARM optimisé Pi5 : $(ARM_RELEASE_DIR)/$(BINARY)"
 	@ls -lh $(ARM_RELEASE_DIR)/$(BINARY) 2>/dev/null || true
 
+# Build ARM64 SYMBOLISÉ pour jeprof — mêmes flags que build-arm (donc même
+# .text que le binaire déployé) + symboles conservés. NE PAS déployer : sert
+# uniquement à résoudre les adresses des profils heap jemalloc déjà capturés :
+#   jeprof --text --base=<ancien>.heap \
+#     target/aarch64-unknown-linux-gnu/release-symbols/daly-bms-server <recent>.heap
+build-arm-symbols: check-arm-deps
+	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(CROSS_LINKER_GNU) \
+	RUSTFLAGS="$(ARM_RUSTFLAGS)" \
+	$(CARGO) build --profile release-symbols --target $(TARGET_ARM) --bin $(BINARY)
+	@echo "✓ Binaire ARM symbolisé (NE PAS déployer) : target/$(TARGET_ARM)/release-symbols/$(BINARY)"
+
 # Build ARM64 avec symboles pour profiling (perf/flamegraph)
 build-arm-debug: check-arm-deps
 	CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$(CROSS_LINKER_GNU) \
