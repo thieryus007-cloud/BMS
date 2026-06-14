@@ -426,6 +426,12 @@ maintenance_interval_hours = 6
 raw_retention_days = 7
 hourly_retention_days = 365
 daily_retention_days = 1825   # 5 ans
+# Plancher global d'écriture redb (secondes) : une série est écrite au plus 1×
+# par cet intervalle. 30 = défaut (le débit de commits redb dominait la
+# croissance RSS — profiling 2026-06-14). RETOUR ARRIÈRE résolution fine :
+# mettre 5, puis `sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl
+# restart daly-bms` (pas de recompilation). Cf. docs/diagnostic-depannage.md §18.
+raw_write_interval_secs = 30
 
 
 [alerts]

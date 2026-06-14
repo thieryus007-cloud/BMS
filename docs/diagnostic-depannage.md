@@ -56,6 +56,7 @@
   - [§16 Phase C (commit 018e363) — axum 0.7 → 0.8](#16-phase-c-commit-018e363--axum-07--08)
   - [§17 Phase D (2026-06) — root cause du résiduel : trafic HTTP passif 1 Hz](#17-phase-d-2026-06--root-cause-du-residuel--trafic-http-passif-1-hz)
   - [§18 Phase E (2026-06-13) — la fuite est une VRAIE fuite heap](#18-phase-e-2026-06-13--la-fuite-est-une-vraie-fuite-heap-mesures-terrain)
+  - [§19 Phase F (2026-06-14) — fuite localisée : chemin d'écriture redb](#19-phase-f-2026-06-14--fuite-localisee--chemin-decriture-redb)
 - [Voir aussi](#voir-aussi)
 - [Sources consolidées](#sources-consolidees)
 
@@ -1535,6 +1536,56 @@ ralentit les commits/compactions. Recommandé : baisser
 conservent l'historique long terme. ⚠ redb ne rétrécit pas le fichier
 automatiquement (réutilise l'espace libéré) ; pour récupérer le disque,
 compaction redb ou recréation de la base.
+
+---
+
+### §19 Phase F (2026-06-14) — fuite localisée : chemin d'écriture redb
+
+#### §19.1 — Profiling heap symbolisé
+
+Le binaire release étant strippé (`strip="symbols"`), jeprof rendait
+`?? ??:0`. Solution : profil `release-symbols` (= `release` + symboles, **même
+`.text`** donc adresses identiques au binaire déployé) via `make build-arm-symbols`,
+puis agrégation par fonction du diff de deux profils heap (3 h d'écart) avec
+`scripts/analyze-jeprof-diff.py`.
+
+#### §19.2 — Verdict
+
+La croissance (~8 Mo/h de heap VIVANT, `jemalloc allocated`) est **dominée par
+le chemin d'écriture redb**, déclenché par `metrics_store::writer::commit_batch` :
+`redb …commit_inner`, `process_freed_pages`, `BtreeBitmap` / `U64GroupedBitmap`,
+`PagedCachedFile::read`, `LeafAccessor` / `RawLeafBuilder` / `LeafMutator`. Ce
+n'est PAS le clone tower/axum (tout en bas du classement) ni un `SplitSink`.
+redb maintient en mémoire des structures (cache de pages, bitmaps de pages
+libres, nœuds B-tree) dont le coût croît avec **le débit de commits** et la
+**taille de la base**. À ~1044 séries × 1 écriture/5 s ≈ 200 écritures/s, le
+débit était énorme pour un usage domestique.
+
+#### §19.3 — Correctif : plancher d'écriture configurable
+
+`[metrics_store].raw_write_interval_secs` (défaut **30 s**, était 5 s) : une
+série est écrite au plus 1× par cet intervalle (`RateLimiter::floor`). Divise
+le débit de commits redb par ~6 → fuite ~÷6. Sans perte d'usage : Grafana
+rafraîchit à 30 s–1 min, et les vues temps réel (dashboard SSR, WebSocket)
+lisent les ring buffers **en RAM**, pas redb. Le polling RS485 et les alertes
+sont inchangés.
+
+**RETOUR ARRIÈRE (résolution fine 5 s)** — aucune recompilation :
+
+```bash
+sudo sed -i 's/^raw_write_interval_secs = .*/raw_write_interval_secs = 5/' /etc/daly-bms/config.toml
+sudo systemctl restart daly-bms
+```
+
+Valeurs intermédiaires possibles : 15 (÷3), 10 (÷2). Le réglage est dans
+`Config.toml` (préservé par `deploy-pi5.sh`).
+
+#### §19.4 — Outils ajoutés (réutilisables)
+
+- `make build-arm-symbols` → binaire `release-symbols` (symbolisation hors-ligne).
+- `scripts/analyze-jeprof-diff.py <ancien.heap> <recent.heap> <bin-symbols>` →
+  classement par fonction des allocations qui ont crû.
+- `scripts/jemalloc-leak-profile.sh` → capture + restauration auto (§18).
 
 ---
 

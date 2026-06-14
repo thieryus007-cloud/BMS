@@ -5,10 +5,21 @@
 //!
 //! ## Rate limiting
 //!
-//! Chaque métrique est rate-limitée à 1 écriture toutes les 5 secondes (par
-//! couple metric+labels) pour éviter de saturer le writer batché. Sur ~50
-//! métriques actives × 1 écriture / 5 s = 10 writes/sec = 36 000 writes/h.
-//! Le writer batche par 500 → ~72 commits redb/h. Empreinte I/O négligeable.
+//! Chaque métrique est rate-limitée par couple metric+labels. Les intervalles
+//! par tier (rapide / énergie / température) ci-dessous sont des PLANCHERS
+//! internes, mais l'intervalle effectif minimum est relevé par un PLANCHER
+//! GLOBAL configurable : `[metrics_store].raw_write_interval_secs` (défaut 30 s).
+//!
+//! Pourquoi 30 s par défaut (profiling heap 2026-06-14) : le chemin d'écriture
+//! redb (commit B-tree + cache de pages + bitmaps de pages libres) dominait la
+//! croissance RSS, et son coût mémoire est proportionnel au débit de commits.
+//! À ~1044 séries × 1/5 s ≈ 200 écritures/s c'était trop ; 30 s divise par 6
+//! sans perte d'usage (Grafana rafraîchit à 30 s–1 min ; les vues temps réel
+//! lisent les ring buffers en RAM, pas redb).
+//!
+//! RETOUR ARRIÈRE (résolution plus fine) : mettre `raw_write_interval_secs = 5`
+//! dans `/etc/daly-bms/config.toml` puis redémarrer — aucune recompilation
+//! (cf. docs/diagnostic-depannage.md §18).
 //!
 //! ## Politique non-bloquante
 //!
@@ -29,14 +40,14 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Intervalle minimum entre 2 écritures d'une même série (metric+labels).
-/// Garde le rate global gérable (1 écriture / 5 s max par série).
+/// Plancher par tier (relevé par le plancher global configurable, cf. doc du
+/// module + `RateLimiter::floor`). Tier rapide (tension, courant, SOC…).
 const MIN_WRITE_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Intervalle min pour les compteurs d'énergie (varient lentement).
+/// Tier énergie (compteurs cumulés, varient lentement).
 const ENERGY_WRITE_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Intervalle min pour température (varient très lentement).
+/// Tier température (varie très lentement).
 const TEMP_WRITE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Rate limiter clonable basé sur Arc<Mutex<HashMap>>.
@@ -47,11 +58,18 @@ const TEMP_WRITE_INTERVAL: Duration = Duration::from_secs(60);
 #[derive(Default, Clone)]
 pub struct RateLimiter {
     last_writes: std::sync::Arc<Mutex<HashMap<String, Instant>>>,
+    /// Plancher GLOBAL : l'intervalle effectif d'une écriture est
+    /// `max(interval_du_tier, floor)`. Configurable via
+    /// `[metrics_store].raw_write_interval_secs`. 0 = pas de plancher (les
+    /// tiers s'appliquent tels quels). Permet un retour arrière sans recompiler.
+    floor: Duration,
 }
 
 impl RateLimiter {
-    pub fn new() -> Self {
-        Self::default()
+    /// Construit avec un plancher global d'écriture (depuis la config).
+    /// `floor = 0` ⇒ pas de plancher (les intervalles par tier s'appliquent).
+    pub fn with_floor(floor: Duration) -> Self {
+        Self { floor, ..Self::default() }
     }
 
     /// Garde-fou anti-cardinalité. La map est keyée par `metric:labels` ; une
@@ -68,6 +86,8 @@ impl RateLimiter {
     /// qu'à la PREMIÈRE rencontre d'une série, plus jamais ensuite (review
     /// gemini phase D — zéro allocation sur le chemin chaud).
     pub fn allow(&self, key: &str, min_interval: Duration) -> bool {
+        // Plancher global : on n'écrit jamais plus souvent que `floor`.
+        let min_interval = min_interval.max(self.floor);
         let now = Instant::now();
         // unwrap_or_else pour rester safe si un panic a empoisonné le mutex.
         let mut map = self.last_writes.lock().unwrap_or_else(|p| p.into_inner());
