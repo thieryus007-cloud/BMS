@@ -527,11 +527,11 @@ pub struct MetricsStoreConfig {
     /// requête à step minuscule peut allouer sans limite — OOM du Pi).
     #[serde(default = "default_metrics_query_max_points")]
     pub query_max_points: i64,
-    /// Plancher global d'écriture redb en secondes (défaut 30). Une série n'est
-    /// écrite au plus qu'une fois par cet intervalle (relevé au-dessus des
-    /// planchers par tier). Réduire le débit de commits redb a réduit la
-    /// croissance RSS (profiling 2026-06-14). Mettre 5 pour retrouver la
-    /// résolution fine d'avant (cf. docs/diagnostic-depannage.md §18).
+    /// Plancher global d'écriture redb en secondes (défaut 5 = résolution fine).
+    /// Une série est écrite au plus 1× par cet intervalle (relevé au-dessus des
+    /// planchers par tier). Le porter à 30 divise le débit de commits redb par
+    /// 6 MAIS ne corrige PAS la fuite RSS (cf. docs/diagnostic-depannage.md
+    /// §20) — restauré à 5 le 2026-06-14.
     #[serde(default = "default_metrics_write_interval_secs")]
     pub raw_write_interval_secs: u64,
 }
@@ -545,7 +545,7 @@ fn default_metrics_hourly_days() -> u32 { 365 }
 fn default_metrics_daily_days() -> u32 { 5 * 365 }
 fn default_metrics_query_backend() -> String { "redb".into() }
 fn default_metrics_query_max_points() -> i64 { metrics_store::promql::DEFAULT_MAX_RANGE_POINTS }
-fn default_metrics_write_interval_secs() -> u64 { 30 }
+fn default_metrics_write_interval_secs() -> u64 { 5 }
 
 impl Default for MetricsStoreConfig {
     fn default() -> Self {

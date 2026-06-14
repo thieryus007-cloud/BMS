@@ -420,18 +420,19 @@ cache_mb = 16
 queue_depth = 10000
 # Intervalle de la passe de compaction tiered (heures, 0 = désactivé).
 maintenance_interval_hours = 6
-# Données brutes (pleine résolution) conservées 7 j ; au-delà, agrégation
-# horaire/journalière (historique préservé à résolution réduite). 30 j de raw
-# faisaient grossir la base à plusieurs Go → démarrages lents (cf. scripts/compact-redb.sh).
-raw_retention_days = 7
+# Données brutes (pleine résolution). 30 j = valeur RESTAURÉE à la demande
+# (2026-06-14). ⚠ La base regrossit alors à ~3-4 Go en 30 j → démarrages plus
+# lents (tolérés par TimeoutStartSec=300 ; compaction possible via
+# scripts/compact-redb.sh). La rétention n'a AUCUN effet sur la fuite RSS.
+raw_retention_days = 30
 hourly_retention_days = 365
 daily_retention_days = 1825   # 5 ans
-# Plancher global d'écriture redb (secondes) : une série est écrite au plus 1×
-# par cet intervalle. 30 = défaut (le débit de commits redb dominait la
-# croissance RSS — profiling 2026-06-14). RETOUR ARRIÈRE résolution fine :
-# mettre 5, puis `sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl
-# restart daly-bms` (pas de recompilation). Cf. docs/diagnostic-depannage.md §18.
-raw_write_interval_secs = 30
+# Plancher global d'écriture redb (secondes). 5 = résolution fine RESTAURÉE
+# (2026-06-14). NB : passer à 30 divisait le débit de commits redb par 6 mais
+# NE corrigeait PAS la fuite RSS (cf. docs/diagnostic-depannage.md §20). 5 s est
+# la résolution la plus fine (plancher des tiers internes). Configurable sans
+# recompiler.
+raw_write_interval_secs = 5
 
 
 [alerts]

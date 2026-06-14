@@ -57,6 +57,7 @@
   - [§17 Phase D (2026-06) — root cause du résiduel : trafic HTTP passif 1 Hz](#17-phase-d-2026-06--root-cause-du-residuel--trafic-http-passif-1-hz)
   - [§18 Phase E (2026-06-13) — la fuite est une VRAIE fuite heap](#18-phase-e-2026-06-13--la-fuite-est-une-vraie-fuite-heap-mesures-terrain)
   - [§19 Phase F (2026-06-14) — fuite localisée : chemin d'écriture redb](#19-phase-f-2026-06-14--fuite-localisee--chemin-decriture-redb)
+  - [§20 Phase G (2026-06-14) — bilan : ce qui N'A PAS corrigé la fuite](#20-phase-g-2026-06-14--bilan--ce-qui-na-pas-corrige-la-fuite)
 - [Voir aussi](#voir-aussi)
 - [Sources consolidées](#sources-consolidees)
 
@@ -1541,6 +1542,10 @@ compaction redb ou recréation de la base.
 
 ### §19 Phase F (2026-06-14) — fuite localisée : chemin d'écriture redb
 
+> ⚠️ **INFIRMÉ par §20** : réduire le débit d'écriture redb n'a PAS corrigé
+> la fuite (et §9.1 montre qu'elle persiste avec metrics-store désactivé).
+> redb n'est que l'allocateur le plus actif, pas la cause. Voir §20.
+
 #### §19.1 — Profiling heap symbolisé
 
 Le binaire release étant strippé (`strip="symbols"`), jeprof rendait
@@ -1586,6 +1591,60 @@ Valeurs intermédiaires possibles : 15 (÷3), 10 (÷2). Le réglage est dans
 - `scripts/analyze-jeprof-diff.py <ancien.heap> <recent.heap> <bin-symbols>` →
   classement par fonction des allocations qui ont crû.
 - `scripts/jemalloc-leak-profile.sh` → capture + restauration auto (§18).
+
+---
+
+### §20 Phase G (2026-06-14) — bilan : ce qui N'A PAS corrigé la fuite
+
+Mesures terrain après TOUS les changements ci-dessous : la pente `jemalloc
+allocated` (heap vivant) reste **~7–9 Mo/h**, identique à avant. La fuite de
+fond n'est PAS résolue.
+
+#### §20.1 — Tentatives infructueuses (à NE PAS refaire)
+
+| Changement | Effet sur la fuite | Verdict |
+|------------|--------------------|---------|
+| `narenas:2` retiré du `_RJEM_MALLOC_CONF` | nul | n'était pas la cause |
+| `RateLimiter` borné (anti-cardinalité process) | nul | bug réel mais marginal |
+| Fuite de tâches Shelly (abort sur reconnexion) | nul | bug réel mais marginal |
+| **Intervalle d'écriture redb 5 s → 30 s** (÷6 commits) | **nul** | **la fuite n'est PAS le volume d'écriture** |
+| Rétention raw 30 j → 7 j + compaction | nul *sur la fuite* | ✅ a corrigé le **disque/démarrage lent** (problème distinct) |
+
+#### §20.2 — Preuve que ce n'est PAS redb / les écritures
+
+Le profiling heap (§19) pointait le chemin d'écriture redb, MAIS :
+1. réduire le débit d'écriture ×6 (30 s) n'a rien changé à la pente ;
+2. surtout, l'investigation **§9.1 avait déjà mesuré** que la fuite persiste
+   à ~7,8 Mo/h **avec `metrics_store.enabled=false`** (redb totalement à
+   l'arrêt).
+
+⇒ redb est seulement l'**allocateur le plus actif** (il masque la vraie fuite
+dans les profils), pas la cause. La fuite est dans une **couche partagée**
+active même sans redb : runtime tokio, hyper/axum (HTTP), ou rumqttc (MQTT).
+
+#### §20.3 — Réglages restaurés (2026-06-14)
+
+À la demande, retour aux valeurs d'origine (elles n'influencent pas la fuite) :
+`raw_retention_days = 30`, `raw_write_interval_secs = 5`. ⚠ La rétention 30 j
+fait regrossir la base (~3-4 Go) → démarrages plus lents (tolérés par
+`TimeoutStartSec=300`).
+
+#### §20.4 — Prochaine étape : profiler metrics-store DÉSACTIVÉ
+
+Pour exposer la vraie fuite sans le bruit redb :
+1. `sudo systemctl edit daly-bms` → `[Service]` `Environment=DALY_JEMALLOC_PROF=1`
+   + `Environment=_RJEM_MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,background_thread:true`
+   + un drop-in qui force `metrics_store.enabled=false` n'existe pas (c'est dans
+   Config.toml) → mettre `enabled = false` dans `/etc/daly-bms/config.toml`
+   (sauvegarder d'abord), `PrivateTmp=false`, restart.
+2. Laisser tourner 1–2 h (la fuite ~8 Mo/h se voit vite).
+3. `make build-arm-symbols` puis
+   `python3 scripts/analyze-jeprof-diff.py <ancien>.heap <recent>.heap <bin-symbols>`.
+4. Cette fois redb est absent → la couche fautive (tokio/hyper/rumqttc)
+   ressortira nettement. Restaurer ensuite `enabled = true`.
+
+En attendant, le **restart quotidien** (`RuntimeMaxSec=86400`) contient la
+fuite (~8 Mo/h × 24 ≈ 190 Mo, très en dessous de `MemoryMax=512M` sur Pi5 8 Go).
 
 ---
 
