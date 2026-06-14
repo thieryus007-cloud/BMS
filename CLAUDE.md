@@ -23,7 +23,7 @@
 | Broker MQTT (status/logs) | `systemctl status mosquitto-broker` / `journalctl -u mosquitto-broker -f` |
 | Taille base redb | `du -sh /mnt/nvme/daly-bms/metrics.redb` |
 | Compacter la base redb (réduit le fichier, garde l'historique ; service arrêté pdt l'op) | `sudo bash scripts/compact-redb.sh 7` (abaisse raw_retention_days à 7 + tiering + compaction physique) |
-| Nettoyer disque (build) | `rm -rf target/armv7-unknown-linux-gnueabihf target/debug target/release && rm -rf ~/.cargo/registry/cache ~/.cargo/registry/src && sudo apt-get clean` (≈ -2,6 G ; garde `target/aarch64`). Reset total : `cargo clean` |
+| Nettoyer disque (build) | `rm -rf target/aarch64-unknown-linux-gnu/release-symbols target/armv7-unknown-linux-gnueabihf target/debug target/release ~/.cargo/registry/cache ~/.cargo/registry/src /tmp/jeprof /tmp/jeprof.*.heap && sudo apt-get clean && sudo journalctl --vacuum-size=200M` (garde `target/aarch64-…/release` = cache prod ; `release-symbols`/jeprof = artefacts de diagnostic régénérables). Reset total : `cargo clean` |
 | Nb séries en base | `curl -s http://localhost:8080/api/v1/redb/series \| jq '.data \| length'` |
 | Healthcheck backend | `curl -s http://localhost:8080/-/healthy` |
 | Valider Config.toml avant déploiement | `DALY_CONFIG=Config.toml daly-bms-server --check-config` et `ENERGY_CONFIG=Config.toml energy-manager --check-config` (dry-run : parse + bornes + typos — audit 2026-06 §12) |
