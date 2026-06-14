@@ -545,6 +545,8 @@ impl AppState {
         metrics_store: Option<Arc<metrics_store::MetricsStore>>,
     ) -> Self {
         let (ws_tx, _) = broadcast::channel(WS_BROADCAST_CAPACITY);
+        // Capturé avant que `config` ne soit déplacé dans l'Arc ci-dessous.
+        let config_write_interval_secs = config.metrics_store.raw_write_interval_secs;
         let addresses = config.bms_addresses();
         let ring_size = config.serial.ring_buffer_size;
         let mut buffers = BTreeMap::new();
@@ -598,7 +600,9 @@ impl AppState {
             alert_engine,
             alert_tx,
             metrics_store,
-            redb_rl: crate::redb_writes::RateLimiter::new(),
+            redb_rl: crate::redb_writes::RateLimiter::with_floor(
+                std::time::Duration::from_secs(config_write_interval_secs),
+            ),
             freshness: Arc::new(crate::freshness::FreshnessRegistry::new()),
         }
     }
