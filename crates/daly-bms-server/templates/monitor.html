@@ -228,22 +228,6 @@
     </div>
   </div>
 
-  <!-- Log archive viewer -->
-  <div class="bms-card" id="card-logs" style="grid-column:1/-1;">
-    <div class="bms-hdr bms-hdr-amber">
-      <div class="bms-hdr-left"><span class="bms-hdr-name">📁 Archives de logs</span></div>
-      <div class="bms-hdr-right" style="display:flex;align-items:center;gap:6px;">
-        <select id="log-file-select" style="font-size:0.72rem;border:1px solid var(--border);border-radius:4px;padding:2px 6px;background:var(--bg);color:var(--text);">
-          <option value="">— choisir un fichier —</option>
-        </select>
-        <button onclick="loadLogFile()" style="font-size:0.72rem;padding:3px 10px;background:#2563eb;color:#fff;border:none;border-radius:4px;cursor:pointer;">Charger</button>
-      </div>
-    </div>
-    <div id="log-content-wrap" style="padding:0.5rem;">
-      <div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">Sélectionner un fichier de log</div></div>
-    </div>
-  </div>
-
 </div>
 {% endblock %}
 
@@ -435,39 +419,6 @@ async function fetchRs485Health(){
       badge.style.color=rate>=95?'#15803d':rate>=80?'#a16207':'#dc2626';
     }
   } catch(e){}
-}
-
-// Log archive
-async function loadLogList(){
-  try{
-    const r=await fetch('/api/v1/monitor/logs'); if(!r.ok)return;
-    const d=await r.json();
-    const sel=document.getElementById('log-file-select'); if(!sel||!d.ok)return;
-    sel.innerHTML='<option value="">— choisir —</option>'+(d.files||[]).map(f=>`<option value="${f.name}">${f.name} (${f.size_kb} KB)</option>`).join('');
-  } catch(e){}
-}
-async function loadLogFile(){
-  const sel=document.getElementById('log-file-select');
-  const name=sel&&sel.value; if(!name)return;
-  const wrap=document.getElementById('log-content-wrap');
-  wrap.innerHTML='<div style="padding:1rem;color:var(--muted2);font-size:0.8rem;">Chargement…</div>';
-  try{
-    const r=await fetch('/api/v1/monitor/logs/content?name='+encodeURIComponent(name)+'&lines=500');
-    if(!r.ok){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">Erreur chargement</div>';return;}
-    const d=await r.json();
-    if(!d.ok){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">'+d.reason+'</div>';return;}
-    const lines=d.lines||[];
-    const html=lines.map(line=>{
-      let color='#94a3b8';
-      if(line.includes(' WARN ')) color='#eab308';
-      if(line.includes(' ERROR ')) color='#ef4444';
-      if(line.includes(' INFO ')) color='#86efac';
-      const e=line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      return `<div style="color:${color};white-space:pre;font-size:0.72rem;line-height:1.5;">${e}</div>`;
-    }).join('');
-    wrap.innerHTML=`<div id="log-scroll" style="background:#0f172a;border-radius:8px;padding:0.75rem;max-height:420px;overflow-y:auto;font-family:monospace;">${html||'<span style="color:#475569;">Fichier vide</span>'}</div>`;
-    const sc=document.getElementById('log-scroll'); if(sc) sc.scrollTop=sc.scrollHeight;
-  } catch(e){wrap.innerHTML='<div style="padding:1rem;color:#dc2626">Erreur: '+e.message+'</div>';}
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -709,7 +660,6 @@ async function fetchRulesStatus() {
 fetchMonitor();
 fetchRs485Health();
 fetchRulesStatus();
-loadLogList();
 setInterval(fetchMonitor, 10000);
 setInterval(fetchRs485Health, 15000);
 setInterval(fetchRulesStatus, 15000);
