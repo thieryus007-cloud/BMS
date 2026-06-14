@@ -58,25 +58,26 @@ base = base_new or base_old
 if base is None:
     print("!! base exécutable introuvable dans MAPPED_LIBRARIES"); sys.exit(2)
 
-# Diff par pile
+# Diff par pile (peut être très fragmenté → on agrège ENSUITE par fonction)
 diff = {}
 for k, b in new.items():
     diff[k] = diff.get(k, 0) + b
 for k, b in old.items():
     diff[k] = diff.get(k, 0) - b
-growing = sorted(((v, k) for k, v in diff.items() if v > 0), reverse=True)[:top_n]
 
-# Adresses uniques à résoudre (seulement celles dans l'exécutable)
+# Toutes les adresses (dans l'exécutable) de toutes les piles à diff != 0
 lo, hi = base, base + 0x10000000
 addrs = set()
-for _, k in growing:
+for k, v in diff.items():
+    if v == 0:
+        continue
     for a in k:
         ai = int(a, 16)
         if lo <= ai < hi:
             addrs.add(ai)
 addrs = sorted(addrs)
 
-# addr2line en batch
+# addr2line en batch (2 lignes par adresse : fonction, fichier:ligne)
 sym = {}
 if addrs:
     offs = [hex(a - base) for a in addrs]
@@ -84,27 +85,39 @@ if addrs:
         out = subprocess.run(
             ["addr2line", "-f", "-C", "-e", binpath] + offs,
             capture_output=True, text=True, check=False).stdout.splitlines()
-        # 2 lignes par adresse : fonction, fichier:ligne
-        for i, a in enumerate(addrs):
-            fn = out[2*i] if 2*i < len(out) else "??"
-            loc = out[2*i+1] if 2*i+1 < len(out) else "??"
-            loc = loc.split("/")[-1]
-            sym[a] = f"{fn}  ({loc})"
     except FileNotFoundError:
         print("!! addr2line introuvable"); sys.exit(3)
+    for i, a in enumerate(addrs):
+        fn  = out[2*i]   if 2*i   < len(out) else "??"
+        loc = out[2*i+1] if 2*i+1 < len(out) else "??"
+        sym[a] = f"{fn}  ({loc.split('/')[-1]})"
 
 def name(a):
     ai = int(a, 16)
     return sym.get(ai, a)
 
-total_growth = sum(v for v, _ in growing)
-print(f"# Top {len(growing)} piles ayant CRÛ — croissance cumulée {total_growth/1048576:.1f} Mo")
-print(f"# binaire : {binpath}\n")
-for v, k in growing:
-    print(f"=== +{v/1048576:.2f} Mo " + "="*40)
-    # pile = leaf -> ... ; on saute le préfixe allocateur (4 frames jemalloc)
-    frames = list(k)
-    # afficher du site d'allocation (après l'allocateur) vers la racine
-    for a in frames[4:14]:
-        print("   " + name(a))
-    print()
+# Agrégation par FONCTION : pour chaque pile (diff != 0), on attribue son delta
+# à chaque fonction UNIQUE de la pile (vue cumulée, comme jeprof). On ignore
+# les 1res frames allocateur (jemalloc) communes à toutes les piles.
+ALLOC_SKIP = 4
+func_cum = {}
+total = 0
+for k, v in diff.items():
+    if v == 0:
+        continue
+    total += v
+    seen = set()
+    for a in k[ALLOC_SKIP:]:
+        f = name(a)
+        if f in seen:
+            continue
+        seen.add(f)
+        func_cum[f] = func_cum.get(f, 0) + v
+
+ranked = sorted(func_cum.items(), key=lambda x: x[1], reverse=True)
+print(f"# Croissance nette totale : {total/1048576:.1f} Mo")
+print(f"# Top fonctions par octets cumulés sur les chemins qui ont CRÛ :\n")
+for f, b in ranked[:35]:
+    if b <= 0:
+        continue
+    print(f"{b/1048576:7.2f} Mo  {f}")
