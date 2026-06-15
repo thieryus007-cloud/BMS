@@ -1104,7 +1104,7 @@ Effet :
 - État in-memory (snapshots, broadcasts) reconstruit en <30 s
 
 Plafond RSS estimé avant correction : `52 MB (baseline) + 24 × 6.6 MB/h = 52 + 158 ≈ 210 MB`
-avant restart quotidien. Très acceptable sur un Pi5 avec 8 GB RAM.
+avant restart quotidien. Très acceptable sur un Pi5 avec 4 Go RAM.
 
 ---
 
@@ -1277,7 +1277,7 @@ Test post-déploiement Plan B :
 
 Avec pente résiduelle 2.85 MB/h, le restart quotidien absorbe +68 MB
 par jour. Plafond cumulé : 52 MB (baseline) + 68 = ~120 MB → restart →
-~52 MB. Cycle stable largement supportable sur Pi5 8 GB.
+~52 MB. Cycle stable largement supportable sur Pi5 4 Go.
 
 À RETIRER seulement si l'investigation continue jusqu'à <1 MB/h.
 
@@ -1375,7 +1375,7 @@ descendre sous 1 MB/h en upgradant aussi axum.
 | **Phase C (axum 0.8)** | **1.18 MB/h** | **-82 %** |
 
 À 1.18 MB/h × 24 h = **+28 MB par jour**. Sur 1 semaine = +200 MB.
-Largement supportable sur Pi5 8 GB.
+Largement supportable sur Pi5 4 Go.
 
 #### §16.5 — Workaround `RuntimeMaxSec=86400` conservé
 
@@ -1661,7 +1661,7 @@ Pour exposer la vraie fuite sans le bruit redb :
    ressortira nettement. Restaurer ensuite `enabled = true`.
 
 En attendant, le **restart quotidien** (`RuntimeMaxSec=86400`) contient la
-fuite (~8 Mo/h × 24 ≈ 190 Mo, très en dessous de `MemoryMax=512M` sur Pi5 8 Go).
+fuite (~8 Mo/h × 24 ≈ 190 Mo, très en dessous de `MemoryMax=512M` sur Pi5 4 Go).
 
 ---
 
@@ -1729,6 +1729,11 @@ fichier stable → état redb stable → **RSS stable**.
   est CONSERVÉ** (marge de sécurité, sans coût notable). Le RSS se stabilisant
   seul bien sous `MemoryMax=512M`, ce restart n'est plus un correctif de fuite
   mais une simple hygiène.
+- **Contexte matériel réel** (terrain 2026-06-15) : Pi5 Compute Module **4 Go**
+  de RAM. Les ~100 Mo du service ≈ **2,5 %** de la RAM ; l'occupation système
+  globale est de **15-18 %**. Le fichier redb est sur le **NVMe 256 Go**, pas
+  sur l'eMMC 32 Go. Aucune ressource sous pression : il n'y a rien à « régler »,
+  seulement à comprendre (palier de rétention = comportement normal de redb).
 
 ---
 
