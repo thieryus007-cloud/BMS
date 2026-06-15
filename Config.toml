@@ -420,10 +420,17 @@ cache_mb = 16
 queue_depth = 10000
 # Intervalle de la passe de compaction tiered (heures, 0 = désactivé).
 maintenance_interval_hours = 6
-# Données brutes (pleine résolution). 30 j = valeur RESTAURÉE à la demande
-# (2026-06-14). ⚠ La base regrossit alors à ~3-4 Go en 30 j → démarrages plus
-# lents (tolérés par TimeoutStartSec=300 ; compaction possible via
-# scripts/compact-redb.sh). La rétention n'a AUCUN effet sur la fuite RSS.
+# Données brutes (pleine résolution). ⚠ Ce paramètre FIXE la taille physique de
+# la base (table raw dominante) ET, par voie de conséquence, le PALIER de RSS du
+# service : l'état interne de redb (cache de pages + métadonnées d'allocateur/
+# régions, gardé vivant par l'Arc<Database>) est proportionnel à la taille du
+# fichier. Mesures terrain 2026-06-15 (docs/diagnostic-depannage.md §21) :
+#   7 j / 30 j  → RSS 45→~100 Mo en ~5 h puis se STABILISE seul (~100 Mo)
+#   60 j        → RSS démarre ~94 Mo et reste ~96 Mo (fichier déjà à son palier)
+# Le RSS se stabilise tout seul = ce N'EST PAS une fuite (§21 infirme la
+# conclusion « fuite tokio/hyper » de §20). Pour BAISSER le palier RSS : réduire
+# cette valeur + compacter (scripts/compact-redb.sh). ⚠ 60 j fait ~3-4 Go →
+# démarrages plus lents (tolérés par TimeoutStartSec=300).
 raw_retention_days = 60
 hourly_retention_days = 365
 daily_retention_days = 1825   # 5 ans

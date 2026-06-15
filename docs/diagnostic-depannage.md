@@ -1459,6 +1459,15 @@ terrain (étapes ci-dessus) à faire après déploiement Pi5.
 
 ### §18 Phase E (2026-06-13) — la fuite est une VRAIE fuite heap (mesures terrain)
 
+> ⚠️ **INFIRMÉ par §21 (2026-06-15)** : la croissance « 37 → ~100 Mo » décrite
+> ici n'était PAS une fuite. Les tests de rétention (§21) montrent que le RSS
+> **se stabilise tout seul** à un palier fixé par `raw_retention_days` — c'est
+> le fichier redb qui grossit vers son équilibre de rétention après un repart à
+> froid, et l'état interne de redb (résident, proportionnel à la taille du
+> fichier) qui suit. `allocated ≈ Anonymous` reflète l'état redb détenu vivant
+> par l'`Arc<Database>`, pas du code qui « retient des allocations par
+> opération ». Conserver §18-§20 pour l'historique d'investigation.
+
 #### §18.1 — Mesures décisives
 
 Binaire phase D confirmé en place (`strings … | grep dashboard/history = 0`,
@@ -1596,6 +1605,14 @@ Valeurs intermédiaires possibles : 15 (÷3), 10 (÷2). Le réglage est dans
 
 ### §20 Phase G (2026-06-14) — bilan : ce qui N'A PAS corrigé la fuite
 
+> ⚠️ **INFIRMÉ par §21 (2026-06-15)** : la conclusion de cette phase (« fuite
+> non bornée ~8 Mo/h dans une couche partagée tokio/hyper/rumqttc ») est
+> erronée. Les mesures de §20 étaient **trop courtes pour voir la
+> stabilisation** : sur 5 h le RSS se fige tout seul (§21). La ligne du tableau
+> §20.1 « Rétention raw 30 j → 7 j : nul *sur la fuite* » est fausse — la
+> rétention **fixe le palier de RSS** (c'est le levier principal). Section
+> conservée pour l'historique.
+
 Mesures terrain après TOUS les changements ci-dessous : la pente `jemalloc
 allocated` (heap vivant) reste **~7–9 Mo/h**, identique à avant. La fuite de
 fond n'est PAS résolue.
@@ -1645,6 +1662,73 @@ Pour exposer la vraie fuite sans le bruit redb :
 
 En attendant, le **restart quotidien** (`RuntimeMaxSec=86400`) contient la
 fuite (~8 Mo/h × 24 ≈ 190 Mo, très en dessous de `MemoryMax=512M` sur Pi5 8 Go).
+
+---
+
+### §21 Phase H (2026-06-15) — résolution : ce n'est PAS une fuite, c'est le palier de rétention redb
+
+> ✅ **Conclusion qui fait foi.** Elle infirme §18 (« vraie fuite heap ») et §20
+> (« fuite non bornée tokio/hyper/rumqttc »). Le RSS **se stabilise tout seul** ;
+> son palier est fixé par `raw_retention_days`.
+
+#### §21.1 — Mesures décisives (3 rétentions)
+
+Test : faire varier `raw_retention_days` et observer le RSS sur plusieurs heures.
+
+| `raw_retention_days` | Trajectoire RSS observée | Lecture |
+|----------------------|--------------------------|---------|
+| **7 jours**  | 45 Mo → ~100 Mo en ~5 h, puis **se stabilise seul** ~100 Mo | montée = re-remplissage du fichier vers l'équilibre de rétention |
+| **30 jours** | identique (45 → ~100 Mo puis figé)                          | même mécanisme |
+| **60 jours** | **démarre ~94 Mo**, reste ~96 Mo                            | fichier déjà à son palier → quasi rien à réchauffer, plat d'emblée |
+
+Le fait déterminant : **le RSS se fige tout seul**. Une fuite non bornée ne se
+stabilise jamais. La trajectoire « 45 → 100 » n'est donc pas une accumulation
+par opération (§18/§20) mais le **fichier redb qui grossit vers son palier de
+rétention** après un repart à froid (démarrage frais ou post-compaction).
+
+#### §21.2 — Mécanisme (étayé par le code)
+
+`raw_retention_days` fixe la taille physique du fichier (table `metrics_raw`
+dominante). redb conserve **en heap anonyme** un état interne proportionnel à
+cette taille : cache de pages (plafonné `cache_mb=16`) **+ métadonnées
+d'allocateur / régions / bitmaps de pages libres** (déjà pointées par le
+profiling §19.2 : `process_freed_pages`, `BtreeBitmap`, `PagedCachedFile`). Cet
+état est **détenu vivant** par l'`Arc<Database>` (`crates/metrics-store/src/reader.rs:16`,
+`lib.rs:85`), donc compté dans `jemalloc allocated` — d'où `allocated ≈ Anonymous`
+au §18.1, qu'on avait pris à tort pour une fuite applicative.
+
+Audit confirmant qu'aucune structure applicative n'est en cause :
+- `Reader` sans état (juste un `Arc<Database>`).
+- `SeriesCache` du writer = **LRU borné** (`writer.rs:48`, `:184`).
+- Cache de pages redb plafonné (`cache_mb=16` → `set_cache_size`, `main.rs:377`).
+- Aucune collection applicative non bornée (déjà établi §18.2).
+
+Équilibre : une fois la fenêtre `raw_retention_days` pleine, la compaction/
+tiering (`maintenance_interval_hours=6`) purge autant qu'on écrit → taille
+fichier stable → état redb stable → **RSS stable**.
+
+#### §21.3 — Pourquoi §18/§20 ont conclu « fuite »
+
+- **Tests trop courts** : sur 1–2 h pendant le remplissage du fichier, la pente
+  (~3,7 à ~8 Mo/h) ressemble à une fuite linéaire. La stabilisation n'apparaît
+  qu'après ~5 h (palier atteint). C'est l'écueil déjà signalé en tête du
+  document (« des tests courts ne distinguent pas plateau et fuite »).
+- **§9.1 (`enabled=false`)** : la croissance résiduelle mesurée sans
+  metrics-store reste à élucider, mais elle est d'un autre ordre et n'explique
+  pas la dépendance du palier à la rétention démontrée ici.
+
+#### §21.4 — Conséquences pratiques
+
+- **Levier pour borner le RSS = `raw_retention_days`** (+ `scripts/compact-redb.sh`
+  pour rétrécir le fichier existant). C'est le réglage à actionner, pas une
+  chasse au leak tokio/hyper.
+- **Ne PAS** repartir sur le profiling « couche partagée » de §20.4 comme s'il
+  s'agissait d'une fuite : le comportement dominant est le palier de rétention.
+- Configuration **inchangée** (décision utilisateur 2026-06-15) :
+  `raw_retention_days = 60`, et le **restart quotidien `RuntimeMaxSec=86400`
+  est CONSERVÉ** (marge de sécurité, sans coût notable). Le RSS se stabilisant
+  seul bien sous `MemoryMax=512M`, ce restart n'est plus un correctif de fuite
+  mais une simple hygiène.
 
 ---
 
