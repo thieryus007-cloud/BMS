@@ -424,7 +424,7 @@ maintenance_interval_hours = 6
 # (2026-06-14). ⚠ La base regrossit alors à ~3-4 Go en 30 j → démarrages plus
 # lents (tolérés par TimeoutStartSec=300 ; compaction possible via
 # scripts/compact-redb.sh). La rétention n'a AUCUN effet sur la fuite RSS.
-raw_retention_days = 30
+raw_retention_days = 60
 hourly_retention_days = 365
 daily_retention_days = 1825   # 5 ans
 # Plancher global d'écriture redb (secondes). 5 = résolution fine RESTAURÉE
