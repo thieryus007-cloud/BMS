@@ -38,7 +38,7 @@ struct ServerState {
     lg:          Option<Arc<LgThinqClient>>,
     loader:      Arc<RulesLoader>,
     rule_reload: broadcast::Sender<String>,
-    wh_cfg:      WaterHeaterConfig,
+    wh_cfg:      Arc<RwLock<WaterHeaterConfig>>,
 }
 
 pub async fn serve(
@@ -48,7 +48,7 @@ pub async fn serve(
     lg: Option<Arc<LgThinqClient>>,
     loader: Arc<RulesLoader>,
     rule_reload: broadcast::Sender<String>,
-    wh_cfg: WaterHeaterConfig,
+    wh_cfg: Arc<RwLock<WaterHeaterConfig>>,
 ) {
     let srv = ServerState { tx: live_tx, state, lg, loader, rule_reload, wh_cfg };
 
@@ -195,13 +195,17 @@ struct RulesStatus {
 }
 
 async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
+    let wh_cfg = srv.wh_cfg.read().await.clone();
     let s = srv.state.read().await;
     // « Température cible atteinte » : la cuve tient temp_max_c depuis ≥ hold_secs.
-    // Recalculé ici à partir de l'horodatage tenu par le control_task, pour que
-    // la carte monitoring reste cohérente avec la décision du moteur de règles.
+    // Recalculé ici à partir de l'horodatage tenu par le control_task. On exige
+    // aussi que la température actuelle soit TOUJOURS ≥ temp_max_c : si elle est
+    // déjà redescendue (poller plus rapide que le tick control_task qui efface
+    // l'horodatage), la carte ne doit pas afficher « cible atteinte » à tort.
     let temp_max_reached = s.water_heater_temp_max_since
         .map(|since| {
-            (Utc::now() - since).num_seconds().max(0) as u64 >= srv.wh_cfg.temp_max_hold_secs
+            s.water_heater_temp_c.map(|t| t >= wh_cfg.temp_max_c).unwrap_or(false)
+                && (Utc::now() - since).num_seconds().max(0) as u64 >= wh_cfg.temp_max_hold_secs
         })
         .unwrap_or(false);
     let status = RulesStatus {
@@ -213,8 +217,8 @@ async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
             last_change_ts: s.water_heater_last_change,
             send_count:     s.water_heater_send_count,
             lg_enabled:     srv.lg.is_some(),
-            temp_max_c:     srv.wh_cfg.temp_max_c,
-            temp_max_hold_secs: srv.wh_cfg.temp_max_hold_secs,
+            temp_max_c:     wh_cfg.temp_max_c,
+            temp_max_hold_secs: wh_cfg.temp_max_hold_secs,
             temp_max_since: s.water_heater_temp_max_since,
             temp_max_reached,
         },
