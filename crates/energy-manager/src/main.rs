@@ -98,7 +98,11 @@ async fn main() -> anyhow::Result<()> {
     logic::charge_current::spawn(vic.clone(), cfg.charge_current.clone(), bus.clone(), state.clone(), loader.clone()).await;
     logic::solar_power::spawn(vic.clone(), cfg.solar.clone(), bus.clone(), state.clone(), loader.clone()).await;
     logic::deye_command::spawn(vic.clone(), cfg.deye.clone(), bus.clone(), state.clone(), loader.clone()).await;
-    logic::water_heater::spawn(cfg.water_heater.clone(), lg_arc.clone(), bus.clone(), state.clone(), loader.clone()).await;
+    // Config chauffe-eau partagée (Arc<RwLock>) : rechargeable à chaud via
+    // POST /api/v1/em/rules/reload — le control_task la relit depuis le disque,
+    // le serveur HTTP lit la même source pour /api/rules-status.
+    let wh_cfg = Arc::new(RwLock::new(cfg.water_heater.clone()));
+    logic::water_heater::spawn(wh_cfg.clone(), lg_arc.clone(), bus.clone(), state.clone(), loader.clone()).await;
     logic::meteo::spawn(cfg.solar.clone(), bus.clone(), state.clone()).await;
     logic::victron_keepalive::spawn(cfg.victron.portal_id.clone(), bus.clone()).await;
 
@@ -109,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
     let srv_lg       = lg_arc.clone();
     let srv_loader   = loader.clone();
     let srv_reload   = bus.rule_reload.clone();
-    let srv_wh_cfg   = cfg.water_heater.clone();
+    let srv_wh_cfg   = wh_cfg.clone();
     supervise::spawn_critical(async move {
         live_ws::server::serve(&bind, live_tx, srv_state, srv_lg, srv_loader, srv_reload, srv_wh_cfg).await;
     });

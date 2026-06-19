@@ -1145,12 +1145,36 @@ curl -s http://192.168.1.141:8081/api/v1/em/rules | python3 -m json.tool
 
 Si `rules.dir` n'est pas configuré ou si le fichier n'existe pas sur disque, le système utilise automatiquement la règle **embarquée dans le binaire**.
 
+> **Seuils chauffe-eau rechargeables à chaud** — l'appel `reload` ci-dessus
+> (`{"name":"water_heater"}` ou `{"name":"*"}`) recharge **aussi** les seuils de
+> la section `[energy_manager.water_heater]` depuis `Config.toml`, en plus du
+> fichier `.grl`. Les paramètres `temp_max_c` (60 °C par défaut),
+> `temp_max_hold_secs`, `irradiance_min_wm2`, `soc_min_pct`,
+> `mode_change_min_secs`, `heat_pump_target_c`, `vacation_target_c` et
+> `temp_set_delay_secs` prennent effet **sans recompiler ni redémarrer** le
+> service. Le control_task et l'endpoint `/api/rules-status` partagent la même
+> config (`Arc<RwLock<WaterHeaterConfig>>`) → la page « Règles système » reflète
+> immédiatement la nouvelle valeur. Procédure :
+>
+> ```bash
+> # 1. Éditer le seuil dans la config active du service
+> sudo nano /etc/daly-bms/config.toml      # [energy_manager.water_heater] temp_max_c = 58.0
+> # 2. Recharger à chaud (aucun restart)
+> curl -s -X POST http://192.168.1.141:8081/api/v1/em/rules/reload \
+>      -H "Content-Type: application/json" -d '{"name":"water_heater"}'
+> # 3. Vérifier la valeur prise en compte
+> curl -s http://192.168.1.141:8081/api/rules-status | python3 -m json.tool | grep temp_max
+> ```
+>
+> Seul `keepalive_secs` (intervalle du ticker keepalive Venus) reste fixé au
+> démarrage et nécessite un `systemctl restart energy-manager`.
+
 ### 13.3 Changer la logique métier (recompilation requise)
 
 | Besoin | Fichier | Ce qu'il faut changer |
 |--------|---------|----------------------|
 | Seuil DEYE fréquence | `config.rs` (DeyeConfig) + `Config.toml` | Paramètre `freq_high_hz` |
-| Délai debounce chauffe-eau | `config.rs` (WaterHeaterConfig) + `Config.toml` | `debounce_secs` |
+| Seuils chauffe-eau (temp_max_c, soc_min_pct, irradiance_min_wm2…) | `Config.toml` `[energy_manager.water_heater]` | **Aucune recompilation** — éditer + `POST /api/v1/em/rules/reload` (hot-reload, cf. §13.2) |
 | Ajouter un MPPT | `config.rs` (VictronConfig), `mqtt/topics.rs`, `solar_power.rs`, `types.rs` | Nouvelle instance + topic |
 | Nouveau topic Victron à surveiller | `mqtt/topics.rs` (`all_subscriptions`) + module concerné | Abonnement + handler |
 | Changer fréquence d'écriture DB | `logic/solar_power.rs` ligne `interval(Duration::from_secs(1))` | Valeur en secondes |

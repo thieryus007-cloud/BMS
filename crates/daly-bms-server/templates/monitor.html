@@ -520,7 +520,10 @@ async function fetchRulesStatus() {
     let tempVal = '—', tempDetail = null;
     if (wh?.current_temp_c != null) {
       tempVal = wh.current_temp_c.toFixed(1) + ' °C';
-      if (tMaxSince) {
+      // N'afficher le compteur que si la température est TOUJOURS ≥ seuil :
+      // évite un message « ≥ 60°C depuis 12min » alors que la valeur affichée
+      // est déjà redescendue (poller plus rapide que le tick qui efface tMaxSince).
+      if (tMaxSince && wh.current_temp_c >= tMaxC) {
         const heldS = Math.max(0, Math.floor((Date.now() - new Date(tMaxSince)) / 1000));
         const heldStr = heldS < 60 ? `${heldS}s` : `${Math.floor(heldS/60)}min`;
         tempDetail = tMaxReached ? `≥ ${tMaxC}°C depuis ${heldStr} → cible atteinte`
