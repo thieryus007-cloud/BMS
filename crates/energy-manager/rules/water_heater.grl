@@ -7,11 +7,13 @@
 //   WH.grid_connected  (bool, true = ac_ignore == 0, grid ON → Vacation)
 //   WH.soc_low         (bool, pre-computed: soc_pct < soc_min_pct from WaterHeaterConfig)
 //   WH.irradiance_low  (bool, true when irradiance < irradiance_min_wm2 from WaterHeaterConfig)
+//   WH.temp_max_reached (bool, true when current_temp_c >= temp_max_c held for temp_max_hold_secs)
 //
 // Output facts (read from Rust after execute):
 //   WH.target_mode     (string: "HEAT_PUMP" | "VACATION")
 //
-// HEAT_PUMP requires ALL: soc_low=false, irradiance_low=false, grid_connected=false
+// HEAT_PUMP requires ALL: soc_low=false, irradiance_low=false, grid_connected=false,
+// temp_max_reached=false
 
 // ── Condition rules (salience 100) ──────────────────────────────────────────
 
@@ -32,6 +34,15 @@ rule "WH_Cond_SOC_Low" salience 100 {
 rule "WH_Cond_Irradiance_Low" salience 100 {
     when
         WH.irradiance_low == true
+    then
+        WH.want_vacation = true;
+}
+
+// Cuve à température cible (≥ temp_max_c, p.ex. 60°C) tenue ≥ temp_max_hold_secs
+// (p.ex. 10 min) → inutile de maintenir la pompe à chaleur, on passe en VACATION.
+rule "WH_Cond_TempMax" salience 100 {
+    when
+        WH.temp_max_reached == true
     then
         WH.want_vacation = true;
 }

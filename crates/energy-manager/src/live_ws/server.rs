@@ -25,6 +25,7 @@ use tokio::sync::{broadcast, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
+use crate::config::WaterHeaterConfig;
 use crate::http_clients::lg_thinq::LgThinqClient;
 use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, LiveEvent, WaterHeaterMode};
@@ -37,6 +38,7 @@ struct ServerState {
     lg:          Option<Arc<LgThinqClient>>,
     loader:      Arc<RulesLoader>,
     rule_reload: broadcast::Sender<String>,
+    wh_cfg:      WaterHeaterConfig,
 }
 
 pub async fn serve(
@@ -46,8 +48,9 @@ pub async fn serve(
     lg: Option<Arc<LgThinqClient>>,
     loader: Arc<RulesLoader>,
     rule_reload: broadcast::Sender<String>,
+    wh_cfg: WaterHeaterConfig,
 ) {
-    let srv = ServerState { tx: live_tx, state, lg, loader, rule_reload };
+    let srv = ServerState { tx: live_tx, state, lg, loader, rule_reload, wh_cfg };
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -139,6 +142,15 @@ struct WaterHeaterCard {
     last_change_ts: Option<DateTime<Utc>>,
     send_count:     u32,
     lg_enabled:     bool,
+    /// Seuil de température « cible atteinte » (°C) — règle 60°C par défaut.
+    temp_max_c:     f64,
+    /// Durée de maintien à `temp_max_c` avant de forcer VACATION (secondes).
+    temp_max_hold_secs: u64,
+    /// Depuis quand la cuve tient `temp_max_c` (None si en-dessous).
+    temp_max_since: Option<DateTime<Utc>>,
+    /// Vrai quand la cuve tient `temp_max_c` depuis ≥ `temp_max_hold_secs`
+    /// → la règle force VACATION.
+    temp_max_reached: bool,
 }
 
 #[derive(Serialize)]
@@ -184,6 +196,14 @@ struct RulesStatus {
 
 async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
     let s = srv.state.read().await;
+    // « Température cible atteinte » : la cuve tient temp_max_c depuis ≥ hold_secs.
+    // Recalculé ici à partir de l'horodatage tenu par le control_task, pour que
+    // la carte monitoring reste cohérente avec la décision du moteur de règles.
+    let temp_max_reached = s.water_heater_temp_max_since
+        .map(|since| {
+            (Utc::now() - since).num_seconds().max(0) as u64 >= srv.wh_cfg.temp_max_hold_secs
+        })
+        .unwrap_or(false);
     let status = RulesStatus {
         water_heater: WaterHeaterCard {
             mode:           s.water_heater_mode.to_lg_str().to_string(),
@@ -193,6 +213,10 @@ async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
             last_change_ts: s.water_heater_last_change,
             send_count:     s.water_heater_send_count,
             lg_enabled:     srv.lg.is_some(),
+            temp_max_c:     srv.wh_cfg.temp_max_c,
+            temp_max_hold_secs: srv.wh_cfg.temp_max_hold_secs,
+            temp_max_since: s.water_heater_temp_max_since,
+            temp_max_reached,
         },
         charge_current: ChargeCurrent {
             current_a:    s.last_charge_current_a,

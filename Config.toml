@@ -635,6 +635,8 @@ vacation_target_c     = 45.0          # °C cible en VACATION
 temp_set_delay_secs   = 15            # s — délai avant réglage temp
 keepalive_secs        = 25            # s — keepalive Venus OS watchdog
 irradiance_min_wm2    = 300         # W/m² — irradiance min pour activer HEAT_PUMP
+temp_max_c            = 60.0          # °C — seuil « cuve à température cible » : si la temp. actuelle reste ≥…
+temp_max_hold_secs    = 600           # s — …pendant ≥ 10 min → on force VACATION (inutile de chauffer plus)
 vm_url                = "http://127.0.0.1:8080"  # daly-bms-server → metrics-store redb (POST /api/v1/import/prometheus)
 
 # --- Production solaire ---

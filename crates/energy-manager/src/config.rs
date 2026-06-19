@@ -395,6 +395,14 @@ pub struct WaterHeaterConfig {
     /// Minimum battery SOC to allow HEAT_PUMP mode (%)
     #[serde(default = "default_soc_min_pct")]
     pub soc_min_pct: f64,
+    /// Température à partir de laquelle la cuve est considérée « cible atteinte » (°C).
+    /// Si la température actuelle reste ≥ ce seuil pendant `temp_max_hold_secs`,
+    /// la règle force le passage en VACATION (inutile de maintenir la pompe à chaleur).
+    #[serde(default = "default_temp_max_c")]
+    pub temp_max_c: f64,
+    /// Durée de maintien à `temp_max_c` avant de forcer VACATION (secondes). Défaut : 600 (10 min).
+    #[serde(default = "default_temp_max_hold_secs")]
+    pub temp_max_hold_secs: u64,
     /// URL d'écriture des métriques chauffe-eau (daly-bms-server → redb,
     /// endpoint POST /api/v1/import/prometheus). Défaut : http://127.0.0.1:8080
     #[serde(default = "default_wh_vm_url")]
@@ -410,6 +418,8 @@ fn default_temp_set_delay_secs() -> u64 { 15 }
 fn default_keepalive_secs() -> u64 { 25 }
 fn default_irradiance_min_wm2() -> f64 { 300.0 }
 fn default_soc_min_pct() -> f64 { 90.0 }
+fn default_temp_max_c() -> f64 { 60.0 }
+fn default_temp_max_hold_secs() -> u64 { 600 }
 fn default_wh_vm_url() -> String { "http://127.0.0.1:8080".into() }
 
 impl Default for WaterHeaterConfig {
@@ -424,6 +434,8 @@ impl Default for WaterHeaterConfig {
             keepalive_secs: default_keepalive_secs(),
             irradiance_min_wm2: default_irradiance_min_wm2(),
             soc_min_pct: default_soc_min_pct(),
+            temp_max_c: default_temp_max_c(),
+            temp_max_hold_secs: default_temp_max_hold_secs(),
             vm_url: default_wh_vm_url(),
         }
     }

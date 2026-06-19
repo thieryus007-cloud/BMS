@@ -50,6 +50,32 @@ async fn publish_to_venus(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     bus.emit_live(LiveEvent::new("water_heater_venus", &payload));
 }
 
+/// Met à jour le suivi « température cible atteinte » dans l'état partagé et
+/// renvoie `true` si la température de la cuve est restée ≥ `temp_max_c`
+/// pendant au moins `hold_secs`.
+///
+/// La température est lue régulièrement (poller LG ThinQ + ce control_task) et
+/// stockée dans `water_heater_temp_c` ; on date le premier instant où le seuil
+/// est franchi (`water_heater_temp_max_since`) puis on mesure la durée écoulée.
+/// Dès qu'elle redescend, le suivi est réarmé.
+fn update_temp_max_tracking(
+    s: &mut EnergyState,
+    now: DateTime<Utc>,
+    temp_max_c: f64,
+    hold_secs: u64,
+) -> bool {
+    match s.water_heater_temp_c {
+        Some(t) if t >= temp_max_c => {
+            let since = *s.water_heater_temp_max_since.get_or_insert(now);
+            (now - since).num_seconds().max(0) as u64 >= hold_secs
+        }
+        _ => {
+            s.water_heater_temp_max_since = None;
+            false
+        }
+    }
+}
+
 async fn write_wh_metrics(vm_url: &str, mode: WaterHeaterMode, temp: Option<f64>, target: Option<f64>) {
     let ts_ms = Utc::now().timestamp_millis();
     let mut lines = Vec::new();
@@ -128,6 +154,21 @@ async fn control_task(
             }
         };
 
+        // Suivi « cuve à température cible » : si la température (lue à l'instant
+        // ci-dessus, sinon valeur en cache rafraîchie par le poller LG) reste
+        // ≥ temp_max_c pendant temp_max_hold_secs → on forcera VACATION.
+        let temp_max_reached = {
+            let mut s = state.write().await;
+            update_temp_max_tracking(&mut s, now, cfg.temp_max_c, cfg.temp_max_hold_secs)
+        };
+        if temp_max_reached {
+            let since = state.read().await.water_heater_temp_max_since;
+            info!(
+                "Water heater: température ≥ {:.1}°C tenue ≥ {}s (depuis {:?}) → cible atteinte, VACATION forcé",
+                cfg.temp_max_c, cfg.temp_max_hold_secs, since
+            );
+        }
+
         // Read energy conditions — skip evaluation if MQTT data not yet available
         let (ac_ignore_opt, soc_opt, irradiance) = {
             let s = state.read().await;
@@ -171,10 +212,10 @@ async fn control_task(
             ac_ignore, grid_connected, soc, cfg.soc_min_pct, soc_low, irradiance_low
         );
 
-        let target_mode_str = match rule_engine.evaluate(grid_connected, soc_low, irradiance_low) {
+        let target_mode_str = match rule_engine.evaluate(grid_connected, soc_low, irradiance_low, temp_max_reached) {
             Ok(m) => {
-                info!("Water heater: rule engine → target_mode={m} (grid_connected={}, soc={:.1}%, irradiance_low={})",
-                    grid_connected, soc, irradiance_low);
+                info!("Water heater: rule engine → target_mode={m} (grid_connected={}, soc={:.1}%, irradiance_low={}, temp_max_reached={})",
+                    grid_connected, soc, irradiance_low, temp_max_reached);
                 m
             }
             Err(e) => {

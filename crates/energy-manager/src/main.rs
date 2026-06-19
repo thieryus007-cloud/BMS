@@ -109,8 +109,9 @@ async fn main() -> anyhow::Result<()> {
     let srv_lg       = lg_arc.clone();
     let srv_loader   = loader.clone();
     let srv_reload   = bus.rule_reload.clone();
+    let srv_wh_cfg   = cfg.water_heater.clone();
     supervise::spawn_critical(async move {
-        live_ws::server::serve(&bind, live_tx, srv_state, srv_lg, srv_loader, srv_reload).await;
+        live_ws::server::serve(&bind, live_tx, srv_state, srv_lg, srv_loader, srv_reload, srv_wh_cfg).await;
     });
 
     // --- Module monitoring Pi5 (métriques système + tokio).
