@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use crate::types::{LiveEvent, MqttIncoming, MqttOutgoing};
@@ -22,6 +23,10 @@ pub struct AppBus {
     pub live:        broadcast::Sender<LiveEvent>,
     /// Broadcast rule reload signals → logic tasks (rule_name or "*" for all)
     pub rule_reload: broadcast::Sender<String>,
+    /// Number of MQTT messages dropped because `mqtt_out` was full (publisher
+    /// task stalled — e.g. broker down). Telemetry/commands are dropped on
+    /// purpose so a wedged MQTT path can never freeze a control loop.
+    mqtt_out_dropped: Arc<AtomicU64>,
 }
 
 pub struct AppBusReceivers {
@@ -35,7 +40,13 @@ impl AppBus {
         let (live, _)              = broadcast::channel(LIVE_CAPACITY);
         let (rule_reload, _)       = broadcast::channel(RULE_RELOAD_CAPACITY);
 
-        let bus = Self { mqtt_in, mqtt_out, live, rule_reload };
+        let bus = Self {
+            mqtt_in,
+            mqtt_out,
+            live,
+            rule_reload,
+            mqtt_out_dropped: Arc::new(AtomicU64::new(0)),
+        };
         let rxs = AppBusReceivers { mqtt_out_rx };
         (bus, rxs)
     }
@@ -59,9 +70,35 @@ impl AppBus {
         let _ = self.rule_reload.send(rule_name.to_string());
     }
 
-    /// Publish a message to MQTT (non-blocking, drops if channel full)
+    /// Publish a message to MQTT. **NON-BLOCKING by design**: if `mqtt_out` is
+    /// full (the publisher task is stalled — e.g. the rumqttc eventloop is stuck
+    /// reconnecting to a downed broker), the message is **dropped** rather than
+    /// awaited.
+    ///
+    /// A blocking `send().await` here would park the calling logic task on a full
+    /// channel and freeze the whole control plane: the DEYE state machine stopped
+    /// restoring the relay for 14 h because its `select!` loop was parked inside a
+    /// telemetry/command publish while the broker was wedged, with no panic and no
+    /// systemd restart. Telemetry and relay commands are stale once the broker is
+    /// down anyway; the periodic resync re-asserts the relay state on recovery.
     pub async fn publish(&self, msg: MqttOutgoing) {
-        let _ = self.mqtt_out.send(msg).await;
+        match self.mqtt_out.try_send(msg) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(msg)) => {
+                let n = self.mqtt_out_dropped.fetch_add(1, Ordering::Relaxed) + 1;
+                // Throttle: warn on the first drop, then every 256, to flag the
+                // stall without flooding the journal.
+                if n == 1 || n.is_multiple_of(256) {
+                    tracing::warn!(
+                        "MQTT out channel full — dropped publish to {} (total dropped: {n}). \
+                         Publisher task likely stalled (broker down?).",
+                        msg.topic
+                    );
+                }
+            }
+            // Publisher gone → process is shutting down / restarting. Drop silently.
+            Err(mpsc::error::TrySendError::Closed(_)) => {}
+        }
     }
 
     /// Broadcast a live event to WebSocket clients.
