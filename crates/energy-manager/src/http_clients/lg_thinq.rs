@@ -4,8 +4,11 @@ use serde_json::json;
 use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
 
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
 use crate::bus::AppBus;
-use crate::config::LgThinqConfig;
+use crate::config::{LgThinqConfig, WaterHeaterConfig};
 use crate::types::{LiveEvent, WaterHeaterMode};
 
 // ---------------------------------------------------------------------------
@@ -216,7 +219,8 @@ impl LgThinqClient {
 pub async fn spawn_poller(
     cfg: LgThinqConfig,
     bus: AppBus,
-    state: std::sync::Arc<tokio::sync::RwLock<crate::types::EnergyState>>,
+    state: Arc<RwLock<crate::types::EnergyState>>,
+    wh_cfg: Arc<RwLock<WaterHeaterConfig>>,
 ) -> Option<LgThinqClient> {
     if !cfg.enabled {
         info!("LG ThinQ integration disabled");
@@ -242,10 +246,11 @@ pub async fn spawn_poller(
         }
     };
 
-    let poller = client.clone();
-    let cfg2   = cfg.clone();
-    let bus2   = bus.clone();
-    let state2 = state.clone();
+    let poller  = client.clone();
+    let cfg2    = cfg.clone();
+    let bus2    = bus.clone();
+    let state2  = state.clone();
+    let wh_cfg2 = wh_cfg.clone();
     crate::supervise::spawn_critical(async move {
         let vm_url = cfg2.vm_url.clone();
         let mut ticker = interval(Duration::from_secs(poller.cfg.poll_interval_secs));
@@ -254,12 +259,18 @@ pub async fn spawn_poller(
             let now = chrono::Utc::now();
             match poller.get_state().await {
                 Ok(snap) => {
+                    // Seuil « cuve à température cible » lu hors verrou `state`
+                    // (config rechargeable à chaud, partagée avec le control_task).
+                    let temp_max_c = wh_cfg2.read().await.temp_max_c;
                     {
                         let mut s = state2.write().await;
                         s.water_heater_mode      = snap.mode;
                         s.water_heater_temp_c    = snap.current_temp_c;
                         s.water_heater_target_c  = snap.target_temp_c;
                         s.water_heater_last_read = Some(now);
+                        // Ancre le chrono dès que le poller voit la cuve ≥ seuil,
+                        // sans attendre le tick de 5 min du control_task.
+                        crate::logic::water_heater::anchor_temp_max(&mut s, now, temp_max_c);
                     }
                     bus2.emit_live(LiveEvent::new("water_heater", &snap));
 
