@@ -142,7 +142,7 @@ Cloner `AppBus` est gratuit (tous les champs sont `Arc`-backed).
 | Batterie | `soc_pct`, `battery_voltage_v`, `battery_current_a`, `battery_power_w`, `battery_state`, `time_to_go_sec` |
 | AC/Grid | `ac_ignore` (0=réseau, 1=hors-réseau), `ac_frequency_hz` |
 | VEBus | `dc_voltage_v`, `dc_current_a`, `dc_power_w`, `ac_out_voltage_v`, `ac_out_current_a`, `ac_out_power_w` |
-| Chauffe-eau | `water_heater_mode`, `water_heater_temp_c`, `water_heater_target_c`, `water_heater_last_read`, `water_heater_last_change`, `water_heater_send_count` |
+| Chauffe-eau | `water_heater_mode`, `water_heater_temp_c`, `water_heater_target_c`, `water_heater_last_read`, `water_heater_last_change`, `water_heater_send_count`, `water_heater_temp_max_since` |
 | DEYE | `deye_on`, `deye_last_change`, `deye_lockout_until` |
 | Compteurs | `total_yield_today_kwh`, `pvinv_baseline_kwh`, `yield_yesterday_kwh`, `ah_charged_today`, `ah_discharged_today`, `shunt_charged_today_kwh`, `shunt_discharged_today_kwh` |
 
@@ -436,21 +436,31 @@ Conditions (salience 100) :
   si grid_connected==true  → want_vacation=true
   si soc_pct < 90          → want_vacation=true
   si irradiance_low==true  → want_vacation=true
+  si temp_max_reached==true → want_vacation=true   (cuve à température cible)
 
 Décision (salience 200) :
   si want_vacation==true   → target_mode="VACATION"
   sinon                    → target_mode="HEAT_PUMP"
 ```
 
-**Logique condensée** : `HEAT_PUMP` requiert **les 3 conditions simultanément** :
+**Logique condensée** : `HEAT_PUMP` requiert **les 4 conditions simultanément** :
 ```
-HEAT_PUMP exige les 3 SIMULTANÉMENT :
+HEAT_PUMP exige les 4 SIMULTANÉMENT :
 ✓ grid_connected == false (ac_ignore=1)
 ✓ soc_pct ≥ 90
 ✓ irradiance_wm2 ≥ 300 W/m²
+✓ temp_max_reached == false (cuve PAS encore à température cible)
 
 Sinon → VACATION
 ```
+
+**Condition « cuve à température cible »** : la température actuelle de la cuve
+est lue régulièrement (poller LG ThinQ + control_task 5 min) et stockée dans
+`water_heater_temp_c`. Le control_task date le premier instant où elle atteint
+`temp_max_c` (défaut **60 °C**) via `water_heater_temp_max_since`. Si elle reste
+≥ ce seuil pendant ≥ `temp_max_hold_secs` (défaut **600 s = 10 min**), le fait
+`temp_max_reached` passe à `true` → la PAC bascule en `VACATION` (inutile de
+continuer à chauffer). Le suivi est réarmé dès que la température redescend.
 
 **Flux de contrôle** (toutes les 5 min) :
 1. `lg.get_state()` → actual_mode, temp, target_temp
@@ -469,7 +479,7 @@ Sinon → VACATION
 - Métriques redb via metrics-store (toutes les 5 min)
 - WebSocket live `"water_heater_venus"`
 
-**Config** : `irradiance_min_wm2=300`, `mode_change_min_secs=900`, `heat_pump_target_c=60`, `vacation_target_c=45`, `temp_set_delay_secs=15`, `keepalive_secs=25`
+**Config** : `irradiance_min_wm2=300`, `mode_change_min_secs=900`, `heat_pump_target_c=60`, `vacation_target_c=45`, `temp_set_delay_secs=15`, `keepalive_secs=25`, `temp_max_c=60`, `temp_max_hold_secs=600`
 
 ---
 
@@ -1039,6 +1049,8 @@ heat_pump_target_c     = 60.0     # Température cible mode HEAT_PUMP
 vacation_target_c      = 45.0     # Température cible mode VACATION
 soc_min_pct            = 90.0     # SOC minimum pour activer HEAT_PUMP
 irradiance_min_wm2     = 300      # Irradiance minimale pour HEAT_PUMP
+temp_max_c             = 60.0     # Seuil « cuve à température cible »
+temp_max_hold_secs     = 600      # Maintien ≥ ce seuil → VACATION (10 min)
 temp_set_delay_secs    = 15       # Délai entre set_mode et set_target_temp
 keepalive_secs         = 25       # Fréquence keepalive MQTT PAC
 vm_url                 = "http://127.0.0.1:8080"  # URL daly-bms-server → metrics-store redb
@@ -1305,7 +1317,7 @@ Couverture des tests :
 | `irradiance` | 5 | valides/invalides, plage 0–2000 W/m² |
 | `smartshunt` | 6 | capture baseline chargée/déchargée |
 | `solar_power` | 4 | nouveau jour, baseline absente |
-| `water_heater` | 5 | grid connecté, SOC bas, irradiance faible |
+| `water_heater` | 6 | grid connecté, SOC bas, irradiance faible, cuve à température cible |
 
 **Ajouter un test** — dans le module `rules.rs` concerné, dans `#[cfg(test)] mod tests` :
 

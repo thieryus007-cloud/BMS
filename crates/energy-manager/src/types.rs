@@ -157,6 +157,10 @@ pub struct EnergyState {
     pub water_heater_last_change: Option<DateTime<Utc>>,
     pub water_heater_last_read: Option<DateTime<Utc>>,
     pub water_heater_send_count: u32,
+    /// Horodatage depuis lequel la température de la cuve atteint/dépasse le
+    /// seuil `temp_max_c`. None tant qu'elle est en-dessous. Sert à forcer le
+    /// passage en VACATION après `temp_max_hold_secs` (cible 60°C atteinte).
+    pub water_heater_temp_max_since: Option<DateTime<Utc>>,
 
     // --- DEYE relay (Shelly) ---
     pub deye_on: bool,

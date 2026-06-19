@@ -509,19 +509,41 @@ async function fetchRulesStatus() {
     const readTs = document.getElementById('wh-read-ts');
     if (readTs) readTs.textContent = fmtTs(wh?.last_read_ts);
 
+    // ── Cuve à température cible : ≥ temp_max_c tenue ≥ temp_max_hold_secs → VACATION
+    const tMaxC      = wh?.temp_max_c ?? 60;
+    const tHoldSecs  = wh?.temp_max_hold_secs ?? 600;
+    const tMaxSince  = wh?.temp_max_since ?? null;
+    const tMaxReached = wh?.temp_max_reached ?? false;
+    const tHoldMin   = Math.round(tHoldSecs / 60);
+    // OK (favorable au HEAT_PUMP) = cible PAS encore atteinte
+    const tempOk     = !tMaxReached;
+    let tempVal = '—', tempDetail = null;
+    if (wh?.current_temp_c != null) {
+      tempVal = wh.current_temp_c.toFixed(1) + ' °C';
+      if (tMaxSince) {
+        const heldS = Math.max(0, Math.floor((Date.now() - new Date(tMaxSince)) / 1000));
+        const heldStr = heldS < 60 ? `${heldS}s` : `${Math.floor(heldS/60)}min`;
+        tempDetail = tMaxReached ? `≥ ${tMaxC}°C depuis ${heldStr} → cible atteinte`
+                                 : `≥ ${tMaxC}°C depuis ${heldStr} (seuil ${tHoldMin}min)`;
+      }
+    }
+
     const grid = document.getElementById('rule-grid');
     if (grid) {
       grid.innerHTML = [
         ruleRow('SOC ≥ 90 % (SmartShunt)',           socOk,    emSoc  != null ? `${emSoc.toFixed(1)} %`   : '—', null),
         ruleRow('Irradiance ≥ 300 W/m²',           irrOk,    irr    != null ? `${irr.toFixed(0)} W/m²` : '—', null),
         ruleRow('Grid déconnecté (AC IN Ignored)', gridOffOk, acIgnore != null ? (acIgnore ? 'ACTIF' : 'Normal') : '—', null),
+        ruleRow(`Temp < ${tMaxC} °C tenue < ${tHoldMin} min`, tempOk, tempVal, tempDetail),
       ].join('');
     }
 
-    const allOk = socOk && irrOk && gridOffOk;
+    const allOk = socOk && irrOk && gridOffOk && !tMaxReached;
     const dec = document.getElementById('rules-decision');
     if (dec) {
-      dec.textContent = allOk ? 'Cible calculée : HEAT_PUMP' : 'Cible calculée : VACATION';
+      let reason = '';
+      if (tMaxReached) reason = ' (cuve à température cible)';
+      dec.textContent = allOk ? 'Cible calculée : HEAT_PUMP' : 'Cible calculée : VACATION' + reason;
       dec.style.color = allOk ? '#4ade80' : '#94a3b8';
     }
   } catch(e) { console.warn('fetchRulesStatus/wh:', e); }
