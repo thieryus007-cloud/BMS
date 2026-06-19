@@ -53,34 +53,46 @@ async fn publish_to_venus(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     bus.emit_live(LiveEvent::new("water_heater_venus", &payload));
 }
 
+/// Ancre (ou réarme) le chrono « cuve à température cible » en fonction de la
+/// dernière température lue, stockée au préalable dans `water_heater_temp_c`.
+///
+/// Appelée à **chaque** lecture de température — par le poller LG ThinQ ET par
+/// le `control_task` — afin que le chrono démarre dès l'instant où la cuve passe
+/// ≥ `temp_max_c`, sans attendre le prochain tick de 5 min du control_task.
+///
+/// - Temp ≥ seuil : on date le premier franchissement (`get_or_insert`).
+/// - Temp < seuil : la cible n'est plus tenue → on réarme.
+/// - Temp inconnue (erreur API/timeout transitoire) : on PRÉSERVE le chrono en
+///   cours pour ne pas perdre le temps accumulé.
+pub(crate) fn anchor_temp_max(s: &mut EnergyState, now: DateTime<Utc>, temp_max_c: f64) {
+    match s.water_heater_temp_c {
+        Some(t) if t >= temp_max_c => {
+            s.water_heater_temp_max_since.get_or_insert(now);
+        }
+        Some(_) => s.water_heater_temp_max_since = None,
+        None => {}
+    }
+}
+
 /// Met à jour le suivi « température cible atteinte » dans l'état partagé et
 /// renvoie `true` si la température de la cuve est restée ≥ `temp_max_c`
 /// pendant au moins `hold_secs`.
 ///
-/// La température est lue régulièrement (poller LG ThinQ + ce control_task) et
-/// stockée dans `water_heater_temp_c` ; on date le premier instant où le seuil
-/// est franchi (`water_heater_temp_max_since`) puis on mesure la durée écoulée.
-/// Dès qu'elle redescend, le suivi est réarmé.
+/// L'ancrage du chrono (`water_heater_temp_max_since`) est délégué à
+/// [`anchor_temp_max`] ; cette fonction ne fait que mesurer la durée écoulée
+/// depuis cet ancrage pour décider du passage en VACATION.
 fn update_temp_max_tracking(
     s: &mut EnergyState,
     now: DateTime<Utc>,
     temp_max_c: f64,
     hold_secs: u64,
 ) -> bool {
-    match s.water_heater_temp_c {
-        Some(t) if t >= temp_max_c => {
-            let since = *s.water_heater_temp_max_since.get_or_insert(now);
+    anchor_temp_max(s, now, temp_max_c);
+    match (s.water_heater_temp_c, s.water_heater_temp_max_since) {
+        (Some(t), Some(since)) if t >= temp_max_c => {
             (now - since).num_seconds().max(0) as u64 >= hold_secs
         }
-        // Lecture valide et SOUS le seuil → la cible n'est plus tenue, on réarme.
-        Some(_) => {
-            s.water_heater_temp_max_since = None;
-            false
-        }
-        // Température temporairement inconnue (erreur API/timeout transitoire) :
-        // on PRÉSERVE le suivi en cours pour ne pas perdre le temps accumulé,
-        // mais on ne force pas VACATION tant qu'on n'a pas reconfirmé le seuil.
-        None => false,
+        _ => false,
     }
 }
 
