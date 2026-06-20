@@ -132,8 +132,10 @@ async fn mqtt_task(
                 s.mppt_289.max_power_today_w = msg.victron_value::<f64>();
             } else if *t == t_m1_state {
                 s.mppt_273.state = msg.victron_value::<i64>();
+                s.mppt_273.state_last_ts = Some(chrono::Utc::now());
             } else if *t == t_m2_state {
                 s.mppt_289.state = msg.victron_value::<i64>();
+                s.mppt_289.state_last_ts = Some(chrono::Utc::now());
             } else if *t == t_m1_pv_v {
                 s.mppt_273.pv_voltage_v = msg.victron_value::<f64>();
             } else if *t == t_m2_pv_v {

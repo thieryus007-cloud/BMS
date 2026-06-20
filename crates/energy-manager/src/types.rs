@@ -140,6 +140,8 @@ pub struct EnergyState {
     pub ac_ignore: Option<i64>,         // IgnoreAcIn1: 0=grid, 1=off-grid
     pub ac_connected: Option<i64>,      // ActiveIn/Connected
     pub ac_frequency_hz: Option<f64>,
+    /// Timestamp of the last AC-Out frequency update — freshness guard for the DEYE decision.
+    pub ac_frequency_last_ts: Option<DateTime<Utc>>,
 
     // --- VEBus (inverter) ---
     pub dc_voltage_v: Option<f64>,
@@ -174,6 +176,12 @@ pub struct EnergyState {
     pub deye_restore_blocked: bool,
     /// Whether the MPPT charge stage signals a full battery (the MPPT-based cut driver) — observability.
     pub deye_mppt_full: bool,
+    /// AC-Out frequency telemetry is stale (topic silent > input_max_age_secs) — observability.
+    /// On stale freq the decision treats it as nominal (restore allowed; DEYE 51.5 Hz auto-trip is the net).
+    pub deye_freq_stale: bool,
+    /// MPPT State telemetry is stale (topic silent > input_max_age_secs) — observability.
+    /// On stale MPPT the decision treats the battery as NOT full (does not strand the relay off).
+    pub deye_mppt_stale: bool,
 
     // --- Irradiance ---
     pub irradiance_wm2: Option<f64>,
@@ -237,6 +245,9 @@ pub struct MpptState {
     pub yield_today_kwh: Option<f64>,
     pub max_power_today_w: Option<f64>,
     pub state: Option<i64>,
+    /// Timestamp of the last `/State` update — freshness guard for the DEYE decision
+    /// (a frozen State must not strand the relay; see deye_command).
+    pub state_last_ts: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

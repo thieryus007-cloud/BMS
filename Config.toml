@@ -622,6 +622,10 @@ relay_resync_secs          = 60       # s — ré-affirmation périodique de l'�
 mppt_cut_enabled           = true     # active la coupure DEYE pilotée par l'état MPPT
 mppt_full_states           = [4, 5, 6] # codes State « batterie pleine » : 4=Absorption,5=Float,6=Storage (3=Bulk → restaure)
 mppt_cut_delay_secs        = 10       # s — débounce : MPPT « plein » maintenu avant coupure
+# Garde de fraîcheur des entrées (fréquence + état MPPT). Au-delà : télémétrie « périmée »
+# (topic muet) → fréquence traitée nominale (restaure permise, filet = auto-trip DEYE 51.5),
+# état MPPT figé ne bloque plus la restauration. Doit rester > keepalive Venus (30 s).
+input_max_age_secs         = 90       # s — anti-blocage relais sur télémétrie figée (3× keepalive)
 
 # --- Chauffe-eau LG ThinQ ---
 [energy_manager.water_heater]
