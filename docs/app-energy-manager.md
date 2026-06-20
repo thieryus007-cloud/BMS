@@ -395,19 +395,24 @@ coupe→restauration minimal ≈ **165 s** → fréquence de bascule du relais b
 **`restore_blocked`** (pré-calculé en Rust) = `mppt_battery_full` **uniquement** (un MPPT dans `mppt_full_states`). Tant qu'elle est vraie, pas de restauration → les DEYE restent coupés jusqu'à ce que les MPPT repassent en `Bulk` (3) **et** que la fréquence soit < 51,0. (Plus aucune garde SmartShunt : un MPPT en Bulk autorise toujours la restauration.)
 
 **Diagramme de la machine d'états** :
+
+> Coupure **immédiate** (relay_off) depuis `On` **ou** `PendingCut` : `freq ≥ 51,3 Hz`
+> (salience 150) **ou** `mppt_cut` (batterie pleine côté MPPT, salience 130) → `Lockout`.
+> Le chemin temporisé ci-dessous gère la coupure douce (≥ 51,0 Hz) et la restauration.
+
 ```
-    ┌────────┐  freq ≥ 51,0 (3 s)     ou  freq ≥ 51,3 (immédiat, salience 150)
-    │   On   ├────────────────────────────────────────────────────┐
-    └────────┘ ◄── freq < 51,0                                     │
-        ▲       ou mppt_cut (batterie pleine, salience 130) ──────►│
-        │                                                          ▼
-        │ restore autorisé                                  ┌─────────────┐
-        │ (freq < 51,0 ET restore_blocked==false)           │ PendingCut  │
-   ┌────┴─────────┐  lockout 120 s   ┌─────────┐  3 s + freq ≥ 51,0 │
-   │PendingRestore│◄─────────────────┤ Lockout │◄───── relay_off (2 canaux)
-   └──────────────┘                  └─────────┘
-        ▲ 45 s + freq < 51,0            │ expire
-        └──────────────────── Off ◄─────┘
+   ┌────────┐  freq ≥ 51,0 Hz (3 s)   ┌────────────┐  3 s + freq ≥ 51,0 Hz   ┌─────────┐
+   │   On   │ ──────────────────────► │ PendingCut │ ──────────────────────► │ Lockout │
+   └────────┘ ◄── freq < 51,0 Hz ──── └────────────┘     (relay_off ×2)      └────┬────┘
+       ▲                                                                          │ expire 120 s
+       │ relay_on ×2                                                              ▼
+       │ (45 s + freq < 51,0 Hz                                              ┌─────────┐
+       │  ET restore_blocked = false)                                       │   Off   │
+   ┌───┴────────────┐                                                       └────┬────┘
+   │ PendingRestore │ ◄── freq < 51,0 Hz  ET  restore_blocked = false ───────────┘
+   └────────────────┘
+       │ annulation : freq ≥ 51,0 Hz  OU  restore_blocked = true
+       └──────────────────────────────► Off
 ```
 
 **Commande Shelly MQTT transient** (envoyée sur **chaque** canal) :
