@@ -997,7 +997,7 @@ Champs `deye` :
 - `freq_hz` — fréquence AC-Out pilotant le seuil unique (≥51,0 coupe / <51,0 restaure).
 - `ac_connected` — connexion physique réseau (`1`=connecté, `0`=panne). **Informatif.**
 - `mppt_full` — au moins un MPPT signale « batterie pleine » (état dans `mppt_full_states`) → pilote la coupe anticipée et bloque la restauration.
-- `mppt_273_state` / `mppt_289_state` — codes State des MPPT (`3`=Bulk, `4`=Absorption, `5`=Float, `6`=Storage).
+- `mppt_273_state` / `mppt_289_state` — codes State des MPPT (`3`=Bulk, `4`=Absorption, `5`=Float, `6`=Storage, etc. — liste non exhaustive ; aussi `0`=Off, `2`=Fault, `7`=Equalize…).
 
 Ces champs alimentent la carte **« Règles système → Gestion Relais DEYE »** de `/dashboard/monitor`.
 
