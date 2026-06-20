@@ -623,6 +623,7 @@ relay_resync_secs          = 60       # s — ré-affirmation périodique de l'�
 # seul MPPT, sans atteindre la fréquence haute. Bascule : mettre false pour fréquence seule.
 mppt_cut_enabled           = true     # active la coupure DEYE pilotée par l'état MPPT
 mppt_full_states           = [4, 5, 6] # codes State « batterie pleine » : 4=Absorption,5=Float,6=Storage
+mppt_charging_states       = [3]      # codes State « batterie en charge » : 3=Bulk → autorise la restauration (prioritaire sur le garde SmartShunt)
 mppt_cut_delay_secs        = 10       # s — débounce : MPPT « plein » maintenu avant coupure
 
 # --- Chauffe-eau LG ThinQ ---
