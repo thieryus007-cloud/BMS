@@ -974,7 +974,10 @@ websocat ws://192.168.1.141:8081/live
     "restore_blocked": false,
     "grid_connected": true,
     "freq_hz": 50.01,
-    "ac_connected": 1
+    "ac_connected": 1,
+    "mppt_full": false,
+    "mppt_273_state": 3,
+    "mppt_289_state": 3
   },
   "soc_pct": null,
   "irradiance_wm2": null,
@@ -988,6 +991,8 @@ Champs `deye` :
 - `grid_connected` — prédicat d'îlotage combiné (`ac_ignore != 1` **et** `ac_connected != 0`). **Informatif uniquement** : n'intervient plus dans la décision DEYE.
 - `freq_hz` — fréquence AC-Out pilotant le seuil unique (≥51,0 coupe / <51,0 restaure).
 - `ac_connected` — connexion physique réseau (`1`=connecté, `0`=panne). **Informatif.**
+- `mppt_full` — au moins un MPPT signale « batterie pleine » (état dans `mppt_full_states`) → pilote la coupe anticipée et bloque la restauration.
+- `mppt_273_state` / `mppt_289_state` — codes State des MPPT (`3`=Bulk, `4`=Absorption, `5`=Float, `6`=Storage).
 
 Ces champs alimentent la carte **« Règles système → Gestion Relais DEYE »** de `/dashboard/monitor`.
 
