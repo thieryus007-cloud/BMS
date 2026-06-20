@@ -71,11 +71,18 @@ async fn main() -> anyhow::Result<()> {
     // --- Spawn persist MQTT watcher (retained topics at startup) ---
     spawn_persist_watcher(bus.clone(), state.clone());
 
+    // Config chauffe-eau partagée (Arc<RwLock>) : rechargeable à chaud via
+    // POST /api/v1/em/rules/reload — le control_task la relit depuis le disque,
+    // le serveur HTTP lit la même source pour /api/rules-status, et le poller LG
+    // y lit `temp_max_c` pour ancrer le chrono « cuve à température cible ».
+    let wh_cfg = Arc::new(RwLock::new(cfg.water_heater.clone()));
+
     // --- LG ThinQ client ---
     let lg_client = http_clients::lg_thinq::spawn_poller(
         cfg.lg_thinq.clone(),
         bus.clone(),
         state.clone(),
+        wh_cfg.clone(),
     ).await;
     let lg_arc = lg_client.map(Arc::new);
 
@@ -98,10 +105,6 @@ async fn main() -> anyhow::Result<()> {
     logic::charge_current::spawn(vic.clone(), cfg.charge_current.clone(), bus.clone(), state.clone(), loader.clone()).await;
     logic::solar_power::spawn(vic.clone(), cfg.solar.clone(), bus.clone(), state.clone(), loader.clone()).await;
     logic::deye_command::spawn(vic.clone(), cfg.deye.clone(), bus.clone(), state.clone(), loader.clone()).await;
-    // Config chauffe-eau partagée (Arc<RwLock>) : rechargeable à chaud via
-    // POST /api/v1/em/rules/reload — le control_task la relit depuis le disque,
-    // le serveur HTTP lit la même source pour /api/rules-status.
-    let wh_cfg = Arc::new(RwLock::new(cfg.water_heater.clone()));
     logic::water_heater::spawn(wh_cfg.clone(), lg_arc.clone(), bus.clone(), state.clone(), loader.clone()).await;
     logic::meteo::spawn(cfg.solar.clone(), bus.clone(), state.clone()).await;
     logic::victron_keepalive::spawn(cfg.victron.portal_id.clone(), bus.clone()).await;
