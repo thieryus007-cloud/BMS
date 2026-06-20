@@ -609,20 +609,18 @@ pv_excess_threshold_w = 50.0          # W minimum pour déclencher l'excédent
 
 # --- Commande relais DEYE (via Shelly) ---
 [energy_manager.deye]
-freq_high_hz               = 51.0     # Hz — coupure débouncée (sous l'auto-trip DEYE 51.5)
+# Décision DEYE : Fréquence AC + état des MPPT UNIQUEMENT (ni réseau, ni SmartShunt/SOC/irradiance).
+# Seuil de fréquence UNIQUE (pas de zone morte) : ≥ freq_high_hz → coupe ; < freq_high_hz → restaure.
+freq_high_hz               = 51.0     # Hz — seuil unique coupe/restaure (sous l'auto-trip DEYE 51.5)
 freq_hard_hz               = 51.3     # Hz — coupure immédiate (filet pré-trip)
-freq_low_hz                = 50.3     # Hz — seuil de réactivation
-cut_delay_secs             = 3        # s — débounce coupure (bat la rampe vers 51.5)
-reenable_delay_secs        = 45       # s — bas-soutenu avant réactivation
-lockout_secs               = 120      # s — anti-oscillation après coupure
-restore_soc_pct            = 95.0     # % — SOC ≥ → excédent structurel présumé → maintien coupé
-restore_irradiance_wm2     = 250.0    # W/m² — irradiance ≥ → soleil fort → maintien coupé
-corroboration_max_age_secs = 60       # s — fraîcheur SmartShunt (au-delà : fréquence seule, fail-open)
+cut_delay_secs             = 3        # s — débounce avant coupure douce (bat la rampe vers 51.5)
+reenable_delay_secs        = 45       # s — bas-soutenu sous le seuil avant restauration
+lockout_secs               = 120      # s — temps mort obligatoire après coupure (anti-rebattement principal)
 relay_resync_secs          = 60       # s — ré-affirmation périodique de l'état des 2 canaux
 # Coupure anticipée sur l'état de charge des MPPT (DC-couplé) — termine la charge sur le
 # seul MPPT, sans atteindre la fréquence haute. Bascule : mettre false pour fréquence seule.
 mppt_cut_enabled           = true     # active la coupure DEYE pilotée par l'état MPPT
-mppt_full_states           = [4, 5, 6] # codes State « batterie pleine » : 4=Absorption,5=Float,6=Storage
+mppt_full_states           = [4, 5, 6] # codes State « batterie pleine » : 4=Absorption,5=Float,6=Storage (3=Bulk → restaure)
 mppt_cut_delay_secs        = 10       # s — débounce : MPPT « plein » maintenu avant coupure
 
 # --- Chauffe-eau LG ThinQ ---

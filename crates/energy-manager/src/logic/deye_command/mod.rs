@@ -151,8 +151,7 @@ async fn run(
                         last_freq = freq;
 
                         let now = Utc::now();
-                        let (connected, restore_blocked, mppt_full) = read_gates(&state, &cfg, now).await;
-                        if connected { continue; }
+                        let mppt_full = read_mppt_full(&state, &cfg).await;
                         // Keep the MPPT-cut debounce in sync with the ticker so a nominal
                         // frequency update cannot cancel an active MPPT-driven cut.
                         mppt_full_since = if mppt_full { Some(mppt_full_since.unwrap_or(now)) } else { None };
@@ -165,14 +164,12 @@ async fn run(
                                 state_name(&deye_sm),
                                 last_freq,
                                 time_in_state_secs(&deye_sm, now),
-                                false,
                                 cfg.freq_high_hz,
                                 cfg.freq_hard_hz,
-                                cfg.freq_low_hz,
                                 cfg.cut_delay_secs,
                                 cfg.reenable_delay_secs,
                                 lockout_expired(&deye_sm, now),
-                                restore_blocked,
+                                mppt_full,
                                 mppt_cut,
                             ),
                             deye_sm,
@@ -190,55 +187,17 @@ async fn run(
                     }
 
                 } else if *t == t_connected {
+                    // Grid status no longer takes part in the DEYE decision (Fréquence + MPPT
+                    // only). Still tracked so the dashboard "Réseau" row stays meaningful.
                     if let Some(v) = msg.victron_value::<i64>() {
-                        // Track the physical grid connection (so read_gates can detect a real
-                        // outage) and only force an immediate reconnect when this makes us
-                        // *truly* grid-connected — not merely physically reconnected while the
-                        // ESS still deliberately ignores AC-in (ac_ignore==1) and keeps
-                        // frequency-shifting. Otherwise the ticker would re-cut 1 s later and
-                        // thrash the relay. Consistent with read_gates / is_grid_connected.
-                        let truly_connected = {
-                            let mut s = state.write().await;
-                            s.ac_connected = Some(v);
-                            is_grid_connected(s.ac_ignore, s.ac_connected)
-                        };
-                        if truly_connected {
-                            let now = Utc::now();
-                            let new_state = apply_decision(
-                                rule_engine.evaluate(
-                                    state_name(&deye_sm),
-                                    last_freq,
-                                    0,
-                                    true,
-                                    cfg.freq_high_hz,
-                                    cfg.freq_hard_hz,
-                                    cfg.freq_low_hz,
-                                    cfg.cut_delay_secs,
-                                    cfg.reenable_delay_secs,
-                                    false,
-                                    false,
-                                    false,
-                                ),
-                                deye_sm,
-                                now,
-                                &cfg,
-                                &bus,
-                                shelly_id,
-                                &channels,
-                            ).await;
-                            if new_state != deye_sm {
-                                deye_sm = new_state;
-                                persist_deye_state(&bus, &deye_sm).await;
-                                update_deye_state(&state, &deye_sm).await;
-                            }
-                        }
+                        state.write().await.ac_connected = Some(v);
                     }
                 }
             }
 
             _ = ticker.tick() => {
                 let now = Utc::now();
-                let (grid_connected, restore_blocked, mppt_full) = read_gates(&state, &cfg, now).await;
+                let mppt_full = read_mppt_full(&state, &cfg).await;
                 // Debounce the MPPT-full signal before it is allowed to cut the DEYE.
                 mppt_full_since = if mppt_full { Some(mppt_full_since.unwrap_or(now)) } else { None };
                 let mppt_cut = mppt_full_since
@@ -247,29 +206,26 @@ async fn run(
                 // Refresh observability fields (1 Hz) for /api/rules-status.
                 // deye_on is synced here too (not only on transition) so it can never
                 // diverge from the state machine — e.g. at startup before any transition.
+                // restore_blocked == mppt_full now (battery-full per the MPPT stage is the
+                // only restore gate; Bulk/charging unblocks it).
                 {
                     let mut s = state.write().await;
                     s.deye_on              = matches!(deye_sm, DeyeState::On | DeyeState::PendingCut(_));
                     s.deye_state           = Some(state_name(&deye_sm).to_string());
-                    s.deye_restore_blocked = restore_blocked;
+                    s.deye_restore_blocked = mppt_full;
                     s.deye_mppt_full       = mppt_full;
                 }
-                // Pass the real grid state: when grid-connected the GRL suppresses the
-                // cut rules (no spurious disconnect on a grid-frequency transient) and the
-                // salience-200 reconnect rules self-heal the relay back to On.
                 let new_state = apply_decision(
                     rule_engine.evaluate(
                         state_name(&deye_sm),
                         last_freq,
                         time_in_state_secs(&deye_sm, now),
-                        grid_connected,
                         cfg.freq_high_hz,
                         cfg.freq_hard_hz,
-                        cfg.freq_low_hz,
                         cfg.cut_delay_secs,
                         cfg.reenable_delay_secs,
                         lockout_expired(&deye_sm, now),
-                        restore_blocked,
+                        mppt_full,
                         mppt_cut,
                     ),
                     deye_sm,
@@ -401,20 +357,17 @@ async fn send_shelly(bus: &AppBus, shelly_id: &str, channels: &[u8], on: bool) {
     tracing::debug!("DEYE Shelly: channels {channels:?} = {}", if on { "ON" } else { "OFF" });
 }
 
-/// Reads the gating signals from shared state in a single lock acquisition.
-/// Returns `(grid_connected, restore_blocked, mppt_full)`.
-async fn read_gates(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig, now: DateTime<Utc>) -> (bool, bool, bool) {
+/// Reads the single MPPT-full gate from shared state. `mppt_full` (battery topping/full per
+/// the MPPT charge stage) drives BOTH the early cut (debounced → `mppt_cut`) and the restore
+/// gate (`restore_blocked`). It is the only non-frequency signal in the DEYE decision.
+async fn read_mppt_full(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig) -> bool {
     let s = state.read().await;
-    let grid_connected = is_grid_connected(s.ac_ignore, s.ac_connected);
-    let mppt_full = mppt_battery_full(&s, cfg);
-    // Restore is held off while the battery is full per EITHER the MPPT charge stage or
-    // the SmartShunt-based structural-excess guard.
-    let restore_blocked = mppt_full || smartshunt_battery_full(&s, cfg, now);
-    (grid_connected, restore_blocked, mppt_full)
+    mppt_battery_full(&s, cfg)
 }
 
 /// Battery topping/full according to the MPPT charge stage (Absorption/Float/Storage on
-/// any solar charger). Pure solar-charger telemetry — works **without DVCC**. Returns
+/// any solar charger). Pure solar-charger telemetry — works **without DVCC**. Bulk (3) is
+/// NOT a full stage, so a charger in Bulk reports `false` → restore is allowed. Returns
 /// false when the feature is disabled.
 fn mppt_battery_full(s: &EnergyState, cfg: &DeyeConfig) -> bool {
     if !cfg.mppt_cut_enabled {
@@ -426,46 +379,15 @@ fn mppt_battery_full(s: &EnergyState, cfg: &DeyeConfig) -> bool {
         .any(|st| cfg.mppt_full_states.contains(&st))
 }
 
-/// Whether the Victron is grid-tied (NOT islanded). The DEYE cut logic must stay active
-/// whenever the Victron forms the AC-Out grid and can frequency-shift the DEYE — which
-/// happens both on a deliberate ignore (`IgnoreAcIn1 == 1`) AND on a real grid outage
-/// (`ActiveIn/Connected == 0`, where `IgnoreAcIn1` may remain 0).
-///
-/// The grid is considered connected only when *neither* signal indicates islanding.
-/// Unknown signals keep the conservative "assume connected" default — identical to the
-/// previous `ac_ignore`-only behaviour, so this degrades gracefully if `ac_connected`
-/// has not been observed yet.
+/// Whether the Victron is grid-tied (NOT islanded). **Informational only** — no longer part
+/// of the DEYE decision (Fréquence + MPPT only); kept for the dashboard "Réseau" row.
 pub(crate) fn is_grid_connected(ac_ignore: Option<i64>, ac_connected: Option<i64>) -> bool {
     ac_ignore != Some(1) && ac_connected != Some(0)
 }
 
-/// Structural PV-excess guard (SmartShunt). While the battery is full, irradiance is
-/// strong and the battery is not discharging, restoring the DEYE would immediately
-/// re-trigger a cut and thrash the relay — so hold them off.
-///
-/// Fails OPEN: if the SmartShunt data is stale or absent, returns `false` so the
-/// frequency hysteresis alone governs restore. The AC-out frequency (Victron) stays
-/// the authority for cutting; this only ever *delays a restore*.
-fn smartshunt_battery_full(s: &EnergyState, cfg: &DeyeConfig, now: DateTime<Utc>) -> bool {
-    let fresh = s
-        .shunt_last_seen_ts
-        .map(|ts| (now - ts).num_seconds() <= cfg.corroboration_max_age_secs as i64)
-        .unwrap_or(false);
-    if !fresh {
-        return false;
-    }
-    let Some(soc) = s.soc_pct else { return false };
-    let irradiance = s.irradiance_wm2.unwrap_or(0.0);
-    // Sign convention: + = charging, - = discharging. Allow 1 A of noise around zero.
-    let current = s.battery_current_a.unwrap_or(0.0);
-    soc >= cfg.restore_soc_pct
-        && irradiance >= cfg.restore_irradiance_wm2
-        && current >= -1.0
-}
-
 #[cfg(test)]
 mod tests {
-    use super::is_grid_connected;
+    use super::*;
 
     #[test]
     fn grid_tied_when_connected_and_not_ignored() {
@@ -490,5 +412,45 @@ mod tests {
         assert!(is_grid_connected(None, None));
         assert!(is_grid_connected(Some(0), None));
         assert!(!is_grid_connected(Some(1), None));
+    }
+
+    // --- mppt_battery_full : seul signal non-fréquentiel de la décision DEYE ----
+
+    fn cfg_mppt_on() -> DeyeConfig {
+        DeyeConfig { mppt_cut_enabled: true, ..Default::default() }
+    }
+
+    fn state_with_mppt(s273: Option<i64>, s289: Option<i64>) -> EnergyState {
+        let mut s = EnergyState::default();
+        s.mppt_273.state = s273;
+        s.mppt_289.state = s289;
+        s
+    }
+
+    #[test]
+    fn both_mppt_bulk_not_full_restore_allowed() {
+        // ← le cas signalé : les deux MPPT en Bulk (3) → batterie PAS pleine → restore autorisé.
+        let s = state_with_mppt(Some(3), Some(3));
+        assert!(!mppt_battery_full(&s, &cfg_mppt_on()));
+    }
+
+    #[test]
+    fn any_mppt_full_blocks_restore() {
+        // Un seul chargeur en Absorption/Float/Storage suffit à considérer la batterie pleine.
+        assert!(mppt_battery_full(&state_with_mppt(Some(4), Some(3)), &cfg_mppt_on())); // Absorption
+        assert!(mppt_battery_full(&state_with_mppt(Some(3), Some(5)), &cfg_mppt_on())); // Float
+        assert!(mppt_battery_full(&state_with_mppt(Some(6), None),    &cfg_mppt_on())); // Storage
+    }
+
+    #[test]
+    fn no_mppt_data_not_full() {
+        assert!(!mppt_battery_full(&EnergyState::default(), &cfg_mppt_on()));
+    }
+
+    #[test]
+    fn feature_disabled_never_full() {
+        // mppt_cut_enabled == false → étage MPPT ignoré (repli fréquence seule).
+        let cfg = DeyeConfig { mppt_cut_enabled: false, ..Default::default() };
+        assert!(!mppt_battery_full(&state_with_mppt(Some(4), Some(4)), &cfg));
     }
 }

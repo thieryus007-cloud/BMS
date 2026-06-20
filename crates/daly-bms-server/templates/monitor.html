@@ -184,7 +184,7 @@
             <div id="deye-change-ts" style="font-family:monospace;font-size:0.7rem;color:#64748b;">—</div>
           </div>
         </div>
-        <div style="font-family:monospace;font-size:0.6rem;color:#475569;margin-bottom:0.35rem;">Coupe ≥ 51,0 Hz (dur ≥ 51,3) · restaure ≤ 50,3 Hz · 2 DEYE</div>
+        <div style="font-family:monospace;font-size:0.6rem;color:#475569;margin-bottom:0.35rem;">Coupe ≥ 51,0 Hz (dur ≥ 51,3) · restaure &lt; 51,0 Hz · Fréq+MPPT · 2 DEYE</div>
         <div id="deye-rule-grid" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
       </div>
 
@@ -656,7 +656,8 @@ async function fetchRulesStatus() {
       const mpptLabels = mpptStates.map(st => st == null ? '—' : (MPPT_STAGE[st] || st)).join(' / ');
 
       const rows = [
-        statusRow('Réseau', resVal, resColor, resDetail),
+        // Réseau : purement informatif — n'intervient plus dans la décision DEYE (Fréq + MPPT).
+        statusRow('Réseau (info)', resVal, resColor, resDetail),
         statusRow('Fréquence AC', deyeFreq != null ? deyeFreq.toFixed(2) + ' Hz' : '—', fColor, 'coupe ≥ 51,0 · dure ≥ 51,3'),
         statusRow('MPPT (charge)', mpptLabels,
                   deyeMpptFull ? AMBER : (mpptStates.some(st => st === 3) ? GREEN : GREY),
@@ -666,7 +667,7 @@ async function fetchRulesStatus() {
       if (relayOn === false) {
         rows.push(statusRow('Restauration', deyeBlock ? 'En attente' : 'Autorisée',
                   deyeBlock ? AMBER : GREEN,
-                  deyeBlock ? 'excédent : batterie pleine + soleil' : 'fréquence ≤ 50,3 Hz'));
+                  deyeBlock ? 'batterie pleine (MPPT) → maintien coupé' : 'fréquence < 51,0 Hz · MPPT pas plein'));
       }
       // Canaux Shelly — état réel de chaque relais (un canal par DEYE), sur la même ligne.
       const chTag = (lbl, out) => {

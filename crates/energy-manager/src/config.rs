@@ -279,37 +279,25 @@ impl Default for ChargeCurrent {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeyeConfig {
-    /// Frequency threshold to cut DEYE after `cut_delay_secs` debounce (Hz).
-    /// Set below the DEYE's own 51.5 Hz self-trip so the Shelly relay pre-empts it.
+    /// Single frequency boundary (Hz): freq ≥ this → cut side (debounced by `cut_delay_secs`,
+    /// or immediate at `freq_hard_hz`); freq < this → restore side. No dead band. Set below
+    /// the DEYE's own 51.5 Hz self-trip so the Shelly relay pre-empts it.
     #[serde(default = "default_freq_high")]
     pub freq_high_hz: f64,
     /// Hard frequency threshold for an immediate cut, bypassing the debounce (Hz).
     /// Safety net if the frequency ramps quickly toward the 51.5 Hz self-trip.
     #[serde(default = "default_freq_hard")]
     pub freq_hard_hz: f64,
-    /// Frequency threshold to re-enable DEYE (Hz)
-    #[serde(default = "default_freq_low")]
-    pub freq_low_hz: f64,
-    /// Delay before cutting after threshold crossed (seconds)
+    /// Debounce before a soft cut: frequency must stay at/above the boundary this long (seconds).
     #[serde(default = "default_cut_delay_secs")]
     pub cut_delay_secs: u64,
-    /// Delay before re-enabling after low threshold (seconds)
+    /// Sustained below-boundary time required before restoring the DEYE (seconds).
     #[serde(default = "default_reenable_delay_secs")]
     pub reenable_delay_secs: u64,
-    /// Anti-oscillation lockout after cut (seconds)
+    /// Anti-oscillation lockout after a cut — mandatory off-time before the DEYE may restore
+    /// (seconds). Main anti-thrash mechanism now that the frequency hysteresis is purely temporal.
     #[serde(default = "default_lockout_secs")]
     pub lockout_secs: u64,
-    /// Battery SOC at/above which a structural PV excess is assumed, blocking
-    /// DEYE restore to avoid relay thrashing while the battery stays full (%).
-    #[serde(default = "default_restore_soc_pct")]
-    pub restore_soc_pct: f64,
-    /// Irradiance at/above which a structural PV excess is assumed (W/m²).
-    #[serde(default = "default_restore_irradiance_wm2")]
-    pub restore_irradiance_wm2: f64,
-    /// Max age of SmartShunt data for the restore-block guard to apply (seconds).
-    /// Beyond this the guard fails open → frequency-only hysteresis takes over.
-    #[serde(default = "default_corroboration_max_age_secs")]
-    pub corroboration_max_age_secs: u64,
     /// Period at which the desired relay state is re-asserted on every channel,
     /// so the physical relay reconverges after a missed command or Shelly reboot (seconds).
     #[serde(default = "default_relay_resync_secs")]
@@ -320,7 +308,8 @@ pub struct DeyeConfig {
     #[serde(default)]
     pub mppt_cut_enabled: bool,
     /// MPPT solar-charger State codes meaning "battery topping off / full" → cut & hold DEYE.
-    /// Default [4,5,6] = Absorption, Float, Storage (3=Bulk means the battery still charges).
+    /// Default [4,5,6] = Absorption, Float, Storage (3=Bulk means the battery still charges,
+    /// so a charger in Bulk allows restore).
     #[serde(default = "default_mppt_full_states")]
     pub mppt_full_states: Vec<i64>,
     /// Debounce: the MPPT-full condition must hold this long before cutting (seconds).
@@ -330,13 +319,9 @@ pub struct DeyeConfig {
 
 fn default_freq_high() -> f64 { 51.0 }
 fn default_freq_hard() -> f64 { 51.3 }
-fn default_freq_low() -> f64 { 50.3 }
 fn default_cut_delay_secs() -> u64 { 3 }
 fn default_reenable_delay_secs() -> u64 { 45 }
 fn default_lockout_secs() -> u64 { 120 }
-fn default_restore_soc_pct() -> f64 { 95.0 }
-fn default_restore_irradiance_wm2() -> f64 { 250.0 }
-fn default_corroboration_max_age_secs() -> u64 { 60 }
 fn default_relay_resync_secs() -> u64 { 60 }
 fn default_mppt_full_states() -> Vec<i64> { vec![4, 5, 6] }
 fn default_mppt_cut_delay_secs() -> u64 { 10 }
@@ -346,13 +331,9 @@ impl Default for DeyeConfig {
         Self {
             freq_high_hz: default_freq_high(),
             freq_hard_hz: default_freq_hard(),
-            freq_low_hz: default_freq_low(),
             cut_delay_secs: default_cut_delay_secs(),
             reenable_delay_secs: default_reenable_delay_secs(),
             lockout_secs: default_lockout_secs(),
-            restore_soc_pct: default_restore_soc_pct(),
-            restore_irradiance_wm2: default_restore_irradiance_wm2(),
-            corroboration_max_age_secs: default_corroboration_max_age_secs(),
             relay_resync_secs: default_relay_resync_secs(),
             mppt_cut_enabled: false,
             mppt_full_states: default_mppt_full_states(),
