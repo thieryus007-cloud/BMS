@@ -182,15 +182,15 @@ async fn control_task(
         // Suivi « cuve à température cible » : si la température (lue à l'instant
         // ci-dessus, sinon valeur en cache rafraîchie par le poller LG) reste
         // ≥ temp_max_c pendant temp_max_hold_secs → on forcera VACATION.
-        let temp_max_reached = {
+        let (temp_max_reached, temp_max_since) = {
             let mut s = state.write().await;
-            update_temp_max_tracking(&mut s, now, cfg.temp_max_c, cfg.temp_max_hold_secs)
+            let reached = update_temp_max_tracking(&mut s, now, cfg.temp_max_c, cfg.temp_max_hold_secs);
+            (reached, s.water_heater_temp_max_since)
         };
         if temp_max_reached {
-            let since = state.read().await.water_heater_temp_max_since;
             info!(
                 "Water heater: température ≥ {:.1}°C tenue ≥ {}s (depuis {:?}) → cible atteinte, VACATION forcé",
-                cfg.temp_max_c, cfg.temp_max_hold_secs, since
+                cfg.temp_max_c, cfg.temp_max_hold_secs, temp_max_since
             );
         }
 
@@ -353,8 +353,10 @@ async fn control_task(
                 // → modifiables à chaud, sans recompiler ni redémarrer le service.
                 // Le serveur HTTP partage le même Arc<RwLock> → /api/rules-status
                 // reflète immédiatement les nouvelles valeurs.
-                match crate::config::load() {
-                    Ok(c) => {
+                // load() fait de l'I/O fichier bloquante → l'isoler du pool async
+                // (spawn_blocking) pour ne pas bloquer l'exécuteur Tokio.
+                match tokio::task::spawn_blocking(crate::config::load).await {
+                    Ok(Ok(c)) => {
                         let new = c.water_heater;
                         info!(
                             "water_heater config reloaded (temp_max_c={}, temp_max_hold_secs={}, \
@@ -364,7 +366,8 @@ async fn control_task(
                         );
                         *wh_cfg.write().await = new;
                     }
-                    Err(e) => tracing::warn!("water_heater config reload failed (keeping old): {e}"),
+                    Ok(Err(e)) => tracing::warn!("water_heater config reload failed (keeping old): {e}"),
+                    Err(e) => tracing::warn!("water_heater config reload task panicked: {e}"),
                 }
             }
         }
