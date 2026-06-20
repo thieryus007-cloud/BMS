@@ -151,7 +151,9 @@ async fn run(
                         last_freq = freq;
 
                         let now = Utc::now();
-                        let mppt_full = read_mppt_full(&state, &cfg).await;
+                        // Réaction immédiate : `freq` du message est la valeur la plus fraîche
+                        // pour ce chemin (le ticker, lui, recale sur `ac_frequency_hz`).
+                        let (_, mppt_full) = read_freq_and_mppt(&state, &cfg).await;
                         // Keep the MPPT-cut debounce in sync with the ticker so a nominal
                         // frequency update cannot cancel an active MPPT-driven cut.
                         mppt_full_since = if mppt_full { Some(mppt_full_since.unwrap_or(now)) } else { None };
@@ -197,7 +199,14 @@ async fn run(
 
             _ = ticker.tick() => {
                 let now = Utc::now();
-                let mppt_full = read_mppt_full(&state, &cfg).await;
+                // Source de vérité UNIQUE pour la fréquence : préférer la valeur partagée
+                // `ac_frequency_hz` (maintenue par le module inverter, identique au widget et
+                // toujours fraîche) à la `last_freq` locale. Cette dernière peut rester figée
+                // sur une dernière valeur HAUTE si l'abonnement fréquence propre à la boucle
+                // deye se tarit (mismatch de topic, flux interrompu) → le relais resterait
+                // ouvert indéfiniment alors que la fréquence est redescendue (bug terrain).
+                let (shared_freq, mppt_full) = read_freq_and_mppt(&state, &cfg).await;
+                last_freq = decision_freq(shared_freq, last_freq);
                 // Debounce the MPPT-full signal before it is allowed to cut the DEYE.
                 mppt_full_since = if mppt_full { Some(mppt_full_since.unwrap_or(now)) } else { None };
                 let mppt_cut = mppt_full_since
@@ -357,12 +366,23 @@ async fn send_shelly(bus: &AppBus, shelly_id: &str, channels: &[u8], on: bool) {
     tracing::debug!("DEYE Shelly: channels {channels:?} = {}", if on { "ON" } else { "OFF" });
 }
 
-/// Reads the single MPPT-full gate from shared state. `mppt_full` (battery topping/full per
-/// the MPPT charge stage) drives BOTH the early cut (debounced → `mppt_cut`) and the restore
-/// gate (`restore_blocked`). It is the only non-frequency signal in the DEYE decision.
-async fn read_mppt_full(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig) -> bool {
+/// Reads the DEYE decision inputs from shared state in a single lock:
+/// - the freshest AC-Out frequency (`ac_frequency_hz`, the SAME source the widget shows,
+///   maintained by the inverter module) — used to recalibrate the decision frequency so it
+///   can never diverge from the display nor stick on a stale deye-local reading;
+/// - the MPPT-full gate (battery topping/full per the MPPT charge stage), which drives both
+///   the early cut (debounced → `mppt_cut`) and the restore gate (`restore_blocked`).
+async fn read_freq_and_mppt(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig) -> (Option<f64>, bool) {
     let s = state.read().await;
-    mppt_battery_full(&s, cfg)
+    (s.ac_frequency_hz, mppt_battery_full(&s, cfg))
+}
+
+/// Frequency the DEYE decision must use: prefer the shared, inverter-maintained
+/// `ac_frequency_hz` (identical to the widget, always fresh) over the deye-local last
+/// value, so the decision can never diverge from the display nor stay latched on a stale
+/// high reading. Falls back to the local value when the shared one is not yet available.
+fn decision_freq(shared: Option<f64>, local: f64) -> f64 {
+    shared.unwrap_or(local)
 }
 
 /// Battery topping/full according to the MPPT charge stage (Absorption/Float/Storage on
@@ -445,6 +465,22 @@ mod tests {
     #[test]
     fn no_mppt_data_not_full() {
         assert!(!mppt_battery_full(&EnergyState::default(), &cfg_mppt_on()));
+    }
+
+    // --- decision_freq : source de vérité unique (anti-divergence widget/décision) ----
+
+    #[test]
+    fn decision_freq_prefers_fresh_shared_value() {
+        // Bug terrain : la `last_freq` locale est restée figée HAUT (≥ 51) après le pic de
+        // midi, tandis que la fréquence partagée (widget) est redescendue à 49,95 Hz.
+        // La décision DOIT utiliser la valeur partagée fraîche → restauration possible.
+        assert_eq!(decision_freq(Some(49.95), 51.4), 49.95);
+    }
+
+    #[test]
+    fn decision_freq_falls_back_to_local_when_shared_absent() {
+        // Pas encore de valeur partagée (démarrage) → repli sur la locale.
+        assert_eq!(decision_freq(None, 50.0), 50.0);
     }
 
     #[test]

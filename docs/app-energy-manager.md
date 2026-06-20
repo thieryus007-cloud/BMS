@@ -351,7 +351,7 @@ ac_ignore == 1 ?
 > Voir [./integration-materiel.md] pour le détail matériel.
 
 **Topics en entrée** :
-- `N/{pid}/vebus/{vb}/Ac/Out/L1/F` → fréquence AC (Hz) — **autorité de coupure**
+- `N/{pid}/vebus/{vb}/Ac/Out/L1/F` → fréquence AC (Hz) — **autorité de coupure**. Le ticker (1 Hz) recale la fréquence de décision sur la valeur partagée `ac_frequency_hz` (maintenue par le module `inverter`, **identique au widget**) via `decision_freq()` : la décision ne peut donc jamais diverger de l'affichage ni rester figée sur une dernière valeur locale haute si l'abonnement propre à la boucle deye se tarit.
 - État des MPPT (`mppt_273.state`, `mppt_289.state` dans `EnergyState`, alimentés par `solar_power`) — second et **seul autre** signal de décision
 - `N/{pid}/vebus/{vb}/Ac/ActiveIn/Connected` → `ac_connected` — **purement informatif** (ligne « Réseau » du widget), **n'intervient plus** dans la décision
 - `Ac/State/IgnoreAcIn1` → `ac_ignore` — **purement informatif** (idem)
