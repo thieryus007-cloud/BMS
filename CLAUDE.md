@@ -128,12 +128,18 @@ NanoPi (192.168.1.120, root)
 
 ## 2. RÉSEAU & SSH
 
-| Machine | IP | User |
-|---------|----|------|
-| Pi5 | 192.168.1.141 | pi5compute |
-| NanoPi | 192.168.1.120 | root |
+| Machine | IP | User | Lien |
+|---------|----|------|------|
+| Pi5 | 192.168.1.141 | pi5compute | WiFi `StarTh` (Starlink) — IP **fixe** via profil NetworkManager |
+| NanoPi | 192.168.1.120 | root | WiFi `StarTh` |
 
 SSH Pi5 config (`~/.ssh/config`): clé `~/.ssh/id_nanopi` → `Host nanopi` + `Host 192.168.1.120` (les deux entrées nécessaires).
+
+**Tous les appareils sont en WiFi sur la box Starlink (SSID `StarTh`, WPA2, passerelle `192.168.1.1`).** Le Pi5 n'a **aucun service réseau dépendant du WiFi pour booter** : `daly-bms` lit le RS485 (USB) même sans réseau → un Pi5 « vivant mais injoignable » est presque toujours un problème WiFi, pas un crash.
+
+**IP fixe Pi5 (NetworkManager)** : l'adresse `192.168.1.141` est figée dans le profil WiFi `StarTh` (`ipv4.method manual`), pas via bail DHCP. MAC WiFi du Pi5 : `88:a2:9e:37:ed:bc` (pour réservation DHCP côté Starlink). Le profil vit dans `/etc/NetworkManager/system-connections/StarTh.nmconnection`.
+
+**Accès de secours si le WiFi tombe** : brancher un **câble Ethernet** entre le Pi5 (port RJ45 intégré) et la box/un switch → `eth0` prend une IP DHCP automatiquement → `ssh pi5compute@<ip_eth0>`. Procédure complète de récupération/fiabilisation WiFi → **docs/diagnostic-depannage.md §10**.
 
 ---
 
@@ -343,6 +349,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 |----------|----------|
 | `make sync` → "Permission denied" | `sudo chown -R pi5compute:pi5compute ~/Daly-BMS-Rust/ && git reset --hard origin/<branch>` |
 | `deploy-pi5.sh` → `rustup: not found` | PATH root ≠ PATH user sous `sudo`. Corrigé : le script build via `as_user` (sous `$SUDO_USER`). Sinon : builder **sans sudo** (`make build-arm && make build-energy-arm`) puis `sudo bash scripts/deploy-pi5.sh --no-build`. Dashboards seuls : `sudo bash scripts/fix-grafana.sh`. |
+| **Pi5 injoignable après reboot** (mais RS485 clignote → OS up) | **WiFi non remonté.** Souvent le profil WiFi NetworkManager a disparu (reset config). Accès de secours : **câble Ethernet** Pi5→box → `ssh pi5compute@<ip_eth0>`. Recréer le profil + IP fixe : voir docs/diagnostic-depannage.md §10. Diag rapide : `nmcli connection show` (profil `StarTh` présent ?), `nmcli device wifi list` (SSID vu ?), `ip -br a` (`wlan0` a-t-il une IP ?). |
 | Service BMS ne démarre pas | `journalctl -u daly-bms -n 50` |
 | Config ignorée | Copier vers `/etc/daly-bms/config.toml` |
 | `scp: dest open Failure` | `ssh root@192.168.1.120 "svc -d /service/dbus-mqtt-venus"` puis redéployer |

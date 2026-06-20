@@ -58,6 +58,14 @@
   - [§18 Phase E (2026-06-13) — la fuite est une VRAIE fuite heap](#18-phase-e-2026-06-13--la-fuite-est-une-vraie-fuite-heap-mesures-terrain)
   - [§19 Phase F (2026-06-14) — fuite localisée : chemin d'écriture redb](#19-phase-f-2026-06-14--fuite-localisee--chemin-decriture-redb)
   - [§20 Phase G (2026-06-14) — bilan : ce qui N'A PAS corrigé la fuite](#20-phase-g-2026-06-14--bilan--ce-qui-na-pas-corrige-la-fuite)
+- [10. Pi5 injoignable après reboot — WiFi non remonté / IP fixe](#10-pi5-injoignable-apres-reboot--wifi-non-remonte--ip-fixe)
+  - [10.1 Comprendre le tableau de symptômes](#101-comprendre-le-tableau-de-symptomes)
+  - [10.2 Localiser le Pi5 depuis le NanoPi](#102-localiser-le-pi5-depuis-le-nanopi-accessible)
+  - [10.3 Reprendre la main sans écran — câble Ethernet](#103-reprendre-la-main-sans-ecran--cable-ethernet)
+  - [10.4 Diagnostiquer le WiFi](#104-diagnostiquer-le-wifi-une-fois-connecte-en-filaire)
+  - [10.5 Recréer le profil WiFi avec IP fixe](#105-recreer-le-profil-wifi-avec-ip-fixe-fiabilisation)
+  - [10.6 Valider par un reboot + verrouiller côté Starlink](#106-valider-par-un-reboot--verrouiller-cote-starlink)
+  - [10.7 Remettre en service après réparation](#107-remettre-en-service-apres-reparation)
 - [Voir aussi](#voir-aussi)
 - [Sources consolidées](#sources-consolidees)
 
@@ -71,6 +79,7 @@ voir [`./integration-materiel.md`](./integration-materiel.md).
 
 | Symptôme | Cause probable | Solution |
 |----------|----------------|----------|
+| **Pi5 injoignable après reboot** (RS485 clignote = OS up, mais ni SSH ni ping ; VRM figé) | **WiFi non remonté** — profil NetworkManager `StarTh` disparu (reset config) ou auto-connexion absente | Accès de secours par **câble Ethernet** puis recréation du profil WiFi + IP fixe. Procédure complète : **§10**. |
 | `make sync` → "Permission denied" | Propriété du répertoire modifiée (sudo précédent) | `sudo chown -R pi5compute:pi5compute ~/Daly-BMS-Rust/ && git reset --hard origin/<branch>` |
 | `deploy-pi5.sh` → `rustup: not found` | PATH root ≠ PATH user sous `sudo` | Corrigé : le script build via `as_user` (sous `$SUDO_USER`). Sinon : builder sans sudo (`make build-arm && make build-energy-arm`) puis `sudo bash scripts/deploy-pi5.sh --no-build`. Dashboards seuls : `sudo bash scripts/fix-grafana.sh`. |
 | Service BMS ne démarre pas | Binaire absent, config manquante, port série indisponible | `journalctl -u daly-bms -n 50` — vérifier le message d'erreur exact |
@@ -1734,6 +1743,177 @@ fichier stable → état redb stable → **RSS stable**.
   globale est de **15-18 %**. Le fichier redb est sur le **NVMe 256 Go**, pas
   sur l'eMMC 32 Go. Aucune ressource sous pression : il n'y a rien à « régler »,
   seulement à comprendre (palier de rétention = comportement normal de redb).
+
+---
+
+## 10. Pi5 injoignable après reboot — WiFi non remonté / IP fixe
+
+> **Cas vécu 2026-06-20** : après une mise à jour de la partie Victron/NanoPi puis
+> reboot du Pi5, celui-ci semblait fonctionner (port RS485 qui clignote → OS démarré,
+> `daly-bms` actif) mais était **injoignable à son IP** `192.168.1.141`, et **VRM
+> affichait tous les appareils mais figés** (plus aucune donnée fraîche). Cause réelle :
+> le **profil WiFi NetworkManager avait disparu** → `wlan0` ne s'associait plus à la
+> box Starlink → Pi5 hors réseau → bridge MQTT Pi5→NanoPi muet → VRM gelé.
+
+### 10.1 Comprendre le tableau de symptômes
+
+Tous les appareils du site sont en **WiFi sur la box Starlink** (SSID `StarTh`, WPA2,
+passerelle `192.168.1.1`). La chaîne de données vers VRM est :
+
+```
+daly-bms (Pi5) --RS485 (USB)--> publie MQTT --> Mosquitto local Pi5
+   --bridge "pi5-nanopi" (RÉSEAU)--> NanoPi:1883 --> dbus-mqtt-venus --> D-Bus --> VRM
+```
+
+| Symptôme | Ce qu'il prouve |
+|----------|-----------------|
+| RS485 clignote | `daly-bms` **tourne** et lit le bus (étape locale, USB — indépendante du réseau) |
+| Pi5 injoignable sur son IP | **Problème réseau Pi5** (interface non montée / WiFi non associé) |
+| VRM montre les appareils **mais figés** | Les services D-Bus existent (anciens), mais **plus aucun message MQTT n'arrive** au NanoPi → le bridge ne livre plus |
+| NanoPi OK en web + SSH | Le LAN/WiFi fonctionne ; `dbus-mqtt-venus` est vivant |
+
+**Conclusion clé** : un Pi5 « vivant (RS485 clignote) mais injoignable » + un **VRM figé**
+pointent vers **un seul problème : le réseau du Pi5**. Pas un crash applicatif.
+
+### 10.2 Localiser le Pi5 depuis le NanoPi (accessible)
+
+Le NanoPi est sur le même réseau et reste joignable → s'en servir pour sonder le Pi5.
+Système minimal (BusyBox) : `arp` n'existe pas, utiliser `ip neigh`.
+
+```bash
+# Le Pi5 répond-il à son IP attendue ?
+ping -c2 192.168.1.141
+ip neigh | grep 192.168.1.141        # "FAILED" = personne ne répond à cette IP
+
+# Le Pi5 a-t-il pris une autre IP ? Balayage du LAN (boucle ping BusyBox)
+for i in $(seq 1 254); do ping -c1 -W1 192.168.1.$i >/dev/null 2>&1 && echo "192.168.1.$i UP"; done
+```
+
+- **Toutes les IP « UP » sont des appareils connus, le Pi5 absent** → le Pi5 n'a **aucune
+  liaison réseau active** (ni WiFi, ni autre). Passer à §10.3.
+- **Une IP inconnue apparaît** → bail DHCP/IP changé ; s'y connecter en SSH directement.
+
+> Raccourci : l'**app Starlink** (liste des appareils connectés) tranche immédiatement
+> si le Pi5 est associé ou non.
+
+### 10.3 Reprendre la main SANS écran — câble Ethernet
+
+Le Pi5 est installé **sans desktop ni console HDMI exploitable**. Comme il n'a ni réseau
+ni console, **aucune réparation purement à distance n'est possible** — il faut un geste
+physique, mais **pas d'écran**. Le plus simple :
+
+1. Brancher un **câble Ethernet** entre le **port RJ45 intégré du Pi5** et un port LAN de
+   la box Starlink (ou n'importe quel switch du réseau `192.168.1.x`). Raspberry Pi OS fait
+   du **DHCP sur `eth0` par défaut**, même si le filaire n'est jamais utilisé en temps normal.
+2. Attendre ~1 min, puis retrouver l'IP filaire depuis le NanoPi :
+   ```bash
+   for i in $(seq 1 254); do ping -c1 -W1 192.168.1.$i >/dev/null 2>&1 && echo "192.168.1.$i UP"; done
+   ```
+3. Se connecter — **utilisateur `pi5compute`, pas `root`** (le login root SSH est désactivé :
+   un `root@...: Permission denied (publickey,password)` est normal) :
+   ```bash
+   ssh pi5compute@192.168.1.<ip_eth0>
+   ```
+
+> Alternatives sans écran si aucun port filaire n'est disponible : sortir le média de boot
+> (microSD/NVMe) et corriger la config réseau sur un autre PC, ou utiliser une **console
+> série USB-TTL** sur le GPIO UART.
+
+### 10.4 Diagnostiquer le WiFi (une fois connecté en filaire)
+
+```bash
+ip -br a                  # eth0 = câble actuel ; wlan0 = WiFi à réparer (DOWN/NO-CARRIER = non associé)
+ip -br link
+rfkill list               # WiFi "Soft/Hard blocked: no" attendu (sinon : sudo rfkill unblock wifi)
+nmcli device status       # wlan0 doit être "managed" (sinon "unmanaged" = autre problème)
+nmcli connection show     # ⚠ un profil de TYPE wifi doit exister — s'il manque, c'est LA cause
+nmcli device wifi list    # le SSID "StarTh" doit apparaître (confirme que la radio scanne)
+```
+
+Symptôme typique du cas vécu : `nmcli connection show` ne liste **que** « Wired connection 1 »
+et « lo » → **le profil WiFi a disparu**, donc NetworkManager n'a rien à rejoindre au boot.
+
+### 10.5 Recréer le profil WiFi avec IP fixe (fiabilisation)
+
+> ⚠ Garder le **câble Ethernet branché** pendant l'opération : la session SSH passe par
+> `eth0`, elle ne tombera pas quand on (re)configure `wlan0`.
+
+La commande `nmcli device wifi connect "StarTh" password ...` peut échouer avec
+`802-11-wireless-security.key-mgmt: property is missing` à cause du **band steering**
+Starlink (même SSID en 2.4 GHz + 5 GHz, BSSID mixtes WPA2/WPA3). Parade : **créer le profil
+explicitement** en forçant `wpa-psk`, et tout configurer d'un coup (sécurité + IP fixe + robustesse) :
+
+```bash
+# Nettoyer un éventuel profil partiel
+sudo nmcli connection delete "StarTh" 2>/dev/null
+
+# Créer le profil complet : WPA2 + IP FIXE 192.168.1.141 + auto-connexion robuste
+sudo nmcli connection add type wifi con-name "StarTh" ifname wlan0 ssid "StarTh" \
+  802-11-wireless-security.key-mgmt wpa-psk \
+  802-11-wireless-security.psk "<MOT_DE_PASSE_StarTh>" \
+  ipv4.method manual \
+  ipv4.addresses 192.168.1.141/24 \
+  ipv4.gateway 192.168.1.1 \
+  ipv4.dns "192.168.1.1 1.1.1.1" \
+  connection.autoconnect yes \
+  connection.autoconnect-retries 0 \
+  802-11-wireless.powersave 2
+
+sudo nmcli connection up "StarTh"
+```
+
+Rôle des garde-fous :
+
+| Option | Effet |
+|--------|-------|
+| `ipv4.method manual` + `192.168.1.141/24` | **IP fixe** — indépendante du bail DHCP |
+| `connection.autoconnect yes` | remonte le WiFi automatiquement au boot |
+| `connection.autoconnect-retries 0` | **réessais illimités** (évite l'abandon si l'AP n'est pas prête au boot) |
+| `802-11-wireless.powersave 2` | **désactive l'économie d'énergie WiFi** (anti-décrochage d'un appareil always-on) |
+| `802-11-wireless-security.key-mgmt wpa-psk` | force WPA2 → contourne l'erreur `key-mgmt` du band steering |
+
+Vérifier :
+
+```bash
+nmcli device status                     # wlan0 = connected, CONNECTION = StarTh
+ip -br a                                # wlan0 doit afficher 192.168.1.141/24
+ping -c2 192.168.1.1                    # passerelle
+ping -c2 8.8.8.8                        # Internet (route/DNS OK)
+ls -l /etc/NetworkManager/system-connections/StarTh.nmconnection   # profil persisté sur disque
+```
+
+### 10.6 Valider par un reboot + verrouiller côté Starlink
+
+1. **Reboot de validation** (câble Ethernet gardé comme filet) — seule vraie preuve que le
+   WiFi remonte seul :
+   ```bash
+   sudo reboot
+   # puis, après ~2-3 min, se reconnecter DIRECTEMENT sur l'IP WiFi fixe :
+   ssh pi5compute@192.168.1.141
+   nmcli device status     # wlan0 = connected, StarTh
+   ```
+2. **Confirmer le WiFi seul** : débrancher l'Ethernet, puis depuis le NanoPi `ping -c2 192.168.1.141`.
+   S'il répond → le Pi5 tient sur le WiFi seul.
+3. **Anti-conflit d'IP** : une IP fixe côté Pi5 ne réserve rien côté box. Idéalement, ajouter
+   une **réservation DHCP** dans l'app Starlink pour la MAC WiFi du Pi5 **`88:a2:9e:37:ed:bc`** →
+   `192.168.1.141`. À défaut, vérifier que `.141` est hors plage DHCP.
+
+> **Filet permanent** : laisser le profil `Wired connection 1` (eth0, `autoconnect yes`) en
+> place. Si le WiFi retombe un jour, un simple câble Ethernet redonne l'accès immédiatement,
+> comme dans cette procédure.
+
+### 10.7 Remettre en service après réparation
+
+```bash
+# (si le RS485 avait été débranché) vérifier le port série stable
+ls -l /dev/serial/by-id/
+sudo systemctl restart daly-bms
+journalctl -u daly-bms -f                 # lecture BMS/ET112 OK ?
+
+# relancer le bridge MQTT → VRM se rafraîchit
+sudo systemctl restart mosquitto-broker
+journalctl -u mosquitto-broker -f | grep -i bridge   # attendu : "connected"
+```
 
 ---
 
