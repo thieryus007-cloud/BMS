@@ -407,10 +407,36 @@ async fn read_gates(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig, now: Dat
     let s = state.read().await;
     let grid_connected = is_grid_connected(s.ac_ignore, s.ac_connected);
     let mppt_full = mppt_battery_full(&s, cfg);
-    // Restore is held off while the battery is full per EITHER the MPPT charge stage or
-    // the SmartShunt-based structural-excess guard.
-    let restore_blocked = mppt_full || smartshunt_battery_full(&s, cfg, now);
+    let restore_blocked = restore_blocked(&s, cfg, now);
     (grid_connected, restore_blocked, mppt_full)
+}
+
+/// Whether DEYE restore must be held off (structural PV excess — restoring would just
+/// re-trigger a cut and thrash the relay).
+///
+/// Held off when the battery is full per the MPPT charge stage (Absorption/Float/Storage)
+/// OR per the SmartShunt structural-excess heuristic. **But** the MPPT firmware stage is the
+/// authority (CLAUDE.md §13): while any charger is still in Bulk the battery is actively
+/// accepting charge and is *not* full, so the SmartShunt heuristic is suppressed — restoring
+/// in Bulk cannot thrash the relay (the charge absorbs the power, frequency stays nominal).
+fn restore_blocked(s: &EnergyState, cfg: &DeyeConfig, now: DateTime<Utc>) -> bool {
+    if mppt_battery_full(s, cfg) {
+        return true;
+    }
+    smartshunt_battery_full(s, cfg, now) && !mppt_charging_bulk(s, cfg)
+}
+
+/// Battery actively accepting bulk charge per any MPPT solar-charger (Bulk stage). Pure
+/// firmware telemetry — a direct "the battery is NOT full" signal. Returns false when the
+/// MPPT-stage feature is disabled.
+fn mppt_charging_bulk(s: &EnergyState, cfg: &DeyeConfig) -> bool {
+    if !cfg.mppt_cut_enabled {
+        return false;
+    }
+    [s.mppt_273.state, s.mppt_289.state]
+        .into_iter()
+        .flatten()
+        .any(|st| cfg.mppt_charging_states.contains(&st))
 }
 
 /// Battery topping/full according to the MPPT charge stage (Absorption/Float/Storage on
@@ -465,7 +491,7 @@ fn smartshunt_battery_full(s: &EnergyState, cfg: &DeyeConfig, now: DateTime<Utc>
 
 #[cfg(test)]
 mod tests {
-    use super::is_grid_connected;
+    use super::*;
 
     #[test]
     fn grid_tied_when_connected_and_not_ignored() {
@@ -490,5 +516,72 @@ mod tests {
         assert!(is_grid_connected(None, None));
         assert!(is_grid_connected(Some(0), None));
         assert!(!is_grid_connected(Some(1), None));
+    }
+
+    // --- restore_blocked / MPPT-stage authority --------------------------------
+
+    fn cfg_mppt_on() -> DeyeConfig {
+        DeyeConfig { mppt_cut_enabled: true, ..Default::default() }
+    }
+
+    /// A state where the SmartShunt structural-excess heuristic alone returns true
+    /// (SOC ≥ 95 %, irradiance ≥ 250 W/m², not discharging, shunt fresh).
+    fn smartshunt_full_state(now: DateTime<Utc>) -> EnergyState {
+        EnergyState {
+            soc_pct: Some(96.0),
+            irradiance_wm2: Some(300.0),
+            battery_current_a: Some(0.0),
+            shunt_last_seen_ts: Some(now),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn smartshunt_alone_blocks_restore() {
+        let now = Utc::now();
+        let s = smartshunt_full_state(now);
+        // No MPPT stage data → only the SmartShunt heuristic governs → blocked.
+        assert!(restore_blocked(&s, &cfg_mppt_on(), now));
+    }
+
+    #[test]
+    fn mppt_bulk_overrides_smartshunt_guard() {
+        // ← le cas signalé : SmartShunt « plein » mais les MPPT en Bulk → la batterie
+        // accepte de la charge → la restauration NE doit PAS être bloquée.
+        let now = Utc::now();
+        let mut s = smartshunt_full_state(now);
+        s.mppt_273.state = Some(3); // Bulk
+        s.mppt_289.state = Some(3); // Bulk
+        assert!(!restore_blocked(&s, &cfg_mppt_on(), now));
+    }
+
+    #[test]
+    fn mppt_full_blocks_even_if_other_charger_bulk() {
+        // One charger in Absorption (full) → mppt_full wins, restore stays blocked,
+        // regardless of a Bulk reading on the other charger.
+        let now = Utc::now();
+        let mut s = smartshunt_full_state(now);
+        s.mppt_273.state = Some(4); // Absorption (full)
+        s.mppt_289.state = Some(3); // Bulk
+        assert!(restore_blocked(&s, &cfg_mppt_on(), now));
+    }
+
+    #[test]
+    fn mppt_bulk_override_respects_feature_toggle() {
+        // mppt_cut_enabled == false → MPPT stage ignored, SmartShunt guard governs alone.
+        let now = Utc::now();
+        let mut s = smartshunt_full_state(now);
+        s.mppt_273.state = Some(3); // Bulk
+        s.mppt_289.state = Some(3);
+        let cfg = DeyeConfig { mppt_cut_enabled: false, ..Default::default() };
+        assert!(restore_blocked(&s, &cfg, now));
+    }
+
+    #[test]
+    fn no_excess_does_not_block() {
+        // Neither MPPT-full nor SmartShunt-full → restore allowed.
+        let now = Utc::now();
+        let s = EnergyState::default(); // no soc/irradiance/shunt data
+        assert!(!restore_blocked(&s, &cfg_mppt_on(), now));
     }
 }
