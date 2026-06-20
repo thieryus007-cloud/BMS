@@ -167,7 +167,8 @@ struct DeyeCard {
     state:           Option<String>,
     last_change:     Option<DateTime<Utc>>,
     /// Restore held off because the battery is full per the MPPT charge stage (4/5/6).
-    /// Sole restore gate now (no grid/SmartShunt input).
+    /// Sole non-frequency restore gate now (no grid/SmartShunt input); AC frequency
+    /// remains the primary restore condition.
     restore_blocked: bool,
     /// Combined islanding predicate (ac_ignore != 1 && ac_connected != 0).
     /// INFORMATIONAL ONLY — no longer part of the DEYE decision (Fréquence + MPPT).
