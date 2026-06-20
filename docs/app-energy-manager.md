@@ -372,6 +372,19 @@ puisque la frontière de fréquence est unique. `cut_delay_secs` (3 s, débounce
 restauration pendant ce délai) + `reenable_delay_secs` (45 s sous le seuil avant restauration). Cycle
 coupe→restauration minimal ≈ **165 s** → fréquence de bascule du relais bornée. Réglable via `lockout_secs`.
 
+**Gardes de fraîcheur (anti-blocage relais sur télémétrie figée)** : la décision n'utilise jamais une
+entrée périmée. Chaque écriture horodate sa source (`ac_frequency_last_ts` par le module `inverter`,
+`mppt_*.state_last_ts` par `solar_power`). Au-delà de `input_max_age_secs` (90 s, soit 3× le keepalive
+Venus 30 s), l'entrée est « périmée » (topic muet alors que la boucle reste vivante) et :
+- **état MPPT périmé** → traité comme **NON plein** (`effective_mppt_full`) : un état figé « batterie pleine »
+  ne peut plus verrouiller le relais ouvert (c'est exactement la classe de bug évitée) ;
+- **fréquence périmée** → traitée comme **nominale (50 Hz)** (`effective_freq`) : restauration permise,
+  aucune coupure fréquence — le filet est l'**auto-trip matériel DEYE à 51,5 Hz** (politique ops).
+
+Côté fréquence, la décision recale aussi `last_freq` sur la valeur partagée `ac_frequency_hz` (= widget,
+via `decision_freq`) pour ne jamais diverger de l'affichage. Les drapeaux `freq_stale`/`mppt_stale` sont
+exposés (`/api/rules-status`) et signalés en rouge dans le widget « Gestion Relais DEYE ».
+
 **Règles GRL** (`deye_command.grl`) :
 
 | État courant | Condition | → Nouvel état | Relay | Salience |
@@ -435,7 +448,7 @@ Payload (pour chaque canal de shelly_deye_channels) :
 - `"On"` — DEYE actif (états `On` ou `PendingCut`)
 - `"Off"` — DEYE coupé (états `Off`, `Lockout`, `PendingRestore`)
 
-**Config** (`[energy_manager.deye]`) : `freq_high_hz=51.0` (seuil unique coupe/restaure), `freq_hard_hz=51.3` (coupe immédiate), `cut_delay_secs=3`, `reenable_delay_secs=45`, `lockout_secs=120`, `relay_resync_secs=60`, `mppt_cut_enabled=true`, `mppt_full_states=[4,5,6]`, `mppt_cut_delay_secs=10`. *(Retirés : `freq_low_hz`, `restore_soc_pct`, `restore_irradiance_wm2`, `corroboration_max_age_secs`, `mppt_charging_states` — plus de zone morte ni de garde SmartShunt.)*
+**Config** (`[energy_manager.deye]`) : `freq_high_hz=51.0` (seuil unique coupe/restaure), `freq_hard_hz=51.3` (coupe immédiate), `cut_delay_secs=3`, `reenable_delay_secs=45`, `lockout_secs=120`, `relay_resync_secs=60`, `mppt_cut_enabled=true`, `mppt_full_states=[4,5,6]`, `mppt_cut_delay_secs=10`, `input_max_age_secs=90` (garde de fraîcheur freq + MPPT). *(Retirés : `freq_low_hz`, `restore_soc_pct`, `restore_irradiance_wm2`, `corroboration_max_age_secs`, `mppt_charging_states` — plus de zone morte ni de garde SmartShunt.)*
 Canaux : `[energy_manager.victron] shelly_deye_channels = [0, 1]` (un canal par DEYE ; fallback mono-canal `shelly_deye_channel` si la liste est vide).
 
 ---
@@ -982,7 +995,9 @@ websocat ws://192.168.1.141:8081/live
     "ac_connected": 1,
     "mppt_full": false,
     "mppt_273_state": 3,
-    "mppt_289_state": 3
+    "mppt_289_state": 3,
+    "freq_stale": false,
+    "mppt_stale": false
   },
   "soc_pct": null,
   "irradiance_wm2": null,
@@ -998,6 +1013,8 @@ Champs `deye` :
 - `ac_connected` — connexion physique réseau (`1`=connecté, `0`=panne). **Informatif.**
 - `mppt_full` — au moins un MPPT signale « batterie pleine » (état dans `mppt_full_states`) → pilote la coupe anticipée et bloque la restauration.
 - `mppt_273_state` / `mppt_289_state` — codes State des MPPT (`3`=Bulk, `4`=Absorption, `5`=Float, `6`=Storage, etc. — liste non exhaustive ; aussi `0`=Off, `2`=Fault, `7`=Equalize…).
+- `freq_stale` — la télémétrie fréquence est périmée (topic muet > `input_max_age_secs`) → la décision la traite comme nominale (restauration permise ; filet = auto-trip DEYE 51,5 Hz).
+- `mppt_stale` — la télémétrie d'état MPPT est périmée → traitée comme « pas plein » (ne bloque pas la restauration → anti-blocage relais).
 
 Ces champs alimentent la carte **« Règles système → Gestion Relais DEYE »** de `/dashboard/monitor`.
 

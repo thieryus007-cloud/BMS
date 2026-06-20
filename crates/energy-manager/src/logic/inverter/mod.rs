@@ -81,7 +81,10 @@ async fn handle(
         }
     } else if t.contains("/vebus/") && t.ends_with("/Ac/Out/L1/F") {
         if let Some(v) = msg.victron_value::<f64>() {
-            state.write().await.ac_frequency_hz = Some(v);
+            let mut s = state.write().await;
+            s.ac_frequency_hz = Some(v);
+            // Freshness stamp for the DEYE decision (a frozen freq must not strand the relay).
+            s.ac_frequency_last_ts = Some(chrono::Utc::now());
             return true;
         }
     } else if t.contains("/vebus/") && t.ends_with("/Ac/Out/L1/P") {

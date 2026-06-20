@@ -595,6 +595,8 @@ async function fetchRulesStatus() {
     const deyeBlock = deye?.restore_blocked ?? false;
     const deyeAcCon = deye?.ac_connected ?? null;     // 1=connecté, 0=panne réseau
     const deyeMpptFull = deye?.mppt_full ?? false;    // l'état MPPT signale batterie pleine
+    const deyeFreqStale = deye?.freq_stale ?? false;  // topic fréquence muet → traité nominal
+    const deyeMpptStale = deye?.mppt_stale ?? false;  // topic état MPPT muet → traité pas-plein
     const mpptStates = [deye?.mppt_273_state, deye?.mppt_289_state];
     // Real per-channel relay state from the Shelly Pro 2PM (daly-bms-server). output=true ⇒
     // relay closed ⇒ DEYE powered. One Shelly device → take the first.
@@ -658,10 +660,13 @@ async function fetchRulesStatus() {
       const rows = [
         // Réseau : purement informatif — n'intervient plus dans la décision DEYE (Fréq + MPPT).
         statusRow('Réseau (info)', resVal, resColor, resDetail),
-        statusRow('Fréquence AC', deyeFreq != null ? deyeFreq.toFixed(2) + ' Hz' : '—', fColor, 'coupe ≥ 51,0 · dure ≥ 51,3'),
+        statusRow('Fréquence AC', deyeFreq != null ? deyeFreq.toFixed(2) + ' Hz' : '—',
+                  deyeFreqStale ? RED : fColor,
+                  deyeFreqStale ? '⚠ télémétrie périmée → traitée nominale (restaure)' : 'coupe ≥ 51,0 · dure ≥ 51,3'),
         statusRow('MPPT (charge)', mpptLabels,
-                  deyeMpptFull ? AMBER : (mpptStates.some(st => st === 3) ? GREEN : GREY),
-                  deyeMpptFull ? 'batterie pleine → coupe DEYE' : null),
+                  deyeMpptStale ? RED : (deyeMpptFull ? AMBER : (mpptStates.some(st => st === 3) ? GREEN : GREY)),
+                  deyeMpptStale ? '⚠ télémétrie périmée → ignorée (ne bloque pas la restauration)'
+                                : (deyeMpptFull ? 'batterie pleine → coupe DEYE' : null)),
       ];
       // Restauration : pertinente seulement quand le relais est ouvert (DEYE coupés)
       if (relayOn === false) {

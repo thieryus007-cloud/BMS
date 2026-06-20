@@ -152,8 +152,11 @@ async fn run(
 
                         let now = Utc::now();
                         // Réaction immédiate : `freq` du message est la valeur la plus fraîche
-                        // pour ce chemin (le ticker, lui, recale sur `ac_frequency_hz`).
-                        let (_, mppt_full) = read_freq_and_mppt(&state, &cfg).await;
+                        // pour ce chemin (le ticker, lui, recale sur `ac_frequency_hz`) → pas de
+                        // garde de staleness fréquence ici. La garde MPPT s'applique néanmoins :
+                        // un état MPPT figé « plein » ne doit pas bloquer la restauration.
+                        let inp = read_deye_inputs(&state, &cfg, now).await;
+                        let mppt_full = effective_mppt_full(inp.mppt_full, inp.mppt_stale);
                         // Keep the MPPT-cut debounce in sync with the ticker so a nominal
                         // frequency update cannot cancel an active MPPT-driven cut.
                         mppt_full_since = if mppt_full { Some(mppt_full_since.unwrap_or(now)) } else { None };
@@ -199,14 +202,15 @@ async fn run(
 
             _ = ticker.tick() => {
                 let now = Utc::now();
-                // Source de vérité UNIQUE pour la fréquence : préférer la valeur partagée
-                // `ac_frequency_hz` (maintenue par le module inverter, identique au widget et
-                // toujours fraîche) à la `last_freq` locale. Cette dernière peut rester figée
-                // sur une dernière valeur HAUTE si l'abonnement fréquence propre à la boucle
-                // deye se tarit (mismatch de topic, flux interrompu) → le relais resterait
-                // ouvert indéfiniment alors que la fréquence est redescendue (bug terrain).
-                let (shared_freq, mppt_full) = read_freq_and_mppt(&state, &cfg).await;
-                last_freq = decision_freq(shared_freq, last_freq);
+                // Source de vérité UNIQUE + GARDES DE FRAÎCHEUR (anti-blocage relais).
+                // - fréquence : préférer la valeur partagée `ac_frequency_hz` (= widget) à la
+                //   `last_freq` locale (qui peut rester figée haut si l'abonnement deye se tarit) ;
+                //   si la télémétrie est périmée, on la traite comme nominale (restauration permise).
+                // - MPPT : un état figé « plein » (topic muet) ne doit plus bloquer la restauration.
+                let inp = read_deye_inputs(&state, &cfg, now).await;
+                last_freq = decision_freq(inp.shared_freq, last_freq);
+                let eff_freq = effective_freq(last_freq, inp.freq_stale);
+                let mppt_full = effective_mppt_full(inp.mppt_full, inp.mppt_stale);
                 // Debounce the MPPT-full signal before it is allowed to cut the DEYE.
                 mppt_full_since = if mppt_full { Some(mppt_full_since.unwrap_or(now)) } else { None };
                 let mppt_cut = mppt_full_since
@@ -215,19 +219,21 @@ async fn run(
                 // Refresh observability fields (1 Hz) for /api/rules-status.
                 // deye_on is synced here too (not only on transition) so it can never
                 // diverge from the state machine — e.g. at startup before any transition.
-                // restore_blocked == mppt_full now (battery-full per the MPPT stage is the
-                // only restore gate; Bulk/charging unblocks it).
+                // restore_blocked == effective mppt_full (battery-full per the MPPT stage, only
+                // when fresh, is the only restore gate; Bulk/charging/stale unblocks it).
                 {
                     let mut s = state.write().await;
                     s.deye_on              = matches!(deye_sm, DeyeState::On | DeyeState::PendingCut(_));
                     s.deye_state           = Some(state_name(&deye_sm).to_string());
                     s.deye_restore_blocked = mppt_full;
                     s.deye_mppt_full       = mppt_full;
+                    s.deye_freq_stale      = inp.freq_stale;
+                    s.deye_mppt_stale      = inp.mppt_stale;
                 }
                 let new_state = apply_decision(
                     rule_engine.evaluate(
                         state_name(&deye_sm),
-                        last_freq,
+                        eff_freq,
                         time_in_state_secs(&deye_sm, now),
                         cfg.freq_high_hz,
                         cfg.freq_hard_hz,
@@ -366,15 +372,44 @@ async fn send_shelly(bus: &AppBus, shelly_id: &str, channels: &[u8], on: bool) {
     tracing::debug!("DEYE Shelly: channels {channels:?} = {}", if on { "ON" } else { "OFF" });
 }
 
-/// Reads the DEYE decision inputs from shared state in a single lock:
-/// - the freshest AC-Out frequency (`ac_frequency_hz`, the SAME source the widget shows,
-///   maintained by the inverter module) — used to recalibrate the decision frequency so it
-///   can never diverge from the display nor stick on a stale deye-local reading;
-/// - the MPPT-full gate (battery topping/full per the MPPT charge stage), which drives both
-///   the early cut (debounced → `mppt_cut`) and the restore gate (`restore_blocked`).
-async fn read_freq_and_mppt(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig) -> (Option<f64>, bool) {
+/// DEYE decision inputs read from shared state, with freshness flags.
+struct DeyeInputs {
+    /// Shared AC-Out frequency (`ac_frequency_hz`, same source as the widget).
+    shared_freq: Option<f64>,
+    /// AC-Out frequency telemetry is stale (topic silent > `input_max_age_secs`).
+    freq_stale: bool,
+    /// Battery topping/full per the MPPT charge stage (raw, before freshness guard).
+    mppt_full: bool,
+    /// MPPT State telemetry is stale (both chargers silent > `input_max_age_secs`).
+    mppt_stale: bool,
+}
+
+/// Reads the DEYE decision inputs from shared state in a single lock, including the
+/// freshness of each input (frequency + MPPT State). A frozen telemetry value (topic gone
+/// silent while the loop stays alive) must never strand the relay — `apply_freshness`
+/// turns these flags into a safe effective decision.
+async fn read_deye_inputs(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig, now: DateTime<Utc>) -> DeyeInputs {
     let s = state.read().await;
-    (s.ac_frequency_hz, mppt_battery_full(&s, cfg))
+    let max = cfg.input_max_age_secs as i64;
+    // MPPT is fresh if at least one charger reported its State recently.
+    let mppt_stale = [s.mppt_273.state_last_ts, s.mppt_289.state_last_ts]
+        .into_iter()
+        .flatten()
+        .map(|t| (now - t).num_seconds())
+        .min()
+        .map(|age| age > max)
+        .unwrap_or(true);
+    DeyeInputs {
+        shared_freq: s.ac_frequency_hz,
+        freq_stale: !is_fresh(s.ac_frequency_last_ts, now, max),
+        mppt_full: mppt_battery_full(&s, cfg),
+        mppt_stale,
+    }
+}
+
+/// Whether a timestamp is within `max_age` seconds of `now` (absent → not fresh).
+fn is_fresh(ts: Option<DateTime<Utc>>, now: DateTime<Utc>, max_age: i64) -> bool {
+    ts.map(|t| (now - t).num_seconds() <= max_age).unwrap_or(false)
 }
 
 /// Frequency the DEYE decision must use: prefer the shared, inverter-maintained
@@ -383,6 +418,23 @@ async fn read_freq_and_mppt(state: &Arc<RwLock<EnergyState>>, cfg: &DeyeConfig) 
 /// high reading. Falls back to the local value when the shared one is not yet available.
 fn decision_freq(shared: Option<f64>, local: f64) -> f64 {
     shared.unwrap_or(local)
+}
+
+/// Nominal AC frequency used when the real one is stale (well below any cut threshold).
+const NOMINAL_FREQ_HZ: f64 = 50.0;
+
+/// Effective frequency for the decision: when the telemetry is stale, treat it as nominal
+/// (50 Hz) so the relay is NOT latched off on a frozen high reading — restore is allowed and
+/// no frequency-based cut fires. Per ops policy, the DEYE 51.5 Hz hardware auto-trip is the
+/// safety net while AC-frequency telemetry is unavailable.
+fn effective_freq(freq_hz: f64, freq_stale: bool) -> f64 {
+    if freq_stale { NOMINAL_FREQ_HZ } else { freq_hz }
+}
+
+/// Effective MPPT-full for the decision: a stale MPPT State is treated as NOT full, so a
+/// frozen "battery full" reading can never strand the relay off (the bug class this guards).
+fn effective_mppt_full(mppt_full: bool, mppt_stale: bool) -> bool {
+    mppt_full && !mppt_stale
 }
 
 /// Battery topping/full according to the MPPT charge stage (Absorption/Float/Storage on
@@ -481,6 +533,36 @@ mod tests {
     fn decision_freq_falls_back_to_local_when_shared_absent() {
         // Pas encore de valeur partagée (démarrage) → repli sur la locale.
         assert_eq!(decision_freq(None, 50.0), 50.0);
+    }
+
+    // --- gardes de fraîcheur (anti-blocage relais sur télémétrie figée) ----------
+
+    #[test]
+    fn is_fresh_within_and_beyond_window() {
+        let now = Utc::now();
+        assert!(is_fresh(Some(now - chrono::Duration::seconds(30)), now, 90));   // récent
+        assert!(!is_fresh(Some(now - chrono::Duration::seconds(120)), now, 90)); // périmé
+        assert!(!is_fresh(None, now, 90));                                        // jamais vu
+    }
+
+    #[test]
+    fn stale_freq_treated_as_nominal_allows_restore() {
+        // Fréquence figée HAUT mais périmée → traitée comme nominale (50 Hz) → côté restauration,
+        // aucune coupure fréquence. Le filet = auto-trip DEYE 51,5 Hz (politique ops).
+        assert_eq!(effective_freq(51.4, true), NOMINAL_FREQ_HZ);
+        // Fraîche → valeur réelle conservée.
+        assert_eq!(effective_freq(51.4, false), 51.4);
+    }
+
+    #[test]
+    fn stale_mppt_full_does_not_block_restore() {
+        // État MPPT figé « plein » mais périmé → traité comme NON plein → ne bloque pas la
+        // restauration (c'est exactement la classe de bug que la garde protège).
+        assert!(!effective_mppt_full(true, true));
+        // Frais + plein → bloque bien.
+        assert!(effective_mppt_full(true, false));
+        // Frais + pas plein → ne bloque pas.
+        assert!(!effective_mppt_full(false, false));
     }
 
     #[test]

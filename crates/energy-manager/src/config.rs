@@ -315,6 +315,13 @@ pub struct DeyeConfig {
     /// Debounce: the MPPT-full condition must hold this long before cutting (seconds).
     #[serde(default = "default_mppt_cut_delay_secs")]
     pub mppt_cut_delay_secs: u64,
+    /// Freshness window for the DEYE decision inputs (frequency + MPPT State), in seconds.
+    /// Beyond this a telemetry value is considered stale (topic silent): a stale MPPT State
+    /// no longer blocks restore, and a stale frequency is treated as nominal (restore allowed,
+    /// the DEYE 51.5 Hz auto-trip being the hardware net). Must stay well above the Venus
+    /// keepalive period (30 s) to avoid false positives. Default 90 s (3× keepalive).
+    #[serde(default = "default_input_max_age_secs")]
+    pub input_max_age_secs: u64,
 }
 
 fn default_freq_high() -> f64 { 51.0 }
@@ -325,6 +332,7 @@ fn default_lockout_secs() -> u64 { 120 }
 fn default_relay_resync_secs() -> u64 { 60 }
 fn default_mppt_full_states() -> Vec<i64> { vec![4, 5, 6] }
 fn default_mppt_cut_delay_secs() -> u64 { 10 }
+fn default_input_max_age_secs() -> u64 { 90 }
 
 impl Default for DeyeConfig {
     fn default() -> Self {
@@ -338,6 +346,7 @@ impl Default for DeyeConfig {
             mppt_cut_enabled: false,
             mppt_full_states: default_mppt_full_states(),
             mppt_cut_delay_secs: default_mppt_cut_delay_secs(),
+            input_max_age_secs: default_input_max_age_secs(),
         }
     }
 }

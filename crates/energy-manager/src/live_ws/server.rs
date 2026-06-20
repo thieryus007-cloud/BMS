@@ -182,6 +182,12 @@ struct DeyeCard {
     /// MPPT solar-charger State codes (3=Bulk, 4=Absorption, 5=Float, 6=Storage…)
     mppt_273_state:  Option<i64>,
     mppt_289_state:  Option<i64>,
+    /// AC-frequency telemetry is stale (topic silent) → decision treats it as nominal
+    /// (restore allowed; DEYE 51.5 Hz auto-trip is the net). Observability/alerting.
+    freq_stale:      bool,
+    /// MPPT State telemetry is stale (topic silent) → decision treats battery as NOT full
+    /// (does not strand the relay off). Observability/alerting.
+    mppt_stale:      bool,
 }
 
 #[derive(Serialize)]
@@ -241,6 +247,8 @@ async fn rules_status_handler(State(srv): State<ServerState>) -> Response {
             mppt_full:       s.deye_mppt_full,
             mppt_273_state:  s.mppt_273.state,
             mppt_289_state:  s.mppt_289.state,
+            freq_stale:      s.deye_freq_stale,
+            mppt_stale:      s.deye_mppt_stale,
         },
         soc_pct:        s.soc_pct,
         irradiance_wm2: s.irradiance_wm2,
