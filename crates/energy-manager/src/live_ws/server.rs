@@ -154,9 +154,11 @@ struct DeyeCard {
     /// State-machine state: On / PendingCut / Lockout / Off / PendingRestore
     state:           Option<String>,
     last_change:     Option<DateTime<Utc>>,
-    /// Restore held off by the structural-excess guard (battery full + sun + not discharging)
+    /// Restore held off because the battery is full per the MPPT charge stage (4/5/6).
+    /// Sole restore gate now (no grid/SmartShunt input).
     restore_blocked: bool,
-    /// Combined islanding predicate (ac_ignore != 1 && ac_connected != 0)
+    /// Combined islanding predicate (ac_ignore != 1 && ac_connected != 0).
+    /// INFORMATIONAL ONLY — no longer part of the DEYE decision (Fréquence + MPPT).
     grid_connected:  bool,
     /// AC-out frequency driving the cut/restore thresholds (Hz)
     freq_hz:         Option<f64>,
