@@ -322,9 +322,30 @@ ac_ignore == 1 ?
 
 ### 4.3 DEYE_COMMAND
 
-**Fichier** : `logic/deye_command/` (`mod.rs` + `rules.rs`)
+> ⚠️ **MISE À JOUR 2026-06 — logique native simple (plus de moteur GRL ni de machine d'états latchable).**
+> L'ancienne implémentation (moteur `rust-rule-engine` + machine à 5 états `On→PendingCut→Lockout→Off→PendingRestore→On`)
+> pouvait **rester coincée en `Lockout`** (relais figé OFF des heures, même fréquence redescendue et MPPT en Bulk),
+> car la sortie du `Lockout` dépendait d'un timer évalué dans la boucle. Remplacée par une **fonction pure
+> ré-évaluée chaque seconde** — `DeyeController::evaluate()` dans `mod.rs` :
+>
+> ```
+> should_cut = freq_hz >= freq_high_hz  OU  mppt_full        // OFF
+> restore    = freq_hz <  freq_high_hz  ET  !mppt_full        // ON
+>   • coupe immédiate si freq >= freq_hard_hz (51,3)
+>   • sinon coupe après cut_delay_secs (3 s) de condition « cut » soutenue
+>   • restaure après reenable_delay_secs (45 s) de condition « clair » soutenue
+> ```
+>
+> **Il n'y a aucun état qui se latch** : le relais SUIT en permanence la décision dérivée des entrées.
+> Tant que le ticker 1 Hz tourne, le relais converge toujours → **impossible de rester coincé**.
+> Gardes de fraîcheur conservées : freq périmée → traitée nominale (50 Hz, restaure permise) ;
+> état MPPT périmé → traité « pas plein » (ne bloque pas). Plus de `lockout_secs`/`mppt_cut_delay_secs`,
+> plus de `deye_command.grl`. Les sections « Règles GRL » / « machine d'états » ci-dessous sont **obsolètes**
+> (gardées pour l'historique).
 
-**Rôle** : Machine d'états → couper/restaurer les onduleurs DEYE via un Shelly Pro 2PM (**un canal par DEYE**). Le but est de **pré-empter l'auto-coupure des DEYE à 51,5 Hz** (qui provoque des micro-coupures sur AC Out) par une déconnexion relais propre et déterministe, dès 51,0 Hz.
+**Fichier** : `logic/deye_command/mod.rs` (logique native, sans moteur de règles)
+
+**Rôle** : Couper/restaurer les onduleurs DEYE via un Shelly Pro 2PM (**un canal par DEYE**). Le but est de **pré-empter l'auto-coupure des DEYE à 51,5 Hz** (qui provoque des micro-coupures sur AC Out) par une déconnexion relais propre et déterministe, dès 51,0 Hz.
 
 > **Décision : Fréquence AC + état des MPPT, UNIQUEMENT.** Aucune autre variable
 > n'intervient : ni réseau (`grid_connected`/`ac_ignore`/`ac_connected`), ni SmartShunt

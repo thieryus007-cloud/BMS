@@ -614,14 +614,12 @@ pv_excess_threshold_w = 50.0          # W minimum pour déclencher l'excédent
 freq_high_hz               = 51.0     # Hz — seuil unique coupe/restaure (sous l'auto-trip DEYE 51.5)
 freq_hard_hz               = 51.3     # Hz — coupure immédiate (filet pré-trip)
 cut_delay_secs             = 3        # s — débounce avant coupure douce (bat la rampe vers 51.5)
-reenable_delay_secs        = 45       # s — bas-soutenu sous le seuil avant restauration
-lockout_secs               = 120      # s — temps mort obligatoire après coupure (anti-rebattement principal)
+reenable_delay_secs        = 45       # s — clair-soutenu avant restauration (= anti-oscillation)
 relay_resync_secs          = 60       # s — ré-affirmation périodique de l'état des 2 canaux
 # Coupure anticipée sur l'état de charge des MPPT (DC-couplé) — termine la charge sur le
 # seul MPPT, sans atteindre la fréquence haute. Bascule : mettre false pour fréquence seule.
 mppt_cut_enabled           = true     # active la coupure DEYE pilotée par l'état MPPT
 mppt_full_states           = [4, 5, 6] # codes State « batterie pleine » : 4=Absorption,5=Float,6=Storage (3=Bulk → restaure)
-mppt_cut_delay_secs        = 10       # s — débounce : MPPT « plein » maintenu avant coupure
 # Garde de fraîcheur des entrées (fréquence + état MPPT). Au-delà : télémétrie « périmée »
 # (topic muet) → fréquence traitée nominale (restaure permise, filet = auto-trip DEYE 51.5),
 # état MPPT figé ne bloque plus la restauration. Doit rester > keepalive Venus (30 s).
