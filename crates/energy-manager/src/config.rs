@@ -292,12 +292,9 @@ pub struct DeyeConfig {
     #[serde(default = "default_cut_delay_secs")]
     pub cut_delay_secs: u64,
     /// Sustained below-boundary time required before restoring the DEYE (seconds).
+    /// Also the anti-oscillation guard: a cut DEYE can only restore after this clear time.
     #[serde(default = "default_reenable_delay_secs")]
     pub reenable_delay_secs: u64,
-    /// Anti-oscillation lockout after a cut — mandatory off-time before the DEYE may restore
-    /// (seconds). Main anti-thrash mechanism now that the frequency hysteresis is purely temporal.
-    #[serde(default = "default_lockout_secs")]
-    pub lockout_secs: u64,
     /// Period at which the desired relay state is re-asserted on every channel,
     /// so the physical relay reconverges after a missed command or Shelly reboot (seconds).
     #[serde(default = "default_relay_resync_secs")]
@@ -312,9 +309,6 @@ pub struct DeyeConfig {
     /// so a charger in Bulk allows restore).
     #[serde(default = "default_mppt_full_states")]
     pub mppt_full_states: Vec<i64>,
-    /// Debounce: the MPPT-full condition must hold this long before cutting (seconds).
-    #[serde(default = "default_mppt_cut_delay_secs")]
-    pub mppt_cut_delay_secs: u64,
     /// Freshness window for the DEYE decision inputs (frequency + MPPT State), in seconds.
     /// Beyond this a telemetry value is considered stale (topic silent): a stale MPPT State
     /// no longer blocks restore, and a stale frequency is treated as nominal (restore allowed,
@@ -328,10 +322,8 @@ fn default_freq_high() -> f64 { 51.0 }
 fn default_freq_hard() -> f64 { 51.3 }
 fn default_cut_delay_secs() -> u64 { 3 }
 fn default_reenable_delay_secs() -> u64 { 45 }
-fn default_lockout_secs() -> u64 { 120 }
 fn default_relay_resync_secs() -> u64 { 60 }
 fn default_mppt_full_states() -> Vec<i64> { vec![4, 5, 6] }
-fn default_mppt_cut_delay_secs() -> u64 { 10 }
 fn default_input_max_age_secs() -> u64 { 90 }
 
 impl Default for DeyeConfig {
@@ -341,11 +333,9 @@ impl Default for DeyeConfig {
             freq_hard_hz: default_freq_hard(),
             cut_delay_secs: default_cut_delay_secs(),
             reenable_delay_secs: default_reenable_delay_secs(),
-            lockout_secs: default_lockout_secs(),
             relay_resync_secs: default_relay_resync_secs(),
             mppt_cut_enabled: false,
             mppt_full_states: default_mppt_full_states(),
-            mppt_cut_delay_secs: default_mppt_cut_delay_secs(),
             input_max_age_secs: default_input_max_age_secs(),
         }
     }
