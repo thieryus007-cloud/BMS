@@ -1,7 +1,7 @@
 # Energy-Manager — Référence Complète — Daly-BMS-Rust
 
 > Document de référence du binaire **energy-manager** : automatisation énergie Pi5 (port 8081, remplace Node-RED).
-> Couvre l'architecture interne, les 12 modules logiques, les 6 règles GRL (DEYE est passé en logique native), les clients HTTP, le MQTT, le WebSocket live, la configuration et le dépannage.
+> Couvre l'architecture interne, les 12 modules logiques, les 7 règles GRL, les clients HTTP, le MQTT, le WebSocket live, la configuration et le dépannage.
 > Fait partie de l'[architecture documentaire](./ARCHITECTURE.md).
 > Dernière consolidation : 2026-06-07.
 
@@ -189,6 +189,7 @@ crates/energy-manager/
       mod.rs           ← restauration baselines au démarrage
   rules/
     charge_current.grl
+    deye_command.grl   ← mapping stateless (pas de machine d'états)
     inverter.grl       ← ⚠️ défini mais jamais chargé (dead code)
     irradiance.grl
     smartshunt.grl
@@ -321,27 +322,28 @@ ac_ignore == 1 ?
 
 ### 4.3 DEYE_COMMAND
 
-> ⚠️ **MISE À JOUR 2026-06 — logique native simple (plus de moteur GRL ni de machine d'états latchable).**
-> L'ancienne implémentation (moteur `rust-rule-engine` + machine à 5 états `On→PendingCut→Lockout→Off→PendingRestore→On`)
+> ⚠️ **MISE À JOUR 2026-06 — modèle `.grl` STATELESS (plus de machine d'états latchable).**
+> L'ancienne implémentation (`rust-rule-engine` + machine à 5 états `On→PendingCut→Lockout→Off→PendingRestore→On`)
 > pouvait **rester coincée en `Lockout`** (relais figé OFF des heures, même fréquence redescendue et MPPT en Bulk),
-> car la sortie du `Lockout` dépendait d'un timer évalué dans la boucle. Remplacée par une **fonction pure
-> ré-évaluée chaque seconde** — `DeyeController::evaluate()` dans `mod.rs` :
+> car la sortie du `Lockout` dépendait d'un timer évalué dans la boucle. **Le problème n'était pas le moteur GRL**
+> mais l'**état latchable** porté entre les évaluations. La décision reste donc sur le modèle `.grl` (cohérent
+> avec les autres modules), mais **sans état latchable** : `deye_command.grl` est désormais un simple **mapping**
+> de flags pré-calculés en Rust vers l'état du relais, ré-évalué chaque seconde :
 >
 > ```
-> should_cut = freq_hz >= freq_high_hz  OU  mppt_full        // OFF
-> restore    = freq_hz <  freq_high_hz  ET  !mppt_full        // ON
+> couper (OFF)    si  freq >= freq_high_hz  OU  mppt_full
+> restaurer (ON)  si  freq <  freq_high_hz  ET  !mppt_full
 >   • coupe immédiate si freq >= freq_hard_hz (51,3)
 >   • sinon coupe après cut_delay_secs (3 s) de condition « cut » soutenue
 >   • restaure après reenable_delay_secs (45 s) de condition « clair » soutenue
 > ```
 >
-> **Il n'y a aucun état qui se latch** : le relais SUIT en permanence la décision dérivée des entrées.
-> Tant que le ticker 1 Hz tourne, le relais converge toujours → **impossible de rester coincé**.
-> Gardes de fraîcheur conservées : freq périmée → traitée nominale (50 Hz, restaure permise) ;
-> état MPPT périmé → traité « pas plein » (ne bloque pas). Plus de `lockout_secs`/`mppt_cut_delay_secs`,
-> plus de `deye_command.grl` ni de `rules.rs`. La description ci-dessous reflète cette logique native.
+> Le `.grl` ne porte **aucun état** : on lui passe `relay_on` + les flags `hard_cut`/`cut_debounced`/`restore_debounced`
+> (les minuteries de débounce sont tenues en Rust, comme `water_heater` tient son chrono `temp_max` en Rust),
+> il renvoie `desired_on`. Le relais SUIT cette décision → tant que le ticker 1 Hz tourne, il **converge toujours**
+> → impossible de rester coincé. Plus de `lockout_secs`/`mppt_cut_delay_secs` ; gardes de fraîcheur conservées.
 
-**Fichier** : `logic/deye_command/mod.rs` (logique native, sans moteur de règles)
+**Fichiers** : `logic/deye_command/mod.rs` (boucle + minuteries de débounce) + `rules.rs` (moteur) + `rules/deye_command.grl` (mapping stateless)
 
 **Rôle** : Couper/restaurer les onduleurs DEYE via un Shelly Pro 2PM (**un canal par DEYE**). Le but est de **pré-empter l'auto-coupure des DEYE à 51,5 Hz** (qui provoque des micro-coupures sur AC Out) par une déconnexion relais propre et déterministe, dès 51,0 Hz.
 
@@ -381,7 +383,7 @@ ac_ignore == 1 ?
 > assumée : si un MPPT atteint un palier plein **alors que le réseau EDF est présent**, les
 > DEYE sont quand même coupés.
 
-**Conception** : une **fonction pure** (`DeyeController::evaluate()` dans `mod.rs`), ré-évaluée **chaque seconde**, **sans aucun état latchable**. Le relais SUIT en continu la décision dérivée des deux entrées :
+**Conception** : modèle `.grl` (cohérent avec les autres modules) mais **stateless**. Le Rust pré-calcule les flags, le `.grl` les mappe vers `desired_on`, ré-évalué **chaque seconde**. **Aucun état latchable** → le relais SUIT en continu la décision dérivée des deux entrées :
 
 ```
 couper (OFF)    si  freq ≥ freq_high_hz (51,0)  OU  mppt_full
@@ -390,6 +392,18 @@ restaurer (ON)  si  freq < freq_high_hz (51,0)  ET  !mppt_full
    • sinon coupe après cut_delay_secs (3 s) de condition « cut » soutenue
    • restaure après reenable_delay_secs (45 s) de condition « clair » soutenue
 ```
+
+**Faits passés à `deye_command.grl`** (pré-calculés par `DeyeController::flags()` en Rust, qui tient les minuteries de débounce — exactement comme les autres modules pré-calculent leurs booléens) :
+
+| Fait | Sens |
+|---|---|
+| `DY.relay_on` | état courant du relais |
+| `DY.hard_cut` | `freq ≥ freq_hard_hz` (51,3) → coupe immédiate |
+| `DY.cut_debounced` | condition « cut » (freq ≥ 51,0 OU mppt_full) tenue ≥ `cut_delay_secs` |
+| `DY.restore_debounced` | condition « clair » (freq < 51,0 ET !mppt_full) tenue ≥ `reenable_delay_secs` |
+| `DY.desired_on` (sortie) | état du relais à appliquer (défaut = `relay_on`) |
+
+Règles (mapping pur, 3 lignes) : `relay_on && (hard_cut OU cut_debounced)` → OFF ; `!relay_on && restore_debounced` → ON ; sinon inchangé.
 
 - **`freq`** : autorité de coupure (mesure Victron). Lue depuis la valeur partagée `ac_frequency_hz` (maintenue par le module `inverter`, **identique au widget**), avec garde de fraîcheur (cf. ci-dessous).
 - **`mppt_full`** : au moins un MPPT (273/289) dans `mppt_full_states` (défaut `[4,5,6]` = Absorption/Float/Storage), désactivable via `mppt_cut_enabled`. **Bulk (3) ⇒ pas plein ⇒ restauration autorisée.** But : couper les DEYE dès le palier d'absorption pour finir la charge sur le seul MPPT (DC-couplé), avant toute montée en fréquence.
@@ -403,7 +417,7 @@ restaurer (ON)  si  freq < freq_high_hz (51,0)  ET  !mppt_full
 > tourne, le relais **converge toujours** → impossible de rester coincé. Test de non-régression :
 > `never_stuck_off_when_conditions_allow_restore` (5 min de conditions claires → restaure forcément).
 
-**Driver unique = ticker 1 Hz.** À chaque tick : `read_inputs()` (freq + MPPT depuis l'état partagé, avec fraîcheur) → `evaluate()` → si l'état du relais change, commande Shelly + persistance ; les champs d'observabilité (`deye_on`, `deye_state` = `"On"`/`"Off"`, `deye_restore_blocked`, `deye_mppt_full`, `freq_stale`, `mppt_stale`) sont rafraîchis **à chaque tick**. L'abonnement MQTT n'est conservé que pour `ac_connected` (info widget « Réseau »).
+**Driver unique = ticker 1 Hz.** À chaque tick : `read_inputs()` (freq + MPPT depuis l'état partagé, avec fraîcheur) → `DeyeController::flags()` (met à jour les minuteries, pré-calcule les booléens) → `DeyeRuleEngine::decide()` (le `.grl`) → si l'état du relais change, commande Shelly + persistance ; les champs d'observabilité (`deye_on`, `deye_state` = `"On"`/`"Off"`, `deye_restore_blocked`, `deye_mppt_full`, `freq_stale`, `mppt_stale`) sont rafraîchis **à chaque tick**. L'abonnement MQTT n'est conservé que pour `ac_connected` (info widget « Réseau ») ; le `.grl` est **hot-reloadable** via l'API reload (comme les autres modules).
 
 **Gardes de fraîcheur (anti-blocage sur télémétrie figée)** : `read_inputs` n'utilise jamais une entrée périmée. Chaque source est horodatée (`ac_frequency_last_ts` par `inverter`, `mppt_*.state_last_ts` par `solar_power`). Au-delà de `input_max_age_secs` (90 s, 3× le keepalive Venus 30 s, topic muet) :
 - **MPPT périmé** → traité **NON plein** → ne bloque pas la restauration ;
@@ -989,7 +1003,7 @@ websocat ws://192.168.1.141:8081/live
 ```
 
 Champs `deye` :
-- `state` — état du relais : `On` (alimenté) / `Off` (coupé). (Plus de machine à 5 états : la logique native n'a que ces deux états.)
+- `state` — état du relais : `On` (alimenté) / `Off` (coupé). (Plus de machine à 5 états : le modèle stateless n'a que ces deux états.)
 - `restore_blocked` — restauration différée car la batterie est pleine côté MPPT (un MPPT en `mppt_full_states` = 4/5/6). Seul gate de restauration (plus de garde SmartShunt).
 - `grid_connected` — prédicat d'îlotage combiné (`ac_ignore != 1` **et** `ac_connected != 0`). **Informatif uniquement** : n'intervient plus dans la décision DEYE.
 - `freq_hz` — fréquence AC-Out pilotant le seuil unique (≥51,0 coupe / <51,0 restaure).

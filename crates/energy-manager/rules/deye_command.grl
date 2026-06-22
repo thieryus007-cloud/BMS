@@ -1,0 +1,48 @@
+// DEYE relay decision — STATELESS mapping (no state machine, nothing latches).
+//
+// The Rust side (logic/deye_command/mod.rs) carries the relay state and the two debounce
+// timers, and pre-computes the boolean input flags below — exactly like the other modules
+// pre-compute their flags in Rust. This rule set just MAPS those flags to the desired relay
+// state, re-evaluated every second. Because it keeps NO latching state of its own, the relay
+// can never get stuck: it always tracks the current inputs.
+//
+// Decision (equivalent to):
+//   cut (OFF)     when  freq >= freq_high_hz  OR  mppt_full
+//   restore (ON)  when  freq <  freq_high_hz  AND !mppt_full
+//   (cut is immediate at freq_hard_hz, otherwise debounced by cut_delay_secs;
+//    restore is debounced by reenable_delay_secs.)
+//
+// Input facts (set from Rust before evaluate):
+//   DY.relay_on          (bool) current relay state
+//   DY.hard_cut          (bool) freq >= freq_hard_hz → immediate cut
+//   DY.cut_debounced     (bool) (freq >= freq_high_hz OR mppt_full) held >= cut_delay_secs
+//   DY.restore_debounced (bool) (freq < freq_high_hz AND !mppt_full) held >= reenable_delay_secs
+//   DY.desired_on        (bool) initialised to DY.relay_on (= no change) by Rust
+//
+// Output fact (read from Rust after execute):
+//   DY.desired_on        (bool) the relay state to apply
+
+// Cut: an ON relay turns OFF on a hard-frequency spike…
+rule "DY_Cut_Hard" salience 100 no-loop {
+    when
+        DY.relay_on == true && DY.hard_cut == true
+    then
+        DY.desired_on = false;
+}
+
+// …or once the cut condition (high frequency OR battery full per MPPT) has held the debounce.
+rule "DY_Cut_Debounced" salience 100 no-loop {
+    when
+        DY.relay_on == true && DY.cut_debounced == true
+    then
+        DY.desired_on = false;
+}
+
+// Restore: an OFF relay turns ON once the clear condition (low frequency AND battery not full)
+// has held the re-enable delay.
+rule "DY_Restore" salience 100 no-loop {
+    when
+        DY.relay_on == false && DY.restore_debounced == true
+    then
+        DY.desired_on = true;
+}
