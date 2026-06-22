@@ -15,8 +15,7 @@ use std::sync::{Arc, RwLock};
 // Embedded fallbacks compiled into the binary
 const EMBEDDED: &[(&str, &str)] = &[
     ("charge_current", include_str!("../rules/charge_current.grl")),
-    // NB : la décision DEYE n'utilise plus de moteur de règles — c'est une logique native
-    // simple (logic/deye_command/mod.rs). Plus de deye_command.grl.
+    ("deye_command",   include_str!("../rules/deye_command.grl")),
     ("irradiance",     include_str!("../rules/irradiance.grl")),
     ("smartshunt",     include_str!("../rules/smartshunt.grl")),
     ("solar_power",    include_str!("../rules/solar_power.grl")),
