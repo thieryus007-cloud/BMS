@@ -33,21 +33,6 @@ pub struct EnergyManagerConfig {
     pub solar: SolarConfig,
     #[serde(default)]
     pub platform: PlatformConfig,
-    #[serde(default)]
-    pub rules: RulesConfig,
-}
-
-// ---------------------------------------------------------------------------
-// Rules hot-reload
-// ---------------------------------------------------------------------------
-
-/// Optional directory containing .grl rule files to load at startup instead of
-/// the embedded versions. Hot-reload is triggered via POST /api/v1/em/rules/reload.
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct RulesConfig {
-    /// Path to directory containing .grl files (e.g. "/etc/daly-bms/rules").
-    /// If absent or files not found, embedded rules are used as fallback.
-    pub dir: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

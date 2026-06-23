@@ -175,10 +175,11 @@ crates/energy-manager/src/              ← gestionnaire énergie (remplace Node
   http_clients/                         ← Open-Meteo + LG ThinQ
   live_ws/                              ← WebSocket live events
   persist/                              ← restauration baselines au démarrage
-crates/energy-manager/rules/            ← règles `.grl` (rust-rule-engine) :
-                                          charge_current, deye_command, inverter,
-                                          irradiance, smartshunt, solar_power,
-                                          water_heater
+  logic/<module>/rules.rs               ← logique de décision **Rust pur** (fonctions
+                                          pures + tests). Remplace l'ancien moteur
+                                          `rust-rule-engine`/`.grl` (retiré 2026-06 :
+                                          no-loop renvoyait des résultats faux ; cf.
+                                          docs/app-energy-manager.md §4)
 crates/dbus-mqtt-venus/src/             ← bridge MQTT→D-Bus NanoPi
 contrib/daly-bms.service                ← unité systemd daly-bms-server
 contrib/energy-manager.service          ← unité systemd energy-manager
@@ -370,7 +371,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | energy-manager ne démarre pas | `journalctl -u energy-manager -n 50` — souvent TOML manquant ou `.env` absent |
 | `missing field energy_manager` | `sudo cp Config.toml /etc/daly-bms/config.toml` — section `[energy_manager]` absente |
 | energy-manager ne reçoit pas MQTT | Vérifier `portal_id` dans Config.toml et que Mosquitto est accessible sur `mqtt.host` |
-| Micro-coupures AC Out au passage 51,5 Hz (auto-coupure DEYE) | Le Shelly doit couper les DEYE **avant** leur auto-trip 51,5 Hz. **Décision = Fréquence AC + état MPPT UNIQUEMENT** (ni réseau, ni SmartShunt). Seuil de fréquence **unique** (pas de zone morte) : `[energy_manager.deye] freq_high_hz=51.0` (coupe ≥51,0 / restaure <51,0) + `freq_hard_hz=51.3` (coupure immédiate). Coupe aussi dès qu'un MPPT passe en 4/5/6 (`mppt_full_states`, `mppt_cut_enabled=true`). **Modèle `.grl` STATELESS** (`deye_command.grl`, plus d'état `Lockout` latchable — 2026-06) : le Rust pré-calcule les flags (`DeyeController::flags()`), le `.grl` les mappe vers `desired_on`, ré-évalué **chaque seconde** ; le relais SUIT en continu `OFF si (freq≥51,0 OU mppt_full), ON sinon` → **ne peut jamais rester coincé**. Anti-rebattement = 2 débounces : `cut_delay_secs=3` (coupe douce) + `reenable_delay_secs=45` (restauration) ; coupure immédiate à `freq_hard_hz=51.3`. Canaux : `[energy_manager.victron] shelly_deye_channels=[0,1]` (un par DEYE — **les deux**). Détail → docs/app-energy-manager.md §4.3. |
+| Micro-coupures AC Out au passage 51,5 Hz (auto-coupure DEYE) | Le Shelly doit couper les DEYE **avant** leur auto-trip 51,5 Hz. **Décision = Fréquence AC + état MPPT UNIQUEMENT** (ni réseau, ni SmartShunt). Seuil de fréquence **unique** (pas de zone morte) : `[energy_manager.deye] freq_high_hz=51.0` (coupe ≥51,0 / restaure <51,0) + `freq_hard_hz=51.3` (coupure immédiate). Coupe aussi dès qu'un MPPT passe en 4/5/6 (`mppt_full_states`, `mppt_cut_enabled=true`). **Décision STATELESS en Rust pur** (`logic/deye_command/rules.rs::decide`, plus d'état `Lockout` latchable — 2026-06) : le Rust pré-calcule les flags (`DeyeController::flags()`), `decide()` les mappe vers `desired_on`, ré-évalué **chaque seconde** ; le relais SUIT en continu `OFF si (freq≥51,0 OU mppt_full), ON sinon` → **ne peut jamais rester coincé**. Anti-rebattement = 2 débounces : `cut_delay_secs=3` (coupe douce) + `reenable_delay_secs=45` (restauration) ; coupure immédiate à `freq_hard_hz=51.3`. Canaux : `[energy_manager.victron] shelly_deye_channels=[0,1]` (un par DEYE — **les deux**). Détail → docs/app-energy-manager.md §4.3. |
 | LG ThinQ ne répond pas | Vérifier `LG_BEARER_TOKEN` et `LG_API_KEY` dans `/etc/daly-bms/.env` |
 | Grafana dossier vide "No items" | Dashboards au mauvais format (export vs provisioning) — `__inputs`/`__requires` doivent être absents, datasource UID = `daly-metrics` |
 | Grafana ne démarre pas | `journalctl -u grafana-server -n 50` — souvent YAML provisioning invalide |
@@ -409,7 +410,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 |--------|----------|
 | **Vue d'ensemble système + index de toute la doc** | `docs/ARCHITECTURE.md` |
 | Serveur principal (RS485, protocole Daly, API REST/WS, dashboard SSR) | `docs/app-daly-bms-server.md` |
-| energy-manager (modules `logic/`, règles `.grl`, modifier/ajouter/retirer) | `docs/app-energy-manager.md` |
+| energy-manager (modules `logic/`, décisions Rust pur `rules.rs`, modifier/ajouter/retirer) | `docs/app-energy-manager.md` |
 | Bridge Venus OS + ajouter un device D-Bus + déploiement armv7 | `docs/app-dbus-mqtt-venus.md` |
 | Déployer (Pi5 + NanoPi), procédures détaillées, restauration git | `docs/deploiement-exploitation.md` |
 | Architecture redb (schéma, tiering) + historique migration VM→redb | `docs/metriques-redb-architecture.md` |

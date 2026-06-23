@@ -1,6 +1,5 @@
 /// Aggregates solar production (MPPT + PV inverter ET112) and posts to daly-bms-server API.
-/// Daily baseline decisions for the ET112 energy counter are delegated to the rule engine
-/// (rules/solar_power.grl).
+/// Daily baseline decisions for the ET112 energy counter are pure Rust (`rules::baseline_decision`).
 mod rules;
 
 use chrono::Datelike;
@@ -13,7 +12,6 @@ use tracing::{debug, warn};
 use crate::bus::AppBus;
 use crate::config::{SolarConfig, VictronConfig};
 use crate::mqtt::topics::publish;
-use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, LiveEvent, MqttOutgoing};
 
 pub async fn spawn(
@@ -21,13 +19,12 @@ pub async fn spawn(
     cfg: SolarConfig,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
-    loader: Arc<RulesLoader>,
 ) {
     let bus2   = bus.clone();
     let state2 = state.clone();
     let vic2   = vic.clone();
 
-    crate::supervise::spawn_critical(mqtt_task(vic2, bus2, state2, loader));
+    crate::supervise::spawn_critical(mqtt_task(vic2, bus2, state2));
     crate::supervise::spawn_critical(writer_task(cfg, bus, state));
 }
 
@@ -35,7 +32,6 @@ async fn mqtt_task(
     vic: Arc<VictronConfig>,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
-    loader: Arc<RulesLoader>,
 ) {
     let pid = &vic.portal_id;
     let m1  = vic.mppt1_instance;
@@ -59,28 +55,17 @@ async fn mqtt_task(
     let t_m2_dc_i   = format!("N/{pid}/solarcharger/{m2}/Dc/0/Current");
     let t_consump   = format!("N/{pid}/system/0/Ac/ConsumptionOnOutput/L1/Power");
 
-    let mut rule_engine = match rules::SolarRuleEngine::with_source(&loader.load("solar_power")) {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::error!("Failed to init solar rule engine: {e}");
-            return;
-        }
-    };
-
-    let mut rx        = bus.subscribe_mqtt();
-    let mut reload_rx = bus.subscribe_rule_reload();
+    let mut rx = bus.subscribe_mqtt();
 
     loop {
-        tokio::select! {
-            result = rx.recv() => {
-                let msg = match result {
-                    Ok(m) => m,
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        warn!("solar_power MQTT subscriber lagged, dropped {n} message(s)");
-                        continue;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                };
+        let msg = match rx.recv().await {
+            Ok(m) => m,
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                warn!("solar_power MQTT subscriber lagged, dropped {n} message(s)");
+                continue;
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        };
         let t = &msg.topic;
 
         let mut publish_baseline: Option<(i32, f64)> = None;
@@ -104,11 +89,11 @@ async fn mqtt_task(
                 if let Some(kwh) = msg.victron_value::<f64>() {
                     let today = chrono::Utc::now().date_naive().num_days_from_ce();
 
-                    // Rule engine decides whether to reset and/or capture baseline
-                    let decision = rule_engine.baseline_decision(
+                    // Pure-Rust decision: whether to reset and/or capture the baseline.
+                    let decision = rules::baseline_decision(
                         s.pvinv_baseline_day != today,
                         s.pvinv_baseline_kwh.is_none(),
-                    ).unwrap_or_default();
+                    );
 
                     if decision.reset {
                         s.pvinv_baseline_kwh = None;
@@ -168,19 +153,7 @@ async fn mqtt_task(
             )).await;
             debug!("pvinv_baseline published as retained: day={day} kwh={kwh:.3}");
         }
-            }   // close Ok(msg) arm
-
-            Ok(name) = reload_rx.recv() => {
-                if name == "solar_power" || name == "*" {
-                    let src = loader.load("solar_power");
-                    match rules::SolarRuleEngine::with_source(&src) {
-                        Ok(e) => { rule_engine = e; tracing::info!("solar_power rule engine reloaded"); }
-                        Err(e) => tracing::warn!("solar_power reload failed (keeping old engine): {e}"),
-                    }
-                }
-            }
-        }   // close select!
-    }       // close loop
+    }   // close loop
 }
 
 async fn writer_task(

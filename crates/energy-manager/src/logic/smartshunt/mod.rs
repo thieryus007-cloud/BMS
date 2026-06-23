@@ -6,7 +6,7 @@
 ///   - History/ChargedEnergy   (kWh cumulative)
 ///   - History/DischargedEnergy (kWh cumulative)
 ///
-/// Daily baseline capture decisions are delegated to the rule engine (rules/smartshunt.grl).
+/// Daily baseline capture decisions are pure Rust (`rules::baseline_decision`).
 /// Falls back to system/0/Dc/Battery/* aggregates when direct shunt paths are absent.
 mod rules;
 
@@ -19,14 +19,13 @@ use tracing::{debug, info, warn};
 use crate::bus::AppBus;
 use crate::config::VictronConfig;
 use crate::mqtt::topics::publish;
-use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, LiveEvent, MqttIncoming, MqttOutgoing};
 
-pub async fn spawn(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>, loader: Arc<RulesLoader>) {
-    crate::supervise::spawn_critical(run(vic, bus, state, loader));
+pub async fn spawn(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>) {
+    crate::supervise::spawn_critical(run(vic, bus, state));
 }
 
-async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>, loader: Arc<RulesLoader>) {
+async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState>>) {
     let pid   = &vic.portal_id;
     let shunt = vic.smartshunt_instance;
 
@@ -37,47 +36,24 @@ async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState
     let t_ttg     = format!("N/{pid}/battery/{shunt}/TimeToGo");
     let t_state   = format!("N/{pid}/battery/{shunt}/State");
 
-    let mut rule_engine = match rules::SmartShuntRuleEngine::with_source(&loader.load("smartshunt")) {
-        Ok(e) => e,
-        Err(e) => {
-            tracing::error!("Failed to init SmartShunt rule engine: {e}");
-            return;
-        }
-    };
-
-    let mut rx        = bus.subscribe_mqtt();
-    let mut reload_rx = bus.subscribe_rule_reload();
+    let mut rx = bus.subscribe_mqtt();
 
     loop {
-        tokio::select! {
-            result = rx.recv() => {
-                let msg = match result {
-                    Ok(m) => m,
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        warn!("smartshunt MQTT subscriber lagged, dropped {n} message(s)");
-                        continue;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                };
-                if let Some(dirty) = handle(
-                    &msg, &state, &mut rule_engine,
-                    &t_voltage, &t_current, &t_power,
-                    &t_soc, &t_ttg, &t_state,
-                ).await {
-                    if dirty {
-                        publish_state(&bus, &state).await;
-                    }
-                }
+        let msg = match rx.recv().await {
+            Ok(m) => m,
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                warn!("smartshunt MQTT subscriber lagged, dropped {n} message(s)");
+                continue;
             }
-
-            Ok(name) = reload_rx.recv() => {
-                if name == "smartshunt" || name == "*" {
-                    let src = loader.load("smartshunt");
-                    match rules::SmartShuntRuleEngine::with_source(&src) {
-                        Ok(e) => { rule_engine = e; tracing::info!("smartshunt rule engine reloaded"); }
-                        Err(e) => tracing::warn!("smartshunt reload failed (keeping old engine): {e}"),
-                    }
-                }
+            Err(broadcast::error::RecvError::Closed) => break,
+        };
+        if let Some(dirty) = handle(
+            &msg, &state,
+            &t_voltage, &t_current, &t_power,
+            &t_soc, &t_ttg, &t_state,
+        ).await {
+            if dirty {
+                publish_state(&bus, &state).await;
             }
         }
     }
@@ -87,7 +63,6 @@ async fn run(vic: Arc<VictronConfig>, bus: AppBus, state: Arc<RwLock<EnergyState
 async fn handle(
     msg: &MqttIncoming,
     state: &Arc<RwLock<EnergyState>>,
-    rule_engine: &mut rules::SmartShuntRuleEngine,
     t_voltage: &str,
     t_current: &str,
     t_power:   &str,
@@ -161,13 +136,13 @@ async fn handle(
         if let Some(kwh) = msg.victron_value::<f64>() {
             let day_key = now.date_naive().num_days_from_ce();
 
-            // Rule engine decides whether to capture baseline
-            let decision = rule_engine.baseline_decision(
+            // Pure-Rust decision: whether to capture the charged baseline.
+            let decision = rules::baseline_decision(
                 s.shunt_charged_day != day_key,
                 s.shunt_charged_baseline_kwh.is_none(),
                 false,
                 false,
-            ).unwrap_or_default();
+            );
 
             if decision.capture_charged {
                 s.shunt_charged_baseline_kwh = Some(kwh);
@@ -183,12 +158,12 @@ async fn handle(
         if let Some(kwh) = msg.victron_value::<f64>() {
             let day_key = now.date_naive().num_days_from_ce();
 
-            let decision = rule_engine.baseline_decision(
+            let decision = rules::baseline_decision(
                 false,
                 false,
                 s.shunt_discharged_day != day_key,
                 s.shunt_discharged_baseline_kwh.is_none(),
-            ).unwrap_or_default();
+            );
 
             if decision.capture_discharged {
                 s.shunt_discharged_baseline_kwh = Some(kwh);
