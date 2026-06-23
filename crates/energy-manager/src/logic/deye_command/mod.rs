@@ -1,12 +1,11 @@
 //! DEYE relay control via Shelly Pro 2PM (MQTT RPC).
 //!
-//! The decision uses the same `.grl` rule model as the other modules
-//! (`rules/deye_command.grl`, evaluated by `rules.rs`), but it is **stateless**: there is
-//! NO latching state machine (no "Lockout"/"Pending*" that can get stuck). This controller
-//! carries only the relay state and two debounce timers, pre-computes the boolean flags, and
-//! the rule set maps them to the desired relay state, re-evaluated every second. The relay
-//! simply tracks the inputs — as long as the 1 Hz loop ticks it always converges, so it can
-//! never be stranded.
+//! The decision is **pure Rust** (`rules::decide`, like every other module), and it is
+//! **stateless**: there is NO latching state machine (no "Lockout"/"Pending*" that can get
+//! stuck). This controller carries only the relay state and two debounce timers, pre-computes
+//! the boolean flags, and `rules::decide` maps them to the desired relay state, re-evaluated
+//! every second. The relay simply tracks the inputs — as long as the 1 Hz loop ticks it always
+//! converges, so it can never be stranded.
 //!
 //! The 4 things the decision depends on:
 //!   1. AC-Out frequency   → cut at/above `freq_high_hz`, restore below.
@@ -19,19 +18,15 @@
 
 mod rules;
 
-#[cfg(feature = "zen-poc")]
-mod zen_poc;
-
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tokio::time::{interval, sleep, Duration};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::bus::AppBus;
 use crate::config::{DeyeConfig, VictronConfig};
 use crate::mqtt::topics::publish;
-use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, MqttOutgoing};
 
 /// Nominal AC frequency used when the real one is stale (well below any cut threshold)
@@ -40,7 +35,7 @@ const NOMINAL_FREQ_HZ: f64 = 50.0;
 
 // ---------------------------------------------------------------------------
 // Controller — carries the relay state + debounce timers, pre-computes the flags
-// fed to the (stateless) rule engine. Nothing here can latch and get stuck.
+// fed to the (stateless) `rules::decide`. Nothing here can latch and get stuck.
 // ---------------------------------------------------------------------------
 
 struct DeyeController {
@@ -51,7 +46,7 @@ struct DeyeController {
     restore_since: Option<DateTime<Utc>>,
 }
 
-/// Pre-computed boolean flags handed to `deye_command.grl`.
+/// Pre-computed boolean flags handed to `rules::decide`.
 struct DeyeFlags {
     hard_cut: bool,
     cut_debounced: bool,
@@ -89,7 +84,7 @@ impl DeyeController {
         }
     }
 
-    /// Applies the rule engine's decision. Returns `Some(new_on)` iff the relay changed.
+    /// Applies the decision. Returns `Some(new_on)` iff the relay changed.
     fn set(&mut self, desired_on: bool) -> Option<bool> {
         if desired_on != self.relay_on {
             self.relay_on = desired_on;
@@ -146,9 +141,8 @@ pub async fn spawn(
     cfg: DeyeConfig,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
-    loader: Arc<RulesLoader>,
 ) {
-    crate::supervise::spawn_critical(run(vic, cfg, bus, state, loader));
+    crate::supervise::spawn_critical(run(vic, cfg, bus, state));
 }
 
 async fn run(
@@ -156,7 +150,6 @@ async fn run(
     cfg: DeyeConfig,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
-    loader: Arc<RulesLoader>,
 ) {
     let pid = &vic.portal_id;
     let vb  = vic.vebus_instance;
@@ -176,14 +169,6 @@ async fn run(
     }
     info!("DEYE control: shelly={shelly_id} channels={channels:?}");
 
-    let mut rule_engine = match rules::DeyeRuleEngine::with_source(&loader.load("deye_command")) {
-        Ok(e) => e,
-        Err(e) => {
-            error!("Failed to init DEYE rule engine: {e}");
-            return;
-        }
-    };
-
     // Restore persisted relay state — wait up to 3s for the retained MQTT message,
     // so restarting while DEYE is cut doesn't spuriously power it back on.
     let initial_on = {
@@ -198,7 +183,6 @@ async fn run(
 
     let mut controller = DeyeController::new(initial_on);
     let mut rx        = bus.subscribe_mqtt();
-    let mut reload_rx = bus.subscribe_rule_reload();
     // 1 Hz authoritative driver: re-derives the relay state every second from the inputs,
     // so the relay always converges regardless of MQTT traffic. The first tick fires now.
     let mut ticker = interval(Duration::from_secs(1));
@@ -210,7 +194,7 @@ async fn run(
             _ = ticker.tick() => {
                 let now = Utc::now();
                 let inputs = read_inputs(&state, &cfg, now).await;
-                apply(&mut controller, &mut rule_engine, &inputs, now, &cfg, &bus, shelly_id, &channels, &state).await;
+                apply(&mut controller, &inputs, now, &cfg, &bus, shelly_id, &channels, &state).await;
             }
 
             result = rx.recv() => {
@@ -233,26 +217,15 @@ async fn run(
             _ = resync.tick() => {
                 send_shelly(&bus, shelly_id, &channels, controller.relay_on).await;
             }
-
-            Ok(name) = reload_rx.recv() => {
-                if name == "deye_command" || name == "*" {
-                    let src = loader.load("deye_command");
-                    match rules::DeyeRuleEngine::with_source(&src) {
-                        Ok(e) => { rule_engine = e; info!("deye_command rule engine reloaded"); }
-                        Err(e) => warn!("deye_command reload failed (keeping old engine): {e}"),
-                    }
-                }
-            }
         }
     }
 }
 
-/// Pre-computes the flags, asks the rule engine for the desired relay state, applies any
+/// Pre-computes the flags, derives the desired relay state (`rules::decide`), applies any
 /// change (relay command + persistence), then refreshes the `/api/rules-status` fields.
 #[allow(clippy::too_many_arguments)]
 async fn apply(
     controller: &mut DeyeController,
-    engine: &mut rules::DeyeRuleEngine,
     inputs: &Inputs,
     now: DateTime<Utc>,
     cfg: &DeyeConfig,
@@ -262,13 +235,9 @@ async fn apply(
     state: &Arc<RwLock<EnergyState>>,
 ) {
     let flags = controller.flags(inputs.freq_hz, inputs.mppt_full, now, cfg);
-    let desired_on = match engine.decide(controller.relay_on, flags.hard_cut, flags.cut_debounced, flags.restore_debounced) {
-        Ok(d) => d,
-        Err(e) => {
-            error!("DEYE rule engine error: {e} — keeping current relay state");
-            controller.relay_on
-        }
-    };
+    let desired_on = rules::decide(
+        controller.relay_on, flags.hard_cut, flags.cut_debounced, flags.restore_debounced,
+    );
     let changed = controller.set(desired_on);
 
     if let Some(on) = changed {
@@ -335,10 +304,10 @@ mod tests {
         DateTime::from_timestamp(1_700_000_000 + secs, 0).unwrap()
     }
 
-    /// Drives the controller + rule engine for one tick and returns the relay change, if any.
-    fn step(c: &mut DeyeController, e: &mut rules::DeyeRuleEngine, freq: f64, mppt_full: bool, now: DateTime<Utc>, cfg: &DeyeConfig) -> Option<bool> {
+    /// Drives the controller for one tick and returns the relay change, if any.
+    fn step(c: &mut DeyeController, freq: f64, mppt_full: bool, now: DateTime<Utc>, cfg: &DeyeConfig) -> Option<bool> {
         let f = c.flags(freq, mppt_full, now, cfg);
-        let desired = e.decide(c.relay_on, f.hard_cut, f.cut_debounced, f.restore_debounced).unwrap();
+        let desired = rules::decide(c.relay_on, f.hard_cut, f.cut_debounced, f.restore_debounced);
         c.set(desired)
     }
 
@@ -351,46 +320,46 @@ mod tests {
 
     #[test]
     fn hard_freq_cuts_immediately() {
-        let (mut c, mut e) = (DeyeController::new(true), rules::DeyeRuleEngine::new().unwrap());
-        assert_eq!(step(&mut c, &mut e, 51.5, false, t(0), &cfg()), Some(false));
+        let mut c = DeyeController::new(true);
+        assert_eq!(step(&mut c, 51.5, false, t(0), &cfg()), Some(false));
         assert!(!c.relay_on);
     }
 
     #[test]
     fn soft_high_freq_cuts_after_debounce() {
-        let (mut c, mut e) = (DeyeController::new(true), rules::DeyeRuleEngine::new().unwrap());
+        let mut c = DeyeController::new(true);
         let cfg = cfg();
-        assert_eq!(step(&mut c, &mut e, 51.1, false, t(0), &cfg), None);   // debouncing
-        assert_eq!(step(&mut c, &mut e, 51.1, false, t(2), &cfg), None);   // < cut_delay
-        assert_eq!(step(&mut c, &mut e, 51.1, false, t(3), &cfg), Some(false)); // 3s → cut
+        assert_eq!(step(&mut c, 51.1, false, t(0), &cfg), None);   // debouncing
+        assert_eq!(step(&mut c, 51.1, false, t(2), &cfg), None);   // < cut_delay
+        assert_eq!(step(&mut c, 51.1, false, t(3), &cfg), Some(false)); // 3s → cut
     }
 
     #[test]
     fn mppt_full_cuts_even_at_low_freq() {
-        let (mut c, mut e) = (DeyeController::new(true), rules::DeyeRuleEngine::new().unwrap());
+        let mut c = DeyeController::new(true);
         let cfg = cfg();
-        assert_eq!(step(&mut c, &mut e, 50.0, true, t(0), &cfg), None);
-        assert_eq!(step(&mut c, &mut e, 50.0, true, t(3), &cfg), Some(false));
+        assert_eq!(step(&mut c, 50.0, true, t(0), &cfg), None);
+        assert_eq!(step(&mut c, 50.0, true, t(3), &cfg), Some(false));
     }
 
     #[test]
     fn restores_after_sustained_clear() {
-        let (mut c, mut e) = (DeyeController::new(false), rules::DeyeRuleEngine::new().unwrap());
+        let mut c = DeyeController::new(false);
         let cfg = cfg();
-        assert_eq!(step(&mut c, &mut e, 50.0, false, t(0), &cfg), None);
-        assert_eq!(step(&mut c, &mut e, 50.0, false, t(44), &cfg), None);  // < reenable_delay
-        assert_eq!(step(&mut c, &mut e, 50.0, false, t(45), &cfg), Some(true)); // 45s → restore
+        assert_eq!(step(&mut c, 50.0, false, t(0), &cfg), None);
+        assert_eq!(step(&mut c, 50.0, false, t(44), &cfg), None);  // < reenable_delay
+        assert_eq!(step(&mut c, 50.0, false, t(45), &cfg), Some(true)); // 45s → restore
     }
 
     #[test]
     fn restore_wait_resets_if_condition_breaks() {
-        let (mut c, mut e) = (DeyeController::new(false), rules::DeyeRuleEngine::new().unwrap());
+        let mut c = DeyeController::new(false);
         let cfg = cfg();
-        assert_eq!(step(&mut c, &mut e, 50.0, false, t(0), &cfg), None);
-        assert_eq!(step(&mut c, &mut e, 51.2, false, t(10), &cfg), None); // freq climbs → reset
-        assert_eq!(step(&mut c, &mut e, 50.0, false, t(20), &cfg), None);
-        assert_eq!(step(&mut c, &mut e, 50.0, false, t(64), &cfg), None); // only 44s from t=20
-        assert_eq!(step(&mut c, &mut e, 50.0, false, t(65), &cfg), Some(true));
+        assert_eq!(step(&mut c, 50.0, false, t(0), &cfg), None);
+        assert_eq!(step(&mut c, 51.2, false, t(10), &cfg), None); // freq climbs → reset
+        assert_eq!(step(&mut c, 50.0, false, t(20), &cfg), None);
+        assert_eq!(step(&mut c, 50.0, false, t(64), &cfg), None); // only 44s from t=20
+        assert_eq!(step(&mut c, 50.0, false, t(65), &cfg), Some(true));
     }
 
     /// THE regression this guards: once conditions are clearly restorable (freq low, MPPT not
@@ -398,11 +367,11 @@ mod tests {
     /// latching "Lockout" state could.
     #[test]
     fn never_stuck_off_when_conditions_allow_restore() {
-        let (mut c, mut e) = (DeyeController::new(false), rules::DeyeRuleEngine::new().unwrap());
+        let mut c = DeyeController::new(false);
         let cfg = cfg();
         let mut restored = false;
         for s in 0..300 {
-            if let Some(true) = step(&mut c, &mut e, 50.08, false, t(s), &cfg) {
+            if let Some(true) = step(&mut c, 50.08, false, t(s), &cfg) {
                 restored = true;
                 break;
             }
@@ -412,10 +381,10 @@ mod tests {
 
     #[test]
     fn full_cycle_cut_then_restore() {
-        let (mut c, mut e) = (DeyeController::new(true), rules::DeyeRuleEngine::new().unwrap());
+        let mut c = DeyeController::new(true);
         let cfg = cfg();
-        assert_eq!(step(&mut c, &mut e, 51.5, false, t(0), &cfg), Some(false)); // spike → cut
-        assert_eq!(step(&mut c, &mut e, 50.0, false, t(10), &cfg), None);
-        assert_eq!(step(&mut c, &mut e, 50.0, false, t(55), &cfg), Some(true)); // restore
+        assert_eq!(step(&mut c, 51.5, false, t(0), &cfg), Some(false)); // spike → cut
+        assert_eq!(step(&mut c, 50.0, false, t(10), &cfg), None);
+        assert_eq!(step(&mut c, 50.0, false, t(55), &cfg), Some(true)); // restore
     }
 }

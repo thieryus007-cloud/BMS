@@ -11,10 +11,6 @@ description = "Energy management automation — replaces Node-RED flows"
 name = "energy-manager"
 path = "src/main.rs"
 
-[features]
-# POC d'évaluation du moteur GoRules/Zen — désactivé par défaut (build prod inchangé).
-zen-poc = ["dep:zen-engine"]
-
 [dependencies]
 # ── Workspace ─────────────────────────────────────────────────────────────────
 tokio             = { workspace = true }
@@ -34,14 +30,6 @@ chrono            = { workspace = true }
 futures           = { workspace = true }
 uuid              = { workspace = true }
 bytes             = { workspace = true }
-
-# ── Rule engine ────────────────────────────────────────────────────────────────
-rust-rule-engine = { workspace = true }
-
-# ── POC: GoRules / Zen decision engine (feature-gated, NOT in prod build) ───────
-# Évalué pour comparer ergonomie + impact binaire vs rust-rule-engine. Voir
-# src/logic/deye_command/zen_poc.rs. À retirer si le POC n'est pas concluant.
-zen-engine = { version = "0.55", optional = true }
 
 # ── Crate-specific ─────────────────────────────────────────────────────────────
 dotenvy = "0.15"

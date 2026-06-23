@@ -11,7 +11,6 @@ use crate::bus::AppBus;
 use crate::config::WaterHeaterConfig;
 use crate::http_clients::lg_thinq::LgThinqClient;
 use crate::mqtt::topics::publish;
-use crate::rules_loader::RulesLoader;
 use crate::types::{EnergyState, LiveEvent, MqttOutgoing, WaterHeaterMode};
 
 pub async fn spawn(
@@ -19,14 +18,12 @@ pub async fn spawn(
     lg: Option<Arc<LgThinqClient>>,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
-    loader: Arc<RulesLoader>,
 ) {
-    // keepalive_secs est lu une seule fois (l'intervalle du ticker est fixé au
-    // démarrage ; seuls les seuils métier sont rechargeables à chaud).
+    // keepalive_secs est lu une seule fois (l'intervalle du ticker est fixé au démarrage).
     let keepalive_secs = wh_cfg.read().await.keepalive_secs;
     crate::supervise::spawn_critical(keepalive_task(keepalive_secs, bus.clone(), state.clone()));
     if let Some(lg_client) = lg {
-        crate::supervise::spawn_critical(control_task(wh_cfg, lg_client, bus, state, loader));
+        crate::supervise::spawn_critical(control_task(wh_cfg, lg_client, bus, state));
     } else {
         info!("Water heater auto-control disabled (no LG ThinQ client)");
     }
@@ -123,31 +120,20 @@ async fn control_task(
     lg: Arc<LgThinqClient>,
     bus: AppBus,
     state: Arc<RwLock<EnergyState>>,
-    loader: Arc<RulesLoader>,
 ) {
     let mut last_change: Option<DateTime<Utc>> = None;
     let mut consecutive_fails: u32 = 0;
-    let mut ticker    = interval(Duration::from_secs(300));
-    let mut reload_rx = bus.subscribe_rule_reload();
-
-    let mut rule_engine = match rules::WaterHeaterRuleEngine::with_source(&loader.load("water_heater")) {
-        Ok(e) => e,
-        Err(e) => {
-            error!("Failed to init water heater rule engine: {e}");
-            return;
-        }
-    };
+    let mut ticker = interval(Duration::from_secs(300));
 
     info!("Water heater control task started (5min interval)");
 
     loop {
-        tokio::select! {
-        _ = ticker.tick() => {
+        ticker.tick().await;
         let now = Utc::now();
 
-        // Snapshot des seuils courants (rechargeable à chaud via reload_rx) :
-        // un clone par tick (toutes les 5 min) → coût négligeable, et tous les
-        // paramètres chauffe-eau deviennent modifiables sans redémarrage.
+        // Snapshot des seuils courants : un clone par tick (toutes les 5 min) →
+        // coût négligeable. Modifier les seuils nécessite un redémarrage du service
+        // (comme toute la config : `sudo cp Config.toml … && systemctl restart`).
         let cfg = wh_cfg.read().await.clone();
 
         // Read actual state from LG ThinQ before deciding
@@ -237,19 +223,11 @@ async fn control_task(
             ac_ignore, grid_connected, soc, cfg.soc_min_pct, soc_low, irradiance_low
         );
 
-        let target_mode_str = match rule_engine.evaluate(grid_connected, soc_low, irradiance_low, temp_max_reached) {
-            Ok(m) => {
-                info!("Water heater: rule engine → target_mode={m} (grid_connected={}, soc={:.1}%, irradiance_low={}, temp_max_reached={})",
-                    grid_connected, soc, irradiance_low, temp_max_reached);
-                m
-            }
-            Err(e) => {
-                error!("Rule engine error: {e} — fallback VACATION");
-                "VACATION".to_string()
-            }
-        };
+        let target_mode_str = rules::evaluate(grid_connected, soc_low, irradiance_low, temp_max_reached);
+        info!("Water heater: decision → target_mode={target_mode_str} (grid_connected={}, soc={:.1}%, irradiance_low={}, temp_max_reached={})",
+            grid_connected, soc, irradiance_low, temp_max_reached);
 
-        let target_mode = match target_mode_str.as_str() {
+        let target_mode = match target_mode_str {
             "HEAT_PUMP" => WaterHeaterMode::HeatPump,
             _ => WaterHeaterMode::Vacation,
         };
@@ -340,37 +318,5 @@ async fn control_task(
             }
             publish_to_venus(&bus2, &state2).await;
         });
-        }   // close _ = ticker.tick() arm
-
-        Ok(name) = reload_rx.recv() => {
-            if name == "water_heater" || name == "*" {
-                let src = loader.load("water_heater");
-                match rules::WaterHeaterRuleEngine::with_source(&src) {
-                    Ok(e) => { rule_engine = e; info!("water_heater rule engine reloaded"); }
-                    Err(e) => tracing::warn!("water_heater reload failed (keeping old engine): {e}"),
-                }
-                // Recharge les seuils depuis Config.toml (temp_max_c, hold, etc.)
-                // → modifiables à chaud, sans recompiler ni redémarrer le service.
-                // Le serveur HTTP partage le même Arc<RwLock> → /api/rules-status
-                // reflète immédiatement les nouvelles valeurs.
-                // load() fait de l'I/O fichier bloquante → l'isoler du pool async
-                // (spawn_blocking) pour ne pas bloquer l'exécuteur Tokio.
-                match tokio::task::spawn_blocking(crate::config::load).await {
-                    Ok(Ok(c)) => {
-                        let new = c.water_heater;
-                        info!(
-                            "water_heater config reloaded (temp_max_c={}, temp_max_hold_secs={}, \
-                             irradiance_min_wm2={}, soc_min_pct={})",
-                            new.temp_max_c, new.temp_max_hold_secs,
-                            new.irradiance_min_wm2, new.soc_min_pct,
-                        );
-                        *wh_cfg.write().await = new;
-                    }
-                    Ok(Err(e)) => tracing::warn!("water_heater config reload failed (keeping old): {e}"),
-                    Err(e) => tracing::warn!("water_heater config reload task panicked: {e}"),
-                }
-            }
-        }
-        }   // close select!
-    }       // close loop
+    }   // close loop
 }

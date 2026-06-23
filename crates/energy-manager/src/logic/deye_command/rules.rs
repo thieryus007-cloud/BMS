@@ -1,63 +1,23 @@
-use anyhow::Context;
-use rust_rule_engine::{Facts, KnowledgeBase, RustRuleEngine, Value};
+//! Stateless DEYE relay decision — **pure Rust** (was `rules/deye_command.grl`).
+//!
+//! The Rust side (`mod.rs`) carries the relay state + the two debounce timers and pre-computes
+//! the boolean flags below; this function just MAPS them to the desired relay state. It holds
+//! NO state of its own: given the same flags it always returns the same answer, so the relay
+//! can never get stuck.
 
-#[cfg(test)]
-const GRL_EMBEDDED: &str = include_str!("../../../rules/deye_command.grl");
-
-/// Stateless DEYE decision engine (`deye_command.grl`). Same model as the other modules:
-/// the Rust side pre-computes the boolean flags and this engine maps them to the desired
-/// relay state. Holds NO latching state — given the same flags it always returns the same
-/// answer, so the relay can never get stuck.
-pub struct DeyeRuleEngine {
-    engine: RustRuleEngine,
-}
-
-impl DeyeRuleEngine {
-    #[cfg(test)]
-    pub fn new() -> anyhow::Result<Self> {
-        Self::with_source(GRL_EMBEDDED)
-    }
-
-    pub fn with_source(grl: &str) -> anyhow::Result<Self> {
-        let kb = KnowledgeBase::new("deye_command");
-        kb.add_rules_from_grl(grl)
-            .context("Failed to load deye_command rules")?;
-        Ok(Self {
-            engine: RustRuleEngine::new(kb),
-        })
-    }
-
-    /// Returns the desired relay state (true = ON) from the current state + pre-computed flags.
-    ///
-    /// - `hard_cut`          : `freq >= freq_hard_hz` → immediate cut
-    /// - `cut_debounced`     : the cut condition (high freq OR MPPT full) has held `cut_delay_secs`
-    /// - `restore_debounced` : the clear condition (low freq AND not full) has held `reenable_delay_secs`
-    pub fn decide(
-        &mut self,
-        relay_on: bool,
-        hard_cut: bool,
-        cut_debounced: bool,
-        restore_debounced: bool,
-    ) -> anyhow::Result<bool> {
-        let facts = Facts::new();
-        facts.set("DY.relay_on",          Value::Boolean(relay_on));
-        facts.set("DY.hard_cut",          Value::Boolean(hard_cut));
-        facts.set("DY.cut_debounced",     Value::Boolean(cut_debounced));
-        facts.set("DY.restore_debounced", Value::Boolean(restore_debounced));
-        // Default: no change. A matching rule overrides it.
-        facts.set("DY.desired_on",        Value::Boolean(relay_on));
-
-        self.engine
-            .execute(&facts)
-            .context("DEYE rule engine evaluation failed")?;
-
-        Ok(facts
-            .get("DY.desired_on")
-            .and_then(|v| match v {
-                Value::Boolean(b) => Some(b),
-                _ => None,
-            })
-            .unwrap_or(relay_on))
+/// Returns the desired relay state (`true` = ON) from the current state + pre-computed flags.
+///
+/// - `hard_cut`          : `freq >= freq_hard_hz` → immediate cut
+/// - `cut_debounced`     : the cut condition (high freq OR MPPT full) has held `cut_delay_secs`
+/// - `restore_debounced` : the clear condition (low freq AND not full) has held `reenable_delay_secs`
+///
+/// While ON, the relay cuts on a hard spike OR a debounced cut. While OFF, it restores once the
+/// clear condition has been debounced. Otherwise the relay state is unchanged.
+pub fn decide(relay_on: bool, hard_cut: bool, cut_debounced: bool, restore_debounced: bool) -> bool {
+    if relay_on {
+        !(hard_cut || cut_debounced)
+    } else {
+        restore_debounced
     }
 }
 
@@ -65,31 +25,26 @@ impl DeyeRuleEngine {
 mod tests {
     use super::*;
 
-    fn e() -> DeyeRuleEngine { DeyeRuleEngine::new().unwrap() }
-
-    /// Reference decision (the single source of truth): ON cuts on hard OR debounced cut;
-    /// OFF restores once the clear condition is debounced; otherwise unchanged.
-    fn logic(relay_on: bool, hard_cut: bool, cut_debounced: bool, restore_debounced: bool) -> bool {
-        if relay_on { !(hard_cut || cut_debounced) } else { restore_debounced }
-    }
-
-    /// Exhaustive guard over ALL 16 flag combinations against the reference logic.
+    /// Exhaustive guard over all 16 flag combinations against a hand-written truth table.
     ///
-    /// This caught a real `rust-rule-engine` footgun: with every rule at the SAME `salience`,
-    /// equal-priority conflict resolution mis-fires and 7/16 combos were wrong. Distinct
-    /// saliences (see `deye_command.grl`) make it deterministic and correct. Hand-written
-    /// single-flag tests never exercised the multi-flag combos, so they missed it.
+    /// History: this decision used to run on `rust-rule-engine`, whose `no-loop` modifier
+    /// mis-fired with several rules present (7/16 combos wrong). Pure Rust removes the engine
+    /// (and the footgun) entirely; this table locks the behaviour in. Index bits:
+    /// bit0=relay_on, bit1=hard_cut, bit2=cut_debounced, bit3=restore_debounced.
     #[test]
-    fn matches_reference_logic_on_all_combos() {
-        let mut eng = e();
+    fn matches_truth_table_on_all_combos() {
+        const EXPECTED: [bool; 16] = [
+            false, true, false, false, false, false, false, false,
+            true, true, true, false, true, false, true, false,
+        ];
         for bits in 0u8..16 {
             let r = bits & 1 != 0;
             let h = bits & 2 != 0;
             let c = bits & 4 != 0;
             let rd = bits & 8 != 0;
             assert_eq!(
-                eng.decide(r, h, c, rd).unwrap(),
-                logic(r, h, c, rd),
+                decide(r, h, c, rd),
+                EXPECTED[bits as usize],
                 "combo relay_on={r} hard_cut={h} cut_debounced={c} restore_debounced={rd}"
             );
         }
@@ -97,31 +52,28 @@ mod tests {
 
     #[test]
     fn on_stays_on_when_clear() {
-        // ON, no cut flags → stays ON.
-        assert!(e().decide(true, false, false, false).unwrap());
+        assert!(decide(true, false, false, false));
     }
 
     #[test]
     fn on_cuts_on_hard_spike() {
-        assert!(!e().decide(true, true, false, false).unwrap());
+        assert!(!decide(true, true, false, false));
     }
 
     #[test]
     fn on_cuts_when_debounced() {
-        assert!(!e().decide(true, false, true, false).unwrap());
+        assert!(!decide(true, false, true, false));
     }
 
     #[test]
     fn off_stays_off_until_restore_debounced() {
-        // OFF, clear not yet held → stays OFF.
-        assert!(!e().decide(false, false, false, false).unwrap());
-        // OFF, restore debounce elapsed → turns ON.
-        assert!(e().decide(false, false, false, true).unwrap());
+        assert!(!decide(false, false, false, false));
+        assert!(decide(false, false, false, true));
     }
 
     #[test]
     fn off_ignores_cut_flags() {
         // Cut flags are irrelevant while already OFF; only restore_debounced matters.
-        assert!(!e().decide(false, true, true, false).unwrap());
+        assert!(!decide(false, true, true, false));
     }
 }
