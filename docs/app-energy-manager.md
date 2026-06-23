@@ -1,9 +1,9 @@
 # Energy-Manager — Référence Complète — Daly-BMS-Rust
 
 > Document de référence du binaire **energy-manager** : automatisation énergie Pi5 (port 8081, remplace Node-RED).
-> Couvre l'architecture interne, les 12 modules logiques, les 7 règles GRL, les clients HTTP, le MQTT, le WebSocket live, la configuration et le dépannage.
+> Couvre l'architecture interne, les 12 modules logiques, les décisions métier en **Rust pur** (`logic/<module>/rules.rs`), les clients HTTP, le MQTT, le WebSocket live, la configuration et le dépannage.
 > Fait partie de l'[architecture documentaire](./ARCHITECTURE.md).
-> Dernière consolidation : 2026-06-07.
+> Dernière consolidation : 2026-06-23 (migration des règles `.grl`/`rust-rule-engine` → fonctions Rust pures).
 
 ---
 
@@ -19,15 +19,15 @@
   - [2.2 Supervision fail-fast (supervise.rs / spawn_critical)](#22-supervision-fail-fast-supervisers--spawn_critical)
   - [2.3 Démarrage séquentiel (main.rs)](#23-démarrage-séquentiel-mainrs)
 - [3. Modules logiques — inventaire](#3-modules-logiques--inventaire)
-- [4. Modules avec règles GRL](#4-modules-avec-règles-grl)
-  - [4.1 INVERTER — ⚠️ rule engine dead code](#41-inverter---️-rule-engine-dead-code)
+- [4. Modules de décision métier (rules.rs Rust pur)](#4-modules-de-décision-métier-rulesrs-rust-pur)
+  - [4.1 INVERTER — publication VEBus (aucune décision)](#41-inverter--publication-vebus-aucune-décision)
   - [4.2 CHARGE_CURRENT](#42-charge_current)
   - [4.3 DEYE_COMMAND](#43-deye_command)
   - [4.4 WATER_HEATER](#44-water_heater)
   - [4.5 SOLAR_POWER](#45-solar_power)
   - [4.6 SMARTSHUNT](#46-smartshunt)
   - [4.7 IRRADIANCE](#47-irradiance)
-- [5. Modules sans règles GRL](#5-modules-sans-règles-grl)
+- [5. Modules sans logique de décision](#5-modules-sans-logique-de-décision)
   - [5.1 METEO](#51-meteo)
   - [5.2 TASMOTA](#52-tasmota)
   - [5.3 SWITCH_ATS — ⚠️ dead code (keepalive seul)](#53-switch_ats---️-dead-code-keepalive-seul)
@@ -57,9 +57,8 @@
   - [12.1 Sections et paramètres complets](#121-sections-et-paramètres-complets)
   - [12.2 Secrets (.env)](#122-secrets-env)
 - [13. Guide : modifier une fonctionnalité existante](#13-guide--modifier-une-fonctionnalité-existante)
-  - [13.1 Changer un seuil ou délai (sans recompiler)](#131-changer-un-seuil-ou-délai-sans-recompiler)
-  - [13.2 Hot-reload des règles GRL (sans recompilation)](#132-hot-reload-des-règles-grl-sans-recompilation)
-  - [13.3 Changer la logique métier (recompilation requise)](#133-changer-la-logique-métier-recompilation-requise)
+  - [13.1 Changer un seuil ou délai (config, restart)](#131-changer-un-seuil-ou-délai-config-restart)
+  - [13.2 Changer une règle de décision (recompilation requise)](#132-changer-une-règle-de-décision-recompilation-requise)
 - [14. Guide : ajouter un nouveau module logique](#14-guide--ajouter-un-nouveau-module-logique)
 - [15. Guide : ajouter un nouveau publish MQTT](#15-guide--ajouter-un-nouveau-publish-mqtt)
 - [16. Guide : supprimer un module](#16-guide--supprimer-un-module)
@@ -78,7 +77,7 @@
 
 ### 1.1 Rôle et positionnement
 
-`energy-manager` est un binaire Rust autonome qui **remplace Node-RED** (anciennement utilisé comme orchestrateur de flux d'automatisation énergétique). Il tourne en service systemd sur le Pi5 (`energy-manager.service`), écoute le broker MQTT Mosquitto local, applique la logique métier via des règles GRL et des modules Rust, et publie sur MQTT et WebSocket.
+`energy-manager` est un binaire Rust autonome qui **remplace Node-RED** (anciennement utilisé comme orchestrateur de flux d'automatisation énergétique). Il tourne en service systemd sur le Pi5 (`energy-manager.service`), écoute le broker MQTT Mosquitto local, applique la logique métier via des modules Rust (décisions en fonctions pures `rules.rs`), et publie sur MQTT et WebSocket.
 
 Positionnement dans l'architecture :
 ```
@@ -128,7 +127,6 @@ MQTT (Mosquitto :1883)
 | `mqtt_in` | `broadcast::Sender<MqttIncoming>` | Tous les messages MQTT entrants → tous les modules |
 | `mqtt_out` | `mpsc::Sender<MqttOutgoing>` | Publish MQTT depuis n'importe quel module |
 | `live` | `broadcast::Sender<LiveEvent>` | Événements WebSocket live |
-| `rule_reload` | `broadcast::Sender<String>` | Signal hot-reload → tous les modules de règles |
 
 Cloner `AppBus` est gratuit (tous les champs sont `Arc`-backed).
 
@@ -162,21 +160,18 @@ crates/energy-manager/
     monitoring.rs      ← métriques système + tokio (TODO : republier dans metrics-store)
     supervise.rs       ← spawn_critical (supervision fail-fast)
     logic/
-      charge_current.rs
-      deye_command.rs
-      inverter/
-        mod.rs
-        rules.rs       ← ⚠️ dead code (jamais appelé depuis mod.rs)
-      irradiance.rs
+      charge_current/  ← mod.rs + rules.rs (décision Rust pure)
+      deye_command/    ← mod.rs + rules.rs (décision Rust pure, stateless)
+      inverter/mod.rs  ← publication VEBus uniquement (aucune décision)
+      irradiance/      ← mod.rs + rules.rs (décision Rust pure)
       meteo.rs
       platform.rs
-      smartshunt.rs
-      solar_power.rs
+      smartshunt/      ← mod.rs + rules.rs (décision Rust pure)
+      solar_power/     ← mod.rs + rules.rs (décision Rust pure)
       switch_ats.rs    ← ⚠️ ne lit jamais le MQTT (keepalive seul)
       tasmota.rs
-      victron_keepalive/
-        mod.rs
-      water_heater.rs
+      victron_keepalive/mod.rs
+      water_heater/    ← mod.rs + rules.rs (décision Rust pure)
     mqtt/
       client.rs        ← client MQTT rumqttc
       topics.rs        ← constantes et fonctions de topics
@@ -187,15 +182,12 @@ crates/energy-manager/
       server.rs        ← WebSocket live events (:8081/live)
     persist/
       mod.rs           ← restauration baselines au démarrage
-  rules/
-    charge_current.grl
-    deye_command.grl   ← mapping stateless (pas de machine d'états)
-    inverter.grl       ← ⚠️ défini mais jamais chargé (dead code)
-    irradiance.grl
-    smartshunt.grl
-    solar_power.grl
-    water_heater.grl
 ```
+
+> Chaque module de décision place sa logique dans un fichier `rules.rs` à côté
+> de son `mod.rs` : une **fonction pure** (entrées booléennes/numériques → sortie)
+> avec ses tests unitaires. Plus de fichiers `.grl` ni de moteur `rust-rule-engine`
+> (retirés 2026-06 — cf. §4).
 
 ### 2.2 Supervision fail-fast (supervise.rs / spawn_critical)
 
@@ -238,17 +230,30 @@ Les modules sont démarrés séquentiellement dans `main.rs`, chacun recevant un
 
 ---
 
-## 4. Modules avec règles GRL
+## 4. Modules de décision métier (rules.rs Rust pur)
 
-Les règles `.grl` utilisent le crate `rust-rule-engine`. Le répertoire des règles est `crates/energy-manager/rules/`. Un mécanisme de **hot-reload** (sans redémarrage) est disponible si `[energy_manager.rules] dir` est configuré (voir §13.2).
+Chaque décision vit dans `logic/<module>/rules.rs` sous forme de **fonction Rust pure**
+(entrées pré-calculées → sortie), accompagnée de ses tests unitaires. Le `mod.rs` du
+module pré-calcule les booléens/numériques d'entrée (minuteries, fraîcheur, seuils de
+config) puis appelle la fonction.
 
-### 4.1 INVERTER — ⚠️ rule engine dead code
+> **Migration 2026-06 — fin de `rust-rule-engine`/`.grl`.** Les décisions étaient
+> auparavant exprimées en fichiers `.grl` évalués par le crate `rust-rule-engine`,
+> avec un mécanisme de hot-reload sur disque. Ce moteur a été **entièrement retiré** :
+> son modificateur `no-loop` renvoyait des **résultats faux** (7/16 combinaisons sur
+> `deye_command`) quand plusieurs règles coexistaient. Les décisions sont désormais du
+> Rust pur (zéro dépendance, vérifié au compilateur, testé exhaustivement). Changer une
+> règle nécessite une recompilation (cf. §13.2) — comme tout changement de code.
 
-**Fichiers** : `logic/inverter/mod.rs` + `logic/inverter/rules.rs`
+### 4.1 INVERTER — publication VEBus (aucune décision)
 
-> ⚠️ **Note de correction** : La règle GRL `INV_AC_Power_Ready` est définie dans `rules.rs` mais **jamais appelée** — `mod rules;` est absent de `mod.rs`. Le rule engine d'INVERTER est **dead code**.
+**Fichier** : `logic/inverter/mod.rs` (pas de `rules.rs` — aucune logique de décision)
 
-**Rôle effectif** : Lire et publier les mesures VEBus vers MQTT (le module fonctionne, seul le rule engine est inutilisé).
+> ℹ️ Module listé ici pour continuité historique. Il ne porte **aucune décision** :
+> c'est un pur publieur de mesures VEBus. (L'ancien « rule engine INVERTER » documenté
+> comme dead code a été supprimé avec le reste de `rust-rule-engine`.)
+
+**Rôle effectif** : Lire et publier les mesures VEBus vers MQTT.
 
 **Topics en entrée** : `N/{pid}/vebus/{vb}/*` (voltage DC/AC, courant, puissance, fréquence, état, IgnoreAcIn1)
 
@@ -286,14 +291,15 @@ Champs `State` et `Mode` sont **hardcodés** (`"on"` / `"inverter"`).
 - `N/{pid}/system/0/Ac/PvOnOutput/L1/Power` → `mppt_power_273_w` (**champ partagé avec SOLAR_POWER**)
 - `N/{pid}/system/0/Ac/ConsumptionOnOutput/L1/Power` → `house_power_w`
 
-**Règles GRL** (`charge_current.grl`) :
+**Logique de décision** (`rules.rs::evaluate`, fonction pure) :
 
-```
-CC_Offgrid       : ac_ignore==1 → mode="offgrid"
-CC_Grid_PV_Excess: ac_ignore==0 && pv_excess==true → mode="grid_pv_excess"
-CC_Grid_No_Excess: ac_ignore==0 && pv_excess==false → mode="grid_no_excess"
-
-pv_excess = (pv_w - cons_w) > pv_excess_threshold_w
+```rust
+// pv_excess = (pv_w - cons_w) > pv_excess_threshold_w   (pré-calculé dans mod.rs)
+fn evaluate(offgrid: bool, pv_excess: bool) -> &str {
+    if offgrid          { "offgrid" }        // ac_ignore == 1
+    else if pv_excess   { "grid_pv_excess" } // réseau + excédent PV
+    else                { "grid_no_excess" } // réseau, pas d'excédent
+}
 ```
 
 **Arbre de décision** :
@@ -322,13 +328,13 @@ ac_ignore == 1 ?
 
 ### 4.3 DEYE_COMMAND
 
-> ⚠️ **MISE À JOUR 2026-06 — modèle `.grl` STATELESS (plus de machine d'états latchable).**
+> ⚠️ **2026-06 — décision STATELESS en Rust pur (plus de machine d'états latchable, plus de `.grl`).**
 > L'ancienne implémentation (`rust-rule-engine` + machine à 5 états `On→PendingCut→Lockout→Off→PendingRestore→On`)
 > pouvait **rester coincée en `Lockout`** (relais figé OFF des heures, même fréquence redescendue et MPPT en Bulk),
-> car la sortie du `Lockout` dépendait d'un timer évalué dans la boucle. **Le problème n'était pas le moteur GRL**
-> mais l'**état latchable** porté entre les évaluations. La décision reste donc sur le modèle `.grl` (cohérent
-> avec les autres modules), mais **sans état latchable** : `deye_command.grl` est désormais un simple **mapping**
-> de flags pré-calculés en Rust vers l'état du relais, ré-évalué chaque seconde :
+> car la sortie du `Lockout` dépendait d'un timer évalué dans la boucle. Le problème n'était pas tant le moteur
+> que l'**état latchable** porté entre les évaluations. La décision est désormais une **fonction Rust pure**
+> (`rules::decide`, cohérente avec les autres modules) **sans état latchable** : un simple **mapping** de flags
+> pré-calculés en Rust vers l'état du relais, ré-évalué chaque seconde :
 >
 > ```
 > couper (OFF)    si  freq >= freq_high_hz  OU  mppt_full
@@ -338,12 +344,12 @@ ac_ignore == 1 ?
 >   • restaure après reenable_delay_secs (45 s) de condition « clair » soutenue
 > ```
 >
-> Le `.grl` ne porte **aucun état** : on lui passe `relay_on` + les flags `hard_cut`/`cut_debounced`/`restore_debounced`
+> `rules::decide` ne porte **aucun état** : on lui passe `relay_on` + les flags `hard_cut`/`cut_debounced`/`restore_debounced`
 > (les minuteries de débounce sont tenues en Rust, comme `water_heater` tient son chrono `temp_max` en Rust),
-> il renvoie `desired_on`. Le relais SUIT cette décision → tant que le ticker 1 Hz tourne, il **converge toujours**
+> elle renvoie `desired_on`. Le relais SUIT cette décision → tant que le ticker 1 Hz tourne, il **converge toujours**
 > → impossible de rester coincé. Plus de `lockout_secs`/`mppt_cut_delay_secs` ; gardes de fraîcheur conservées.
 
-**Fichiers** : `logic/deye_command/mod.rs` (boucle + minuteries de débounce) + `rules.rs` (moteur) + `rules/deye_command.grl` (mapping stateless)
+**Fichiers** : `logic/deye_command/mod.rs` (boucle + minuteries de débounce) + `rules.rs` (`decide`, fonction pure + table de vérité exhaustive)
 
 **Rôle** : Couper/restaurer les onduleurs DEYE via un Shelly Pro 2PM (**un canal par DEYE**). Le but est de **pré-empter l'auto-coupure des DEYE à 51,5 Hz** (qui provoque des micro-coupures sur AC Out) par une déconnexion relais propre et déterministe, dès 51,0 Hz.
 
@@ -383,7 +389,7 @@ ac_ignore == 1 ?
 > assumée : si un MPPT atteint un palier plein **alors que le réseau EDF est présent**, les
 > DEYE sont quand même coupés.
 
-**Conception** : modèle `.grl` (cohérent avec les autres modules) mais **stateless**. Le Rust pré-calcule les flags, le `.grl` les mappe vers `desired_on`, ré-évalué **chaque seconde**. **Aucun état latchable** → le relais SUIT en continu la décision dérivée des deux entrées :
+**Conception** : fonction Rust pure (cohérent avec les autres modules) et **stateless**. Le Rust pré-calcule les flags, `rules::decide` les mappe vers `desired_on`, ré-évalué **chaque seconde**. **Aucun état latchable** → le relais SUIT en continu la décision dérivée des deux entrées :
 
 ```
 couper (OFF)    si  freq ≥ freq_high_hz (51,0)  OU  mppt_full
@@ -393,17 +399,17 @@ restaurer (ON)  si  freq < freq_high_hz (51,0)  ET  !mppt_full
    • restaure après reenable_delay_secs (45 s) de condition « clair » soutenue
 ```
 
-**Faits passés à `deye_command.grl`** (pré-calculés par `DeyeController::flags()` en Rust, qui tient les minuteries de débounce — exactement comme les autres modules pré-calculent leurs booléens) :
+**Arguments de `rules::decide(relay_on, hard_cut, cut_debounced, restore_debounced) -> bool`** (pré-calculés par `DeyeController::flags()` en Rust, qui tient les minuteries de débounce — exactement comme les autres modules pré-calculent leurs booléens) :
 
-| Fait | Sens |
+| Argument | Sens |
 |---|---|
-| `DY.relay_on` | état courant du relais |
-| `DY.hard_cut` | `freq ≥ freq_hard_hz` (51,3) → coupe immédiate |
-| `DY.cut_debounced` | condition « cut » (freq ≥ 51,0 OU mppt_full) tenue ≥ `cut_delay_secs` |
-| `DY.restore_debounced` | condition « clair » (freq < 51,0 ET !mppt_full) tenue ≥ `reenable_delay_secs` |
-| `DY.desired_on` (sortie) | état du relais à appliquer (défaut = `relay_on`) |
+| `relay_on` | état courant du relais |
+| `hard_cut` | `freq ≥ freq_hard_hz` (51,3) → coupe immédiate |
+| `cut_debounced` | condition « cut » (freq ≥ 51,0 OU mppt_full) tenue ≥ `cut_delay_secs` |
+| `restore_debounced` | condition « clair » (freq < 51,0 ET !mppt_full) tenue ≥ `reenable_delay_secs` |
+| *retour* `bool` | état du relais à appliquer (`true` = ON) |
 
-Règles (mapping pur, 3 lignes) : `relay_on && (hard_cut OU cut_debounced)` → OFF ; `!relay_on && restore_debounced` → ON ; sinon inchangé.
+Mapping pur : `if relay_on { !(hard_cut || cut_debounced) } else { restore_debounced }`. Soit : un relais ON coupe sur `hard_cut` OU `cut_debounced` ; un relais OFF restaure sur `restore_debounced` ; sinon inchangé. Garde de non-régression : table de vérité exhaustive sur les **16 combinaisons** (`rules.rs::matches_truth_table_on_all_combos`).
 
 - **`freq`** : autorité de coupure (mesure Victron). Lue depuis la valeur partagée `ac_frequency_hz` (maintenue par le module `inverter`, **identique au widget**), avec garde de fraîcheur (cf. ci-dessous).
 - **`mppt_full`** : au moins un MPPT (273/289) dans `mppt_full_states` (défaut `[4,5,6]` = Absorption/Float/Storage), désactivable via `mppt_cut_enabled`. **Bulk (3) ⇒ pas plein ⇒ restauration autorisée.** But : couper les DEYE dès le palier d'absorption pour finir la charge sur le seul MPPT (DC-couplé), avant toute montée en fréquence.
@@ -417,7 +423,7 @@ Règles (mapping pur, 3 lignes) : `relay_on && (hard_cut OU cut_debounced)` → 
 > tourne, le relais **converge toujours** → impossible de rester coincé. Test de non-régression :
 > `never_stuck_off_when_conditions_allow_restore` (5 min de conditions claires → restaure forcément).
 
-**Driver unique = ticker 1 Hz.** À chaque tick : `read_inputs()` (freq + MPPT depuis l'état partagé, avec fraîcheur) → `DeyeController::flags()` (met à jour les minuteries, pré-calcule les booléens) → `DeyeRuleEngine::decide()` (le `.grl`) → si l'état du relais change, commande Shelly + persistance ; les champs d'observabilité (`deye_on`, `deye_state` = `"On"`/`"Off"`, `deye_restore_blocked`, `deye_mppt_full`, `freq_stale`, `mppt_stale`) sont rafraîchis **à chaque tick**. L'abonnement MQTT n'est conservé que pour `ac_connected` (info widget « Réseau ») ; le `.grl` est **hot-reloadable** via l'API reload (comme les autres modules).
+**Driver unique = ticker 1 Hz.** À chaque tick : `read_inputs()` (freq + MPPT depuis l'état partagé, avec fraîcheur) → `DeyeController::flags()` (met à jour les minuteries, pré-calcule les booléens) → `rules::decide()` → si l'état du relais change, commande Shelly + persistance ; les champs d'observabilité (`deye_on`, `deye_state` = `"On"`/`"Off"`, `deye_restore_blocked`, `deye_mppt_full`, `freq_stale`, `mppt_stale`) sont rafraîchis **à chaque tick**. L'abonnement MQTT n'est conservé que pour `ac_connected` (info widget « Réseau »).
 
 **Gardes de fraîcheur (anti-blocage sur télémétrie figée)** : `read_inputs` n'utilise jamais une entrée périmée. Chaque source est horodatée (`ac_frequency_last_ts` par `inverter`, `mppt_*.state_last_ts` par `solar_power`). Au-delà de `input_max_age_secs` (90 s, 3× le keepalive Venus 30 s, topic muet) :
 - **MPPT périmé** → traité **NON plein** → ne bloque pas la restauration ;
@@ -463,17 +469,13 @@ Canaux : `[energy_manager.victron] shelly_deye_channels = [0, 1]` (un canal par 
 - `soc_pct` ← EnergyState
 - `irradiance_low` ← `irradiance_wm2 < 300 W/m²`
 
-**Règles GRL** (`water_heater.grl`) :
-```
-Conditions (salience 100) :
-  si grid_connected==true  → want_vacation=true
-  si soc_pct < 90          → want_vacation=true
-  si irradiance_low==true  → want_vacation=true
-  si temp_max_reached==true → want_vacation=true   (cuve à température cible)
-
-Décision (salience 200) :
-  si want_vacation==true   → target_mode="VACATION"
-  sinon                    → target_mode="HEAT_PUMP"
+**Logique de décision** (`rules.rs::evaluate`, fonction pure) :
+```rust
+fn evaluate(grid_connected: bool, soc_low: bool, irradiance_low: bool, temp_max_reached: bool) -> &str {
+    // Toute condition active force VACATION ; HEAT_PUMP exige les 4 claires.
+    if grid_connected || soc_low || irradiance_low || temp_max_reached { "VACATION" }
+    else { "HEAT_PUMP" }
+}
 ```
 
 **Logique condensée** : `HEAT_PUMP` requiert **les 4 conditions simultanément** :
@@ -498,7 +500,7 @@ continuer à chauffer). Le suivi est réarmé dès que la température redescend
 **Flux de contrôle** (toutes les 5 min) :
 1. `lg.get_state()` → actual_mode, temp, target_temp
 2. Vérifier données MQTT (ac_ignore, soc) — skip si absent
-3. `rule_engine.evaluate(...)` → target_mode
+3. `rules::evaluate(...)` → target_mode
 4. Si target != actual **ET** cooldown (900 s) expiré :
 5. `lg.set_mode(target_mode)` ← synchrone
 6. Sleep 15 s (dans une tâche Tokio séparée **non-bloquante**)
@@ -530,10 +532,12 @@ continuer à chauffer). Le suivi est réarmé dès que la température redescend
 - ET112 energy forward (`N/{pid}/pvinverter/{pv}/#`)
 - Consommation maison (`N/{pid}/system/0/Ac/ConsumptionOnOutput/L1/Power`)
 
-**Règles GRL** (`solar_power.grl`) :
-```
-SOLAR_Reset_On_NewDay    : new_day==true → reset=true, capture=true
-SOLAR_Capture_When_Absent: baseline_absent==true → capture=true
+**Logique de décision** (`rules.rs::baseline_decision`, fonction pure) :
+```rust
+fn baseline_decision(new_day: bool, baseline_absent: bool) -> BaselineDecision {
+    BaselineDecision { reset: new_day, capture: new_day || baseline_absent }
+}
+// nouveau jour → reset + capture ; baseline absente (restart) → capture seul
 ```
 
 **Logique baseline ET112** :
@@ -566,12 +570,14 @@ pvinv_yield_today_kwh = (kwh_current - baseline).max(0.0)
 
 > ⚠️ **Note de correction** : Le code **n'a pas de priorité explicite** entre la source primaire (shunt) et le fallback (system). Les deux sources sont acceptées — "dernier écrit gagne". La documentation originale était trompeuse en parlant de "fallback avec priorité".
 
-**Règles GRL** (`smartshunt.grl`) :
-```
-Capture baseline si : new_day==true OU baseline_absent==true
+**Logique de décision** (`rules.rs::baseline_decision`, fonction pure) :
+```rust
+// chargé et déchargé décidés indépendamment
+capture_charged    = charged_new_day    || charged_baseline_absent
+capture_discharged = discharged_new_day || discharged_baseline_absent
 ```
 
-**Intégration Ah** (time-based, sans règle GRL) :
+**Intégration Ah** (time-based, hors décision `rules.rs`) :
 ```
 Si delta_ms ∈ [1ms, 600_000ms] :
   ah_charged    += current_a * delta_h
@@ -591,9 +597,9 @@ Si delta_ms ∈ [1ms, 600_000ms] :
 
 **Source** : HTTP GET `{bms_server}/api/v1/irradiance/status` (toutes les 30 s)
 
-**Règle GRL** (`irradiance.grl`) :
-```
-IR_Valid_Range : raw ∈ [0, 2000] W/m² → valid=true
+**Logique de décision** (`rules.rs::validate`, fonction pure) :
+```rust
+fn validate(raw: f64) -> bool { (0.0..=2000.0).contains(&raw) } // W/m²
 ```
 
 **Comportement** :
@@ -604,7 +610,7 @@ IR_Valid_Range : raw ∈ [0, 2000] W/m² → valid=true
 
 ---
 
-## 5. Modules sans règles GRL
+## 5. Modules sans logique de décision
 
 ### 5.1 METEO
 
@@ -960,9 +966,7 @@ websocat ws://192.168.1.141:8081/live
 | `/health` | GET | Retourne `"energy-manager ok"` |
 | `/api/water-heater` | GET | État PAC LG ThinQ (JSON) |
 | `/api/water-heater/mode` | POST | Set mode PAC — body: `{"mode": "HEAT_PUMP"|"VACATION"|"TURBO"}` |
-| `/api/rules-status` | GET | Snapshot état des règles (JSON) |
-| `/api/v1/em/rules` | GET | Lister les règles chargées (origine: disk ou embedded, timestamp) |
-| `/api/v1/em/rules/reload` | POST | Recharger une ou toutes les règles |
+| `/api/rules-status` | GET | Snapshot agrégé des décisions (cartes du dashboard monitor, JSON) |
 
 ### 10.2 Payload /api/rules-status
 
@@ -1080,7 +1084,7 @@ mppt_full_states           = [4, 5, 6]  # Codes State « batterie pleine » (4=A
 input_max_age_secs         = 90     # Garde de fraîcheur freq + MPPT (topic muet au-delà → entrée ignorée)
 
 [energy_manager.water_heater]
-solar_min_w            = 2000.0   # Production min pour HEAT_PUMP (non utilisé par la règle GRL)
+solar_min_w            = 2000.0   # Production min pour HEAT_PUMP (non utilisé par la décision)
 debounce_secs          = 300      # Délai de stabilisation (5 min)
 mode_change_min_secs   = 900      # Intervalle minimal entre changements de mode (15 min)
 heat_pump_target_c     = 60.0     # Température cible mode HEAT_PUMP
@@ -1092,11 +1096,6 @@ temp_max_hold_secs     = 600      # Maintien ≥ ce seuil → VACATION (10 min)
 temp_set_delay_secs    = 15       # Délai entre set_mode et set_target_temp
 keepalive_secs         = 25       # Fréquence keepalive MQTT PAC
 vm_url                 = "http://127.0.0.1:8080"  # URL daly-bms-server → metrics-store redb
-
-[energy_manager.rules]
-# Optionnel — si défini, les règles .grl sont lues depuis ce répertoire
-# (hot-reload sans recompilation). Fallback sur les règles embarquées.
-# dir = "/etc/daly-bms/rules"
 
 [energy_manager.charge_current]
 offgrid_max_a          = 70.0    # Courant max en mode hors-réseau (A)
@@ -1138,81 +1137,54 @@ LG_API_KEY=<API key LG>
 
 ## 13. Guide : modifier une fonctionnalité existante
 
-### 13.1 Changer un seuil ou délai (sans recompiler)
+### 13.1 Changer un seuil ou délai (config, restart)
 
-Si le paramètre est exposé dans `Config.toml` (voir §12) :
+Tous les seuils/délais métier sont exposés dans `Config.toml` (voir §12) — aucune
+recompilation, mais un **redémarrage** du service est requis (la config est lue au
+démarrage) :
 
 ```bash
 # 1. Éditer Config.toml (localement)
-# 2. Copier sur Pi5
+# 2. Copier sur Pi5 + redémarrer
 sudo cp Config.toml /etc/daly-bms/config.toml
 sudo systemctl restart energy-manager
+# 3. Vérifier (ex. seuil chauffe-eau pris en compte)
+curl -s http://192.168.1.141:8081/api/rules-status | python3 -m json.tool | grep temp_max
 ```
 
-### 13.2 Hot-reload des règles GRL (sans recompilation)
+> ℹ️ **Plus de hot-reload.** L'ancien endpoint `POST /api/v1/em/rules/reload` (qui
+> rechargeait les `.grl` sur disque **et**, au passage, les seuils chauffe-eau) a été
+> retiré avec `rust-rule-engine`. Tout changement de seuil passe désormais par un
+> `systemctl restart` — modèle d'exploitation déjà documenté partout
+> (`cp Config.toml … && systemctl restart`).
 
-Les règles `.grl` peuvent être modifiées **en production** sans recompiler ni redémarrer.
+### 13.2 Changer une règle de décision (recompilation requise)
 
-**Prérequis** — configurer un répertoire dans `Config.toml` :
-```toml
-[energy_manager.rules]
-dir = "/etc/daly-bms/rules"
-```
+La logique de décision vit dans `logic/<module>/rules.rs` (fonctions Rust pures). La
+modifier nécessite une **recompilation** :
 
-Copier les règles initiales vers ce répertoire :
 ```bash
-sudo mkdir -p /etc/daly-bms/rules
-sudo cp crates/energy-manager/rules/*.grl /etc/daly-bms/rules/
+# 1. Éditer la fonction de décision, ex. logic/deye_command/rules.rs::decide
+# 2. Mettre à jour / ajouter les tests dans le même fichier (#[cfg(test)] mod tests)
+cargo test -p energy-manager          # valider localement
+# 3. Compiler pour le Pi5 + déployer
+make build-energy-arm
+sudo systemctl stop energy-manager
+sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/
+sudo systemctl start energy-manager
 ```
 
-Modifier la règle souhaitée, puis recharger :
-```bash
-# Recharger UNE règle (ex: water_heater)
-curl -s -X POST http://192.168.1.141:8081/api/v1/em/rules/reload \
-     -H "Content-Type: application/json" \
-     -d '{"name":"water_heater"}'
+> Avantage du Rust pur : la décision est vérifiée au compilateur et couverte par des
+> tests exhaustifs (p. ex. `deye_command` : table de vérité sur les 16 combinaisons),
+> sans dépendance ni format externe à maintenir.
 
-# Recharger TOUTES les règles
-curl -s -X POST http://192.168.1.141:8081/api/v1/em/rules/reload \
-     -H "Content-Type: application/json" \
-     -d '{"name":"*"}'
-
-# Lister les règles chargées (origine: disk ou embedded, timestamp)
-curl -s http://192.168.1.141:8081/api/v1/em/rules | python3 -m json.tool
-```
-
-Si `rules.dir` n'est pas configuré ou si le fichier n'existe pas sur disque, le système utilise automatiquement la règle **embarquée dans le binaire**.
-
-> **Seuils chauffe-eau rechargeables à chaud** — l'appel `reload` ci-dessus
-> (`{"name":"water_heater"}` ou `{"name":"*"}`) recharge **aussi** les seuils de
-> la section `[energy_manager.water_heater]` depuis `Config.toml`, en plus du
-> fichier `.grl`. Les paramètres `temp_max_c` (60 °C par défaut),
-> `temp_max_hold_secs`, `irradiance_min_wm2`, `soc_min_pct`,
-> `mode_change_min_secs`, `heat_pump_target_c`, `vacation_target_c` et
-> `temp_set_delay_secs` prennent effet **sans recompiler ni redémarrer** le
-> service. Le control_task et l'endpoint `/api/rules-status` partagent la même
-> config (`Arc<RwLock<WaterHeaterConfig>>`) → la page « Règles système » reflète
-> immédiatement la nouvelle valeur. Procédure :
->
-> ```bash
-> # 1. Éditer le seuil dans la config active du service
-> sudo nano /etc/daly-bms/config.toml      # [energy_manager.water_heater] temp_max_c = 58.0
-> # 2. Recharger à chaud (aucun restart)
-> curl -s -X POST http://192.168.1.141:8081/api/v1/em/rules/reload \
->      -H "Content-Type: application/json" -d '{"name":"water_heater"}'
-> # 3. Vérifier la valeur prise en compte
-> curl -s http://192.168.1.141:8081/api/rules-status | python3 -m json.tool | grep temp_max
-> ```
->
-> Seul `keepalive_secs` (intervalle du ticker keepalive Venus) reste fixé au
-> démarrage et nécessite un `systemctl restart energy-manager`.
-
-### 13.3 Changer la logique métier (recompilation requise)
+**Tableau de référence — où changer quoi :**
 
 | Besoin | Fichier | Ce qu'il faut changer |
 |--------|---------|----------------------|
-| Seuil DEYE fréquence | `config.rs` (DeyeConfig) + `Config.toml` | Paramètre `freq_high_hz` |
-| Seuils chauffe-eau (temp_max_c, soc_min_pct, irradiance_min_wm2…) | `Config.toml` `[energy_manager.water_heater]` | **Aucune recompilation** — éditer + `POST /api/v1/em/rules/reload` (hot-reload, cf. §13.2) |
+| Seuil DEYE fréquence | `Config.toml` `[energy_manager.deye]` | Paramètre `freq_high_hz` (config → restart, cf. §13.1) |
+| Seuils chauffe-eau (temp_max_c, soc_min_pct, irradiance_min_wm2…) | `Config.toml` `[energy_manager.water_heater]` | Éditer + `systemctl restart` (config → restart, cf. §13.1) |
+| Logique de décision (mapping flags → sortie) | `logic/<module>/rules.rs` | Éditer la fonction + tests, recompiler (§13.2) |
 | Ajouter un MPPT | `config.rs` (VictronConfig), `mqtt/topics.rs`, `solar_power.rs`, `types.rs` | Nouvelle instance + topic |
 | Nouveau topic Victron à surveiller | `mqtt/topics.rs` (`all_subscriptions`) + module concerné | Abonnement + handler |
 | Changer fréquence d'écriture DB | `logic/solar_power.rs` ligne `interval(Duration::from_secs(1))` | Valeur en secondes |
@@ -1357,15 +1329,16 @@ bus.publish(MqttOutgoing::raw(publish::MON_TOPIC, "valeur", false)).await;
 
 ---
 
-## 17. Tests unitaires des règles
+## 17. Tests unitaires des décisions
 
-Chaque module de règles `.grl` a une suite de tests unitaires dans son fichier `rules.rs`.
+Chaque module de décision a une suite de tests unitaires : les fonctions pures dans
+son `rules.rs`, et (pour `deye_command`) les minuteries de débounce dans son `mod.rs`.
 
 ```bash
-# Lancer tous les tests (34 tests, ~0,3 s)
+# Lancer tous les tests (30 tests, ~0 s)
 cargo test -p energy-manager
 
-# Lancer les tests d'une règle spécifique
+# Lancer les tests d'un module spécifique
 cargo test -p energy-manager deye_command
 cargo test -p energy-manager water_heater
 ```
@@ -1374,21 +1347,20 @@ Couverture des tests :
 
 | Module | Nb tests | Cas couverts |
 |--------|---------|--------------|
-| `charge_current` | 4 | offgrid, grid+PV, grid sans PV, etc. |
-| `deye_command` | 26 | transitions, seuil unique (zéro zone morte), coupe MPPT, lockout, scénario 51,5 Hz |
-| `irradiance` | 5 | valides/invalides, plage 0–2000 W/m² |
-| `smartshunt` | 6 | capture baseline chargée/déchargée |
+| `charge_current` | 3 | offgrid, grid+PV, grid sans PV |
+| `deye_command` | 14 | table de vérité exhaustive (16 combos), débounce coupe/restaure, coupe MPPT, **jamais coincé OFF**, cycle complet, scénario 51,5 Hz |
+| `irradiance` | 2 | plage 0–2000 W/m² valide / hors plage |
+| `smartshunt` | 4 | capture baseline chargée/déchargée (nouveau jour, absente) |
 | `solar_power` | 4 | nouveau jour, baseline absente |
-| `water_heater` | 6 | grid connecté, SOC bas, irradiance faible, cuve à température cible |
+| `water_heater` | 3 | toutes conditions OK → HEAT_PUMP, toute condition active → VACATION |
 
-**Ajouter un test** — dans le module `rules.rs` concerné, dans `#[cfg(test)] mod tests` :
+**Ajouter un test** — dans le `rules.rs` concerné, dans `#[cfg(test)] mod tests` :
 
 ```rust
 #[test]
 fn mon_nouveau_cas() {
-    let mut e = MonRuleEngine::new().unwrap();
-    let result = e.evaluate(/* params */);
-    assert_eq!(result.unwrap(), "EXPECTED");
+    // les fonctions de décision sont pures : appel direct, pas de moteur à instancier
+    assert_eq!(evaluate(/* params */), "EXPECTED");
 }
 ```
 
@@ -1435,11 +1407,8 @@ mosquitto_sub -h 192.168.1.141 -t "N/c0619ab9929a/#" -v
 # WebSocket live events
 websocat ws://192.168.1.141:8081/live
 
-# Vérifier l'état des règles
+# Vérifier l'état des décisions (cartes du dashboard monitor)
 curl -s http://192.168.1.141:8081/api/rules-status | python3 -m json.tool
-
-# Vérifier les règles chargées et leur origine (disk/embedded)
-curl -s http://192.168.1.141:8081/api/v1/em/rules | python3 -m json.tool
 
 # Santé du service
 curl -s http://192.168.1.141:8081/health
@@ -1462,7 +1431,6 @@ mosquitto_sub -h 127.0.0.1 -p 1883 -t 'N/c0619ab9929a/#' -C 5 -v
 | Données Venus OS absentes (N/... silencieux) | Keepalive non reçu par le GX | Vérifier energy-manager actif ; forcer keepalive : `mosquitto_pub -h 127.0.0.1 -p 1883 -t 'R/c0619ab9929a/keepalive' -m ''` |
 | Mode PAC LG ne change pas | Cooldown (900 s) non expiré, ou irradiance/SOC non mis à jour | Vérifier `/api/rules-status` ; vérifier logs `journalctl -u energy-manager -f` |
 | DEYE ne se coupe pas malgré fréquence haute | Fréquence lue sur mauvais topic VEBus | Vérifier `vebus_instance` dans Config.toml et topic `N/{pid}/vebus/{vb}/Ac/Out/L1/F` |
-| `rules.dir` ignoré | Chemin invalide ou permissions | Vérifier que le répertoire existe et contient les `.grl` ; checker les logs |
 | `panic=abort` → redémarrage systemd | Comportement normal (supervision fail-fast) | Inspecter les logs avant l'arrêt pour identifier la cause |
 
 ---

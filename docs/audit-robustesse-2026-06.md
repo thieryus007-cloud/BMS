@@ -315,8 +315,8 @@ energy-manager 47, metrics-store 56 + golden PromQL. Les hotspots de fixes
    battery/grid/pvinverter : 1 JSON d'entrée → items D-Bus attendus) ;
 3. `cargo-fuzz` sur `ResponseFrame::parse` + parseur PromQL (job CI nightly,
    hors chemin bloquant) ;
-4. Tests des règles `.grl` charge/deye sur snapshots historiques (rejouer un
-   scénario 51,5 Hz).
+4. Tests des décisions Rust (`rules.rs`) charge/deye sur snapshots historiques
+   (rejouer un scénario 51,5 Hz).
 
 ### §18. Observabilité de fraîcheur
 Les morts silencieuses restantes sont toutes de la forme « la donnée ne se
