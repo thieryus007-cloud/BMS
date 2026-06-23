@@ -67,6 +67,34 @@ mod tests {
 
     fn e() -> DeyeRuleEngine { DeyeRuleEngine::new().unwrap() }
 
+    /// Reference decision (the single source of truth): ON cuts on hard OR debounced cut;
+    /// OFF restores once the clear condition is debounced; otherwise unchanged.
+    fn logic(relay_on: bool, hard_cut: bool, cut_debounced: bool, restore_debounced: bool) -> bool {
+        if relay_on { !(hard_cut || cut_debounced) } else { restore_debounced }
+    }
+
+    /// Exhaustive guard over ALL 16 flag combinations against the reference logic.
+    ///
+    /// This caught a real `rust-rule-engine` footgun: with every rule at the SAME `salience`,
+    /// equal-priority conflict resolution mis-fires and 7/16 combos were wrong. Distinct
+    /// saliences (see `deye_command.grl`) make it deterministic and correct. Hand-written
+    /// single-flag tests never exercised the multi-flag combos, so they missed it.
+    #[test]
+    fn matches_reference_logic_on_all_combos() {
+        let mut eng = e();
+        for bits in 0u8..16 {
+            let r = bits & 1 != 0;
+            let h = bits & 2 != 0;
+            let c = bits & 4 != 0;
+            let rd = bits & 8 != 0;
+            assert_eq!(
+                eng.decide(r, h, c, rd).unwrap(),
+                logic(r, h, c, rd),
+                "combo relay_on={r} hard_cut={h} cut_debounced={c} restore_debounced={rd}"
+            );
+        }
+    }
+
     #[test]
     fn on_stays_on_when_clear() {
         // ON, no cut flags → stays ON.

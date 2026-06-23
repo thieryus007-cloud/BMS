@@ -22,8 +22,15 @@
 // Output fact (read from Rust after execute):
 //   DY.desired_on        (bool) the relay state to apply
 
+// ⚠️ DO NOT add `no-loop`. rust-rule-engine's `no-loop` modifier mis-fires when several
+// rules are present: with `no-loop` this set returns WRONG results on 7/16 input combos;
+// without it, 0/16. (These rules never test the fact they write — `DY.desired_on` — so there
+// is no self-retrigger to guard against anyway.) Regression test that locks this in:
+// rules.rs::matches_reference_logic_on_all_combos. Distinct saliences are kept only for a
+// deterministic firing order; the rules are mutually exclusive so the order is immaterial.
+
 // Cut: an ON relay turns OFF on a hard-frequency spike…
-rule "DY_Cut_Hard" salience 100 no-loop {
+rule "DY_Cut_Hard" salience 130 {
     when
         DY.relay_on == true && DY.hard_cut == true
     then
@@ -31,7 +38,7 @@ rule "DY_Cut_Hard" salience 100 no-loop {
 }
 
 // …or once the cut condition (high frequency OR battery full per MPPT) has held the debounce.
-rule "DY_Cut_Debounced" salience 100 no-loop {
+rule "DY_Cut_Debounced" salience 120 {
     when
         DY.relay_on == true && DY.cut_debounced == true
     then
@@ -40,7 +47,7 @@ rule "DY_Cut_Debounced" salience 100 no-loop {
 
 // Restore: an OFF relay turns ON once the clear condition (low frequency AND battery not full)
 // has held the re-enable delay.
-rule "DY_Restore" salience 100 no-loop {
+rule "DY_Restore" salience 110 {
     when
         DY.relay_on == false && DY.restore_debounced == true
     then

@@ -19,6 +19,9 @@
 
 mod rules;
 
+#[cfg(feature = "zen-poc")]
+mod zen_poc;
+
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
