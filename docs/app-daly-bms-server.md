@@ -1383,7 +1383,7 @@ my_device: Arc::new(RwLock::new(None)),
 ## Voir aussi
 
 - [./ARCHITECTURE.md](./ARCHITECTURE.md) — Document maître, vue d'ensemble du système et index de toute la documentation.
-- [./app-energy-manager.md](./app-energy-manager.md) — energy-manager (port 8081) : modules logic, règles GRL, MQTT, clients HTTP. Produit les topics `santuario/inverter/venus`, `santuario/system/venus`, `santuario/meteo/venus` consommés par daly-bms-server.
+- [./app-energy-manager.md](./app-energy-manager.md) — energy-manager (port 8081) : modules logic, décisions Rust pur (`rules.rs`), MQTT, clients HTTP. Produit les topics `santuario/inverter/venus`, `santuario/system/venus`, `santuario/meteo/venus` consommés par daly-bms-server.
 - [./app-dbus-mqtt-venus.md](./app-dbus-mqtt-venus.md) — Bridge NanoPi (armv7) : consomme les topics MQTT publiés par daly-bms-server, les enregistre comme services D-Bus Venus OS.
 - [./metriques-redb-architecture.md](./metriques-redb-architecture.md) — Internals du metrics-store redb (tables, encodage, tiering, write path).
 - [./metriques-promql-reference.md](./metriques-promql-reference.md) — Catalogue des métriques exposées via l'interface PromQL, conventions de labels.

@@ -34,7 +34,7 @@ transverse**. Tous les documents vivent dans `docs/`.
 | Document | Hôte | Contenu |
 |---|---|---|
 | [app-daly-bms-server.md](./app-daly-bms-server.md) | Pi5 (:8080) | Serveur principal : bus RS485, protocole Daly UART, `AppState`/ring buffer, bridges, **API REST/WebSocket complète**, dashboard SSR (Askama + ECharts), Tasmota/Shelly. |
-| [app-energy-manager.md](./app-energy-manager.md) | Pi5 (:8081) | Automatisation énergie (remplace Node-RED) : 12 modules `logic/`, 7 règles `.grl` (rust-rule-engine), clients HTTP Open-Meteo + LG ThinQ, MQTT, WebSocket live, persistance. |
+| [app-energy-manager.md](./app-energy-manager.md) | Pi5 (:8081) | Automatisation énergie (remplace Node-RED) : 12 modules `logic/`, décisions métier en **Rust pur** (`rules.rs`), clients HTTP Open-Meteo + LG ThinQ, MQTT, WebSocket live, persistance. |
 | [app-dbus-mqtt-venus.md](./app-dbus-mqtt-venus.md) | NanoPi (armv7) | Bridge MQTT → D-Bus Venus OS (zbus pur Rust) : services `battery`/`pvinverter`/`heatpump`/`temperature`/`switch`/`meteo`/`grid`/`platform`, intégration d'un nouveau device, déploiement armv7. |
 
 ### Domaines transverses
@@ -166,7 +166,7 @@ Détails par appareil : [app-daly-bms-server.md](./app-daly-bms-server.md) · [i
 | `rs485-bus` | — | Lib : bus RS485 partagé (mutex tokio) + Modbus RTU pur Rust |
 | `daly-bms-core` | — | Lib : protocole UART Daly, parsing trames, types (`BmsSnapshot`), polling |
 | `daly-bms-server` | Pi5 | Binaire principal : API Axum (REST + WS) + Dashboard SSR + bridges (MQTT, redb, AlertEngine) |
-| `energy-manager` | Pi5 | Binaire automatisation énergie via `rust-rule-engine` + clients HTTP |
+| `energy-manager` | Pi5 | Binaire automatisation énergie : décisions en Rust pur (`logic/<module>/rules.rs`) + clients HTTP |
 | `metrics-store` | Pi5 | Lib TSDB redb (embarquée dans daly-bms-server) + shim PromQL |
 | `dbus-mqtt-venus` | NanoPi (armv7) | Binaire MQTT → D-Bus Venus OS (zbus pur Rust) |
 
