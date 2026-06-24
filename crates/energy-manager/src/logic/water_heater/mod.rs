@@ -6,7 +6,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep, Duration};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use crate::bus::AppBus;
 use crate::config::WaterHeaterConfig;
 use crate::http_clients::lg_thinq::LgThinqClient;
@@ -137,10 +137,10 @@ async fn control_task(
         let cfg = wh_cfg.read().await.clone();
 
         // Read actual state from LG ThinQ before deciding
-        info!("Water heater: calling lg.get_state()...");
+        debug!("Water heater: calling lg.get_state()...");
         let lg_snapshot = match lg.get_state().await {
             Ok(snap) => {
-                info!(
+                debug!(
                     "Water heater: LG get_state OK → mode={:?}, temp={:?}°C, target={:?}°C",
                     snap.mode, snap.current_temp_c, snap.target_temp_c
                 );
@@ -186,7 +186,7 @@ async fn control_task(
             (s.ac_ignore, s.soc_pct, s.irradiance_wm2)
         };
 
-        info!(
+        debug!(
             "Water heater tick — ac_ignore={:?}, soc={:?}, irradiance={:?} W/m² (min={})",
             ac_ignore_opt, soc_opt, irradiance, cfg.irradiance_min_wm2
         );
@@ -205,7 +205,7 @@ async fn control_task(
         let irradiance_low = match irradiance {
             Some(w) => {
                 let low = w < cfg.irradiance_min_wm2;
-                info!("Water heater: irradiance={:.1} W/m², min={}, irradiance_low={}", w, cfg.irradiance_min_wm2, low);
+                debug!("Water heater: irradiance={:.1} W/m², min={}, irradiance_low={}", w, cfg.irradiance_min_wm2, low);
                 low
             }
             None => {
@@ -218,13 +218,16 @@ async fn control_task(
         };
         let grid_connected = ac_ignore == 0;
         let soc_low = soc < cfg.soc_min_pct;
-        info!(
+        debug!(
             "Water heater: ac_ignore={}, grid_connected={}, soc={:.1}% (min={}%, soc_low={}), irradiance_low={}",
             ac_ignore, grid_connected, soc, cfg.soc_min_pct, soc_low, irradiance_low
         );
 
         let target_mode_str = rules::evaluate(grid_connected, soc_low, irradiance_low, temp_max_reached);
-        info!("Water heater: decision → target_mode={target_mode_str} (grid_connected={}, soc={:.1}%, irradiance_low={}, temp_max_reached={})",
+        // Démoté info!→debug! (2026-06) : la décision est ré-évaluée à chaque tick
+        // (toutes les 5 min) → 288 lignes/jour même sans changement. Le SEND réel
+        // (changement de mode effectif) reste en info! plus bas.
+        debug!("Water heater: decision → target_mode={target_mode_str} (grid_connected={}, soc={:.1}%, irradiance_low={}, temp_max_reached={})",
             grid_connected, soc, irradiance_low, temp_max_reached);
 
         let target_mode = match target_mode_str {
@@ -241,7 +244,7 @@ async fn control_task(
                 state.try_read().map(|s| s.water_heater_mode).unwrap_or(WaterHeaterMode::Vacation)
             });
 
-        info!(
+        debug!(
             "Water heater: target={:?}, actual (LG)={:?}, should_send={}",
             target_mode, actual_mode, actual_mode != target_mode
         );
@@ -249,7 +252,7 @@ async fn control_task(
         let should_send = actual_mode != target_mode;
 
         if !should_send {
-            info!(
+            debug!(
                 "Water heater: target={:?} matches actual={:?}, no command needed",
                 target_mode, actual_mode
             );
@@ -265,7 +268,7 @@ async fn control_task(
             let secs_left = cfg.mode_change_min_secs.saturating_sub(
                 last_change.map(|t| (now - t).num_seconds() as u64).unwrap_or(0)
             );
-            info!("Water heater: cooldown active, {}s remaining — target={:?}", secs_left, target_mode);
+            debug!("Water heater: cooldown active, {}s remaining — target={:?}", secs_left, target_mode);
             continue;
         }
 

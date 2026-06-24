@@ -39,7 +39,12 @@ async fn http_poll_task(bms_server_url: String, state: Arc<RwLock<EnergyState>>,
                                     "irradiance",
                                     serde_json::json!({ "irradiance_wm2": wm2 }),
                                 ));
-                                info!("Irradiance HTTP poll: {:.0} W/m²", wm2);
+                                // Démoté info!→debug! (2026-06) : ce poll tourne
+                                // toutes les 30 s (2880 lignes/jour, même la nuit à
+                                // 0 W/m²) → bruit dominant dans journald. La valeur
+                                // part déjà dans bus.emit_live + metrics-store : on
+                                // ne perd aucune donnée, seulement le doublon texte.
+                                debug!("Irradiance HTTP poll: {:.0} W/m²", wm2);
                             } else {
                                 warn!("Irradiance HTTP: out of range: {wm2} W/m² (state updated)");
                             }

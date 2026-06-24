@@ -271,6 +271,31 @@ else
     info "mosquitto.conf déjà à jour (ou absent du repo)"
 fi
 
+# ── 5.ter Journald : plafond de taille (si modifié) ───────────────────────────
+# Borne le journal systemd (cf. contrib/journald/daly-bms.conf). Purement
+# défensif : journald purge ses plus vieux enregistrements au-delà du plafond,
+# aucun service applicatif n'est touché → on peut redémarrer journald sans
+# risque pour daly-bms/energy-manager/mosquitto.
+JRNL_SRC=contrib/journald/daly-bms.conf
+JRNL_DST=/etc/systemd/journal.conf.d/daly-bms.conf
+if [[ -f "$JRNL_SRC" ]] && ! sudo diff -q "$JRNL_SRC" "$JRNL_DST" >/dev/null 2>&1; then
+    if $DRY_RUN; then
+        warn "[dry-run] $JRNL_DST absent/différent → serait déployé + restart systemd-journald"
+        sudo diff "$JRNL_DST" "$JRNL_SRC" 2>/dev/null | sed 's/^/    /' || true
+    else
+        step "Mise à jour du plafond journald ($JRNL_DST)…"
+        sudo mkdir -p /etc/systemd/journal.conf.d
+        sudo install -m 644 -o root -g root "$JRNL_SRC" "$JRNL_DST"
+        sudo systemctl restart systemd-journald
+        info "Plafond journald appliqué (SystemMaxUse=200M) + journald redémarré"
+        # Purge immédiate à la nouvelle borne (sinon le plafond n'est appliqué
+        # qu'à la prochaine rotation). Sans effet si déjà sous la borne.
+        sudo journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+    fi
+else
+    info "Plafond journald déjà à jour (ou absent du repo)"
+fi
+
 # ── 6. Déploiement CIBLÉ des binaires ─────────────────────────────────────────
 # Redémarre un service ssi : binaire différent, OU unité changée (§5), OU config
 # changée (§3/§3.bis). Évite les interruptions de service inutiles.

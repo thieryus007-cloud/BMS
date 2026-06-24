@@ -31,6 +31,8 @@
 | Profiler une fuite RSS (heap jemalloc, auto-restauré) | `sudo bash scripts/jemalloc-leak-profile.sh 2h` → rapport `/tmp/jeprof/leak-report-*.txt` (cf. docs/diagnostic-depannage.md §18) |
 | Diag pic réseau (veille auto-capture) | `sudo bash scripts/netdiag.sh --watch` → rapport `/tmp/netdiag-*.txt` |
 | Logs energy-manager | `journalctl -u energy-manager -f` |
+| Taille du journal systemd | `journalctl --disk-usage` |
+| Plafonner le journal (déjà fait par deploy-pi5.sh) | drop-in `contrib/journald/daly-bms.conf` → `/etc/systemd/journal.conf.d/` (SystemMaxUse=200M) ; purge immédiate : `sudo journalctl --vacuum-size=200M` |
 | Compiler energy-manager | `make build-energy-arm` |
 | Déployer energy-manager | `sudo systemctl stop energy-manager && sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ && sudo systemctl start energy-manager` |
 | Appliquer Config energy-manager | `sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart energy-manager` |
@@ -183,6 +185,8 @@ crates/energy-manager/src/              ← gestionnaire énergie (remplace Node
 crates/dbus-mqtt-venus/src/             ← bridge MQTT→D-Bus NanoPi
 contrib/daly-bms.service                ← unité systemd daly-bms-server
 contrib/energy-manager.service          ← unité systemd energy-manager
+contrib/journald/daly-bms.conf          ← drop-in journald (plafond journal : SystemMaxUse=200M)
+                                          déployé par deploy-pi5.sh → /etc/systemd/journal.conf.d/
 contrib/grafana/                        ← provisioning Grafana complet
   dashboards/01-bms.json … 21-memoire-daly-bms.json ← 21 dashboards JSON
     (17→20 = dashboards évolués PromQL avancé : flotte/SLO, rendement PV,
@@ -355,6 +359,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Config ignorée | Copier vers `/etc/daly-bms/config.toml` |
 | `scp: dest open Failure` | `ssh root@192.168.1.120 "svc -d /service/dbus-mqtt-venus"` puis redéployer |
 | Venus symlink disparu (màj firmware) | `ssh root@192.168.1.120 "ln -sf /data/etc/sv/dbus-mqtt-venus /service/dbus-mqtt-venus"` |
+| Journal systemd qui grossit (`journalctl --disk-usage`) | **Comportement normal** (journald grossit jusqu'au plafond puis rotationne). Plafond explicite borné à 200M via `contrib/journald/daly-bms.conf` (déployé par `deploy-pi5.sh`). Bruit réduit à la source : `info!→debug!` sur les boucles irradiance (30 s) et water_heater (5 min) — 2026-06. Détail → docs/diagnostic-depannage.md §11. Purge manuelle : `sudo journalctl --vacuum-size=200M`. |
 | Disque racine Pi5 se remplit (`df -h /` > 45 %) | Builds Rust cumulés dans `target/` (aarch64 + armv7 + natif debug/release). Les binaires prod sont dans `/usr/local/bin` → `target/` est jetable. Voir « Nettoyer disque (build) » §0. Ne **jamais** supprimer `~/.cargo/bin`, `/usr/local/bin/*`, ni `/mnt/nvme/.../metrics.redb`. |
 | `dbus-mqtt-venus` crash-loop sur NanoPi (`svstat` uptime=0, tous les services D-Bus absents) | Binaire armv7 mal compilé → **SIGILL** (exit 132). Cause : `target-cpu=native` dans le build armv7 (hôte aarch64 ≠ cible armv7). Corrigé dans le Makefile. Diag : lancer le binaire à la main sur le NanoPi. Indice au build : warnings `'+lse' is not a recognized feature`. |
 | `install-venus.sh: Permission denied` (`make install-venus-v7`) | Bit +x manquant → `chmod +x nanoPi/install-venus.sh` ou déployer via `ARCH=armv7 bash nanoPi/install-venus.sh 192.168.1.120`. |
