@@ -4,7 +4,8 @@
 > Couvre : table maîtresse des problèmes courants, diagnostic port série et permissions,
 > diagnostic services systemd, test API/WebSocket, diagnostic réseau (`netdiag`),
 > procédure d'investigation Onduleur & SmartShunt, investigation memory-leak (§1–§16),
-> nettoyage disque builds cumulés, et récupération Venus/NanoPi.
+> nettoyage disque builds cumulés, récupération Venus/NanoPi, et plafond du journal
+> systemd (§11).
 > Fait partie de l'[architecture documentaire](./ARCHITECTURE.md).
 > Dernière consolidation : 2026-06-07.
 
@@ -66,6 +67,11 @@
   - [10.5 Recréer le profil WiFi avec IP fixe](#105-recreer-le-profil-wifi-avec-ip-fixe-fiabilisation)
   - [10.6 Valider par un reboot + verrouiller côté Starlink](#106-valider-par-un-reboot--verrouiller-cote-starlink)
   - [10.7 Remettre en service après réparation](#107-remettre-en-service-apres-reparation)
+- [11. Journal systemd (journald) qui grossit — diagnostic et plafond](#11-journal-systemd-journald-qui-grossit--diagnostic-et-plafond)
+  - [11.1 Pourquoi le journal grossit](#111-pourquoi-le-journal-grossit)
+  - [11.2 Plafond explicite (drop-in journald)](#112-plafond-explicite-drop-in-journald)
+  - [11.3 Réduction du bruit à la source](#113-reduction-du-bruit-a-la-source)
+  - [11.4 Vérification et purge manuelle](#114-verification-et-purge-manuelle)
 - [Voir aussi](#voir-aussi)
 - [Sources consolidées](#sources-consolidees)
 
@@ -1913,6 +1919,96 @@ journalctl -u daly-bms -f                 # lecture BMS/ET112 OK ?
 # relancer le bridge MQTT → VRM se rafraîchit
 sudo systemctl restart mosquitto-broker
 journalctl -u mosquitto-broker -f | grep -i bridge   # attendu : "connected"
+```
+
+---
+
+## 11. Journal systemd (journald) qui grossit — diagnostic et plafond
+
+> Ajouté 2026-06 après constat « systemd-journal augmente avec le temps (~26 Mo) ».
+
+### 11.1 Pourquoi le journal grossit
+
+**Ce n'est pas une fuite — c'est le fonctionnement nominal de journald.** Le
+journal grossit jusqu'à un plafond, puis rotationne en purgeant ses plus vieux
+enregistrements. 26 Mo est minuscule : le défaut systemd (`min(4 Go, 10 % de la
+partition /var/log)`) laisserait le fichier monter beaucoup plus haut avant de
+rotationner. Le vrai problème historique : **ce plafond n'était nulle part
+configuré dans le repo** → on dépendait du défaut, sans borne explicite.
+
+Deux contributeurs de volume en régime permanent (avec `RUST_LOG=info`) :
+
+| Source | Fichier | Fréquence | Volume/jour |
+|--------|---------|-----------|-------------|
+| Sonde irradiance | `energy-manager/src/logic/irradiance/mod.rs` | **toutes les 30 s** | ~2 880 lignes |
+| Contrôle chauffe-eau (≈8 `info!`/cycle) | `energy-manager/src/logic/water_heater/mod.rs` | toutes les 5 min | ~2 300 lignes |
+
+Le cas irradiance était le pire : la ligne `Irradiance HTTP poll: N W/m²`
+loguait dès que la valeur était dans `0..=2000` — **même la nuit à 0 W/m²**,
+24h/24, valeur souvent inchangée. En face, les boucles vraiment chaudes étaient
+déjà propres : `charge_current` ne logue que sur changement, `solar_power` 1 Hz
+est en `debug!`, le polling BMS/ATS ne logue pas par cycle.
+
+Confirmer la répartition réelle sur le Pi5 :
+
+```bash
+journalctl --disk-usage                                          # taille + storage
+journalctl -u daly-bms -u energy-manager --since "1 day ago" | wc -l
+journalctl --since "1 day ago" -o cat | sort | uniq -c | sort -rn | head -20
+```
+
+### 11.2 Plafond explicite (drop-in journald)
+
+Borné par `contrib/journald/daly-bms.conf`, déployé automatiquement par
+`scripts/deploy-pi5.sh` (section 5.ter) vers
+`/etc/systemd/journal.conf.d/daly-bms.conf` :
+
+```ini
+[Journal]
+SystemMaxUse=200M          # plafond disque des journaux persistants
+SystemKeepFree=500M        # toujours laisser 500 Mo libres sur la partition
+MaxRetentionSec=1month     # purge les entrées de plus d'un mois
+SystemMaxFileSize=50M      # taille max d'un fichier avant rotation
+```
+
+C'est **purement défensif** : journald purge ses plus vieux enregistrements
+au-delà du plafond ; aucun service applicatif (daly-bms / energy-manager /
+mosquitto) n'est touché. `deploy-pi5.sh` copie le fichier, fait
+`systemctl restart systemd-journald`, puis `journalctl --vacuum-size=200M` pour
+appliquer la borne immédiatement (sinon elle n'agit qu'à la rotation suivante).
+
+Application manuelle (hors déploiement) :
+
+```bash
+sudo install -m 644 contrib/journald/daly-bms.conf /etc/systemd/journal.conf.d/daly-bms.conf
+sudo systemctl restart systemd-journald
+sudo journalctl --vacuum-size=200M
+```
+
+### 11.3 Réduction du bruit à la source
+
+En complément du plafond, les `info!` bavards par-tick ont été démotés en
+`debug!` (2026-06), **sans rien changer au comportement** : les valeurs partent
+déjà dans `bus.emit_live` + metrics-store (irradiance) et les transitions
+réelles restent en `info!` (water_heater : seul le `SEND` d'un changement de
+mode + le passage VACATION forcé loguent encore au niveau info).
+
+- `irradiance/mod.rs` : `Irradiance HTTP poll: N W/m²` → `debug!` (gain ~2 880 lignes/jour).
+- `water_heater/mod.rs` : dumps d'état par tick (get_state, irradiance, soc,
+  décision, cooldown, no-command-needed) → `debug!`.
+
+Pour réafficher ces lignes ponctuellement, monter le niveau de log sans
+recompiler — éditer l'unité energy-manager :
+`Environment=RUST_LOG=info,energy_manager::logic::water_heater=debug,energy_manager::logic::irradiance=debug`
+puis `sudo systemctl daemon-reload && sudo systemctl restart energy-manager`.
+
+### 11.4 Vérification et purge manuelle
+
+```bash
+journalctl --disk-usage                    # doit se stabiliser ≤ 200 Mo
+cat /etc/systemd/journal.conf.d/daly-bms.conf
+sudo journalctl --vacuum-size=200M         # purge immédiate à la borne
+sudo journalctl --vacuum-time=30d          # ou purge par âge
 ```
 
 ---
