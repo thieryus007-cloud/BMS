@@ -69,7 +69,7 @@ const NODES0 = [
   { id: 'tongou-group', type: 'tongouGroup', position: { x: 780, y: -30 }, data: { switches: [], disabled: false, _rev: 0 } },
   { id: 'ats-reseau',   type: 'atsreseau',  position: { x: -303, y: 280 }, data: { v2a:'—', sw2:'Ouvert', s2a:'—', cnt2:'0', max2:'—', t2:'—', onForce: null, disabled: false, _rev: 0 } },
   { id: 'ats-main',     type: 'atsmain',    position: { x: 60, y: -30 }, data: { swRemote:'—', swMode:'—', swFault:'—', middleOFF:'—', sw1:'—', sw2:'—', active_source:'—', onToggleRemote: null, onForceOff: null, disabled: false, _rev: 0 } },
-  { id: 'ats-onduleur', type: 'atsonduleur', position: { x: 60, y: 180 }, data: { v1a:'—', sw1:'Ouvert', s1a:'—', cnt1:'0', max1:'—', t1:'—', onForce: null, disabled: false, _rev: 0 } },
+  { id: 'ats-onduleur', type: 'atsonduleur', position: { x: 60, y: 200 }, data: { v1a:'—', sw1:'Ouvert', s1a:'—', cnt1:'0', max1:'—', t1:'—', onForce: null, disabled: false, _rev: 0 } },
 ];
 
 const COLOR = { ac: '#2563eb', dc: '#ea580c', bat: '#16a34a', gray: '#94a3b8' };
@@ -102,8 +102,8 @@ const EDGES0 = [
   mkEdge('e-ats-micro', 'micro-ond', 'ats-onduleur',   COLOR.ac,  { sourceHandle: 'sl', targetHandle: 'onduleur-right', type: 'customBezier', history: HIST_ET112_7 }),
   mkEdge('e-onduleur-ats', 'ats-onduleur', 'onduleur',   COLOR.ac,  { sourceHandle: 'onduleur-bottom', targetHandle: 'tt', history: HIST_INV_AC }),
   mkEdge('e-maison-switchs', 'et112-maison', 'tongou-group',   COLOR.ac,  { sourceHandle: 'sr', targetHandle: 'tl', type: 'customBezier', history: HIST_ET112_8 }),
-  mkEdge('e-ats-reseau', 'ats-reseau', 'et112-reseau',   COLOR.ac,  { sourceHandle: 'reseau-et112reseau', targetHandle: 'tt', history: HIST_ET112_9 }),
-  mkEdge('e-reseau-onduleur', 'et112-reseau', 'onduleur',   COLOR.ac,  { sourceHandle: 'sr', targetHandle: 'tl', history: HIST_ET112_9 }),
+  mkEdge('e-ats-reseau', 'ats-reseau', 'et112-reseau',   COLOR.ac,  { sourceHandle: 'reseau-et112reseau', targetHandle: 'tt', type: 'customBezier', history: HIST_ET112_9 }),
+  mkEdge('e-reseau-onduleur', 'et112-reseau', 'onduleur',   COLOR.ac,  { sourceHandle: 'sr', targetHandle: 'tl', type: 'customBezier', history: HIST_ET112_9 }),
   mkEdge('e-mppt-shu', 'mppt',      'hubMPPT', COLOR.dc,  { sourceHandle: 'sl', targetHandle: 'tr', type: 'customBezier', history: HIST_MPPT }),
   mkEdge('e-ond-shu',  'onduleur',  'hubMPPT', COLOR.dc,  { sourceHandle: 'sb', targetHandle: 'tt', history: HIST_INV_DC }),
   mkEdge('e-hub-shu',  'hubMPPT',  'smartshunt', COLOR.dc,  { sourceHandle: 'sb', targetHandle: 'tt', history: HIST_SHUNT }),
