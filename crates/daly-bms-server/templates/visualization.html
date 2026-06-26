@@ -344,7 +344,7 @@ const atsExecRef = useRef(null);
   useEffect(function() {
     const safe = p => p.catch(() => null);
     async function fetchAll() {
-      const [bms1, bms2, bms3, et7, et8, et9, irr, venusResp, tempResp, atsResp] = await Promise.all([
+      const [bms1, bms2, bms3, et7, et8, et9, irr, venusResp, atsResp] = await Promise.all([
         safe(fetch('/api/v1/bms/1/status').then(r => r.ok ? r.json() : null)),
         safe(fetch('/api/v1/bms/2/status').then(r => r.ok ? r.json() : null)),
         safe(fetch('/api/v1/bms/3/status').then(r => r.ok ? r.json() : null)),
@@ -353,7 +353,6 @@ const atsExecRef = useRef(null);
         safe(fetch('/api/v1/et112/9/status').then(r => r.ok ? r.json() : null)),
         safe(fetch('/api/v1/irradiance/status').then(r => r.ok ? r.json() : null)),
         safe(fetch('/api/v1/venus/mppt').then(r => r.ok ? r.json() : null)),
-        safe(fetch('/api/v1/venus/temperatures').then(r => r.ok ? r.json() : null)),
         safe(fetch('/api/v1/ats/status').then(r => r.ok ? r.json() : null)),
       ]);
 
@@ -389,11 +388,9 @@ const atsExecRef = useRef(null);
       const shunt = shuntResp?.shunt ?? null;
       const inverter = inverterResp?.inverter ?? null;
       const heatpumps = heatpumpsResp?.heatpumps ?? [];
-      const temps = tempResp?.temperatures ?? [];
-      const temp = temps.length > 0 ? temps[0] : null;
       const ats = atsResp?.values ?? null;
 
-      applyData({ bms1, bms2, bms3, et7, et8, et9, irr, mpptList, mpptTotalPowerW, mpptTotalDcA, shunt, inverter, temp, ats, tasmotaDevices, heatpumps });
+      applyData({ bms1, bms2, bms3, et7, et8, et9, irr, mpptList, mpptTotalPowerW, mpptTotalDcA, shunt, inverter, ats, tasmotaDevices, heatpumps });
     }
     fetchAll();
     const timer = setInterval(fetchAll, 2000);

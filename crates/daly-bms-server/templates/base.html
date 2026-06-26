@@ -1149,11 +1149,19 @@ window.showToast = function(msg, type, duration) {
     setDot('hdr-temp-dot', t0 ? 'live' : '');
   }
 
-  fetchKpi();
-  setInterval(fetchKpi, 5000);
+  let intervalId = null;
+  function startPolling() {
+    fetchKpi();
+    if (!intervalId) intervalId = setInterval(fetchKpi, 5000);
+  }
+  function stopPolling() {
+    if (intervalId) { clearInterval(intervalId); intervalId = null; }
+  }
+
+  if (!document.hidden) startPolling();
 
   document.addEventListener('visibilitychange', function() {
-    if (!document.hidden) fetchKpi();
+    if (document.hidden) stopPolling(); else startPolling();
   });
 })();
 </script>
