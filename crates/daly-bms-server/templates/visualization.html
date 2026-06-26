@@ -52,10 +52,6 @@ const edgeTypes = { doubleLine: AnimatedFlowEdge, customBezier: CustomBezierEdge
 
 const NODES0 = [
   { id: 'spiral-race',   type: 'spiralRace',  position: { x: -350, y: -30  }, data: { prodKwh: 0, soc: 0, irrWm2: 0 } },
-  { id: 'production',  type: 'summary',     position: { x: -30,  y: -30  }, data: { label: 'Production',  icon: '☀️',  value: '—', sub: 'Micro-onduleurs',   dotClass: '' } },
-  { id: 'batteries',   type: 'summary',     position: { x: 170,  y: -30  }, data: { label: 'Batteries',   icon: '🔋', value: '—', sub: '360 Ah + 320 Ah + 620 Ah',  dotClass: '' } },
-  { id: 'meteo',       type: 'summary',     position: { x: 370,  y: -30  }, data: { label: 'Météo',       icon: '🌤️',  value: '—', sub: 'Irradiance solaire', dotClass: '' } },
-  { id: 'temp-ext',    type: 'temperature', position: { x: 570, y: -30 }, data: { label: 'Température', icon: '🌡️', live: null } },
   { id: 'chauffe-eau',   type: 'waterheater', position: { x: 780,  y: 550 }, data: { label: 'Chauffe-eau',   icon: '🚿', live: null, heatpump: null, isClimatisation: false } },
   { id: 'climatisation', type: 'waterheater', position: { x: 780,  y: 770 }, data: { label: 'Climatisation', icon: '❄️',  live: null, heatpump: null, isClimatisation: true  } },
   { id: 'micro-ond',   type: 'et112card',   position: { x: 400, y: 275 }, data: { label: 'Micro-onduleurs', address: 7, live: null } },
@@ -175,7 +171,6 @@ const atsExecRef = useRef(null);
     const mpptTotalDcA    = d.mpptTotalDcA     ?? 0;
     const shunt = d.shunt;
     const inverter = d.inverter;
-    const temp = d.temp;
     const ats = d.ats;
     const tasmotaDevices = d.tasmotaDevices || [];
     const heatpumps = d.heatpumps || [];
@@ -189,19 +184,6 @@ const atsExecRef = useRef(null);
     const totalPwr = validBms.reduce((s, b) => s + (b.Dc?.Power ?? 0), 0);
     // Use SmartShunt SOC (Victron) as primary — falls back to DALY average only if absent
     const displaySoc = shunt?.soc_percent != null ? shunt.soc_percent : (avgSoc != null ? parseFloat(avgSoc) : null);
-
-    const microPwr     = et7?.power_w ?? 0;
-    const totalProdPwr = microPwr + mpptTotalPowerW;
-    const prodVal      = fmtKw(totalProdPwr);
-    const mpptYieldSumG = mpptList.reduce((s, m) => s + (m.yield_today_kwh ?? 0), 0);
-    const prodSub      = et7 ? `${((et7.energy_export_wh ?? 0) / 1000).toFixed(1)} kWh ET112` : mpptList.length > 0 ? `${mpptYieldSumG.toFixed(2)} kWh MPPT` : 'Micro-onduleurs';
-    const prodDot      = (et7?.connected || mpptList.length > 0) ? (totalProdPwr > 50 ? 'live' : '') : '';
-    const batVal       = displaySoc != null ? `SOC ${displaySoc.toFixed(0)}%` : '—';
-    const batSub       = totalPwr ? `${totalPwr > 0 ? '+' : ''}${(totalPwr / 1000).toFixed(2)} kW` : '360 Ah + 320 Ah + 620 Ah';
-    const batDot       = displaySoc == null ? '' : displaySoc > 50 ? 'live' : displaySoc > 20 ? 'warn' : 'alarm';
-    const irrVal       = irr?.irradiance_wm2 != null ? `${irr.irradiance_wm2.toFixed(0)} W/m²` : '—';
-    const irrSub       = irr?.total_yield_kwh != null ? `☀ ${irr.total_yield_kwh.toFixed(1)} kWh` : 'Irradiance solaire';
-    const irrDot       = irr ? 'live' : '';
 
     setEdges(function (prev) {
       const withFlow = prev.map(function (e) {
@@ -303,12 +285,6 @@ const atsExecRef = useRef(null);
           const batDischargePwr = Math.max(0, -totalPwr);
           return { ...n, data: { ...n.data, microPwr: et7?.power_w ?? 0, mpptPwr: mpptTotalPowerW, batChargePwr, batDischargePwr, loadPwr } };
         }
-        case 'production':
-          return { ...n, data: { ...n.data, value: prodVal, sub: prodSub, dotClass: prodDot } };
-        case 'batteries':
-          return { ...n, data: { ...n.data, value: batVal, sub: batSub, dotClass: batDot } };
-        case 'meteo':
-          return { ...n, data: { ...n.data, value: irrVal, sub: irrSub, dotClass: irrDot } };
         case 'bms1': return { ...n, data: { ...n.data, live: bms1 ?? null } };
         case 'bms2': return { ...n, data: { ...n.data, live: bms2 ?? null } };
         case 'bms3': return { ...n, data: { ...n.data, live: bms3 ?? null } };
@@ -320,7 +296,6 @@ const atsExecRef = useRef(null);
         case 'climatisation': return { ...n, data: { ...n.data, live: et9 ?? null, heatpump: hp9 } };
         case 'mppt':        return { ...n, data: { ...n.data, mppts: mpptList, totalPowerW: mpptTotalPowerW, totalDcA: mpptTotalDcA } };
         case 'smartshunt':  return { ...n, data: { ...n.data, live: shunt ?? null } };
-        case 'temp-ext':    return { ...n, data: { ...n.data, live: temp ?? null } };
         case 'tongou-group': return { ...n, data: { ...n.data, switches: tasmotaDevices, disabled: atsProcessing, _rev: newRev } };
 
         case 'ats-reseau':

@@ -350,12 +350,65 @@
       font-size: 0.95rem;
       font-weight: 700;
       color: var(--text);
-      flex: 1;
+      flex-shrink: 0;
     }
     .topbar-clock {
       font-family: 'JetBrains Mono', monospace;
       font-size: 0.75rem;
       color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    /* ─── Topbar KPI nodes ───────────────────────────────────── */
+    .topbar-kpi {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex: 1;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .topbar-kpi-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0 0.85rem;
+      border-right: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .topbar-kpi-item:first-child { border-left: 1px solid var(--border); }
+    .topbar-kpi-icon { font-size: 0.9rem; flex-shrink: 0; }
+    .topbar-kpi-body { display: flex; flex-direction: column; gap: 0; }
+    .topbar-kpi-label {
+      font-size: 0.52rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted2);
+      line-height: 1;
+    }
+    .topbar-kpi-value {
+      font-size: 0.78rem;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text);
+      line-height: 1.3;
+    }
+    .topbar-kpi-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--muted2);
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .topbar-kpi-dot.live  { background: var(--green);  box-shadow: 0 0 6px rgba(63,185,80,0.5); animation: pulse-dot 2s infinite; }
+    .topbar-kpi-dot.warn  { background: var(--yellow); box-shadow: 0 0 6px rgba(210,153,34,0.5); animation: pulse-dot 2s infinite; }
+    .topbar-kpi-dot.alarm { background: var(--red);    box-shadow: 0 0 6px rgba(248,81,73,0.5); animation: pulse-dot 2s infinite; }
+    @media (max-width: 920px) {
+      .topbar-kpi-item:nth-child(n+3) { display: none; }
+    }
+    @media (max-width: 600px) {
+      .topbar-kpi { display: none; }
     }
 
     /* ─── Main ───────────────────────────────────────────────── */
@@ -853,6 +906,40 @@
   <header class="topbar">
     <button class="topbar-burger" onclick="toggleSidebar()">☰</button>
     <div class="topbar-title">{% block page_title %}Monitoring{% endblock %}</div>
+    <div class="topbar-kpi" id="topbar-kpi">
+      <div class="topbar-kpi-item">
+        <span class="topbar-kpi-icon">☀️</span>
+        <div class="topbar-kpi-body">
+          <span class="topbar-kpi-label">Production</span>
+          <span class="topbar-kpi-value" id="hdr-prod">—</span>
+        </div>
+        <div class="topbar-kpi-dot" id="hdr-prod-dot"></div>
+      </div>
+      <div class="topbar-kpi-item">
+        <span class="topbar-kpi-icon">🔋</span>
+        <div class="topbar-kpi-body">
+          <span class="topbar-kpi-label">Batteries</span>
+          <span class="topbar-kpi-value" id="hdr-bat">—</span>
+        </div>
+        <div class="topbar-kpi-dot" id="hdr-bat-dot"></div>
+      </div>
+      <div class="topbar-kpi-item">
+        <span class="topbar-kpi-icon">🌤️</span>
+        <div class="topbar-kpi-body">
+          <span class="topbar-kpi-label">Météo</span>
+          <span class="topbar-kpi-value" id="hdr-meteo">—</span>
+        </div>
+        <div class="topbar-kpi-dot" id="hdr-meteo-dot"></div>
+      </div>
+      <div class="topbar-kpi-item">
+        <span class="topbar-kpi-icon">🌡️</span>
+        <div class="topbar-kpi-body">
+          <span class="topbar-kpi-label">Température</span>
+          <span class="topbar-kpi-value" id="hdr-temp">—</span>
+        </div>
+        <div class="topbar-kpi-dot" id="hdr-temp-dot"></div>
+      </div>
+    </div>
     <button class="tb-btn" id="fs-btn" onclick="toggleFullscreen()" title="Plein écran [F]">⛶</button>
     <button class="tb-btn" id="theme-btn" onclick="toggleTheme()" title="Thème sombre [D]">🌙</button>
     <div class="topbar-clock" id="tb-clock"></div>
@@ -992,6 +1079,83 @@ window.showToast = function(msg, type, duration) {
     setTimeout(function() { if (t.parentElement) t.remove(); }, 400);
   }, duration);
 };
+</script>
+
+<script>
+// ── Topbar KPI global fetch ────────────────────────────────────────────
+(function topbarKpi() {
+  const safe = p => p.catch(() => null);
+
+  function setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  }
+  function setDot(id, cls) {
+    const el = document.getElementById(id);
+    if (el) el.className = 'topbar-kpi-dot' + (cls ? ' ' + cls : '');
+  }
+
+  async function fetchKpi() {
+    const [et7, irr, venusResp, shuntResp, bms1, bms2, bms3, tempResp] = await Promise.all([
+      safe(fetch('/api/v1/et112/7/status').then(r => r.ok ? r.json() : null)),
+      safe(fetch('/api/v1/irradiance/status').then(r => r.ok ? r.json() : null)),
+      safe(fetch('/api/v1/venus/mppt').then(r => r.ok ? r.json() : null)),
+      safe(fetch('/api/v1/venus/smartshunt').then(r => r.ok ? r.json() : null)),
+      safe(fetch('/api/v1/bms/1/status').then(r => r.ok ? r.json() : null)),
+      safe(fetch('/api/v1/bms/2/status').then(r => r.ok ? r.json() : null)),
+      safe(fetch('/api/v1/bms/3/status').then(r => r.ok ? r.json() : null)),
+      safe(fetch('/api/v1/venus/temperatures').then(r => r.ok ? r.json() : null)),
+    ]);
+
+    // Production
+    const mpptTotalW = venusResp?.total_power_w ?? 0;
+    const microW     = et7?.power_w ?? 0;
+    const totalProdW = microW + mpptTotalW;
+    const prodStr    = totalProdW > 0 || et7 || venusResp
+      ? ((totalProdW / 1000).toFixed(2) + ' kW')
+      : '—';
+    const prodDot    = (et7?.connected || (venusResp?.mppts?.length > 0))
+      ? (totalProdW > 50 ? 'live' : '') : '';
+    setText('hdr-prod', prodStr);
+    setDot('hdr-prod-dot', prodDot);
+
+    // Batteries
+    const shunt = shuntResp?.shunt ?? null;
+    const validBms = [bms1, bms2, bms3].filter(Boolean);
+    const avgSoc = validBms.length
+      ? (validBms.reduce((s, b) => s + (b.Soc ?? 0), 0) / validBms.length)
+      : null;
+    const totalPwr = validBms.reduce((s, b) => s + (b.Dc?.Power ?? 0), 0);
+    const displaySoc = shunt?.soc_percent != null ? shunt.soc_percent : avgSoc;
+    const batStr = displaySoc != null
+      ? ('SOC ' + displaySoc.toFixed(0) + '%' + (totalPwr ? (' ' + (totalPwr > 0 ? '+' : '') + (totalPwr / 1000).toFixed(1) + 'kW') : ''))
+      : '—';
+    const batDot = displaySoc == null ? '' : displaySoc > 50 ? 'live' : displaySoc > 20 ? 'warn' : 'alarm';
+    setText('hdr-bat', batStr);
+    setDot('hdr-bat-dot', batDot);
+
+    // Météo
+    const irrVal = irr?.irradiance_wm2 != null ? (irr.irradiance_wm2.toFixed(0) + ' W/m²') : '—';
+    setText('hdr-meteo', irrVal);
+    setDot('hdr-meteo-dot', irr ? 'live' : '');
+
+    // Température
+    const temps = tempResp?.temperatures ?? [];
+    const t0 = temps.length > 0 ? temps[0] : null;
+    const tempStr = t0?.temp_c != null
+      ? (t0.temp_c.toFixed(1) + '°C' + (t0.humidity_percent != null ? ' ' + t0.humidity_percent.toFixed(0) + '%HR' : ''))
+      : '—';
+    setText('hdr-temp', tempStr);
+    setDot('hdr-temp-dot', t0 ? 'live' : '');
+  }
+
+  fetchKpi();
+  setInterval(fetchKpi, 5000);
+
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) fetchKpi();
+  });
+})();
 </script>
 
 {% block scripts %}{% endblock %}
