@@ -56,7 +56,7 @@ const NODES0 = [
   { id: 'climatisation', type: 'waterheater', position: { x: 780,  y: 770 }, data: { label: 'Climatisation', icon: '❄️',  live: null, heatpump: null, isClimatisation: true  } },
   { id: 'micro-ond',   type: 'et112card',   position: { x: 400, y: 275 }, data: { label: 'Micro-onduleurs', address: 7, live: null } },
   { id: 'et112-reseau',   type: 'et112card', position: { x: -350, y: 469 }, data: { label: 'ET112-reseau', address: 9, live: null } },
-  { id: 'et112-maison',   type: 'et112card', position: { x: 400, y: 112 }, data: { label: 'ET112-Maison', address: 8, live: null } },
+  { id: 'et112-maison',   type: 'et112card', position: { x: 400, y: -30 }, data: { label: 'ET112-Maison', address: 8, live: null } },
   { id: 'onduleur',    type: 'inverter',    position: { x: 10,   y: 450 }, data: { live: null } },
   { id: 'sankey',      type: 'sankey',      position: { x: 400, y: 420 }, data: { microPwr: 0, mpptPwr: 0, batPwr: 0, loadPwr: 0 } },
   { id: 'hubMPPT',    type: 'hub', position: { x: 148,   y: 650 }, data: { live: null } },
@@ -66,9 +66,9 @@ const NODES0 = [
   { id: 'bms1',        type: 'bms', position: { x: -350, y: 620  }, data: { label: 'BMS-360Ah', live: null } },
   { id: 'bms2',        type: 'bms', position: { x: -350, y: 730  }, data: { label: 'BMS-320Ah', live: null } },
   { id: 'bms3',        type: 'bms', position: { x: -350, y: 840 }, data: { label: 'BMS-620Ah', live: null } },
-  { id: 'tongou-group', type: 'tongouGroup', position: { x: 780, y: 70 }, data: { switches: [], disabled: false, _rev: 0 } },
+  { id: 'tongou-group', type: 'tongouGroup', position: { x: 780, y: -30 }, data: { switches: [], disabled: false, _rev: 0 } },
   { id: 'ats-reseau',   type: 'atsreseau',  position: { x: -303, y: 280 }, data: { v2a:'—', sw2:'Ouvert', s2a:'—', cnt2:'0', max2:'—', t2:'—', onForce: null, disabled: false, _rev: 0 } },
-  { id: 'ats-main',     type: 'atsmain',    position: { x: 60, y: 110 }, data: { swRemote:'—', swMode:'—', swFault:'—', middleOFF:'—', sw1:'—', sw2:'—', active_source:'—', onToggleRemote: null, onForceOff: null, disabled: false, _rev: 0 } },
+  { id: 'ats-main',     type: 'atsmain',    position: { x: 60, y: -30 }, data: { swRemote:'—', swMode:'—', swFault:'—', middleOFF:'—', sw1:'—', sw2:'—', active_source:'—', onToggleRemote: null, onForceOff: null, disabled: false, _rev: 0 } },
   { id: 'ats-onduleur', type: 'atsonduleur', position: { x: 60, y: 280 }, data: { v1a:'—', sw1:'Ouvert', s1a:'—', cnt1:'0', max1:'—', t1:'—', onForce: null, disabled: false, _rev: 0 } },
 ];
 
