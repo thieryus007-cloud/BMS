@@ -376,7 +376,7 @@ const atsExecRef = useRef(null);
       const heatpumps = heatpumpsResp?.heatpumps ?? [];
       const ats = atsResp?.values ?? null;
 
-      applyData({ bms1, bms2, bms3, et7, et8, et9, irr, mpptList, mpptTotalPowerW, mpptTotalDcA, shunt, inverter, ats, tasmotaDevices, heatpumps });
+      applyData({ bms1, bms2, bms3, et7, et8, et9, mpptList, mpptTotalPowerW, mpptTotalDcA, shunt, inverter, ats, tasmotaDevices, heatpumps });
     }
     fetchAll();
     const timer = setInterval(fetchAll, 2000);
