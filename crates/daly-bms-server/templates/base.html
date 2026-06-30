@@ -908,6 +908,14 @@
     <div class="topbar-title">{% block page_title %}Monitoring{% endblock %}</div>
     <div class="topbar-kpi" id="topbar-kpi">
       <div class="topbar-kpi-item">
+        <span class="topbar-kpi-icon">📊</span>
+        <div class="topbar-kpi-body">
+          <span class="topbar-kpi-label">Prod. totale</span>
+          <span class="topbar-kpi-value" id="hdr-prod-total">—</span>
+        </div>
+        <div class="topbar-kpi-dot" id="hdr-prod-total-dot"></div>
+      </div>
+      <div class="topbar-kpi-item">
         <span class="topbar-kpi-icon">☀️</span>
         <div class="topbar-kpi-body">
           <span class="topbar-kpi-label">Production</span>
@@ -1118,6 +1126,15 @@ window.showToast = function(msg, type, duration) {
       ? (totalProdW > 50 ? 'live' : '') : '';
     setText('hdr-prod', prodStr);
     setDot('hdr-prod-dot', prodDot);
+
+    // Production totale (kWh, jour)
+    const mpptList       = venusResp?.mppts ?? [];
+    const mpptYieldSum   = mpptList.reduce((s, m) => s + (m.yield_today_kwh ?? 0), 0);
+    const localProdKwh   = ((et7?.energy_export_wh ?? 0) / 1000) + mpptYieldSum;
+    const totalYieldKwh  = irr?.total_yield_kwh ?? localProdKwh;
+    const prodTotalStr   = (et7 || venusResp || irr) ? (totalYieldKwh.toFixed(2) + ' kWh') : '—';
+    setText('hdr-prod-total', prodTotalStr);
+    setDot('hdr-prod-total-dot', (et7 || venusResp || irr) ? 'live' : '');
 
     // Batteries
     const shunt = shuntResp?.shunt ?? null;
