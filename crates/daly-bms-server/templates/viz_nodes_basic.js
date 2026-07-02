@@ -85,41 +85,39 @@ function Et112CardNode({ data }) {
     mkHandle('source', Position.Bottom, 'sb'),
     mkHandle('source', Position.Right,  'sr'),
     mkHandle('target', Position.Right,  'tr', { top: '50%' }),
-    h('div', { className: `bms-card-in-viz ${connected ? '' : 'offline-card'}`, style: { opacity: connected ? 1 : 0.7 } },
+    h('div', { className: `bms-card-in-viz ${connected ? '' : 'offline-card'}`, style: { opacity: connected ? 1 : 0.85 } },
       h('div', { className: `bms-hdr ${connected ? '' : 'offline'}` },
         h('div', { className: 'bms-hdr-left' },
-          connected ? h('div', { className: 'bms-live' }, h('div', { className: 'live-dot' }), 'LIVE') : h('span', { style: { fontSize: '0.62rem', color: 'var(--muted2)' } }, 'Hors ligne'),
+          connected ? h('div', { className: 'bms-live' }, h('div', { className: 'live-dot' }), 'LIVE') : h('span', { style: { fontSize: '0.62rem', color: 'var(--muted2)' } }, '○ Données absentes'),
           h('span', { className: 'bms-hdr-name' }, `${icon} `, data.label)
         ),
         h('div', { className: 'bms-hdr-right' }, h('span', { className: 'bms-badge' }, `0x0${addr.toString(16).toUpperCase()}`))
       ),
-      connected && live ? h('div', { className: 'kpi4' },
+      // Le node reste complet même sans données : « --- » à la place des valeurs.
+      h('div', { className: 'kpi4' },
         h('div', { className: 'kpi4-cell t-yellow' },
           h('div', { className: 'kpi4-lbl' }, 'Puissance'),
-          h('div', { className: `kpi4-val ${(pwr ?? 0) >= 0 ? 'chg' : 'dch'}` }, pwr != null ? `${pwr.toFixed(0)} W` : '—')
+          h('div', { className: `kpi4-val ${!connected ? 'muted' : ((pwr ?? 0) >= 0 ? 'chg' : 'dch')}` }, (connected && pwr != null) ? `${pwr.toFixed(0)} W` : '---')
         ),
         h('div', { className: 'kpi4-cell t-blue' },
           h('div', { className: 'kpi4-lbl' }, 'Tension'),
-          h('div', { className: 'kpi4-val' }, volt != null ? `${volt.toFixed(1)} V` : '—')
+          h('div', { className: `kpi4-val ${connected ? '' : 'muted'}` }, (connected && volt != null) ? `${volt.toFixed(1)} V` : '---')
         ),
         h('div', { className: 'kpi4-cell t-orange' },
           h('div', { className: 'kpi4-lbl' }, 'Courant'),
-          h('div', { className: 'kpi4-val' }, cur != null ? `${cur.toFixed(2)} A` : '—')
+          h('div', { className: `kpi4-val ${connected ? '' : 'muted'}` }, (connected && cur != null) ? `${cur.toFixed(2)} A` : '---')
         )
-      ) : h('div', { className: 'empty-state' },
-        h('div', { className: 'empty-icon' }, '⏳'),
-        h('div', { className: 'empty-title' }, 'En attente de données')
       ),
-      connected && live ? h('div', { className: 'istrip' },
+      h('div', { className: 'istrip' },
         h('div', { className: 'icell' },
           h('span', { className: 'i-lbl' }, '⬇ Importée'),
-          h('span', { className: 'i-val ok' }, imp != null ? `${imp.toFixed(2)} kWh` : '—')
+          h('span', { className: `i-val ${connected ? 'ok' : 'muted'}` }, (connected && imp != null) ? `${imp.toFixed(2)} kWh` : '---')
         ),
         h('div', { className: 'icell' },
           h('span', { className: 'i-lbl' }, '⬆ Exportée'),
-          h('span', { className: 'i-val blue' }, expW != null ? `${expW.toFixed(2)} kWh` : '—')
+          h('span', { className: `i-val ${connected ? 'blue' : 'muted'}` }, (connected && expW != null) ? `${expW.toFixed(2)} kWh` : '---')
         )
-      ) : null
+      )
     )
   );
 }

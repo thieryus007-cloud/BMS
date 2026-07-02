@@ -18,16 +18,14 @@
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1.25rem;">
 
 {% for d in devices %}
-<div class="bms-card {% if !d.connected %}" style="opacity:0.7{% endif %}" id="et112-card-{{ d.address }}">
+<div class="bms-card {% if !d.connected %}" style="opacity:0.85{% endif %}" id="et112-card-{{ d.address }}">
 
   {# Header #}
   <div class="bms-hdr {% if !d.connected %}bms-hdr-offline{% else if d.service_type == "pvinverter" %}bms-hdr-pv{% else if d.service_type == "heatpump" %}bms-hdr-heat{% endif %}">
     <div class="bms-hdr-left">
-      {% if d.connected %}
-        <div class="bms-live"><div class="live-dot"></div>LIVE</div>
-      {% else %}
-        <span style="font-size:0.62rem;color:var(--muted2)">Hors ligne</span>
-      {% endif %}
+      <span id="state-{{ d.address }}">
+        {% if d.connected %}<span class="bms-live"><span class="live-dot"></span>LIVE</span>{% else %}<span style="font-size:0.62rem;color:var(--muted2)">○ Données absentes</span>{% endif %}
+      </span>
       <span class="bms-hdr-name">
         {% if d.service_type == "pvinverter" %}☀{% else if d.service_type == "heatpump" %}🌡{% else %}⚡{% endif %}
         {{ d.name }}
@@ -39,23 +37,21 @@
     </div>
   </div>
 
-  {% if d.connected %}
-
-  {# KPI 4 col #}
+  {# KPI 4 col — le node reste complet ; « --- » si aucune donnée reçue #}
   <div class="kpi4">
     <div class="kpi4-cell t-yellow">
       <div class="kpi4-lbl">Puissance</div>
-      <div class="kpi4-val {% if d.power_w >= 0.0 %}chg{% else %}dch{% endif %}" id="p-{{ d.address }}">
-        {{ d.power_w|f1 }} W
+      <div class="kpi4-val {% if !d.connected %}muted{% else if d.power_w >= 0.0 %}chg{% else %}dch{% endif %}" id="p-{{ d.address }}">
+        {% if d.connected %}{{ d.power_w|f1 }} W{% else %}---{% endif %}
       </div>
     </div>
     <div class="kpi4-cell t-blue">
       <div class="kpi4-lbl">Tension</div>
-      <div class="kpi4-val" id="v-{{ d.address }}">{{ d.voltage_v|f1 }} V</div>
+      <div class="kpi4-val {% if !d.connected %}muted{% endif %}" id="v-{{ d.address }}">{% if d.connected %}{{ d.voltage_v|f1 }} V{% else %}---{% endif %}</div>
     </div>
     <div class="kpi4-cell t-orange">
       <div class="kpi4-lbl">Courant</div>
-      <div class="kpi4-val" id="i-{{ d.address }}">{{ d.current_a|f2 }} A</div>
+      <div class="kpi4-val {% if !d.connected %}muted{% endif %}" id="i-{{ d.address }}">{% if d.connected %}{{ d.current_a|f2 }} A{% else %}---{% endif %}</div>
     </div>
     <div class="kpi4-cell">
       <div class="kpi4-lbl">Type</div>
@@ -63,27 +59,17 @@
     </div>
   </div>
 
-  {# Énergie #}
+  {# Énergie — toujours affichée (« --- » si aucune donnée) #}
   <div class="istrip c2">
     <div class="icell">
       <span class="i-lbl">⬇ Importée</span>
-      <span class="i-val ok" id="imp-{{ d.address }}">{{ d.energy_import_kwh|f2 }} kWh</span>
+      <span class="i-val {% if d.connected %}ok{% else %}muted{% endif %}" id="imp-{{ d.address }}">{% if d.connected %}{{ d.energy_import_kwh|f2 }} kWh{% else %}---{% endif %}</span>
     </div>
     <div class="icell">
       <span class="i-lbl">⬆ Exportée</span>
-      <span class="i-val blue" id="exp-{{ d.address }}">{{ d.energy_export_kwh|f2 }} kWh</span>
+      <span class="i-val {% if d.connected %}blue{% else %}muted{% endif %}" id="exp-{{ d.address }}">{% if d.connected %}{{ d.energy_export_kwh|f2 }} kWh{% else %}---{% endif %}</span>
     </div>
   </div>
-
-  {% else %}
-
-  <div class="empty-state" style="padding:2rem 1rem;">
-    <div class="empty-icon" style="font-size:1.5rem">⏳</div>
-    <div class="empty-title">En attente de données</div>
-    <div class="empty-sub">Adresse Modbus : <code>{{ d.addr_hex }}</code></div>
-  </div>
-
-  {% endif %}
 
   <div style="padding:0.5rem 0.75rem;display:flex;justify-content:flex-end;border-top:1px solid var(--border);">
     <a href="/dashboard/et112/{{ d.address }}" class="btn btn-outline" style="font-size:0.72rem;padding:0.3rem 0.7rem;">Détails →</a>
@@ -105,10 +91,28 @@ async function updateAll() {
   const tsEl = document.getElementById('et112-ts');
   if (tsEl) tsEl.textContent = ts;
 
+  const NA = '---';
+
+  // Bascule l'affichage d'une carte en « données absentes » (valeurs « --- »).
+  function markMissing(addr) {
+    const pw = document.getElementById(`p-${addr}`);
+    const vv = document.getElementById(`v-${addr}`);
+    const iv = document.getElementById(`i-${addr}`);
+    const im = document.getElementById(`imp-${addr}`);
+    const ex = document.getElementById(`exp-${addr}`);
+    const st = document.getElementById(`state-${addr}`);
+    if (pw) { pw.textContent = NA; pw.className = 'kpi4-val muted'; }
+    if (vv) { vv.textContent = NA; vv.className = 'kpi4-val muted'; }
+    if (iv) { iv.textContent = NA; iv.className = 'kpi4-val muted'; }
+    if (im) { im.textContent = NA; im.className = 'i-val muted'; }
+    if (ex) { ex.textContent = NA; ex.className = 'i-val muted'; }
+    if (st) st.innerHTML = '<span style="font-size:0.62rem;color:var(--muted2)">○ Données absentes</span>';
+  }
+
   for (const addr of ET112_ADDRS) {
     try {
       const resp = await fetch(`/api/v1/et112/${addr}/status`);
-      if (!resp.ok) continue;
+      if (!resp.ok) { markMissing(addr); continue; }
       const d = await resp.json();
 
       const pw = document.getElementById(`p-${addr}`);
@@ -117,14 +121,18 @@ async function updateAll() {
       const im = document.getElementById(`imp-${addr}`);
       const ex = document.getElementById(`exp-${addr}`);
       const tsEl2 = document.getElementById(`ts-${addr}`);
+      const st = document.getElementById(`state-${addr}`);
 
       if (pw) { pw.textContent = d.power_w.toFixed(1) + ' W'; pw.className = 'kpi4-val ' + (d.power_w >= 0 ? 'chg' : 'dch'); }
-      if (vv) vv.textContent = d.voltage_v.toFixed(1) + ' V';
-      if (iv) iv.textContent = d.current_a.toFixed(2) + ' A';
-      if (im) im.textContent = (d.energy_import_wh / 1000).toFixed(2) + ' kWh';
-      if (ex) ex.textContent = (d.energy_export_wh / 1000).toFixed(2) + ' kWh';
+      if (vv) { vv.textContent = d.voltage_v.toFixed(1) + ' V'; vv.className = 'kpi4-val'; }
+      if (iv) { iv.textContent = d.current_a.toFixed(2) + ' A'; iv.className = 'kpi4-val'; }
+      if (im) { im.textContent = (d.energy_import_wh / 1000).toFixed(2) + ' kWh'; im.className = 'i-val ok'; }
+      if (ex) { ex.textContent = (d.energy_export_wh / 1000).toFixed(2) + ' kWh'; ex.className = 'i-val blue'; }
       if (tsEl2) tsEl2.textContent = ts;
-    } catch(e) {}
+      if (st) st.innerHTML = '<span class="bms-live"><span class="live-dot"></span>LIVE</span>';
+    } catch(e) {
+      markMissing(addr);
+    }
   }
 }
 
