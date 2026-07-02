@@ -18,7 +18,7 @@
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1.25rem;">
 
 {% for d in devices %}
-<div class="bms-card {% if !d.connected %}" style="opacity:0.85{% endif %}" id="et112-card-{{ d.address }}">
+<div class="bms-card" style="{% if !d.connected %}opacity:0.85;{% endif %}" id="et112-card-{{ d.address }}">
 
   {# Header #}
   <div class="bms-hdr {% if !d.connected %}bms-hdr-offline{% else if d.service_type == "pvinverter" %}bms-hdr-pv{% else if d.service_type == "heatpump" %}bms-hdr-heat{% endif %}">
@@ -101,12 +101,14 @@ async function updateAll() {
     const im = document.getElementById(`imp-${addr}`);
     const ex = document.getElementById(`exp-${addr}`);
     const st = document.getElementById(`state-${addr}`);
+    const card = document.getElementById(`et112-card-${addr}`);
     if (pw) { pw.textContent = NA; pw.className = 'kpi4-val muted'; }
     if (vv) { vv.textContent = NA; vv.className = 'kpi4-val muted'; }
     if (iv) { iv.textContent = NA; iv.className = 'kpi4-val muted'; }
     if (im) { im.textContent = NA; im.className = 'i-val muted'; }
     if (ex) { ex.textContent = NA; ex.className = 'i-val muted'; }
     if (st) st.innerHTML = '<span style="font-size:0.62rem;color:var(--muted2)">○ Données absentes</span>';
+    if (card) card.style.opacity = '0.85';
   }
 
   for (const addr of ET112_ADDRS) {
@@ -122,6 +124,7 @@ async function updateAll() {
       const ex = document.getElementById(`exp-${addr}`);
       const tsEl2 = document.getElementById(`ts-${addr}`);
       const st = document.getElementById(`state-${addr}`);
+      const card = document.getElementById(`et112-card-${addr}`);
 
       if (pw) { pw.textContent = d.power_w.toFixed(1) + ' W'; pw.className = 'kpi4-val ' + (d.power_w >= 0 ? 'chg' : 'dch'); }
       if (vv) { vv.textContent = d.voltage_v.toFixed(1) + ' V'; vv.className = 'kpi4-val'; }
@@ -130,6 +133,7 @@ async function updateAll() {
       if (ex) { ex.textContent = (d.energy_export_wh / 1000).toFixed(2) + ' kWh'; ex.className = 'i-val blue'; }
       if (tsEl2) tsEl2.textContent = ts;
       if (st) st.innerHTML = '<span class="bms-live"><span class="live-dot"></span>LIVE</span>';
+      if (card) card.style.opacity = '1';
     } catch(e) {
       markMissing(addr);
     }
