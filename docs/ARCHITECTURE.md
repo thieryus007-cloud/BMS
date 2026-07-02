@@ -48,6 +48,7 @@ transverse**. Tous les documents vivent dans `docs/`.
 | [mqtt-mosquitto.md](./mqtt-mosquitto.md) | Architecture MQTT : Mosquitto natif systemd, topics `santuario/*`, bridge `pi5-nanopi`, anti-boucle, migration Docker → natif. |
 | [alertes.md](./alertes.md) | **AlertEngine** natif Rust : règles + hysteresis, persistance SQLite, notifications Telegram/SMTP, API alertes. |
 | [integration-materiel.md](./integration-materiel.md) | Inventaire RS485/D-Bus, **ajout d'un BMS Daly**, ATS CHINT, ET112, PRALRAN, Tasmota/Shelly. |
+| [integration-toshiba-shorai-esphome.md](./integration-toshiba-shorai-esphome.md) | **Plan d'intégration Toshiba SHORAI EDGE** (×3) : ESP32 + ESPHome `toshiba_suzumi` sur CN22 → MQTT Mosquitto → module EM `logic/toshiba_ac`. BOM, câblage, phases. |
 | [diagnostic-depannage.md](./diagnostic-depannage.md) | Dépannage transverse, `netdiag` réseau, debug onduleur/SmartShunt, investigation memory-leak (en cours). |
 
 ### Hors `docs/`
