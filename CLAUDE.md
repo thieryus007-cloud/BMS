@@ -424,5 +424,6 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | MQTT / Mosquitto (topics, bridge, anti-boucle, migration Docker→natif) | `docs/mqtt-mosquitto.md` |
 | Alertes (AlertEngine natif, règles, hysteresis, notifications) | `docs/alertes.md` |
 | Ajouter un appareil / BMS Daly, ATS CHINT, ET112, PRALRAN | `docs/integration-materiel.md` |
+| **Intégrer les clim Toshiba SHORAI EDGE** (ESP32 + ESPHome sur CN22 → MQTT → module EM `logic/toshiba_ac`) | `docs/integration-toshiba-shorai-esphome.md` |
 | Dépannage, netdiag réseau, debug onduleur/SmartShunt, memory-leak | `docs/diagnostic-depannage.md` |
 | **Audit robustesse 2026-06** — 18 axes (§3-§18 implémentés ; §1-§2 sécurité en attente d'action utilisateur) | `docs/audit-robustesse-2026-06.md` |
