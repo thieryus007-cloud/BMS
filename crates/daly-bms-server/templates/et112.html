@@ -21,8 +21,7 @@
 
 {# Le node reste complet même sans données : « --- » à la place des valeurs. #}
 
-{% if !connected %}
-<div class="card" style="margin-bottom:1.25rem;border-left:3px solid var(--muted2);">
+<div class="card" id="missing-data-banner" style="margin-bottom:1.25rem;border-left:3px solid var(--muted2);{% if connected %}display:none;{% endif %}">
   <div style="display:flex;align-items:center;gap:0.6rem;padding:0.3rem 0.1rem;">
     <span style="font-size:1.3rem">○</span>
     <div>
@@ -31,7 +30,6 @@
     </div>
   </div>
 </div>
-{% endif %}
 
 {# ─── Métriques instantanées ──────────────────────────────────────────── #}
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:0.85rem;margin-bottom:1.25rem;">
@@ -108,15 +106,12 @@
     <span class="chart-hdr-title">Historique puissance</span>
     <span class="chart-hdr-meta">Dernières mesures — rafraîchi toutes les 5s</span>
   </div>
-  {% if connected %}
-  <div id="chart-power" style="height:260px;"></div>
-  {% else %}
-  <div class="empty-state" style="height:260px;display:flex;flex-direction:column;justify-content:center;">
+  <div id="chart-power" style="height:260px;{% if !connected %}display:none;{% endif %}"></div>
+  <div id="chart-empty" class="empty-state" style="height:260px;flex-direction:column;justify-content:center;display:{% if connected %}none{% else %}flex{% endif %};">
     <div class="empty-icon">○</div>
     <div class="empty-title">Données absentes</div>
     <div class="empty-sub">Aucun historique tant qu'aucune donnée n'est reçue sur <code>{{ addr_hex }}</code>.</div>
   </div>
-  {% endif %}
 </div>
 
 {% endblock %}
@@ -165,6 +160,23 @@ if (chartDom) {
 }
 
 const set = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+const setVal = (id, txt, color) => { const el = document.getElementById(id); if (el) { el.textContent = txt; el.style.color = color; } };
+
+// Bascule l'affichage graphique ↔ placeholder « Données absentes ».
+function showChart(hasData) {
+  const banner  = document.getElementById('missing-data-banner');
+  const chartEl = document.getElementById('chart-power');
+  const emptyEl = document.getElementById('chart-empty');
+  if (banner)  banner.style.display  = hasData ? 'none' : 'block';
+  if (emptyEl) emptyEl.style.display = hasData ? 'none' : 'flex';
+  if (chartEl) {
+    const wasHidden = chartEl.style.display === 'none';
+    chartEl.style.display = hasData ? 'block' : 'none';
+    // ECharts initialisé sur un conteneur masqué (0×0) : recalculer les
+    // dimensions au moment où il redevient visible.
+    if (hasData && wasHidden && myChart) myChart.resize();
+  }
+}
 
 // Affiche « --- » partout quand aucune donnée n'est reçue.
 function markMissing() {
@@ -172,6 +184,7 @@ function markMissing() {
     .forEach(id => { const el = document.getElementById(id); if (el) { el.textContent = '---'; el.style.color = 'var(--muted)'; } });
   const badge = document.getElementById('conn-badge');
   if (badge) { badge.textContent = '○ Données absentes'; badge.className = 'badge muted'; }
+  showChart(false);
 }
 
 async function update() {
@@ -179,19 +192,18 @@ async function update() {
     const resp = await fetch(`/api/v1/et112/${ADDR}/status`);
     if (!resp.ok) { markMissing(); return; }
     const d = await resp.json();
-    set('val-power',    d.power_w.toFixed(1) + ' W');
-    set('val-voltage',  d.voltage_v.toFixed(1) + ' V');
-    set('val-current',  d.current_a.toFixed(2) + ' A');
-    set('val-pf',       d.power_factor.toFixed(3));
-    set('val-freq',     d.frequency_hz.toFixed(2) + ' Hz');
-    set('val-apparent', d.apparent_power_va.toFixed(1) + ' VA');
-    set('val-import',   (d.energy_import_wh / 1000).toFixed(3) + ' kWh');
-    set('val-export',   (d.energy_export_wh / 1000).toFixed(3) + ' kWh');
+    setVal('val-power',    d.power_w.toFixed(1) + ' W', d.power_w >= 0 ? 'var(--green)' : 'var(--accent)');
+    setVal('val-voltage',  d.voltage_v.toFixed(1) + ' V', 'var(--accent)');
+    setVal('val-current',  d.current_a.toFixed(2) + ' A', 'var(--orange)');
+    setVal('val-pf',       d.power_factor.toFixed(3), 'var(--text2)');
+    setVal('val-freq',     d.frequency_hz.toFixed(2) + ' Hz', 'var(--text)');
+    setVal('val-apparent', d.apparent_power_va.toFixed(1) + ' VA', 'var(--muted)');
+    setVal('val-import',   (d.energy_import_wh / 1000).toFixed(3) + ' kWh', 'var(--green)');
+    setVal('val-export',   (d.energy_export_wh / 1000).toFixed(3) + ' kWh', 'var(--accent)');
     set('last-ts',      new Date().toLocaleTimeString('fr-FR'));
-    const powEl = document.getElementById('val-power');
-    if (powEl) powEl.style.color = d.power_w >= 0 ? 'var(--green)' : 'var(--accent)';
     const badge = document.getElementById('conn-badge');
     if (badge) { badge.textContent = '● Connecté'; badge.className = 'badge ok'; }
+    showChart(true);
   } catch(e) { markMissing(); }
 }
 
