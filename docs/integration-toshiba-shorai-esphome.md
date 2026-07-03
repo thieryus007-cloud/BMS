@@ -1,11 +1,16 @@
 # Intégration Toshiba SHORAI EDGE R32 — ESP32 + ESPHome (CN22 → MQTT → Mosquitto Pi5)
 
-> **Statut** : plan de mise en œuvre (non déployé).
-> **Portée** : 3 unités intérieures Toshiba SHORAI EDGE R32 Wi‑Fi, contrôle **local**
-> (sans cloud Toshiba), via un ESP32 par unité branché sur le connecteur **CN22**
-> et publiant en **MQTT** vers le broker Mosquitto du Pi5.
+> **Statut** : plan de mise en œuvre (non déployé — système livré, pas encore installé).
+> **Topologie** : **multi‑split** = **1 unité extérieure** (compresseur) + **3 unités
+> intérieures**. Contrôle **local** (sans cloud Toshiba) via **un ESP32 par unité
+> intérieure** branché sur le connecteur **CN22**, publiant en **MQTT** vers le broker
+> Mosquitto du Pi5.
 > **Voie retenue** : composant ESPHome `pedobry/esphome_toshiba_suzumi` (couvre
 > explicitement le Shorai Edge). CN22 réputé facilement accessible sur ces unités.
+> **Mesure puissance/énergie** : **PAS de capteur sur les ESP32** (ni ACS712, ni PZEM,
+> ni pince). Sur un multi‑split la conso est quasi‑totale à l'unité extérieure → elle
+> est mesurée par le **switch Tongou (Tasmota) placé sur l'alim de l'unité extérieure**
+> — voir §7. Les ESP32 ne font que le **contrôle/télémétrie climatique**.
 >
 > Contexte / comparatif des voies d'intégration (cloud KaSroka vs local ESP32 vs IR) :
 > voir la discussion projet. Ce document ne traite **que** la voie ESP32/ESPHome locale.
@@ -28,26 +33,27 @@ ces topics (télémétrie → metrics-store/Grafana) et peut émettre des comman
 ### Schéma de flux
 
 ```
-┌───────────────── Unité intérieure Toshiba SHORAI EDGE (×3) ─────────────────┐
-│  Carte de commande ── CN22 (JST PA 2.0, 5 pins, +5V/GND/TX/RX) ── AB bus     │
-└───────────────────────────┬─────────────────────────────────────────────────┘
-                            │  UART 5V, 9600 8E1
-                    ┌───────▼────────┐
-                    │ Level shifter  │ 5V ↔ 3.3V (canaux TX + RX)
-                    └───────┬────────┘
-                    ┌───────▼────────┐   WiFi StarTh
-                    │ ESP32-WROOM-32 │  (ESPHome + toshiba_suzumi)
-                    │  GPIO33=TX     │──────────────┐
-                    │  GPIO32=RX     │              │ MQTT (client ESPHome)
-                    └────────────────┘              ▼
-                                        Mosquitto Pi5 192.168.1.141:1883
-                                        topic_prefix: santuario/toshiba/<zone>
-                                                       │
-                                        ┌──────────────┼───────────────┐
-                                        ▼              ▼               ▼
-                                 energy-manager   (Grafana via     (optionnel)
-                                 logic/toshiba_ac  daly-bms-server  VRM Victron
-                                 (lecture + cmd)   → redb)          heatpump.mqtt_n
+CONTRÔLE CLIMATIQUE (×3 unités intérieures)      MESURE CONSO (×1 unité extérieure)
+┌──────── Unité intérieure SHORAI EDGE (×3) ─┐   ┌──── Unité extérieure (compresseur) ────┐
+│ Carte cmd ─ CN22 (JST PA 2.0, +5V/GND/TX/RX)│   │ Alim secteur ── Switch Tongou (Tasmota) │
+└───────────────┬────────────────────────────┘   │   metering V/I/P/kWh ── relais on/off    │
+                │  UART 5V, 9600 8E1               └───────────────┬─────────────────────────┘
+        ┌───────▼────────┐                                         │ MQTT tele/{id}/SENSOR
+        │ Level shifter  │ 5V ↔ 3.3V                               │ (power, today kWh…)
+        └───────┬────────┘                                         │
+        ┌───────▼────────┐   WiFi StarTh                           │
+        │ ESP32-WROOM-32 │  (ESPHome + toshiba_suzumi)             │
+        │ GPIO33=TX/32=RX│──────────┐ MQTT (climate)               │
+        └────────────────┘          ▼                              ▼
+                            Mosquitto Pi5 192.168.1.141:1883 ◄──────┘
+                            santuario/toshiba/<zone>  +  tele/<tongou_ac>/SENSOR
+                                           │
+                            ┌──────────────┼───────────────┐
+                            ▼              ▼               ▼
+                     energy-manager   Grafana via      (optionnel)
+                     logic/toshiba_ac daly-bms-server  VRM Victron
+                     + logic/tasmota  → redb           heatpump.mqtt_n
+                     (clim ↔ conso)
 ```
 
 > ⚠️ **Ne PAS bridger** ces topics vers le NanoPi. Le bridge Mosquitto ne relaie
@@ -336,8 +342,9 @@ mode_change_min_secs  = 300     # anti‑rebattement entre 2 commandes
 
 - **#16 supervision** : boucles longue durée via `spawn_critical` ; tâches one‑shot/timer
   **jamais** en `spawn_critical`.
-- **#13 mesure prioritaire** : température ambiante et puissance viennent de l'unité
-  (via ESP) — **ne pas** les recalculer/écraser.
+- **#13 mesure prioritaire** : température ambiante/consigne viennent de l'unité (via
+  ESP/CN22) ; **puissance & énergie viennent du Tongou‑Tasmota** (§7.1) — **ne jamais**
+  recalculer/écraser ces mesures firmware.
 - **#15 CI** : `clippy -D warnings`, tests des règles pures, cross‑build aarch64/armv7.
 - **Robustesse source morte** (audit §18) : publier un
   `em_source_last_update_age_seconds{source="toshiba_salon"}` (âge > 5× l'intervalle
@@ -345,17 +352,68 @@ mode_change_min_secs  = 300     # anti‑rebattement entre 2 commandes
 
 ---
 
-## 7. Métriques & Grafana (optionnel)
+## 7. Mesure puissance & énergie, métriques & Grafana
 
-- Écriture metrics‑store via daly‑bms‑server (déjà en place pour `em/*`).
+### 7.1 Mesure conso via le switch Tongou (Tasmota) existant — PAS de PZEM
+
+**Décision (topologie multi‑split)** : la consommation étant quasi‑totale à l'unité
+extérieure (compresseur + ventilo ext.), un **seul point de mesure sur l'alim de
+l'unité extérieure** capture **tout le système AC** (compresseur + ventilo + les 3
+unités intérieures, celles‑ci étant alimentées depuis l'extérieure sur un multi‑split).
+Ce point de mesure est le **switch Tongou** placé sur l'alim de l'unité extérieure.
+→ **Aucun capteur de courant sur les ESP32** (pas d'ACS712, pas de PZEM, pas de pince).
+
+> **Fait projet à retenir** : **TOUS les switches Tongou actuellement en place sont du
+> MÊME modèle** — des disjoncteurs/switchs intelligents **flashés Tasmota** qui
+> **mesurent TOUT** : tension, courant, **puissance (W)**, **énergie (kWh)**, +
+> protections. Ils sont tous visibles sur la **page Tasmota du dashboard**
+> (`/dashboard/tasmota`, API `GET /api/v1/tasmota`). Le Tongou destiné à l'unité
+> extérieure est **le même modèle** → il fournit nativement la puissance instantanée
+> et l'énergie du jour, sans matériel supplémentaire.
+
+**Le pipeline ingère déjà ces données.** `logic/tasmota` parse la télémétrie
+`tele/{id}/SENSOR` d'un Tongou‑Tasmota et remonte exactement les deux besoins :
+
+```rust
+// crates/energy-manager/src/logic/tasmota/mod.rs — struct TasmotaEnergy
+power:   Option<f64>,   // → puissance instantanée (W)
+today:   Option<f64>,   // → énergie consommée DANS LA JOURNÉE (kWh)
+voltage, current, total // + tension, courant, cumul total
+```
+
+Conforme à la **règle #13** : le Tongou fournit des **W réels mesurés** (pas un
+`I × V` recalculé).
+
+**Évolution de code nécessaire (petite)** : le module `logic/tasmota` ne gère
+aujourd'hui **qu'un seul** appareil (le chauffe‑eau `tasmota_waterheater_id`,
+p. ex. `tongou_3BC764`). Pour ingérer aussi le Tongou de la clim, le **généraliser à
+plusieurs devices** (liste de `{id, role}` en config) — ou ajouter un handler dédié —
+alimentant les champs `EnergyState` et les séries `toshiba_ac_power_w` /
+`toshiba_ac_energy_today_kwh`. Pattern déjà en place, changement trivial.
+
+**À confirmer à l'installation** :
+- L'alim secteur arrive bien **sur l'unité extérieure** et les intérieures en sont
+  alimentées (cas standard multi‑split) — sinon on manque les ventilos intérieurs (~négligeable).
+- **Calibre** du Tongou suffisant pour le courant de l'unité extérieure (démarrage inclus).
+- **ID Tasmota** du nouveau Tongou (topic `tele/<id>/SENSOR`) → à renseigner en config.
+
+*Plan B (si ce Tongou n'était PAS à comptage / pas Tasmota)* : un **PZEM‑004T v3.0
+unique** sur l'alim de l'unité extérieure, lu par un ESP32 (2ᵉ UART) — voir discussion
+projet. Non nécessaire tant que le Tongou reste le modèle metering standard.
+
+### 7.2 Séries & Grafana
+
+- Écriture metrics‑store via daly‑bms‑server (déjà en place pour `em/*` et Tasmota).
 - Séries proposées : `toshiba_ac_mode`, `toshiba_ac_current_temp_c`,
-  `toshiba_ac_target_temp_c`, `toshiba_ac_power_w{zone=…}`, `..._compressor_pct`.
+  `toshiba_ac_target_temp_c`, `toshiba_ac_power_w` (Tongou),
+  `toshiba_ac_energy_today_kwh` (Tongou), `..._compressor_pct` (si télémétrie unité).
 - Dashboard Grafana dédié (format **provisioning**, datasource UID `daly-metrics`,
-  cf. règle #14) : état des 3 unités, conso, corrélation surplus PV / marche clim.
+  cf. règle #14) : mode/temp des 3 pièces, **puissance & conso du jour du système**,
+  corrélation surplus PV / marche clim.
 
-### VRM Victron (optionnel, avancé)
+### 7.3 VRM Victron (optionnel, avancé)
 
-Exposer chaque clim sur VRM via `santuario/heatpump/{n}/venus` →
+Exposer les clim sur VRM via `santuario/heatpump/{n}/venus` →
 `com.victronenergy.heatpump.mqtt_{n}` (bridge dbus‑mqtt‑venus). **Instances D‑Bus
 libres uniquement** — 1 (chauffe‑eau LG), 8/9 (ET112), 151–153 (BMS), 20/30‑32/40/60‑65
 sont pris. Utiliser p. ex. **heatpump.mqtt_2/3/4** (instances VRM ex. 70/71/72). À
@@ -373,6 +431,7 @@ traiter en dernier, une fois la boucle MQTT locale validée.
 | **3** | Install **unité #1** (dans l'unité intérieure) | Secteur coupé → câblage CN22 → boîtier → WiFi/MQTT stables 24 h, pas de brownout |
 | **4** | Réplication **×3** | 3 nœuds `salon/chambre/bureau`, IP statiques, topics distincts |
 | **5** | EM **lecture seule** | Module `logic/toshiba_ac` (télémétrie) ; séries visibles en base ; `--check-config` OK ; CI verte |
+| **5b** | **Mesure conso Tongou** | Tongou (Tasmota) posé sur alim unité extérieure ; `tele/<id>/SENSOR` reçu ; `logic/tasmota` multi‑device ingère `power`+`today` → `toshiba_ac_power_w`/`_energy_today_kwh` ; visible sur `/dashboard/tasmota` |
 | **6** | EM **contrôle** (opt‑in) | `rules.rs` + tests ; `control_enabled=true` ; débounce validé |
 | **7** | Grafana (+ VRM opt.) | Dashboard provisionné ; (option) 3 heatpump D‑Bus sur VRM |
 
@@ -395,19 +454,33 @@ connectée ・ [ ] level shifter HV=5V / LV=3V3 ・ [ ] pas de brownout au boot 
 (`/api/v1/redb/series`) ・ [ ] `em_source_last_update_age_seconds` borné ・ [ ]
 `clippy -D warnings` + tests verts.
 
+**Mesure conso (Tongou)** : [ ] Tongou de l'unité extérieure = même modèle metering
+(V/I/P/kWh) ・ [ ] flashé Tasmota, `tele/<id>/SENSOR` publié ・ [ ] visible sur
+`/dashboard/tasmota` ・ [ ] calibre ≥ courant unité extérieure ・ [ ] `power` et
+`today` (kWh) non nuls sous charge.
+
 ---
 
 ## 10. Points ouverts (décisions à trancher)
 
+**Déjà tranché** :
+- **Topologie** = multi‑split (1 extérieure / 3 intérieures).
+- **Mesure puissance/énergie** = via le **switch Tongou (Tasmota) de l'unité
+  extérieure** (tous les Tongou en place sont le même modèle metering) → **pas de PZEM
+  ni de capteur sur les ESP32** (§7.1). Reste à confirmer à l'install : calibre + ID
+  Tasmota du Tongou + alim des intérieures depuis l'extérieure.
+
+**À trancher** :
 1. **Zones/nommage** des 3 unités (`salon/chambre/bureau` proposés).
 2. **Schéma de topics final** : conserver le schéma ESPHome/HA natif, ou remapper via
    lambdas ESPHome vers `santuario/em/toshiba_ac/<n>/...` (plus homogène avec `em/*`) —
    **à figer après observation du 1er boot** (§5.2).
-3. **Alimentation** : +5V CN22 (défaut) vs alim 5V externe (si instabilité).
+3. **Alimentation ESP32** : +5V CN22 (défaut) vs alim 5V externe (si instabilité).
 4. **Stratégie énergie** : effacement sur fréquence AC (comme DEYE) et/ou marche sur
    surplus PV ? seuils SOC / surplus / plages horaires ?
-5. **Exposition VRM** (heatpump.mqtt_2/3/4) : oui/non.
-6. **Garantie** constructeur vs intervention CN22 (matériel neuf).
+5. **`logic/tasmota` multi‑device** : liste de devices en config vs handler dédié (§7.1).
+6. **Exposition VRM** (heatpump.mqtt_2/3/4) : oui/non.
+7. **Garantie** constructeur vs intervention CN22 (matériel neuf).
 
 ---
 
@@ -418,4 +491,6 @@ connectée ・ [ ] level shifter HV=5V / LV=3V3 ・ [ ] pas de brownout au boot 
 - Pattern module EM (contrôle + télémétrie) : `crates/energy-manager/src/logic/water_heater/`
 - Décision Rust pure/stateless : `crates/energy-manager/src/logic/deye_command/rules.rs`
 - Config EM : `crates/energy-manager/src/config.rs`, section `[energy_manager]` de `Config.toml`
+- **Mesure Tongou/Tasmota** : `crates/energy-manager/src/logic/tasmota/mod.rs` (parse `power`/`today`),
+  page dashboard `/dashboard/tasmota` (API `GET /api/v1/tasmota`) — tous les Tongou = même modèle metering
 - Conventions Grafana provisioning : `docs/grafana-dashboards.md`, règle projet #14
