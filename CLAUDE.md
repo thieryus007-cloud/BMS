@@ -245,6 +245,14 @@ com.victronenergy.meteo                   Irradiance PRALRAN + TodaysYield (inst
 com.victronenergy.pvinverter.cgwacs_ttyUSB0_mb2   Onduleur PV Victron direct
 ```
 
+> **Switches Tongou** : **tous du MÊME modèle** — disjoncteurs/switchs intelligents
+> **flashés Tasmota** qui **mesurent TOUT** (tension, courant, **puissance W**, **énergie
+> kWh**, + protections). Visibles sur la **page Tasmota** du dashboard
+> (`/dashboard/tasmota`, API `GET /api/v1/tasmota`) ; télémétrie `tele/<id>/SENSOR`
+> parsée par `energy-manager` `logic/tasmota` (`power`/`today`). → Pour mesurer la conso
+> d'un appareil (ex. clim Toshiba multi‑split sur l'unité extérieure), poser un Tongou
+> sur son alim suffit — pas de capteur additionnel. Cf. `docs/integration-toshiba-shorai-esphome.md` §7.
+
 Diagnostic rapide (NanoPi) :
 ```bash
 ssh root@192.168.1.120 "dbus -y | grep victronenergy"
