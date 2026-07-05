@@ -47,7 +47,7 @@ Crate : **`firmware/toshiba-suzumi-rs/`** — **détaché** du workspace Pi5 (`[
 vide → zéro impact sur le build/CI daly-bms). Tester : 
 `cargo test --manifest-path firmware/toshiba-suzumi-rs/Cargo.toml`.
 
-**34 tests host verts** au total (clippy `-D warnings` + rustfmt propres).
+**38 tests host verts** au total (clippy `-D warnings` + rustfmt propres).
 
 | Composant | Fichier | État |
 |-----------|---------|------|
@@ -57,6 +57,7 @@ vide → zéro impact sur le build/CI daly-bms). Tester :
 | Accumulateur de trames RX incrémental (`validate_message_`) | `src/framing.rs` | ✅ **fait** (5 tests) |
 | Machine à états + file/pacing + watchdog + **simulateur d'unité** | `src/machine.rs` | ✅ **fait** (5 tests, dont handshake→online end-to-end) |
 | Codec MQTT applicatif (`ToshibaState`→JSON ; JSON→`Command`→`apply_command`) | `src/mqtt_payload.rs` | ✅ **fait** (8 tests, transport-agnostique) |
+| Config nœud + dérivation topics + validation | `src/config.rs` | ✅ **fait** (4 tests) |
 | UART ESP-IDF (init 9600 8E1, lecture/écriture octets) | `src/uart.rs` | ⏳ **TODO (attend matériel)** |
 | WiFi + MQTT transport (`santuario/toshiba/<zone>`) | `src/{wifi,mqtt}.rs` | ⏳ TODO (matériel) |
 | `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO (matériel) |
@@ -66,18 +67,20 @@ vide → zéro impact sur le build/CI daly-bms). Tester :
 Faits (session 2026-07-05) : ✅ state machine (`machine.rs`), ✅ accumulateur RX
 (`framing.rs`), ✅ agrégat d'état (`state.rs`), ✅ simulateur d'unité (test end-to-end).
 
-Fait aussi (session 2026-07-05) : ✅ codec MQTT applicatif (`mqtt_payload.rs`) +
-`Client::apply_command`.
+Fait aussi (session 2026-07-05) : ✅ codec MQTT (`mqtt_payload.rs`) + `apply_command`,
+✅ config nœud + topics (`config.rs`). **Schéma de topics FIGÉ** :
+`santuario/toshiba/<zone>/{state,command,availability}` (la voie Rust définit ses
+propres topics → la contrainte ESPHome « observer au 1er boot » ne s'applique plus).
 
-Reste **faisable sans matériel** :
-1. **Config** (`config.rs`) : zones/topics/pins/creds — struct + parsing (TOML/NVS),
-   host-testable. **Figer le schéma de sous-topics** (aligné `logic/toshiba_ac`, §5.2 de
-   l'autre doc) reste à trancher — idéalement confirmé au 1er boot (pas de matériel).
+➡️ **Toutes les couches purement logicielles sont faites.** Ce qui reste **nécessite
+le matériel ESP32** :
+1. `uart.rs` (ESP-IDF, 9600 8E1, lecture/écriture octets) — branche `on_rx_byte`/`poll_tx`.
+2. `wifi.rs` + `mqtt.rs` (transport esp-idf-svc) + `main.rs` (feature `esp32`).
+3. Tests au banc : handshake réel, analyseur logique, commandes bout-en-bout.
 
-Puis **à réception du matériel** :
-2. `uart.rs` (ESP-IDF, 9600 8E1, lecture/écriture octets) — branche `on_rx_byte`/`poll_tx`.
-3. `wifi.rs` + `mqtt.rs` (transport esp-idf-svc) + `main.rs` (feature `esp32`).
-4. Tests au banc : handshake réel, analyseur logique, commandes bout-en-bout.
+> À la réception du matériel : lire `README.md` du crate + ce §0, puis ajouter la
+> feature `esp32` (deps esp-idf-svc/hal/sys) et les 4 fichiers ci-dessus qui **ne font
+> que relayer** vers `Client`. Aucune logique protocolaire nouvelle à écrire.
 
 ### 0.5 Journal des sessions
 
@@ -96,6 +99,11 @@ Puis **à réception du matériel** :
   `ToshibaState` → JSON télémétrie ; JSON de commande → `Vec<Command>` → `Client::
   apply_command`), mappings chaîne↔enum stables. Ajout dep `serde`/`serde_json` (std,
   OK sur ESP-IDF). Test end-to-end JSON→unité. **34 tests verts**, clippy + fmt OK.
+- **2026-07-05 (suite 3)** — `config.rs` : `NodeConfig` (zone/wifi/mqtt/pins) +
+  validation + dérivation des topics ; **schéma de topics figé**
+  `santuario/toshiba/<zone>/{state,command,availability}`. Ajout `README.md` du crate.
+  **38 tests verts**. Toutes les couches logicielles pures sont terminées ; le reste
+  (uart/wifi/mqtt/main) attend le matériel.
 
 ---
 
@@ -179,7 +187,8 @@ Pi5). Légende : ✅ fait · ⏳ TODO (attend le matériel).
 
 ```
 firmware/toshiba-suzumi-rs/
-├── Cargo.toml                   # ✅ crate détaché ([workspace] vide), lib pure, 0 dép.
+├── Cargo.toml                   # ✅ crate détaché ([workspace] vide) ; deps serde/serde_json
+├── README.md                    # ✅ carte des modules + comment tester (host)
 ├── .gitignore                   # ✅ ignore /target
 ├── src/
 │   ├── lib.rs                   # ✅ expose protocol / state / framing / machine
@@ -190,7 +199,7 @@ firmware/toshiba-suzumi-rs/
 │   ├── machine.rs               # ✅ Client : handshake, pacing, file, watchdog
 │   │                            #    + simulateur d'unité (test end-to-end) — 5 tests
 │   ├── mqtt_payload.rs          # ✅ état→JSON ; JSON→Command→apply_command — 8 tests
-│   ├── config.rs                # ⏳ Configuration (zones/topics/pins ; NVS)
+│   ├── config.rs                # ✅ NodeConfig + topics santuario/toshiba/<zone> — 4 tests
 │   ├── uart.rs                  # ⏳ UART ESP-IDF (9600 8E1) → on_rx_byte / poll_tx
 │   ├── wifi.rs                  # ⏳ WiFi station (connexion, reconnexion)
 │   ├── mqtt.rs                  # ⏳ Transport MQTT (santuario/toshiba/<zone>)

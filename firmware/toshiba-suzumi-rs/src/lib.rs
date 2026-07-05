@@ -8,6 +8,7 @@
 //! Référence de spécification : `docs/toshiba-suzumi-rs-plan.md` §6/§8, vérifiée
 //! contre `pedobry/esphome_toshiba_suzumi` et recoupée avec `o0Zz/climate-uart`.
 
+pub mod config;
 pub mod framing;
 pub mod machine;
 pub mod mqtt_payload;
