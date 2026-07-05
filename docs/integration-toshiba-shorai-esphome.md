@@ -1,12 +1,20 @@
 # Intégration Toshiba SHORAI EDGE R32 — ESP32 + ESPHome (CN22 → MQTT → Mosquitto Pi5)
 
+> **🚫 VOIE NON RETENUE (décision juillet 2026).** Le runtime ESP32 retenu est un
+> **firmware Rust natif**, PAS ESPHome → **voir `docs/toshiba-suzumi-rs-plan.md`**
+> (référence d'implémentation du projet). **Ce document reste utile en RÉFÉRENCE** pour
+> ses parties **indépendantes du runtime**, toujours valables et réutilisées par la voie
+> Rust : **§1 BOM, §2 brochage CN22, §3 câblage/sécurité, §5 schéma de topics MQTT
+> `santuario/toshiba/<zone>`, §6 module Pi5 `logic/toshiba_ac`, §7 mesure conso
+> Tongou/Tasmota**. **Ignorer §4 (YAML ESPHome)** — remplacé par le firmware Rust.
+>
 > **Statut** : plan de mise en œuvre (non déployé — système livré, pas encore installé).
 > **Topologie** : **multi‑split** = **1 unité extérieure** (compresseur) + **3 unités
 > intérieures**. Contrôle **local** (sans cloud Toshiba) via **un ESP32 par unité
 > intérieure** branché sur le connecteur **CN22**, publiant en **MQTT** vers le broker
 > Mosquitto du Pi5.
-> **Voie retenue** : composant ESPHome `pedobry/esphome_toshiba_suzumi` (couvre
-> explicitement le Shorai Edge). CN22 réputé facilement accessible sur ces unités.
+> **Protocole série** : identique quel que soit le runtime (ESPHome ou Rust) — spec
+> vérifiée dans `docs/toshiba-suzumi-rs-plan.md` §6. Le Shorai Edge est couvert.
 > **Mesure puissance/énergie** : **PAS de capteur sur les ESP32** (ni ACS712, ni PZEM,
 > ni pince). Sur un multi‑split la conso est quasi‑totale à l'unité extérieure → elle
 > est mesurée par le **switch Tongou (Tasmota) placé sur l'alim de l'unité extérieure**
