@@ -47,24 +47,35 @@ Crate : **`firmware/toshiba-suzumi-rs/`** — **détaché** du workspace Pi5 (`[
 vide → zéro impact sur le build/CI daly-bms). Tester : 
 `cargo test --manifest-path firmware/toshiba-suzumi-rs/Cargo.toml`.
 
+**25 tests host verts** au total (clippy `-D warnings` + rustfmt propres).
+
 | Composant | Fichier | État |
 |-----------|---------|------|
-| Couche protocole pure (checksum, enums, trames, validation, parsing) | `src/protocol.rs` | ✅ **fait + 11 tests host verts** (clippy `-D warnings` propre) |
+| Couche protocole pure (checksum, enums, trames, validation, parsing, ODU/IDU) | `src/protocol.rs` | ✅ **fait** (11 tests) |
 | Handshake + timings + bornes température (constantes) | `src/protocol.rs` | ✅ fait |
-| Diagnostics ODU/IDU (parsing) | `src/protocol.rs` | ✅ fait |
-| UART ESP-IDF (init 9600 8E1, framing incrémental) | `src/uart.rs` | ⏳ **TODO (attend matériel)** |
-| WiFi + MQTT (`santuario/toshiba/<zone>`) | `src/{wifi,mqtt}.rs` | ⏳ TODO |
-| Machine à états (handshake→online→retry) | `src/state_machine.rs` | ⏳ TODO |
-| `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO |
+| Agrégat d'état (`ToshibaState`, applique les `Field`) | `src/state.rs` | ✅ **fait** (4 tests) |
+| Accumulateur de trames RX incrémental (`validate_message_`) | `src/framing.rs` | ✅ **fait** (5 tests) |
+| Machine à états + file/pacing + watchdog + **simulateur d'unité** | `src/machine.rs` | ✅ **fait** (5 tests, dont handshake→online end-to-end) |
+| Sérialisation MQTT (`ToshibaState` ↔ JSON, commande ↔ `set_*`) | `src/mqtt_payload.rs` | ⏳ TODO (host-testable) |
+| UART ESP-IDF (init 9600 8E1, lecture/écriture octets) | `src/uart.rs` | ⏳ **TODO (attend matériel)** |
+| WiFi + MQTT transport (`santuario/toshiba/<zone>`) | `src/{wifi,mqtt}.rs` | ⏳ TODO (matériel) |
+| `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO (matériel) |
 
 ### 0.4 Prochaines étapes (ordre conseillé, sans matériel)
 
-1. **State machine pure** (`state_machine.rs`) : transitions + file de commandes,
-   **testable sur host** (pas d'I/O) — pilote la couche protocole.
-2. **Assembleur de trames incrémental** (accumulateur `rx` façon `validate_message_`),
-   testable host avec des trames capturées.
-3. **Simulateur d'unité** (host) pour rejouer des séquences handshake/état en test.
-4. *(à réception matériel)* UART ESP-IDF, WiFi/MQTT, `main.rs`, tests au banc.
+Faits (session 2026-07-05) : ✅ state machine (`machine.rs`), ✅ accumulateur RX
+(`framing.rs`), ✅ agrégat d'état (`state.rs`), ✅ simulateur d'unité (test end-to-end).
+
+Reste **faisable sans matériel** :
+1. **Couche MQTT applicative** (`mqtt_payload.rs`, host-testable) : `ToshibaState` →
+   JSON d'état ; parsing d'un JSON de commande → appels `Client::set_*`. Figer le schéma
+   de sous-topics (aligné `logic/toshiba_ac`, cf. §5.2 de l'autre doc).
+2. **Config** (zones/topics/pins) : struct + parsing (TOML/NVS), host-testable.
+
+Puis **à réception du matériel** :
+3. `uart.rs` (ESP-IDF, 9600 8E1, lecture/écriture octets) — branche `on_rx_byte`/`poll_tx`.
+4. `wifi.rs` + `mqtt.rs` (transport esp-idf-svc) + `main.rs` (feature `esp32`).
+5. Tests au banc : handshake réel, analyseur logique, commandes bout-en-bout.
 
 ### 0.5 Journal des sessions
 
@@ -74,6 +85,11 @@ vide → zéro impact sur le build/CI daly-bms). Tester :
   Clarification paysage protocoles Toshiba (§15) : issalig/AB non applicable.
   **Décision Rust actée.** Bootstrap crate `firmware/toshiba-suzumi-rs/` : couche
   protocole pure `src/protocol.rs` + 11 tests host verts (clippy propre).
+- **2026-07-05 (suite)** — Ajout des couches **logiques pures host-testables** :
+  `state.rs` (agrégat `ToshibaState`), `framing.rs` (accumulateur RX incrémental),
+  `machine.rs` (client : séquence handshake, pacing 100 ms, file de commandes,
+  watchdog de re-handshake) **+ simulateur d'unité en mémoire** → test **end-to-end**
+  handshake→online→commande sans matériel. **25 tests verts** au total, clippy + fmt OK.
 
 ---
 
@@ -160,23 +176,28 @@ firmware/toshiba-suzumi-rs/
 ├── Cargo.toml                   # ✅ crate détaché ([workspace] vide), lib pure, 0 dép.
 ├── .gitignore                   # ✅ ignore /target
 ├── src/
-│   ├── lib.rs                   # ✅ expose `protocol`
-│   └── protocol.rs              # ✅ couche PURE : checksum, enums, trames, validation,
-│   │                            #    parsing (+ ODU/IDU), handshake, timings, TESTS host
-│   ├── state_machine.rs         # ⏳ machine à états (Handshake → Online → Error → Retry) — testable host
-│   ├── uart.rs                  # ⏳ Wrapper UART ESP-IDF (9600 8E1) + framing incrémental
+│   ├── lib.rs                   # ✅ expose protocol / state / framing / machine
+│   ├── protocol.rs              # ✅ couche PURE : checksum, enums, trames, validation,
+│   │                            #    parsing (+ ODU/IDU), handshake, timings — 11 tests
+│   ├── state.rs                 # ✅ ToshibaState (agrégat, applique les Field) — 4 tests
+│   ├── framing.rs               # ✅ accumulateur RX incrémental (validate_message_) — 5 tests
+│   ├── machine.rs               # ✅ Client : handshake, pacing, file, watchdog
+│   │                            #    + simulateur d'unité (test end-to-end) — 5 tests
+│   ├── mqtt_payload.rs          # ⏳ état ↔ JSON, commande ↔ set_* (host-testable)
+│   ├── config.rs                # ⏳ Configuration (zones/topics/pins ; NVS)
+│   ├── uart.rs                  # ⏳ UART ESP-IDF (9600 8E1) → on_rx_byte / poll_tx
 │   ├── wifi.rs                  # ⏳ WiFi station (connexion, reconnexion)
-│   ├── mqtt.rs                  # ⏳ Client MQTT (santuario/toshiba/<zone>)
-│   ├── config.rs                # ⏳ Configuration NVS (SSID, MQTT, topics)
+│   ├── mqtt.rs                  # ⏳ Transport MQTT (santuario/toshiba/<zone>)
 │   └── main.rs                  # ⏳ Point d'entrée ESP32 (feature `esp32`, esp-idf-svc)
 ├── .cargo/config.toml           # ⏳ cible xtensa-esp32-espidf (ajouté avec la partie ESP32)
-├── build.rs / sdkconfig.defaults / partitions.csv   # ⏳ ESP-IDF (OTA + NVS)
+└── build.rs / sdkconfig.defaults / partitions.csv   # ⏳ ESP-IDF (OTA + NVS)
 ```
 
-> Les **tests protocole sont inline** dans `protocol.rs` (`#[cfg(test)]`) et tournent
-> sur host sans matériel. Le parsing des capteurs ODU/IDU est **intégré** à `protocol.rs`
-> (pas de `sensors.rs` séparé). La partie ESP-IDF (deps + `main.rs` + `.cargo/`) sera
-> ajoutée **derrière une feature `esp32`** pour garder la couche pure compilable partout.
+> **Séparation I/O ↔ logique** (inspirée de o0Zz, §14.3) : `protocol`/`state`/`framing`/
+> `machine` sont **purs** (aucune I/O) → testés sur host. Le futur code ESP-IDF
+> (`uart`/`wifi`/`mqtt`/`main`) ne fera **que** relayer : lire l'UART → `Client::on_rx_byte`,
+> écrire ← `Client::poll_tx`, timer → `Client::on_tick`. Cette partie sera **derrière une
+> feature `esp32`** pour garder la couche pure compilable partout.
 
 ---
 
