@@ -1,0 +1,33 @@
+# =============================================================================
+# toshiba-suzumi-rs — firmware Rust natif ESP32 pour clim Toshiba (connecteur CN22)
+# =============================================================================
+# ⚠️ Crate DÉTACHÉ du workspace Pi5 (bloc [workspace] vide ci-dessous) :
+#    il a sa propre racine, son propre target/ et son propre lockfile → AUCUN
+#    impact sur le build/CI de daly-bms-server / energy-manager.
+#
+# ÉTAT (voir docs/toshiba-suzumi-rs-plan.md §0) : seule la COUCHE PROTOCOLE PURE
+# est implémentée pour l'instant (sans ESP-IDF), testable sur host via `cargo test`.
+# La partie ESP32 (UART/WiFi/MQTT/main + esp-idf-svc) sera ajoutée quand le
+# matériel sera disponible. Aucun test matériel n'est requis à ce stade.
+# =============================================================================
+
+[package]
+name = "toshiba-suzumi-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+description = "Firmware Rust natif ESP32 (protocole série Toshiba SUZUMI, connecteur CN22)"
+repository = "https://github.com/thieryus007-cloud/Daly-BMS-Rust"
+
+# Détache ce crate du workspace parent (Pi5). NE PAS retirer.
+[workspace]
+
+[lib]
+name = "toshiba_suzumi_protocol"
+path = "src/lib.rs"
+
+[dependencies]
+# Couche protocole pure : AUCUNE dépendance (host-testable, no_std-ready).
+# Les dépendances ESP-IDF (esp-idf-svc/hal/sys) seront ajoutées avec la partie
+# firmware (feature "esp32"), cf. plan §5 — pas maintenant (pas de matériel).
