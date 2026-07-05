@@ -866,4 +866,40 @@ pedobry reste la **référence primaire** (couverture complète : diagnostics + 
 
 ---
 
+## 15. Paysage des protocoles Toshiba — NE PAS CONFONDRE ⚠️
+
+Il existe **deux familles de protocoles série Toshiba, incompatibles**. Un contrôleur
+prévu pour l'un **ne fonctionnera pas** sur l'autre. Nos 3 unités **Shorai Edge**
+(splits résidentiels) relèvent **exclusivement** de la voie **CN22 / SUZUMI**.
+
+| Critère | **Voie CN22 / SUZUMI (LA NÔTRE)** | Voie A/B « TCC‑Link » |
+|---|---|---|
+| Bus physique | connecteur **CN22** (port de l'adaptateur WiFi d'origine) | **bus filaire A/B** (2 fils de la télécommande murale) |
+| Familles d'unités | **splits résidentiels** : Seiya, Suzumi Plus, **Shorai (Edge/Premium)**, Daiseikai, Yukai | **central / VRF / light‑commercial** (ex. RAV‑SM406BTP‑E) via télécommande **RBC‑AMT32E** |
+| UART | **9600** 8E1 | **2400** 8E1 |
+| Début de trame | **STX `0x02`** + préfixe fixe | **octet d'adresse source** (`0x00` master / `0x40` remote / `0xFE` broadcast) |
+| Adressage | non (liaison point‑à‑point) | **oui** (`FROM|TO|OPCODE1|COUNT|MODE|OPCODE2|…`) |
+| Checksum | **`256 − Σ(octets[1..])`** (complément à deux) | **XOR** de tous les octets (ex. `00 FE 10 02 80 8A` → CRC `E6`) |
+| Modes (octet) | `0x41..0x45` | `1=Heat, 2=Cool, 3=Fan, 4=Dry, 6=Auto` |
+| Fan (octet) | `0x31..0x36, 0x41` | `2=Auto, 3=High, 4=Med, 5=Low` |
+| Implémentations | **pedobry** (réf.), **o0Zz** (§14) | **issalig/toshiba_air_cond**, makusets/esphome‑toshiba‑ab, muxa/esphome‑tcc‑link |
+
+**Conclusion** : `issalig/toshiba_air_cond` (`air/ac_protocol.h/.cpp`) implémente le
+**protocole A/B TCC‑Link à 2400 bauds avec CRC XOR** — **inapplicable** à nos Shorai Edge.
+Ne **pas** câbler sur A/B ni régler 2400/XOR pour nos unités. Ce projet reste utile
+**uniquement** comme culture du paysage Toshiba (et comme référence si, un jour, on devait
+intégrer une unité **centrale/VRF** — cas non présent dans le projet).
+
+### 15.1 Documentation officielle Toshiba
+
+**Aucune spécification publique officielle** du protocole série (ni CN22/SUZUMI ni A/B)
+n'a été trouvée : **toutes** les implémentations connues sont **reverse‑engineered**
+(analyseur logique + captures). Les documents Toshiba officiels *connexes* mais **non
+pertinents** pour le protocole série applicatif : guides de **codes défaut TCC‑Link**, et
+**passerelles** LonWorks/Modbus/BACnet (ex. interface **TCB‑IFLN642TLE**) — ces passerelles
+parlent Modbus/LON côté client, pas le protocole CN22. → **Notre spec §6 (issue de pedobry,
+recoupée o0Zz) reste la meilleure source disponible.**
+
+---
+
 *Bon courage ! Si vous bloquez sur un point précis (handshake, checksum, parsing d'une trame spécifique), n'hésitez pas à demander avec un extrait de log hexadécimal.*
