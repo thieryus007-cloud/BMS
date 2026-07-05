@@ -268,7 +268,7 @@ HANDSHAKE[0] = {2, 255, 255, 0,   0, 0, 0,   2}
 HANDSHAKE[1] = {2, 255, 255, 1,   0, 0, 1,   2, 254}
 HANDSHAKE[2] = {2, 0,   0,   0,   0, 0, 2, 2, 2, 250}
 HANDSHAKE[3] = {2, 0,   1,   129, 1, 0, 2, 0, 0, 123}
-HANDSHAKE[4] = {2, 0,   1,   2,   0, 0, 2, 0, 0, 254}
+HANDSHAKE[4] = {2, 0,   1,   2,   0, 0, 2, 0, 0, 254}  // ⚠️ 254=0xFE (pedobry, éprouvé) ; alt. checksum-correct = 251=0xFB (o0Zz) — cf. note ci-dessous
 HANDSHAKE[5] = {2, 0,   2,   0,   0, 0, 0, 254}
 ```
 
