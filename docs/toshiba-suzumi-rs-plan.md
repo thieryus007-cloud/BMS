@@ -1,7 +1,23 @@
 # Plan de projet : Transposition du pilote Toshiba SUZUMI en Rust pour ESP32
 
-> **Référence** : [pedobry/esphome_toshiba_suzumi](https://github.com/pedobry/esphome_toshiba_suzumi)  
+> **Référence** : [pedobry/esphome_toshiba_suzumi](https://github.com/pedobry/esphome_toshiba_suzumi)
 > **Objectif** : Remplacer le composant ESPHome (C++) par un firmware Rust autonome sur ESP32, sans dépendance à Home Assistant.
+>
+> **⚠️ Statut du document** : la spécification protocolaire ci‑dessous (§6, §8) a été
+> **vérifiée octet par octet contre le code source C++** (`toshiba_climate.cpp`,
+> `toshiba_climate.h`, `toshiba_climate_mode.cpp`/`.h`, `climate.py`) en juillet 2026.
+> Les valeurs marquées « ✅ source » sont **extraites du firmware d'origine**, plus des
+> suppositions. Voir le tableau de correspondance §6.5.
+>
+> **Relation avec les autres documents du projet** :
+> - **Voie retenue en production** = réutiliser le composant **ESPHome tel quel** →
+>   `docs/integration-toshiba-shorai-esphome.md` (câblage CN22, YAML, MQTT, module
+>   `energy-manager logic/toshiba_ac`, mesure conso via Tongou/Tasmota).
+> - **Ce document** = voie **alternative/avancée** : un firmware **Rust natif** qui
+>   ré‑implémente le protocole (utile si on veut se passer d'ESPHome, réduire l'empreinte,
+>   ou intégrer une logique embarquée). Le **protocole série est identique** dans les deux
+>   cas ; seul l'hôte logiciel change. Le câblage, les topics MQTT et l'intégration Pi5
+>   décrits dans l'autre document **restent valables**.
 
 ---
 
@@ -51,14 +67,30 @@ L'ESP32 agit comme **passerelle protocolaire** :
 
 ### 3.2 Connexions CN22 → ESP32
 
-| CN22 (broche) | Couleur | Fonction | ESP32 GPIO | Remarque |
-|:-------------:|:-------:|:---------|:----------:|:---------|
-| 1 | Bleu | TX climatiseur → RX ESP32 | GPIO 33 | **Via level-shifter 5V→3.3V** |
-| 2 | Rose | GND | GND | Commun |
-| 3 | Noir | 5V (alim) | VIN (ou 5V) | Vérifier la capacité de sortie du CN22 (typ. 100-200mA) |
-| 4 | Blanc | RX climatiseur ← TX ESP32 | GPIO 32 | **Via level-shifter 3.3V→5V** |
+Connecteur **JST PA 2.0 mm, 5 voies**. Le composant ESPHome utilise par défaut
+`tx_pin: GPIO33` / `rx_pin: GPIO32` — on garde cette convention pour rester cohérent
+avec `docs/integration-toshiba-shorai-esphome.md`.
 
-> **⚠️ Attention critique** : Les lignes TX/RX du CN22 sont en **5V TTL**. L'ESP32 est **3.3V**. Un level-shifter bidirectionnel est **obligatoire** sous peine de destruction du GPIO. La parité UART est **EVEN** (et non NONE).
+| CN22 (broche) | Couleur (typ.) | Fonction (côté unité) | ESP32 GPIO | Remarque |
+|:-------------:|:--------------:|:----------------------|:----------:|:---------|
+| 1 | Bleu | **TX unité** → RX ESP | **GPIO 32 (RX ESP)** | Via level-shifter 5V→3.3V |
+| 2 | Rose | GND | GND | Commun |
+| 3 | Noir | +5V (alim) | VIN (ou 5V) | Vérifier la capacité de sortie du CN22 (typ. 100-200 mA) |
+| 4 | Blanc | **RX unité** ← TX ESP | **GPIO 33 (TX ESP)** | Via level-shifter 3.3V→5V |
+| 5 | Rose | **NE PAS CONNECTER** | — | Risque d'endommager la carte de commande |
+
+> **⚠️ Attention critique** :
+> 1. Les lignes TX/RX du CN22 sont en **5V TTL**, l'ESP32 en **3.3V** → level-shifter
+>    bidirectionnel **obligatoire** sous peine de destruction du GPIO.
+> 2. La parité UART est **EVEN** (jamais `None` — le piège n°1, cf. §12).
+> 3. **Broche 5 : ne jamais connecter.**
+> 4. **Croisement / sens des fils à vérifier au banc.** La seule invariance électrique
+>    est le **croisement UART** : `ESP_TX → unité_RX` et `ESP_RX ← unité_TX`.
+>    L'association *couleur ↔ GPIO* diffère selon les sources (le README pedobry associe
+>    Bleu↔GPIO33 et Blanc↔GPIO32 ; le tableau ci‑dessus suit le sens *fonctionnel*
+>    unité‑TX→ESP‑RX). **Si aucune trame n'est reçue au 1er boot, inverser les deux fils
+>    de signal** (ou permuter `tx_pin`/`rx_pin`) — c'est l'erreur de câblage la plus
+>    fréquente. Repérer GND et +5V **au multimètre** avant tout branchement.
 
 ---
 
@@ -117,8 +149,7 @@ serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde-json-core = "0.6"          # Version no-std compatible heap limité
 
 # Logging & diagnostic
-log = "0.4"
-esp-idf-svc::log = "0.1"         # EspLogger intégré
+log = "0.4"                      # EspLogger fourni par esp-idf-svc (esp_idf_svc::log::EspLogger)
 
 # Utilitaires no-std
 heapless = "0.8"                 # Vec/String statiques (pas d'allocateur requis)
@@ -151,117 +182,286 @@ lto = true
 | Stop bits | 1 | |
 | Flow control | Aucun | |
 
-### 6.2 Format général d'une trame
+### 6.2 Format général d'une trame ✅ source
 
-Une trame SUZUMI suit le schéma suivant (à adapter selon reverse-engineering du C++ source) :
+**Toutes les trames** (émission comme réception) commencent par l'en‑tête **`0x02`**
+(STX). Le firmware construit deux gabarits, tous deux avec un **préfixe fixe** puis le
+type de commande, une valeur optionnelle et un checksum final.
+
+**Trame de commande (écriture)** — 15 octets, produite par `sendCmd()` :
 
 ```
-[0]     Octet de début / synchro (ex: 0xF0 ou 0xF1)
-[1]     Longueur du payload (n) ou type de message
-[2..n]  Payload (commande ou état)
-[n+1]   Checksum (8 bits)
+Index :  0    1  2  3   4  5  6  7   8  9 10 11    12    13    14
+Octet : 02   00 03 10  00 00 07 01  30 01 00 02  <cmd> <val> <cks>
+        └──────── préfixe fixe (12 octets) ────┘   │     │     └ checksum
+                        [6]=07 (len)  [11]=02 (write)│     └ valeur (uint8)
+                                                     └ cmd (ToshibaCommandType)
 ```
 
-### 6.3 Checksum
+**Trame de requête (lecture)** — 14 octets, produite par `requestData()` :
 
-Algorithme : `(256 - (somme des octets de l'index 1 à len-2) % 256) % 256`
+```
+Index :  0    1  2  3   4  5  6  7   8  9 10 11    12    13
+Octet : 02   00 03 10  00 00 06 01  30 01 00 01  <cmd> <cks>
+        └──────── préfixe fixe (12 octets) ────┘   │     └ checksum
+                        [6]=06 (len)  [11]=01 (read)└ cmd    (pas d'octet valeur)
+```
 
-En Rust (wrapping arithmétique) :
+**Sémantique des champs** (déduite de `validate_message_` + `sendCmd`/`requestData`) :
 
-```rust
-pub fn compute_checksum(data: &[u8]) -> u8 {
-    let sum: u8 = data[1..data.len()-1]
-        .iter()
-        .fold(0u8, |acc, &b| acc.wrapping_add(b));
-    (256u16 - sum as u16) as u8
+| Octet | Rôle |
+|:-----:|------|
+| `[0]` | **En‑tête STX = `0x02`** (constant, vérifié à la réception) |
+| `[2]` | Toujours `0x03` (vérifié à la réception) |
+| `[6]` | **Longueur du payload** : le récepteur en déduit l'**index du checksum** `cks_idx = 6 + data[6] + 1` (donc taille totale = `cks_idx + 1`). Écriture : `[6]=07` → checksum en `[14]`, trame 15 o. Lecture : `[6]=06` → checksum en `[13]`, trame 14 o. |
+| `[11]` | **Classe** : `0x01` = lecture/requête, `0x02` = écriture/commande |
+| `[12]` | **Type** = `ToshibaCommandType` (§6.5) |
+| `[13]` | Valeur (écriture) **ou** checksum (lecture) |
+| dernier | **Checksum** (§6.3) |
+
+> Les octets `[1]=00 [3]=10 [4..5]=00 00 [7]=01 [8]=30 [9]=01 [10]=00` sont **constants**
+> dans les deux gabarits (adressage/canal interne du bus TCC). Reproduire tels quels.
+
+### 6.3 Checksum ✅ source
+
+Le C++ d'origine :
+
+```cpp
+uint8_t checksum(std::vector<uint8_t> data, uint8_t length) {
+  uint8_t sum = 0;
+  for (size_t i = 1; i < length; i++) sum += data[i];   // exclut data[0]=0x02
+  return 256 - sum;                                      // complément à deux (u8)
 }
 ```
 
-### 6.4 Séquence de handshake (boot / reconnexion)
+Algorithme exact : **somme (mod 256) de tous les octets à partir de l'index 1**
+(l'en‑tête `0x02` est exclu ; le checksum lui‑même **n'est pas encore présent** au
+moment du calcul), puis **complément à deux** (`256 − somme`, tronqué à 8 bits).
 
-Le climatiseur **ne répond pas** aux commandes tant que le handshake n'est pas établi. La séquence est critique.
+En Rust — `frame` est la trame **sans** l'octet de checksum final :
 
-```
-Étape 1 : Envoi des 6 trames d'initialisation (INIT_FRAMES)
-    ├── Délai inter-trame : 50 ms
-    └── Contenu : constantes définies dans le firmware d'origine
-
-Étape 2 : Attente obligatoire
-    └── Délai : 2000 ms (2 secondes exactes)
-
-Étape 3 : Envoi des 2 trames AFTER_HANDSHAKE
-    ├── Délai inter-trame : 50 ms
-    └── À ce stade, le climatiseur commence à émettre des trames d'état
-
-Étape 4 : Réception des trames d'état périodiques
-    └── Le climatiseur pousse spontanément son état toutes les ~1-2 secondes
+```rust
+/// Checksum SUZUMI. `frame` = tous les octets AVANT le checksum (en-tête 0x02 inclus).
+/// Équivaut à `(256 - Σ frame[1..]) mod 256`, soit la négation en complément à deux.
+pub fn compute_checksum(frame: &[u8]) -> u8 {
+    frame[1..]
+        .iter()
+        .fold(0u8, |acc, &b| acc.wrapping_add(b))
+        .wrapping_neg() // 0u8.wrapping_sub(sum) == 256 - sum (mod 256)
+}
 ```
 
-> **Note** : Si le climatiseur est éteint puis rallumé, ou si le câble est débranché, le handshake doit être **re-joué** intégralement.
+> ⚠️ À la **réception**, le firmware appelle `checksum(rx, at)` où `at` = index de
+> l'octet de checksum → il somme `rx[1..at]` (donc hors en‑tête **et** hors checksum),
+> ce qui est cohérent avec le calcul ci‑dessus.
 
-### 6.5 Types de commandes (CmdType)
+### 6.4 Séquence de handshake (boot / reconnexion) ✅ source
 
-Basé sur l'analyse du composant ESPHome :
+Le climatiseur **ne répond pas** aux requêtes tant que le handshake n'est pas établi.
+La séquence est critique. Les **8 trames sont des constantes pré‑calculées** (checksum
+déjà inclus) — les émettre **telles quelles**, ne rien recalculer.
+
+**Trames `HANDSHAKE[6]`** (octets décimaux, du firmware) :
+
+```
+HANDSHAKE[0] = {2, 255, 255, 0,   0, 0, 0,   2}
+HANDSHAKE[1] = {2, 255, 255, 1,   0, 0, 1,   2, 254}
+HANDSHAKE[2] = {2, 0,   0,   0,   0, 0, 2, 2, 2, 250}
+HANDSHAKE[3] = {2, 0,   1,   129, 1, 0, 2, 0, 0, 123}
+HANDSHAKE[4] = {2, 0,   1,   2,   0, 0, 2, 0, 0, 254}
+HANDSHAKE[5] = {2, 0,   2,   0,   0, 0, 0, 254}
+```
+
+**Trames `AFTER_HANDSHAKE[2]`** :
+
+```
+AFTER_HANDSHAKE[0] = {2, 0, 2, 1, 0, 0, 2, 0, 0, 251}
+AFTER_HANDSHAKE[1] = {2, 0, 2, 2, 0, 0, 2, 0, 0, 250}
+```
+
+**Déroulé exact** (`setup()` → `start_handshake()` puis `getInitData()`) :
+
+```
+1. Envoyer HANDSHAKE[0..5]  (6 trames)
+2. Attendre 2000 ms          (trame interne DELAY dans la file)
+3. Envoyer AFTER_HANDSHAKE[0..1] (2 trames)
+4. getInitData() : enfiler 10 requêtes de lecture (§6.4.1)
+5. set_wifi_led(...) : LED WiFi de l'unité (ON/OFF, §6.5)
+```
+
+**Cadence d'émission** : la file de commandes est vidée par `process_command_queue_()`
+avec un **délai minimal de `COMMAND_DELAY = 100 ms` entre deux trames** (et **jamais**
+pendant qu'une trame est en cours de réception — `rx_message_` doit être vide). Le
+`2000 ms` de l'étape 2 est réalisé par une commande spéciale `DELAY` insérée dans la
+file (pas un `sleep` bloquant). → ce n'est **pas** 50 ms comme supposé initialement.
+
+#### 6.4.1 Données initiales `getInitData()`
+
+Après le handshake, le firmware demande **10 valeurs** (une requête de lecture chacune) :
+
+```
+POWER_STATE, [SELF_CLEAN si capteur], MODE, TARGET_TEMP, FAN,
+POWER_SEL, SWING, ROOM_TEMP, OUTDOOR_TEMP, SPECIAL_MODE
+```
+
+> **Note reconnexion** : si l'unité est coupée/rallumée ou le câble débranché, **rejouer
+> le handshake complet** puis `getInitData()`. Un watchdog logiciel (aucune trame reçue
+> pendant N secondes) doit forcer ce re‑handshake (§5 state-machine).
+
+### 6.5 Types de commandes `ToshibaCommandType` ✅ source
+
+Valeurs **exactes** (`toshiba_climate_mode.h`). Elles servent à la fois de champ `[12]`
+en émission (lecture ou écriture) et d'identifiant du capteur/réglage en réception.
 
 ```rust
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmdType {
-    Power       = 0x30,  // 48 decimal — ON/OFF
-    Mode        = 0x31,  // 49 decimal — Cool, Heat, Dry, Fan, Auto
-    TargetTemp  = 0x32,  // 50 decimal — 17-30°C (5-30°C en mode "8 degrees")
-    FanSpeed    = 0x33,  // Ventilation
-    PowerLevel  = 0x34,  // Niveau de puissance (Hi Power, ECO, etc.)
-    Preset      = 0x35,  // Standard, Sleep, Silent, Fireplace...
-    SwingVertical   = 0x36,
-    SwingHorizontal = 0x37,  // Optionnel selon modèle
-    DisableWifiLed  = 0x38,  // Éteindre la LED WiFi de l'unité interne
-    // ... autres commandes identifiées par scan
+    Handshake    = 0,    // 0x00 — trames de handshake (interne)
+    Delay        = 1,    // 0x01 — pseudo-commande d'attente (interne file)
+    PowerState   = 128,  // 0x80 — ON/OFF (valeurs STATE, §6.8)
+    PowerSel     = 135,  // 0x87 — niveau de puissance 50/75/100 % (PWR_LEVEL)
+    ComfortSleep = 148,  // 0x94 — confort/sommeil
+    Fan          = 160,  // 0xA0 — ventilation (FAN)
+    Swing        = 163,  // 0xA3 — orientation (SWING)
+    Mode         = 176,  // 0xB0 — mode CVC (MODE)
+    TargetTemp   = 179,  // 0xB3 — consigne °C (offset +16 si mode 8°, §6.8)
+    RoomTemp     = 187,  // 0xBB — température ambiante mesurée (lecture)
+    OutdoorTemp  = 190,  // 0xBE — température extérieure (lecture ; 127 = invalide)
+    WifiLed1     = 222,  // 0xDE — LED WiFi (octet 1)
+    WifiLed2     = 223,  // 0xDF — LED WiFi (octet 2)
+    SelfClean    = 203,  // 0xCB — auto-nettoyage (SELF_CLEAN_STATE)
+    SpecialMode  = 247,  // 0xF7 — préréglage/spécial (SPECIAL_MODE)
+    IduStatus    = 228,  // 0xE4 — trame étendue unité intérieure (§6.8)
+    OduStatus    = 229,  // 0xE5 — trame étendue unité extérieure (§6.8)
 }
 ```
 
-### 6.6 Modes de fonctionnement
+> **`scan()`** (débogage) : le firmware balaye `requestData(i)` pour `i` de **128 à 254**
+> afin de découvrir les capteurs d'un modèle non répertorié. À reproduire pour une
+> commande MQTT `santuario/toshiba/<zone>/scan` (cf. §12, point 6).
 
-| Valeur | Mode | Description |
-|--------|------|-------------|
-| 0x00 | OFF | Unité arrêtée (Power=OFF) |
-| 0x01 | COOL | Refroidissement |
-| 0x02 | HEAT | Chauffage |
-| 0x03 | DRY | Déshumidification |
-| 0x04 | FAN | Ventilation seule |
-| 0x05 | AUTO | Automatique |
+### 6.6 Modes de fonctionnement `MODE` ✅ source
 
-### 6.7 Préréglages (Presets)
+⚠️ **Il n'existe pas de valeur de mode « OFF »** : l'arrêt passe par `PowerState`
+(`STATE::OFF`), pas par le champ MODE. Le « mode auto » = `HEAT_COOL`.
 
-- `Standard`
-- `Hi POWER`
-- `ECO`
-- `Fireplace 1`
-- `Fireplace 2`
-- `8 degrees` → Plage température forcée à 5-30°C
-- `Silent#1`
-- `Silent#2`
-- `Sleep`
-- `Floor`
-- `Comfort`
+| Valeur (déc / hex) | `MODE` | Mode ESPHome | Description |
+|:------------------:|--------|--------------|-------------|
+| 65 / 0x41 | `HEAT_COOL` | `heat_cool` | Automatique (chaud/froid) |
+| 66 / 0x42 | `COOL` | `cool` | Refroidissement |
+| 67 / 0x43 | `HEAT` | `heat` | Chauffage |
+| 68 / 0x44 | `DRY` | `dry` | Déshumidification |
+| 69 / 0x45 | `FAN_ONLY` | `fan_only` | Ventilation seule |
 
-### 6.8 Capteurs de diagnostic ODU / IDU (optionnels)
+Marche/arrêt via `PowerState` : `STATE::ON = 48 (0x30)`, `STATE::OFF = 49 (0x31)`.
 
-Certaines unités envoient des trames étendues contenant :
+### 6.7 Préréglages `SPECIAL_MODE` ✅ source
 
-| Capteur | Unité | Description | Valeur invalide |
-|---------|-------|-------------|-----------------|
-| `outdoor_temp` | °C | Température extérieure | 127 (à filtrer) |
-| `cdu_load` | % | Charge compresseur (fréquence) | — |
-| `cdu_iac` | A | Courant compresseur / EEV | — |
-| `cdu_td_temp` | °C | Température tube de refoulement | — |
-| `cdu_ts_temp` | °C | Température tube d'aspiration | — |
-| `cdu_te_temp` | °C | Température évaporateur ODU | — |
-| `fcu_tc_temp` | °C | Température échangeur IDU | — |
-| `fcu_tcj_temp` | °C | Température jonction échangeur IDU | — |
-| `fcu_fan_rpm` | RPM | Vitesse ventilateur IDU | — |
+| Valeur (déc) | `SPECIAL_MODE` | Nom (chaîne ESPHome) |
+|:------------:|----------------|----------------------|
+| 0  | `STANDARD`    | `Standard` |
+| 1  | `HI_POWER`    | `Hi POWER` |
+| 2  | `SILENT_1`    | `Silent#1` |
+| 3  | `ECO`         | `ECO` |
+| 4  | `EIGHT_DEG`   | `8 degrees` (garde hors‑gel) |
+| 5  | `SLEEP`       | `Sleep` |
+| 6  | `FLOOR`       | `Floor` |
+| 7  | `COMFORT`     | `Comfort` |
+| 10 | `SILENT_2`    | `Silent#2` |
+| 32 | `FIREPLACE_1` | `Fireplace 1` |
+| 48 | `FIREPLACE_2` | `Fireplace 2` |
 
-> Ces valeurs arrivent **spontanément** depuis l'unité (pas de polling requis). Il suffit de parser les trames étendues.
+> Les **valeurs ne sont pas contiguës** (0,1,2,3,4,5,6,7,10,32,48) → utiliser une table
+> explicite, **jamais** un `preset as u8` séquentiel. La liste des presets réellement
+> exposés est configurable côté ESPHome (`supported_presets`).
+
+### 6.8 Enums de valeurs `FAN` / `SWING` / `STATE` / `PWR_LEVEL` ✅ source
+
+```rust
+#[repr(u8)] enum Fan { Quiet=49, Low=50, Mode2=51, Medium=52, Mode4=53, High=54, Auto=65 }
+//                     (Mode2 = « Low-Medium », Mode4 = « Medium-High » : modes custom)
+#[repr(u8)] enum Swing {
+    Off=49, Vertical=65, Horizontal=66, Both=67,
+    VFix1=80, VFix2=81, VFix3=82, VFix4=83, VFix5=84, // positions verticales fixes
+}
+#[repr(u8)] enum State { On=48, Off=49 }
+#[repr(u8)] enum PwrLevel { Pct50=50, Pct75=75, Pct100=100 }
+#[repr(u8)] enum SelfClean { Running=0x18, Off=0x10 }
+```
+
+Le select « Vertical Air Direction » ESPHome mappe :
+`Off/Swing/Top/Middle Top/Middle/Middle Bottom/Bottom` → `Off/Vertical/VFix1..VFix5`.
+
+### 6.9 Parsing des réponses `parseResponse()` ✅ source
+
+Le récepteur **accumule octet par octet** (`handle_rx_byte_`) et valide de façon
+incrémentale (`validate_message_` : en‑tête `0x02`, `[2]==0x03`, longueur via `[6]`,
+checksum). Une trame complète est ensuite dispatchée **selon sa longueur totale** :
+
+| Longueur | Signification | Type en `[?]` | Valeur en `[?]` |
+|:--------:|---------------|:-------------:|:---------------:|
+| **15** | réponse à une lecture | `[12]` | `[13]` |
+| **16** | **ACK** de commande | — | *(ignorée)* |
+| **17** | réponse à une lecture (variante) | `[14]` | `[15]` |
+| **22** | trame étendue ODU/IDU | `[12]` | offset 13 |
+| **24** | trame étendue ODU/IDU (variante) | `[14]` | offset 15 |
+
+Décodage par type :
+
+| Type | Décodage |
+|------|----------|
+| `TargetTemp` | consigne = `value` (°C). **Si mode `EIGHT_DEG` actif : `value -= 16`** |
+| `RoomTemp` | temp ambiante = `value` (°C, `int8`) ; **127 = invalide** |
+| `OutdoorTemp` | temp ext. = `value as i8` ; **127 = invalide** |
+| `Mode` | `MODE` (§6.6) ; n'écrase le mode que si l'unité est ON et pas en auto‑nettoyage |
+| `Fan` | `FAN` (§6.8) |
+| `Swing` | `SWING` (§6.8) |
+| `PowerState` | `STATE` : OFF → mode `off` ; ON → redemande `Mode`/`SelfClean` |
+| `PowerSel` | `PWR_LEVEL` |
+| `SpecialMode` | `SPECIAL_MODE` (§6.7) → preset courant |
+| `SelfClean` | `SELF_CLEAN` : `RUNNING`=0x18 (mode affiché `off`) / `OFF`=0x10 |
+
+### 6.10 Capteurs de diagnostic ODU / IDU (optionnels) ✅ source
+
+Trames **étendues** (`OduStatus=0xE5`, `IduStatus=0xE4`), longueur 22 ou 24.
+**Offset de base** : `off = 13` si longueur 22, `off = 15` si longueur 24.
+
+**ODU (`0xE5`)** :
+
+| Capteur | Octet | Unité | Décodage |
+|---------|:-----:|:-----:|----------|
+| `cdu_td_temp` | `off+0` | °C | `int8` (tube de refoulement) |
+| `cdu_ts_temp` | `off+1` | °C | `int8` (tube d'aspiration) |
+| `cdu_te_temp` | `off+2` | °C | `int8` (évaporateur ODU) |
+| `cdu_load` | `off+3` | % | **`value / 1.7`** (charge compresseur) |
+| `cdu_iac` | `off+6` | A | `value` (courant compresseur) |
+
+**IDU (`0xE4`)** :
+
+| Capteur | Octet | Unité | Décodage |
+|---------|:-----:|:-----:|----------|
+| `fcu_tc_temp` | `off+0` | °C | `int8` (échangeur IDU) |
+| `fcu_tcj_temp` | `off+1` | °C | `int8` (jonction échangeur IDU) |
+| `fcu_fan_rpm` | `off+2` | RPM | `value` (ventilateur IDU) |
+
+> **Comportement d'émission (à corriger vs. supposition initiale)** : le composant est un
+> **PollingComponent** — `update()` (par défaut **toutes les 120 s**) redemande activement
+> `RoomTemp` (+ `OutdoorTemp` si capteur, + `SelfClean` si actif). Les trames ODU/IDU et
+> les changements faits **à la télécommande** arrivent de façon **non sollicitée**. Il ne
+> faut donc **pas** compter sur un push « toutes les 1‑2 s » : prévoir un polling
+> périodique **et** l'écoute des pushes.
+
+### 6.11 Encodage de la consigne de température ✅ source
+
+- **Mode standard** : consigne = entier °C, **plage 17–30 °C** (`MIN_TEMP_STANDARD=17`,
+  `MAX_TEMP=30`). Pas de demi‑degrés.
+- **Mode 8° (garde hors‑gel `EIGHT_DEG`)** : plage **5–13 °C** (défaut 8). Bascule
+  **automatique** : demander une consigne `< 17` fait passer en `EIGHT_DEG` ; `≥ 17`
+  revient en `STANDARD`. **Sur le fil, la valeur est décalée de +16** (ex. 8 °C → octet
+  `24`) à l'émission, et `−16` à la réception.
+- `set_wifi_led(on)` (LED WiFi de l'unité) : ON = `WifiLed1=0x05` puis `WifiLed2=0x00` ;
+  OFF = `WifiLed1=0x00` puis `WifiLed2=0x80`.
 
 ---
 
@@ -285,27 +485,38 @@ Certaines unités envoient des trames étendues contenant :
 
 ### Phase 2 : Transposition du protocole (3h)
 
-1. **Extraire les constantes** du C++ source : tableaux `HANDSHAKE` (6 trames), `AFTER_HANDSHAKE` (2 trames), et les magic bytes.
-2. **Implémenter `compute_checksum`** (wrapping_add, voir §6.3).
-3. **Implémenter `validate_message`** : vérifier longueur, checksum, et structure minimale.
-4. **Définir les structures** :
+1. **Reprendre les constantes** documentées : `HANDSHAKE[6]` + `AFTER_HANDSHAKE[2]`
+   (§6.4), préfixes fixes des trames lecture/écriture (§6.2), enums (§6.5–6.8).
+2. **Implémenter `compute_checksum`** (`wrapping_neg`, voir §6.3/§8.1).
+3. **Implémenter `validate_frame`** : en‑tête `0x02`, `[2]==0x03`, longueur via `[6]`,
+   checksum (§8.1) — de préférence en accumulation incrémentale (§6.9).
+4. **Définir les structures** (consigne = **entier** °C, pas de demi‑degrés) :
    ```rust
    pub struct ToshibaStatus {
-       pub power: bool,
-       pub mode: OperationMode,
-       pub target_temp: f32,      // ou u8 si demi-degrés non supportés
-       pub current_temp: f32,     // Température ambiante mesurée
-       pub fan_speed: FanSpeed,
-       pub preset: Option<Preset>,
-       pub swing_vertical: Swing,
-       pub swing_horizontal: Option<Swing>,
-       pub outdoor_temp: Option<i8>, // 127 = invalide
-       // ... diagnostics ODU/IDU
+       pub power: bool,               // depuis PowerState (STATE::On/Off)
+       pub mode: OperationMode,       // MODE 65..69 (OFF = power=false)
+       pub target_temp: u8,           // 17..30 (ou 5..13 en mode 8°, déjà « dé-offseté »)
+       pub current_temp: Option<i8>,  // RoomTemp ; None si 127 (invalide)
+       pub fan_speed: Fan,
+       pub preset: Option<SpecialMode>,
+       pub swing: Swing,
+       pub pwr_level: Option<PwrLevel>,
+       pub self_clean: bool,
+       pub outdoor_temp: Option<i8>,  // None si 127
+       // Diagnostics ODU/IDU optionnels (§6.10) :
+       pub cdu_td_temp: Option<i8>, pub cdu_ts_temp: Option<i8>, pub cdu_te_temp: Option<i8>,
+       pub cdu_load_pct: Option<f32>, // = octet / 1.7
+       pub cdu_iac_a: Option<u8>,
+       pub fcu_tc_temp: Option<i8>, pub fcu_tcj_temp: Option<i8>, pub fcu_fan_rpm: Option<u16>,
    }
    ```
-5. **Implémenter `build_command`** : construire une trame de commande à partir de `CmdType` + valeur.
-6. **Implémenter `parse_response`** : mapper les octets reçus vers `ToshibaStatus`.
-7. **Écrire les tests unitaires host-side** (`tests/test_protocol.rs`) pour valider checksum et parsing.
+5. **Implémenter `build_read`/`build_write`** : assembler préfixe fixe + `cmd` (+ `value`)
+   + checksum (§6.2). Gérer le décalage `+16` de la consigne en mode 8° (§6.11).
+6. **Implémenter `parse_response`** : dispatch par **longueur** (15/16/17/22/24, §6.9)
+   puis par type → `ToshibaStatus`.
+7. **Écrire les tests unitaires host-side** (`tests/test_protocol.rs`) : valider checksum
+   et parsing **sur les trames constantes connues** (les 8 trames de handshake ont un
+   checksum vérifiable) + trames d'état capturées au banc.
 
 ### Phase 3 : Interface UART (1h30)
 
@@ -317,7 +528,8 @@ Certaines unités envoient des trames étendues contenant :
        .parity(uart::config::Parity::ParityEven)  // ⚠️ EVEN
        .stop_bits(uart::config::StopBits::STOP1);
    ```
-2. Configurer les pins GPIO32 (TX) et GPIO33 (RX).
+2. Configurer les pins **GPIO33 (TX ESP → RX unité)** et **GPIO32 (RX ESP ← TX unité)**
+   (défaut du composant ESPHome ; cf. §3.2 pour le croisement et la vérification au banc).
 3. Implémenter `send_bytes(data: &[u8])` avec flush après envoi.
 4. Implémenter `read_bytes(timeout_ms: u32) -> heapless::Vec<u8, 64>` (buffer circulaire).
 5. **Gérer le framing** : détection du start-byte, lecture de la longueur, attente du checksum.
@@ -328,22 +540,33 @@ Certaines unités envoient des trames étendues contenant :
    - Lecture des credentials depuis NVS (flash) ou variables d'environnement au build.
    - Reconnexion automatique avec backoff exponentiel.
 2. **MQTT** : Utiliser le client intégré à `esp_idf_svc::mqtt::client::EspMqttClient`.
-   - Connexion au broker avec LWT (Last Will Testament) pour signaler la déconnexion.
-   - **Topic d'état** (publish) : `toshiba/<device_id>/state` — JSON structuré.
-   - **Topic de commande** (subscribe) : `toshiba/<device_id>/command` — JSON ou payload simple.
-   - **Topic de disponibilité** : `toshiba/<device_id>/availability` — `online` / `offline`.
-3. **Format JSON d'état** (exemple) :
+   - Connexion au broker Mosquitto Pi5 (`192.168.1.141:1883`, `allow_anonymous`).
+   - LWT (Last Will Testament) pour signaler la déconnexion.
+   - **Préfixe** : rester dans l'espace **local non bridgé** `santuario/toshiba/<zone>/…`
+     (cf. `docs/integration-toshiba-shorai-esphome.md` §5 — **ne PAS bridger vers le
+     NanoPi** ; valider avec `verify-no-loop.sh`).
+   - **Topic d'état** (publish) : `santuario/toshiba/<zone>/state` — JSON structuré.
+   - **Topic de commande** (subscribe) : `santuario/toshiba/<zone>/command`.
+   - **Disponibilité** : `santuario/toshiba/<zone>/status` — `online` / `offline`.
+   > **Cohérence Pi5** : le module `energy-manager logic/toshiba_ac` est prévu pour le
+   > schéma **ESPHome/HA‑climate** (sous‑topics `mode/state`, `target_temperature/command`…).
+   > Si ce firmware Rust doit s'y brancher **sans modifier le module Pi5**, reproduire ce
+   > schéma de sous‑topics plutôt qu'un unique blob JSON — **à figer après le 1er boot**
+   > (`mosquitto_sub -t 'santuario/toshiba/#' -v`).
+3. **Format JSON d'état** (exemple — valeurs conformes §6) :
    ```json
    {
      "power": true,
      "mode": "heat",
-     "target_temp": 22.0,
-     "current_temp": 21.5,
+     "target_temp": 22,
+     "current_temp": 21,
      "fan_speed": "auto",
-     "preset": "standard",
-     "swing_vertical": "auto",
+     "preset": "Standard",
+     "swing": "vertical",
+     "pwr_level": 100,
      "outdoor_temp": 8,
-     "cdu_load": 45,
+     "cdu_load_pct": 45.3,
+     "self_clean": false,
      "timestamp": 1720000000
    }
    ```
@@ -415,37 +638,47 @@ pub enum State {
 
 ## 8. Détails techniques critiques
 
-### 8.1 Checksum
+### 8.1 Checksum & validation ✅ source
 
 ```rust
-/// Calcule le checksum SUZUMI sur une trame complète (incluant le checksum à l'index final)
-/// data[0] = start byte, data[1..n-1] = payload + checksum, data.len() = n+1
-pub fn compute_checksum(data: &[u8]) -> u8 {
-    let sum = data[1..data.len().saturating_sub(1)]
-        .iter()
-        .fold(0u8, |acc, &b| acc.wrapping_add(b));
-    (256u16 - sum as u16) as u8
+/// Checksum SUZUMI : `frame` = trame SANS l'octet de checksum (en-tête 0x02 inclus).
+pub fn compute_checksum(frame: &[u8]) -> u8 {
+    frame[1..].iter().fold(0u8, |a, &b| a.wrapping_add(b)).wrapping_neg()
 }
 
+/// Validation d'une trame reçue complète (checksum au dernier octet).
+/// Reproduit `validate_message_` : en-tête 0x02, octet [2]==0x03, longueur via [6].
 pub fn validate_frame(data: &[u8]) -> Result<(), ProtocolError> {
-    if data.len() < 3 { return Err(ProtocolError::TooShort); }
-    let expected = compute_checksum(data);
-    if data[data.len() - 1] != expected {
-        return Err(ProtocolError::ChecksumMismatch { expected, got: data[data.len()-1] });
+    if data.len() < 8   { return Err(ProtocolError::TooShort); }
+    if data[0] != 0x02 { return Err(ProtocolError::BadHeader); }
+    if data[2] != 0x03 { return Err(ProtocolError::BadFrame); }
+    // Le firmware calcule l'INDEX de l'octet de checksum : cks_idx = 6 + data[6] + 1.
+    // La taille totale attendue est donc cks_idx + 1 (ex. écriture data[6]=7 → idx 14, 15 o.).
+    let cks_idx = 6 + data[6] as usize + 1;
+    if data.len() != cks_idx + 1 { return Err(ProtocolError::BadLength); }
+    let expected = compute_checksum(&data[..cks_idx]); // somme data[1..cks_idx-1]
+    let got = data[cks_idx];
+    if got != expected {
+        return Err(ProtocolError::ChecksumMismatch { expected, got });
     }
     Ok(())
 }
 ```
 
-### 8.2 Temporisation
+> Note : côté réception, mieux vaut **accumuler octet par octet** et valider de façon
+> incrémentale (comme `handle_rx_byte_`/`validate_message_`) plutôt que d'attendre un
+> buffer figé — l'unité n'envoie pas de délimiteur de fin, la longueur se déduit de `[6]`.
 
-| Étape | Délai | Tolérance |
-|-------|-------|-----------|
-| Inter-trame handshake | 50 ms | ±10 ms |
-| Attente post-INIT | 2000 ms | **Stricte** (pas de réponse avant) |
-| Timeout réception UART | 200 ms | Si dépassé, considérer la trame comme incomplète |
-| Re-handshake après échec | 10 s | Backoff exponentiel max 60 s |
-| Période heartbeat MQTT | 60 s | Publish `availability: online` + état complet |
+### 8.2 Temporisation ✅ source (constantes du firmware)
+
+| Étape | Délai | Origine / tolérance |
+|-------|-------|---------------------|
+| **Inter-trame (file de commandes)** | **100 ms** | `COMMAND_DELAY` — min. entre 2 trames émises, **et** seulement si `rx_message_` vide |
+| **Attente post-handshake** | **2000 ms** | pseudo-commande `DELAY` dans la file (stricte) |
+| **Timeout réception UART** | **200 ms** | `RECEIVE_TIMEOUT` — sans octet reçu pendant 200 ms, purger le buffer partiel |
+| **Période de polling** | **120 s** (défaut) | `update()` : redemande `RoomTemp` (+ `OutdoorTemp`/`SelfClean`). Ajustable |
+| Re-handshake après échec | 10 s (conseillé) | design firmware Rust : backoff exp. max 60 s |
+| Heartbeat MQTT | 60 s (conseillé) | design : publier `availability: online` + état complet |
 
 ### 8.3 Gestion des erreurs et reprise
 
@@ -498,6 +731,15 @@ cargo run --release
 | Projet connexe (Shorai) | https://github.com/toremick/shorai-esp32 |
 | Projet connexe (TConnect) | https://github.com/Vpowgh/TConnect |
 | Discord communautaire | https://discord.gg/wYYFawvqfr |
+| **Voie ESPHome du projet** (câblage, YAML, MQTT, module EM) | `docs/integration-toshiba-shorai-esphome.md` |
+
+**Fichiers source vérifiés** (juillet 2026, branche `main`) pour la spec §6/§8 :
+`components/toshiba_suzumi/{toshiba_climate.cpp, toshiba_climate.h,
+toshiba_climate_mode.cpp, toshiba_climate_mode.h, climate.py}`.
+
+**Modèles couverts par le composant** (donc par ce protocole) : Seiya, Suzumi Plus,
+Shorai Premium, Daiseikai 9, **Shorai Edge** (RAS‑B07 … RAS‑B24). MCU testés :
+ESP32 (WROOM‑32D) et ESP8266. → **compatible avec les 3 unités intérieures du projet.**
 
 ---
 
@@ -523,7 +765,7 @@ cargo run --release
 3. **Parité UART** : C'est le piège le plus courant. Le C++ source utilise `parity: EVEN`. Si vous configurez `None`, le climatiseur ignorera silencieusement toutes les trames.
 4. **Level-shifter** : Ne pas négliger l'étage de conversion de niveau. Un simple diviseur résistif côté RX peut suffire, mais un TXB0108 est plus sûr et bidirectionnel.
 5. **Version de secours** : Avant le premier flash sur le hardware définitif, testez avec un ESP32 de développement et assurez-vous de pouvoir entrer en mode boot (GPIO0 → GND) en cas de brick.
-6. **Scan de capteurs inconnus** : Le C++ original propose une fonction `scan()` pour découvrir les capteurs sur des modèles non répertoriés. Prévoir une commande MQTT `toshiba/<id>/scan` qui active un mode debug et logue toutes les trames inconnues.
+6. **Scan de capteurs inconnus** : Le C++ original propose une fonction `scan()` (balaye `requestData(i)`, `i` = 128→254) pour découvrir les capteurs sur des modèles non répertoriés. Prévoir une commande MQTT `santuario/toshiba/<zone>/scan` qui active un mode debug et logue toutes les trames inconnues.
 7. **Mémoire** : L'ESP32 a 520 Ko de SRAM. Utilisez `heapless::Vec` et `heapless::String` pour éviter les allocations dynamiques dans le hot path (UART/MQTT).
 8. **Task priorities** : Donnez une priorité FreeRTOS plus élevée à la task UART que à la task MQTT pour ne pas manquer de trames.
 
