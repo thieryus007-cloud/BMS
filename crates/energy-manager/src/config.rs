@@ -33,6 +33,8 @@ pub struct EnergyManagerConfig {
     pub solar: SolarConfig,
     #[serde(default)]
     pub platform: PlatformConfig,
+    #[serde(default)]
+    pub toshiba_ac: ToshibaAcConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +454,40 @@ impl Default for PlatformConfig {
 fn default_true() -> bool { true }
 
 // ---------------------------------------------------------------------------
+// Toshiba climatiseurs (télémétrie lecture seule ; contrôle opt-in futur)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToshibaAcConfig {
+    /// Active le module (souscription `santuario/toshiba/+/state`).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Zones attendues (informatif — la souscription utilise un wildcard).
+    #[serde(default)]
+    pub zones: Vec<String>,
+    /// Âge (s) au-delà duquel une unité est considérée muette (liveness).
+    #[serde(default = "default_toshiba_stale_secs")]
+    pub stale_after_secs: u64,
+    /// Pilotage des clim par l'EM (phase contrôle) — OFF par défaut : la stratégie
+    /// énergie (effacement/solaire) n'est pas encore arrêtée. Réservé au futur.
+    #[serde(default)]
+    pub control_enabled: bool,
+}
+
+fn default_toshiba_stale_secs() -> u64 { 300 }
+
+impl Default for ToshibaAcConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            zones: Vec::new(),
+            stale_after_secs: default_toshiba_stale_secs(),
+            control_enabled: false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Loader
 // ---------------------------------------------------------------------------
 
@@ -519,6 +555,12 @@ impl EnergyManagerConfig {
             anyhow::ensure!(
                 self.lg_thinq.poll_interval_secs > 0,
                 "config invalide : `energy_manager.lg_thinq.poll_interval_secs` doit être > 0"
+            );
+        }
+        if self.toshiba_ac.enabled {
+            anyhow::ensure!(
+                self.toshiba_ac.stale_after_secs > 0,
+                "config invalide : `energy_manager.toshiba_ac.stale_after_secs` doit être > 0"
             );
         }
         Ok(())

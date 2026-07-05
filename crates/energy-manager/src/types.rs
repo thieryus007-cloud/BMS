@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // Incoming MQTT message dispatched to all logic tasks
@@ -234,6 +235,11 @@ pub struct EnergyState {
     pub shunt_discharged_baseline_kwh:   Option<f64>,
     pub shunt_charged_day:               i32,
     pub shunt_discharged_day:            i32,
+
+    // --- Climatiseurs Toshiba (télémétrie lecture seule) ---
+    // Alimenté par logic/toshiba_ac depuis `santuario/toshiba/<zone>/state`
+    // (publié par le firmware ESP32 Rust). Clé = zone (salon/chambre/bureau).
+    pub toshiba_ac: HashMap<String, ToshibaAcSnapshot>,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -248,6 +254,26 @@ pub struct MpptState {
     /// Timestamp of the last `/State` update — freshness guard for the DEYE decision
     /// (a frozen State must not strand the relay; see deye_command).
     pub state_last_ts: Option<DateTime<Utc>>,
+}
+
+/// Instantané télémétrie d'un climatiseur Toshiba (une zone), reçu en JSON sur
+/// `santuario/toshiba/<zone>/state`. Champs `Option` tant qu'ils n'ont pas été
+/// reçus. Voir `docs/toshiba-suzumi-rs-plan.md` (firmware `mqtt_payload`).
+#[derive(Debug, Default, Clone, Serialize)]
+pub struct ToshibaAcSnapshot {
+    pub power: Option<bool>,
+    /// Mode « effectif » : `"off"` si éteint, sinon `heat/cool/dry/fan_only/heat_cool`.
+    pub mode: Option<String>,
+    pub target_temp_c: Option<u8>,
+    pub current_temp_c: Option<i8>,
+    pub outdoor_temp_c: Option<i8>,
+    pub fan: Option<String>,
+    pub swing: Option<String>,
+    pub preset: Option<String>,
+    pub pwr_level_pct: Option<u8>,
+    pub self_clean: bool,
+    /// Horodatage de la dernière trame reçue (liveness — audit 2026-06 §18).
+    pub last_update: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

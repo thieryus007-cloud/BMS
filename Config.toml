@@ -651,3 +651,12 @@ host_tag             = "pi5"
 # --- Statut plateforme ---
 [energy_manager.platform]
 publish_interval_secs = 60
+
+# --- Climatiseurs Toshiba (télémétrie lecture seule via ESP32 Rust / CN22) ---
+# Souscrit santuario/toshiba/<zone>/state (préfixe LOCAL, non bridgé — règle #11).
+# Voir docs/toshiba-suzumi-rs-plan.md. control_enabled réservé au futur pilotage.
+[energy_manager.toshiba_ac]
+enabled          = true
+zones            = ["salon", "chambre", "bureau"]
+stale_after_secs = 300
+control_enabled  = false

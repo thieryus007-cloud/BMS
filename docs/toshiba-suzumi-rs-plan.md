@@ -62,6 +62,12 @@ vide → zéro impact sur le build/CI daly-bms). Tester :
 | WiFi + MQTT transport (`santuario/toshiba/<zone>`) | `src/{wifi,mqtt}.rs` | ⏳ TODO (matériel) |
 | `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO (matériel) |
 
+**Côté Pi5** (`crates/energy-manager`) : le module **`logic/toshiba_ac` (lecture seule)**
+est **fait** — souscrit `santuario/toshiba/<zone>/state`, remplit
+`EnergyState.toshiba_ac[zone]`, diffuse un event live. Config `[energy_manager.toshiba_ac]`
+(+ `--check-config`). 4 tests, clippy propre, build vert. La **phase contrôle**
+(`control_enabled`) reste à faire (dépend de la stratégie énergie, §10.4).
+
 ### 0.4 Prochaines étapes (ordre conseillé, sans matériel)
 
 Faits (session 2026-07-05) : ✅ state machine (`machine.rs`), ✅ accumulateur RX
@@ -104,6 +110,12 @@ le matériel ESP32** :
   `santuario/toshiba/<zone>/{state,command,availability}`. Ajout `README.md` du crate.
   **38 tests verts**. Toutes les couches logicielles pures sont terminées ; le reste
   (uart/wifi/mqtt/main) attend le matériel.
+- **2026-07-05 (suite 4)** — **Côté Pi5** : module `energy-manager logic/toshiba_ac`
+  **lecture seule** (souscription `santuario/toshiba/<zone>/state` → `EnergyState` +
+  event live), config `[energy_manager.toshiba_ac]` + validation, souscription broker
+  wildcard, `rules.rs` pur (parse_zone/payload) testé. Section ajoutée à `Config.toml`.
+  Build energy-manager vert, clippy `-D warnings` propre, 4 tests + suite complète (34)
+  OK, `--check-config` OK. Phase **contrôle** encore à faire (stratégie énergie §10.4).
 
 ---
 
