@@ -47,7 +47,7 @@ Crate : **`firmware/toshiba-suzumi-rs/`** — **détaché** du workspace Pi5 (`[
 vide → zéro impact sur le build/CI daly-bms). Tester : 
 `cargo test --manifest-path firmware/toshiba-suzumi-rs/Cargo.toml`.
 
-**25 tests host verts** au total (clippy `-D warnings` + rustfmt propres).
+**34 tests host verts** au total (clippy `-D warnings` + rustfmt propres).
 
 | Composant | Fichier | État |
 |-----------|---------|------|
@@ -56,7 +56,7 @@ vide → zéro impact sur le build/CI daly-bms). Tester :
 | Agrégat d'état (`ToshibaState`, applique les `Field`) | `src/state.rs` | ✅ **fait** (4 tests) |
 | Accumulateur de trames RX incrémental (`validate_message_`) | `src/framing.rs` | ✅ **fait** (5 tests) |
 | Machine à états + file/pacing + watchdog + **simulateur d'unité** | `src/machine.rs` | ✅ **fait** (5 tests, dont handshake→online end-to-end) |
-| Sérialisation MQTT (`ToshibaState` ↔ JSON, commande ↔ `set_*`) | `src/mqtt_payload.rs` | ⏳ TODO (host-testable) |
+| Codec MQTT applicatif (`ToshibaState`→JSON ; JSON→`Command`→`apply_command`) | `src/mqtt_payload.rs` | ✅ **fait** (8 tests, transport-agnostique) |
 | UART ESP-IDF (init 9600 8E1, lecture/écriture octets) | `src/uart.rs` | ⏳ **TODO (attend matériel)** |
 | WiFi + MQTT transport (`santuario/toshiba/<zone>`) | `src/{wifi,mqtt}.rs` | ⏳ TODO (matériel) |
 | `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO (matériel) |
@@ -66,16 +66,18 @@ vide → zéro impact sur le build/CI daly-bms). Tester :
 Faits (session 2026-07-05) : ✅ state machine (`machine.rs`), ✅ accumulateur RX
 (`framing.rs`), ✅ agrégat d'état (`state.rs`), ✅ simulateur d'unité (test end-to-end).
 
+Fait aussi (session 2026-07-05) : ✅ codec MQTT applicatif (`mqtt_payload.rs`) +
+`Client::apply_command`.
+
 Reste **faisable sans matériel** :
-1. **Couche MQTT applicative** (`mqtt_payload.rs`, host-testable) : `ToshibaState` →
-   JSON d'état ; parsing d'un JSON de commande → appels `Client::set_*`. Figer le schéma
-   de sous-topics (aligné `logic/toshiba_ac`, cf. §5.2 de l'autre doc).
-2. **Config** (zones/topics/pins) : struct + parsing (TOML/NVS), host-testable.
+1. **Config** (`config.rs`) : zones/topics/pins/creds — struct + parsing (TOML/NVS),
+   host-testable. **Figer le schéma de sous-topics** (aligné `logic/toshiba_ac`, §5.2 de
+   l'autre doc) reste à trancher — idéalement confirmé au 1er boot (pas de matériel).
 
 Puis **à réception du matériel** :
-3. `uart.rs` (ESP-IDF, 9600 8E1, lecture/écriture octets) — branche `on_rx_byte`/`poll_tx`.
-4. `wifi.rs` + `mqtt.rs` (transport esp-idf-svc) + `main.rs` (feature `esp32`).
-5. Tests au banc : handshake réel, analyseur logique, commandes bout-en-bout.
+2. `uart.rs` (ESP-IDF, 9600 8E1, lecture/écriture octets) — branche `on_rx_byte`/`poll_tx`.
+3. `wifi.rs` + `mqtt.rs` (transport esp-idf-svc) + `main.rs` (feature `esp32`).
+4. Tests au banc : handshake réel, analyseur logique, commandes bout-en-bout.
 
 ### 0.5 Journal des sessions
 
@@ -90,6 +92,10 @@ Puis **à réception du matériel** :
   `machine.rs` (client : séquence handshake, pacing 100 ms, file de commandes,
   watchdog de re-handshake) **+ simulateur d'unité en mémoire** → test **end-to-end**
   handshake→online→commande sans matériel. **25 tests verts** au total, clippy + fmt OK.
+- **2026-07-05 (suite 2)** — `mqtt_payload.rs` : codec **transport-agnostique** (état
+  `ToshibaState` → JSON télémétrie ; JSON de commande → `Vec<Command>` → `Client::
+  apply_command`), mappings chaîne↔enum stables. Ajout dep `serde`/`serde_json` (std,
+  OK sur ESP-IDF). Test end-to-end JSON→unité. **34 tests verts**, clippy + fmt OK.
 
 ---
 
@@ -183,7 +189,7 @@ firmware/toshiba-suzumi-rs/
 │   ├── framing.rs               # ✅ accumulateur RX incrémental (validate_message_) — 5 tests
 │   ├── machine.rs               # ✅ Client : handshake, pacing, file, watchdog
 │   │                            #    + simulateur d'unité (test end-to-end) — 5 tests
-│   ├── mqtt_payload.rs          # ⏳ état ↔ JSON, commande ↔ set_* (host-testable)
+│   ├── mqtt_payload.rs          # ✅ état→JSON ; JSON→Command→apply_command — 8 tests
 │   ├── config.rs                # ⏳ Configuration (zones/topics/pins ; NVS)
 │   ├── uart.rs                  # ⏳ UART ESP-IDF (9600 8E1) → on_rx_byte / poll_tx
 │   ├── wifi.rs                  # ⏳ WiFi station (connexion, reconnexion)

@@ -10,5 +10,6 @@
 
 pub mod framing;
 pub mod machine;
+pub mod mqtt_payload;
 pub mod protocol;
 pub mod state;

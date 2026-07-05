@@ -13,6 +13,7 @@
 use std::collections::VecDeque;
 
 use crate::framing::{FrameAccumulator, Rx};
+use crate::mqtt_payload::Command;
 use crate::protocol::{
     build_read, build_target_temp, build_write, parse_response, CmdType, Fan, Field, Mode,
     PwrLevel, SpecialMode, State, Swing, AFTER_HANDSHAKE, COMMAND_DELAY_MS, HANDSHAKE,
@@ -232,6 +233,19 @@ impl Client {
         let frame = build_target_temp(celsius, self.state.eight_deg_active());
         self.queue.push_back(OutFrame::Bytes(frame));
     }
+
+    /// Applique une commande typée (issue de [`crate::mqtt_payload::parse_command`]).
+    pub fn apply_command(&mut self, cmd: Command) {
+        match cmd {
+            Command::SetPower(on) => self.set_power(on),
+            Command::SetMode(m) => self.set_mode(m),
+            Command::SetTargetTemp(t) => self.set_target_temp(t),
+            Command::SetFan(f) => self.set_fan(f),
+            Command::SetSwing(s) => self.set_swing(s),
+            Command::SetPreset(p) => self.set_preset(p),
+            Command::SetPowerLevel(l) => self.set_power_level(l),
+        }
+    }
 }
 
 // ============================================================================
@@ -437,6 +451,29 @@ mod tests {
         drive(&mut client, &mut unit, &mut now, 40);
         assert_eq!(unit.special, SpecialMode::EightDeg);
         assert_eq!(unit.target, 8, "l'unité doit dé-offseter 24 → 8 °C");
+    }
+
+    #[test]
+    fn json_command_reaches_unit() {
+        let mut client = Client::new();
+        let mut unit = FakeUnit::default();
+        client.start(0);
+        let mut now = 0;
+        drive(&mut client, &mut unit, &mut now, 400);
+        assert!(client.is_online());
+
+        // Commande MQTT (JSON) → liste de Command → application.
+        let cmds =
+            crate::mqtt_payload::parse_command(r#"{"mode":"heat","target_temp":23,"fan":"high"}"#)
+                .unwrap();
+        for c in cmds {
+            client.apply_command(c);
+        }
+        drive(&mut client, &mut unit, &mut now, 60);
+
+        assert_eq!(unit.mode, Mode::Heat);
+        assert_eq!(unit.target, 23);
+        assert_eq!(unit.fan, Fan::High);
     }
 
     #[test]
