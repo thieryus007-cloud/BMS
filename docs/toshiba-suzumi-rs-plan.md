@@ -47,24 +47,40 @@ Crate : **`firmware/toshiba-suzumi-rs/`** — **détaché** du workspace Pi5 (`[
 vide → zéro impact sur le build/CI daly-bms). Tester : 
 `cargo test --manifest-path firmware/toshiba-suzumi-rs/Cargo.toml`.
 
+**38 tests host verts** au total (clippy `-D warnings` + rustfmt propres).
+
 | Composant | Fichier | État |
 |-----------|---------|------|
-| Couche protocole pure (checksum, enums, trames, validation, parsing) | `src/protocol.rs` | ✅ **fait + 11 tests host verts** (clippy `-D warnings` propre) |
+| Couche protocole pure (checksum, enums, trames, validation, parsing, ODU/IDU) | `src/protocol.rs` | ✅ **fait** (11 tests) |
 | Handshake + timings + bornes température (constantes) | `src/protocol.rs` | ✅ fait |
-| Diagnostics ODU/IDU (parsing) | `src/protocol.rs` | ✅ fait |
-| UART ESP-IDF (init 9600 8E1, framing incrémental) | `src/uart.rs` | ⏳ **TODO (attend matériel)** |
-| WiFi + MQTT (`santuario/toshiba/<zone>`) | `src/{wifi,mqtt}.rs` | ⏳ TODO |
-| Machine à états (handshake→online→retry) | `src/state_machine.rs` | ⏳ TODO |
-| `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO |
+| Agrégat d'état (`ToshibaState`, applique les `Field`) | `src/state.rs` | ✅ **fait** (4 tests) |
+| Accumulateur de trames RX incrémental (`validate_message_`) | `src/framing.rs` | ✅ **fait** (5 tests) |
+| Machine à états + file/pacing + watchdog + **simulateur d'unité** | `src/machine.rs` | ✅ **fait** (5 tests, dont handshake→online end-to-end) |
+| Codec MQTT applicatif (`ToshibaState`→JSON ; JSON→`Command`→`apply_command`) | `src/mqtt_payload.rs` | ✅ **fait** (8 tests, transport-agnostique) |
+| Config nœud + dérivation topics + validation | `src/config.rs` | ✅ **fait** (4 tests) |
+| UART ESP-IDF (init 9600 8E1, lecture/écriture octets) | `src/uart.rs` | ⏳ **TODO (attend matériel)** |
+| WiFi + MQTT transport (`santuario/toshiba/<zone>`) | `src/{wifi,mqtt}.rs` | ⏳ TODO (matériel) |
+| `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO (matériel) |
 
 ### 0.4 Prochaines étapes (ordre conseillé, sans matériel)
 
-1. **State machine pure** (`state_machine.rs`) : transitions + file de commandes,
-   **testable sur host** (pas d'I/O) — pilote la couche protocole.
-2. **Assembleur de trames incrémental** (accumulateur `rx` façon `validate_message_`),
-   testable host avec des trames capturées.
-3. **Simulateur d'unité** (host) pour rejouer des séquences handshake/état en test.
-4. *(à réception matériel)* UART ESP-IDF, WiFi/MQTT, `main.rs`, tests au banc.
+Faits (session 2026-07-05) : ✅ state machine (`machine.rs`), ✅ accumulateur RX
+(`framing.rs`), ✅ agrégat d'état (`state.rs`), ✅ simulateur d'unité (test end-to-end).
+
+Fait aussi (session 2026-07-05) : ✅ codec MQTT (`mqtt_payload.rs`) + `apply_command`,
+✅ config nœud + topics (`config.rs`). **Schéma de topics FIGÉ** :
+`santuario/toshiba/<zone>/{state,command,availability}` (la voie Rust définit ses
+propres topics → la contrainte ESPHome « observer au 1er boot » ne s'applique plus).
+
+➡️ **Toutes les couches purement logicielles sont faites.** Ce qui reste **nécessite
+le matériel ESP32** :
+1. `uart.rs` (ESP-IDF, 9600 8E1, lecture/écriture octets) — branche `on_rx_byte`/`poll_tx`.
+2. `wifi.rs` + `mqtt.rs` (transport esp-idf-svc) + `main.rs` (feature `esp32`).
+3. Tests au banc : handshake réel, analyseur logique, commandes bout-en-bout.
+
+> À la réception du matériel : lire `README.md` du crate + ce §0, puis ajouter la
+> feature `esp32` (deps esp-idf-svc/hal/sys) et les 4 fichiers ci-dessus qui **ne font
+> que relayer** vers `Client`. Aucune logique protocolaire nouvelle à écrire.
 
 ### 0.5 Journal des sessions
 
@@ -74,6 +90,20 @@ vide → zéro impact sur le build/CI daly-bms). Tester :
   Clarification paysage protocoles Toshiba (§15) : issalig/AB non applicable.
   **Décision Rust actée.** Bootstrap crate `firmware/toshiba-suzumi-rs/` : couche
   protocole pure `src/protocol.rs` + 11 tests host verts (clippy propre).
+- **2026-07-05 (suite)** — Ajout des couches **logiques pures host-testables** :
+  `state.rs` (agrégat `ToshibaState`), `framing.rs` (accumulateur RX incrémental),
+  `machine.rs` (client : séquence handshake, pacing 100 ms, file de commandes,
+  watchdog de re-handshake) **+ simulateur d'unité en mémoire** → test **end-to-end**
+  handshake→online→commande sans matériel. **25 tests verts** au total, clippy + fmt OK.
+- **2026-07-05 (suite 2)** — `mqtt_payload.rs` : codec **transport-agnostique** (état
+  `ToshibaState` → JSON télémétrie ; JSON de commande → `Vec<Command>` → `Client::
+  apply_command`), mappings chaîne↔enum stables. Ajout dep `serde`/`serde_json` (std,
+  OK sur ESP-IDF). Test end-to-end JSON→unité. **34 tests verts**, clippy + fmt OK.
+- **2026-07-05 (suite 3)** — `config.rs` : `NodeConfig` (zone/wifi/mqtt/pins) +
+  validation + dérivation des topics ; **schéma de topics figé**
+  `santuario/toshiba/<zone>/{state,command,availability}`. Ajout `README.md` du crate.
+  **38 tests verts**. Toutes les couches logicielles pures sont terminées ; le reste
+  (uart/wifi/mqtt/main) attend le matériel.
 
 ---
 
@@ -157,26 +187,32 @@ Pi5). Légende : ✅ fait · ⏳ TODO (attend le matériel).
 
 ```
 firmware/toshiba-suzumi-rs/
-├── Cargo.toml                   # ✅ crate détaché ([workspace] vide), lib pure, 0 dép.
+├── Cargo.toml                   # ✅ crate détaché ([workspace] vide) ; deps serde/serde_json
+├── README.md                    # ✅ carte des modules + comment tester (host)
 ├── .gitignore                   # ✅ ignore /target
 ├── src/
-│   ├── lib.rs                   # ✅ expose `protocol`
-│   └── protocol.rs              # ✅ couche PURE : checksum, enums, trames, validation,
-│   │                            #    parsing (+ ODU/IDU), handshake, timings, TESTS host
-│   ├── state_machine.rs         # ⏳ machine à états (Handshake → Online → Error → Retry) — testable host
-│   ├── uart.rs                  # ⏳ Wrapper UART ESP-IDF (9600 8E1) + framing incrémental
+│   ├── lib.rs                   # ✅ expose protocol / state / framing / machine
+│   ├── protocol.rs              # ✅ couche PURE : checksum, enums, trames, validation,
+│   │                            #    parsing (+ ODU/IDU), handshake, timings — 11 tests
+│   ├── state.rs                 # ✅ ToshibaState (agrégat, applique les Field) — 4 tests
+│   ├── framing.rs               # ✅ accumulateur RX incrémental (validate_message_) — 5 tests
+│   ├── machine.rs               # ✅ Client : handshake, pacing, file, watchdog
+│   │                            #    + simulateur d'unité (test end-to-end) — 5 tests
+│   ├── mqtt_payload.rs          # ✅ état→JSON ; JSON→Command→apply_command — 8 tests
+│   ├── config.rs                # ✅ NodeConfig + topics santuario/toshiba/<zone> — 4 tests
+│   ├── uart.rs                  # ⏳ UART ESP-IDF (9600 8E1) → on_rx_byte / poll_tx
 │   ├── wifi.rs                  # ⏳ WiFi station (connexion, reconnexion)
-│   ├── mqtt.rs                  # ⏳ Client MQTT (santuario/toshiba/<zone>)
-│   ├── config.rs                # ⏳ Configuration NVS (SSID, MQTT, topics)
+│   ├── mqtt.rs                  # ⏳ Transport MQTT (santuario/toshiba/<zone>)
 │   └── main.rs                  # ⏳ Point d'entrée ESP32 (feature `esp32`, esp-idf-svc)
 ├── .cargo/config.toml           # ⏳ cible xtensa-esp32-espidf (ajouté avec la partie ESP32)
-├── build.rs / sdkconfig.defaults / partitions.csv   # ⏳ ESP-IDF (OTA + NVS)
+└── build.rs / sdkconfig.defaults / partitions.csv   # ⏳ ESP-IDF (OTA + NVS)
 ```
 
-> Les **tests protocole sont inline** dans `protocol.rs` (`#[cfg(test)]`) et tournent
-> sur host sans matériel. Le parsing des capteurs ODU/IDU est **intégré** à `protocol.rs`
-> (pas de `sensors.rs` séparé). La partie ESP-IDF (deps + `main.rs` + `.cargo/`) sera
-> ajoutée **derrière une feature `esp32`** pour garder la couche pure compilable partout.
+> **Séparation I/O ↔ logique** (inspirée de o0Zz, §14.3) : `protocol`/`state`/`framing`/
+> `machine` sont **purs** (aucune I/O) → testés sur host. Le futur code ESP-IDF
+> (`uart`/`wifi`/`mqtt`/`main`) ne fera **que** relayer : lire l'UART → `Client::on_rx_byte`,
+> écrire ← `Client::poll_tx`, timer → `Client::on_tick`. Cette partie sera **derrière une
+> feature `esp32`** pour garder la couche pure compilable partout.
 
 ---
 

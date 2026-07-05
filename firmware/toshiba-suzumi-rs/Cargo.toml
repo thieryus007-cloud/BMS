@@ -28,6 +28,10 @@ name = "toshiba_suzumi_protocol"
 path = "src/lib.rs"
 
 [dependencies]
-# Couche protocole pure : AUCUNE dépendance (host-testable, no_std-ready).
-# Les dépendances ESP-IDF (esp-idf-svc/hal/sys) seront ajoutées avec la partie
-# firmware (feature "esp32"), cf. plan §5 — pas maintenant (pas de matériel).
+# Couches pures (protocol/state/framing/machine) : aucune dépendance requise.
+# La couche MQTT applicative (mqtt_payload) sérialise en JSON via serde (std ;
+# fourni aussi par ESP-IDF → OK sur cible). Les dépendances ESP-IDF
+# (esp-idf-svc/hal/sys) seront ajoutées avec la partie firmware (feature "esp32"),
+# cf. plan §5 — pas maintenant (pas de matériel).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
