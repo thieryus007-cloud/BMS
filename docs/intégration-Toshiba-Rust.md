@@ -1,5 +1,7 @@
 Plan de projet : Transposition du pilote Toshiba SUZUMI en Rust pour ESP32
 
+reference: https://github.com/pedobry/esphome_toshiba_suzumi
+
 1. Objectifs du projet
 
 · Remplacer le composant ESPHome (C++) par un firmware Rust autonome sur ESP32.
