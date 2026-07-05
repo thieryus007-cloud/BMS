@@ -8,5 +8,6 @@ pub mod smartshunt;
 pub mod solar_power;
 pub mod switch_ats;
 pub mod tasmota;
+pub mod toshiba_ac;
 pub mod victron_keepalive;
 pub mod water_heater;

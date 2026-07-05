@@ -82,6 +82,10 @@ pub fn all_subscriptions(portal_id: &str, vebus: u32, mppt1: u32, mppt2: u32, pv
         "stat/tongou_3BC764/POWER".to_string(),
         "tele/tongou_3BC764/SENSOR".to_string(),
 
+        // --- Toshiba climatiseurs (télémétrie lecture seule, wildcard par zone).
+        //     Préfixe LOCAL, non relayé par le bridge NanoPi (règle #11). ---
+        "santuario/toshiba/+/state".to_string(),
+
         // --- Persist (retained baselines + DEYE state) ---
         "santuario/persist/pvinv_baseline".to_string(),
         "santuario/persist/yield_yesterday".to_string(),

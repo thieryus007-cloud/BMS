@@ -293,8 +293,15 @@ Après toute modif de topics/bridge : `sudo /usr/local/bin/verify-no-loop.sh` (r
 
 ## 6. Logiciel Pi5 — module `energy-manager` `logic/toshiba_ac`
 
-Nouveau module calqué sur `logic/water_heater` (contrôle + télémétrie) et
-`logic/deye_command` (règles **Rust pures, stateless** ré‑évaluées chaque seconde).
+> ✅ **Phase lecture seule IMPLÉMENTÉE** (2026-07) : `crates/energy-manager/src/logic/
+> toshiba_ac/` (`mod.rs` + `rules.rs`), config `[energy_manager.toshiba_ac]`, souscription
+> `santuario/toshiba/+/state`, remplissage `EnergyState.toshiba_ac[zone]` + event live.
+> Tests verts, clippy propre, `--check-config` OK. **Phase contrôle** (`control_enabled`)
+> = à faire (dépend de la stratégie énergie, §10). Détail/journal :
+> `docs/toshiba-suzumi-rs-plan.md` §0.
+
+Module calqué sur `logic/tasmota` (consommateur MQTT lecture seule) ; le futur contrôle
+suivra `logic/deye_command` (règles **Rust pures, stateless**).
 
 ### 6.1 Arborescence
 
