@@ -21,6 +21,62 @@
 
 ---
 
+## 0. État d'avancement & reprise de session
+
+> 🔁 **NOUVELLE SESSION → LIRE CETTE SECTION EN PREMIER.** Ce document est la
+> **mémoire du projet Toshiba** : il porte l'historique complet pour ne rien reperdre
+> quand le contexte Claude est réinitialisé. Tenir ce §0 **à jour à chaque session**
+> (journal + prochaines étapes), au même titre que CLAUDE.md (règle projet #9).
+
+### 0.1 Contexte matériel
+
+- **Les ESP32 ne sont PAS encore arrivés** → on progresse **sans aucun test matériel**.
+  Tout ce qui est fait doit être **validable sur host** (`cargo test`) ou sur le papier.
+- Dès réception du matériel : reprendre la Phase 3+ (UART/WiFi/MQTT) et les tests au banc.
+
+### 0.2 Décisions actées
+
+1. **Runtime = firmware Rust natif**, **PAS ESPHome** (voir bandeau en tête).
+2. **Protocole SUZUMI vérifié** contre pedobry, **recoupé** avec o0Zz (§14) → fiable.
+3. **`issalig`/AB TCC-Link = protocole différent, non applicable** à nos Shorai Edge (§15).
+4. **Aucune spec officielle Toshiba** publique → §6 est la meilleure source (§15.1).
+
+### 0.3 État du code
+
+Crate : **`firmware/toshiba-suzumi-rs/`** — **détaché** du workspace Pi5 (`[workspace]`
+vide → zéro impact sur le build/CI daly-bms). Tester : 
+`cargo test --manifest-path firmware/toshiba-suzumi-rs/Cargo.toml`.
+
+| Composant | Fichier | État |
+|-----------|---------|------|
+| Couche protocole pure (checksum, enums, trames, validation, parsing) | `src/protocol.rs` | ✅ **fait + 11 tests host verts** (clippy `-D warnings` propre) |
+| Handshake + timings + bornes température (constantes) | `src/protocol.rs` | ✅ fait |
+| Diagnostics ODU/IDU (parsing) | `src/protocol.rs` | ✅ fait |
+| UART ESP-IDF (init 9600 8E1, framing incrémental) | `src/uart.rs` | ⏳ **TODO (attend matériel)** |
+| WiFi + MQTT (`santuario/toshiba/<zone>`) | `src/{wifi,mqtt}.rs` | ⏳ TODO |
+| Machine à états (handshake→online→retry) | `src/state_machine.rs` | ⏳ TODO |
+| `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO |
+
+### 0.4 Prochaines étapes (ordre conseillé, sans matériel)
+
+1. **State machine pure** (`state_machine.rs`) : transitions + file de commandes,
+   **testable sur host** (pas d'I/O) — pilote la couche protocole.
+2. **Assembleur de trames incrémental** (accumulateur `rx` façon `validate_message_`),
+   testable host avec des trames capturées.
+3. **Simulateur d'unité** (host) pour rejouer des séquences handshake/état en test.
+4. *(à réception matériel)* UART ESP-IDF, WiFi/MQTT, `main.rs`, tests au banc.
+
+### 0.5 Journal des sessions
+
+- **2026-07-05** — Correction complète du protocole §6/§8 contre pedobry (start byte
+  `0x02`, codes réels, checksum, handshake, temp, polling 120 s). Validation croisée
+  o0Zz (§14) : même protocole ; anomalie `HANDSHAKE[4]` (0xFE vs 0xFB) documentée.
+  Clarification paysage protocoles Toshiba (§15) : issalig/AB non applicable.
+  **Décision Rust actée.** Bootstrap crate `firmware/toshiba-suzumi-rs/` : couche
+  protocole pure `src/protocol.rs` + 11 tests host verts (clippy propre).
+
+---
+
 ## 1. Objectifs du projet
 
 - **Remplacer** le composant ESPHome C++ par un firmware Rust autonome sur ESP32.
@@ -96,28 +152,31 @@ avec `docs/integration-toshiba-shorai-esphome.md`.
 
 ## 4. Structure du projet Rust
 
+Emplacement réel : **`firmware/toshiba-suzumi-rs/`** (crate **détaché** du workspace
+Pi5). Légende : ✅ fait · ⏳ TODO (attend le matériel).
+
 ```
-toshiba-suzumi-rs/
-├── .cargo/
-│   └── config.toml              # Cible xtensa-esp32-espidf
-├── Cargo.toml
-├── build.rs                     # Configuration ESP-IDF (sdkconfig)
-├── sdkconfig.defaults           # Paramètres ESP-IDF (heap, WiFi, UART buffers)
-├── partitions.csv               # Table de partition personnalisée (OTA + NVS)
+firmware/toshiba-suzumi-rs/
+├── Cargo.toml                   # ✅ crate détaché ([workspace] vide), lib pure, 0 dép.
+├── .gitignore                   # ✅ ignore /target
 ├── src/
-│   ├── main.rs                  # Point d'entrée, init, task principale
-│   ├── protocol.rs              # Définition des trames, checksum, parsing SUZUMI
-│   ├── uart.rs                  # Wrapper UART ESP-IDF (async ou blocking)
-│   ├── mqtt.rs                  # Client MQTT (WiFi + connexion broker)
-│   ├── wifi.rs                  # Gestion WiFi station (connexion, reconnexion)
-│   ├── command_queue.rs         # File d'attente des commandes (MPMC channel)
-│   ├── state_machine.rs         # Machine à états (Handshake → Online → Error → Retry)
-│   ├── sensors.rs               # Parsing des capteurs ODU/IDU optionnels
-│   └── config.rs                # Configuration NVS (SSID, MQTT, topics)
-└── tests/
-    ├── test_protocol.rs         # Tests unitaires checksum / parsing (exécutable sur host)
-    └── test_frame_builder.rs    # Tests construction de trames
+│   ├── lib.rs                   # ✅ expose `protocol`
+│   └── protocol.rs              # ✅ couche PURE : checksum, enums, trames, validation,
+│   │                            #    parsing (+ ODU/IDU), handshake, timings, TESTS host
+│   ├── state_machine.rs         # ⏳ machine à états (Handshake → Online → Error → Retry) — testable host
+│   ├── uart.rs                  # ⏳ Wrapper UART ESP-IDF (9600 8E1) + framing incrémental
+│   ├── wifi.rs                  # ⏳ WiFi station (connexion, reconnexion)
+│   ├── mqtt.rs                  # ⏳ Client MQTT (santuario/toshiba/<zone>)
+│   ├── config.rs                # ⏳ Configuration NVS (SSID, MQTT, topics)
+│   └── main.rs                  # ⏳ Point d'entrée ESP32 (feature `esp32`, esp-idf-svc)
+├── .cargo/config.toml           # ⏳ cible xtensa-esp32-espidf (ajouté avec la partie ESP32)
+├── build.rs / sdkconfig.defaults / partitions.csv   # ⏳ ESP-IDF (OTA + NVS)
 ```
+
+> Les **tests protocole sont inline** dans `protocol.rs` (`#[cfg(test)]`) et tournent
+> sur host sans matériel. Le parsing des capteurs ODU/IDU est **intégré** à `protocol.rs`
+> (pas de `sensors.rs` séparé). La partie ESP-IDF (deps + `main.rs` + `.cargo/`) sera
+> ajoutée **derrière une feature `esp32`** pour garder la couche pure compilable partout.
 
 ---
 
