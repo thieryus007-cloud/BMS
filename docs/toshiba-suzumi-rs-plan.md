@@ -3,21 +3,21 @@
 > **Référence** : [pedobry/esphome_toshiba_suzumi](https://github.com/pedobry/esphome_toshiba_suzumi)
 > **Objectif** : Remplacer le composant ESPHome (C++) par un firmware Rust autonome sur ESP32, sans dépendance à Home Assistant.
 >
-> **⚠️ Statut du document** : la spécification protocolaire ci‑dessous (§6, §8) a été
-> **vérifiée octet par octet contre le code source C++** (`toshiba_climate.cpp`,
-> `toshiba_climate.h`, `toshiba_climate_mode.cpp`/`.h`, `climate.py`) en juillet 2026.
-> Les valeurs marquées « ✅ source » sont **extraites du firmware d'origine**, plus des
-> suppositions. Voir le tableau de correspondance §6.5.
+> **✅ DÉCISION ACTÉE (juillet 2026) — la voie retenue est un firmware RUST natif, PAS ESPHome.**
+> Ce document est **la référence d'implémentation du projet** pour les 3 unités Toshiba
+> Shorai Edge. ESPHome n'est **plus** la solution retenue : le document
+> `docs/integration-toshiba-shorai-esphome.md` est **conservé uniquement en référence**
+> pour ses parties **toujours valables** (câblage CN22, brochage, schéma de topics MQTT
+> `santuario/toshiba/<zone>`, module Pi5 `energy-manager logic/toshiba_ac`, mesure conso
+> via Tongou/Tasmota) — mais **le runtime ESP32 sera le firmware Rust décrit ici**, pas
+> le composant ESPHome.
 >
-> **Relation avec les autres documents du projet** :
-> - **Voie retenue en production** = réutiliser le composant **ESPHome tel quel** →
->   `docs/integration-toshiba-shorai-esphome.md` (câblage CN22, YAML, MQTT, module
->   `energy-manager logic/toshiba_ac`, mesure conso via Tongou/Tasmota).
-> - **Ce document** = voie **alternative/avancée** : un firmware **Rust natif** qui
->   ré‑implémente le protocole (utile si on veut se passer d'ESPHome, réduire l'empreinte,
->   ou intégrer une logique embarquée). Le **protocole série est identique** dans les deux
->   cas ; seul l'hôte logiciel change. Le câblage, les topics MQTT et l'intégration Pi5
->   décrits dans l'autre document **restent valables**.
+> **⚠️ Statut de la spécification** : le protocole ci‑dessous (§6, §8) a été
+> **vérifié octet par octet contre le code source C++** de référence
+> (`toshiba_climate.cpp`, `.h`, `toshiba_climate_mode.cpp`/`.h`, `climate.py` — pedobry)
+> **et recoupé avec une seconde implémentation indépendante** (`o0Zz/climate-uart`,
+> `src/protocols/toshiba.cpp` — voir §14). Les deux aboutissent au **même protocole** →
+> confiance élevée. Les valeurs marquées « ✅ source » sont **extraites du firmware**.
 
 ---
 
@@ -278,6 +278,15 @@ HANDSHAKE[5] = {2, 0,   2,   0,   0, 0, 0, 254}
 AFTER_HANDSHAKE[0] = {2, 0, 2, 1, 0, 0, 2, 0, 0, 251}
 AFTER_HANDSHAKE[1] = {2, 0, 2, 2, 0, 0, 2, 0, 0, 250}
 ```
+
+> ⚠️ **Divergence `HANDSHAKE[4]` (dernier octet)** — repérée en recoupant avec
+> `o0Zz/climate-uart` (§14). pedobry termine cette trame par **`254` (0xFE)**, mais la
+> **règle de checksum donne `251` (0xFB)** (Σ index 1..8 = 5 → 256−5 = 251) — c'est la
+> valeur qu'utilise o0Zz (`kSyn5`). Les **7 autres trames sont checksum‑correctes** ; seule
+> celle‑ci ne l'est pas côté pedobry. Comme le firmware pedobry **fonctionne sur le terrain
+> avec 0xFE**, l'unité **ne valide probablement pas** le checksum des trames de handshake
+> (init figées). **Recommandation** : garder les octets pedobry tels quels pour la parité,
+> mais si le handshake échoue au banc, **tester `0xFB`**.
 
 **Déroulé exact** (`setup()` → `start_handshake()` puis `getInitData()`) :
 
@@ -727,7 +736,8 @@ cargo run --release
 | The Rust on ESP Book | https://docs.esp-rs.org/book/ |
 | esp-idf-hal documentation | https://docs.esp-rs.org/esp-idf-hal/ |
 | esp-idf-svc examples | https://github.com/esp-rs/esp-idf-svc/tree/master/examples |
-| Code source C++ original | https://github.com/pedobry/esphome_toshiba_suzumi |
+| Code source C++ référence (pedobry) | https://github.com/pedobry/esphome_toshiba_suzumi |
+| 2ᵉ implémentation (validation croisée, §14) | https://github.com/o0Zz/climate-uart — `src/protocols/toshiba.cpp` |
 | ESP-IDF UART API | https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/uart.html |
 | Projet connexe (Shorai) | https://github.com/toremick/shorai-esp32 |
 | Projet connexe (TConnect) | https://github.com/Vpowgh/TConnect |
@@ -784,6 +794,75 @@ ESP32 (WROOM‑32D) et ESP8266. → **compatible avec les 3 unités intérieures
 - [ ] Watchdog hardware alimenté (`CONFIG_ESP_TASK_WDT_EN=y`).
 - [ ] Mode AP de secours fonctionnel (si WiFi invalide).
 - [ ] Binaire signé pour OTA (si fonctionnalité activée).
+
+---
+
+## 14. Validation croisée avec `o0Zz/climate-uart`
+
+> Source : [`o0Zz/climate-uart`](https://github.com/o0Zz/climate-uart),
+> `src/protocols/toshiba.cpp` — une **2ᵉ implémentation C++ indépendante** du protocole
+> Toshiba UART, au sein d'une bibliothèque multi‑marques (Mitsubishi, **Toshiba**, Daikin
+> S21, Sharp, LG, Hitachi H‑Link, Fujitsu). Modèles Toshiba cités : **Seiya, Shorai, Yukai**.
+
+### 14.1 Verdict : **même protocole** (confirmation)
+
+Recoupement octet par octet : STX `0x02`, structure de trame (`[6]=dataSize+5`,
+`[11]=dataSize`, données = `{fonction, valeur}`), **checksum identique**
+(`−Σ octets[1..]`), et **valeurs identiques** pour les codes fonction et les mappings :
+
+| | pedobry (notre réf.) | o0Zz | |
+|---|---|---|---|
+| Power / Mode / Setpoint | `0x80 / 0xB0 / 0xB3` | `kFunctionPowerState/UnitMode/Setpoint` idem | ✅ |
+| Fan / Swing / RoomTemp | `0xA0 / 0xA3 / 0xBB` | idem | ✅ |
+| Power ON/OFF | `0x30 / 0x31` | `kPowerStateOn/Off` idem | ✅ |
+| Modes (Auto/Cool/Heat/Dry/Fan) | `0x41..0x45` | idem | ✅ |
+| Fan (Quiet…Auto) | `0x31..0x36, 0x41` | `kFanQuiet/Lvl1..5/Auto` idem | ✅ |
+| Swing (Fix/V/H/Both/Pos1‑5) | `0x31,0x41‑43,0x50‑54` | idem | ✅ |
+| Handshake | 8 trames | **7/8 identiques** | ⚠️ voir 14.2 |
+
+→ Deux reverse‑engineering indépendants convergent : **notre spécification §6 est fiable.**
+
+### 14.2 Un écart à connaître : `HANDSHAKE[4]` / `kSyn5`
+
+Détaillé en §6.4 : dernier octet **`0xFE` (pedobry) vs `0xFB` (o0Zz, checksum‑correct)**.
+L'unité ignore vraisemblablement le checksum des trames d'init → garder `0xFE`, tester
+`0xFB` seulement si le handshake échoue au banc.
+
+### 14.3 Apports utiles de o0Zz (à considérer)
+
+1. **Codes fonction supplémentaires nommés** par o0Zz, **absents** de pedobry — non
+   caractérisés, à sonder au `scan()` : `kFunctionStatus = 0x88`, `kFunctionGroup1 = 0xF8`.
+   (pedobry expose plutôt `SPECIAL_MODE = 0xF7`, absent de o0Zz.)
+2. **Indice de parsing des réponses** : o0Zz marque les réponses avec
+   `type = commande | masque_réponse = 0x10 | 0x80 = 0x90` (octet `[3]`). Utile pour
+   distinguer une **réponse** (`[3]=0x90`) d'un **ACK/commande** — complément à notre
+   dispatch par longueur (§6.9).
+3. **Timeout** : `kPacketReadTimeoutMs = 250 ms` (vs `RECEIVE_TIMEOUT = 200 ms` pedobry) —
+   même ordre de grandeur ; 200–250 ms est la bonne fenêtre.
+4. **Architecture logicielle** (inspiration directe pour notre `protocol.rs` / `uart.rs`) :
+   o0Zz sépare un **transport UART abstrait** (portable ESP32/Arduino) d'une **classe
+   protocole par marque** exposant une API unifiée (`query/sendCommand/setState/getState/
+   getRoomTemperature`). En Rust : un `trait UartTransport` + un `struct ToshibaProtocol`
+   pur (sans I/O) testable sur host → aligne bien avec les règles projet (#16 supervision,
+   décisions/parsing purs et testés).
+
+### 14.4 Ce que o0Zz **ne** couvre pas (→ on garde pedobry comme référence primaire)
+
+o0Zz/Toshiba est un **sous‑ensemble** « contrôle de base ». Il **n'implémente pas** ce que
+nous avons déjà documenté et qui a de la valeur pour le projet :
+
+- **Diagnostics ODU/IDU** (`0xE5`/`0xE4` : `cdu_*`, `fcu_*`, charge compresseur, RPM) — §6.10.
+- **Température extérieure** (`0xBE`) — §6.5.
+- **Auto‑nettoyage** (`0xCB`) et **LED WiFi** (`0xDE`/`0xDF`).
+- **Presets / modes spéciaux** (`0xF7` : 8°/garde hors‑gel, ECO, Hi‑Power, Sleep…) — §6.7/§6.11.
+
+### 14.5 Conclusion pour le projet
+
+**Aucun ajout protocolaire indispensable** : notre spec §6 est déjà un **sur‑ensemble** de
+o0Zz/Toshiba. Actions retenues : (a) **note `HANDSHAKE[4]`** intégrée (§6.4) ; (b) **sonder
+`0x88`/`0xF8`** lors du `scan()` de mise au point ; (c) **s'inspirer de l'architecture
+transport/protocole** de o0Zz pour le découpage Rust ; (d) fenêtre timeout **200–250 ms**.
+pedobry reste la **référence primaire** (couverture complète : diagnostics + presets).
 
 ---
 
