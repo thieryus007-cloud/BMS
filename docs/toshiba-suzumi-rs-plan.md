@@ -321,7 +321,8 @@ pub enum CmdType {
     Delay        = 1,    // 0x01 — pseudo-commande d'attente (interne file)
     PowerState   = 128,  // 0x80 — ON/OFF (valeurs STATE, §6.8)
     PowerSel     = 135,  // 0x87 — niveau de puissance 50/75/100 % (PWR_LEVEL)
-    ComfortSleep = 148,  // 0x94 — confort/sommeil
+    ComfortSleep = 148,  // 0x94 — déclaré dans l'enum mais NON utilisé par le firmware
+                         //        (valeurs/sémantique inconnues — à caractériser au scan)
     Fan          = 160,  // 0xA0 — ventilation (FAN)
     Swing        = 163,  // 0xA3 — orientation (SWING)
     Mode         = 176,  // 0xB0 — mode CVC (MODE)
