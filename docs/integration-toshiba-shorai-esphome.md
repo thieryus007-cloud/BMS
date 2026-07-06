@@ -491,8 +491,11 @@ connectée ・ [ ] level shifter HV=5V / LV=3V3 ・ [ ] pas de brownout au boot 
    lambdas ESPHome vers `santuario/em/toshiba_ac/<n>/...` (plus homogène avec `em/*`) —
    **à figer après observation du 1er boot** (§5.2).
 3. **Alimentation ESP32** : +5V CN22 (défaut) vs alim 5V externe (si instabilité).
-4. **Stratégie énergie** : effacement sur fréquence AC (comme DEYE) et/ou marche sur
-   surplus PV ? seuils SOC / surplus / plages horaires ?
+4. ~~**Stratégie énergie**~~ **TRANCHÉE** : contrôle par **présence** (capteurs Aqara FP2,
+   un par pièce) — **ECO dès absence, OFF après 5 min**. Règles pures faites+testées
+   (`logic/toshiba_ac/rules.rs`) ; reste à câbler la source de présence FP2. Détail :
+   `docs/toshiba-suzumi-rs-plan.md` §18. (La coupe fréquence type DEYE ne s'applique pas :
+   une clim est une charge, pas une source PV.)
 5. **`logic/tasmota` multi‑device** : liste de devices en config vs handler dédié (§7.1).
 6. **Exposition VRM** (heatpump.mqtt_2/3/4) : oui/non.
 7. **Garantie** constructeur vs intervention CN22 (matériel neuf).

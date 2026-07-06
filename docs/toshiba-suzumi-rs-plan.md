@@ -68,14 +68,17 @@ est **fait** — souscrit `santuario/toshiba/<zone>/state`, remplit
 (+ `--check-config`). 4 tests, clippy propre, build vert. La **phase contrôle**
 (`control_enabled`) reste à faire (dépend de la stratégie énergie, §10.4).
 
-> ⚠️ **Note de conception (phase contrôle) — NE PAS copier la logique DEYE telle quelle.**
-> La coupe DEYE déconnecte des **sources PV** quand la batterie est pleine (fréquence AC
-> haute). Une **clim est une CHARGE** : sur surplus PV on veut la faire tourner **plus**
-> (absorber l'excédent), pas la couper. La stratégie AC est donc **inverse** de DEYE
-> côté fréquence. Options réelles à trancher avec l'utilisateur : (a) **marche/boost sur
-> surplus PV** (seuil W + SOC), (b) **plages horaires/confort**, (c) délestage sur import
-> réseau / SOC bas. → implémenter en `rules.rs` **pur + tests** une fois la stratégie
-> choisie, `control_enabled=false` par défaut.
+> ✅ **Stratégie de contrôle TRANCHÉE = présence (capteurs Aqara FP2).** Politique :
+> **ECO dès absence, OFF après 5 min d'absence** (retour de présence → rallumage + preset
+> normal). C'est énergétiquement sain **et** simple. (À noter : la coupe DEYE — déconnexion
+> de **sources PV** sur batterie pleine — **ne s'applique pas** à une clim, qui est une
+> **charge** ; on ne la pilote donc **pas** sur la fréquence AC.)
+>
+> **Fait** : règles **pures + testées** dans `energy-manager logic/toshiba_ac/rules.rs`
+> (`decide_presence`, `presence_command_json`) + config `eco_after_secs`/`off_after_secs`,
+> `control_enabled=false` par défaut. **Reste** (quand les 3 FP2 seront posés) : câbler la
+> **source de présence** (topic MQTT des FP2 → zone) et la boucle d'émission débouncée.
+> Détail → §18.
 
 ### 0.4 Prochaines étapes (ordre conseillé, sans matériel)
 
@@ -140,6 +143,13 @@ le matériel ESP32** :
   **`node_name` = hostname = segment de topic = SSID AP** (`Shorai-31/32/33`, → 7 à terme).
   **Décision : station WiFi + AP de repli** (un AP principal isolerait du broker). Zones
   `Config.toml` alignées sur `Shorai-3x`. 5 tests config, 39 tests firmware, clippy+fmt OK.
+- **2026-07-06 (suite 7)** — **Stratégie de contrôle tranchée = présence (Aqara FP2)** :
+  ECO dès absence, OFF après 5 min. Règles **pures + testées** côté Pi5
+  (`logic/toshiba_ac/rules.rs` : `decide_presence` + `presence_command_json`, 4 tests) +
+  config `control_enabled`/`eco_after_secs`/`off_after_secs` (validation `off≥eco`),
+  `control_enabled=false` par défaut. Reste à câbler (à réception des FP2) : source de
+  présence (topic → zone) + boucle débouncée (§18). IP statiques recalées `.31–.37`.
+  energy-manager clippy propre, 8 tests toshiba, `--check-config` OK. Détail → §18.
 
 ---
 
@@ -1257,7 +1267,7 @@ Alternatives : provisionner en **NVS** (persistant, modifiable sans reflash), ou
 - **IP statique** si pas de réservation possible :
   ```rust
   NodeConfig::new("Shorai-31").with_static_ip(
-      "192.168.1.131".parse().unwrap(), // ip
+      "192.168.1.31".parse().unwrap(),  // ip
       "192.168.1.1".parse().unwrap(),   // gateway
       "255.255.255.0".parse().unwrap(), // netmask
       "192.168.1.1".parse().unwrap());  // dns
@@ -1269,12 +1279,14 @@ Alternatives : provisionner en **NVS** (persistant, modifiable sans reflash), ou
 
 | node_name | Topics | IP statique suggérée (si non‑DHCP) |
 |-----------|--------|:----------------------------------:|
-| `Shorai-31` | `santuario/toshiba/Shorai-31/…` | `192.168.1.131` |
-| `Shorai-32` | `santuario/toshiba/Shorai-32/…` | `192.168.1.132` |
-| `Shorai-33` | `santuario/toshiba/Shorai-33/…` | `192.168.1.133` |
-| `Shorai-34…37` | `…/Shorai-3x/…` | `192.168.1.134…137` |
+| `Shorai-31` | `santuario/toshiba/Shorai-31/…` | `192.168.1.31` |
+| `Shorai-32` | `santuario/toshiba/Shorai-32/…` | `192.168.1.32` |
+| `Shorai-33` | `santuario/toshiba/Shorai-33/…` | `192.168.1.33` |
+| `Shorai-34…37` | `…/Shorai-3x/…` | `192.168.1.34…37` |
 
-> IPs suggérées **hors** de la plage DHCP et des adresses prises (`141`=Pi5, `120`=NanoPi).
+> Plage **`.31–.37`** choisie car le scope **`.130–.137`** est **déjà partiellement occupé**.
+> Dernier octet = suffixe du nom (`Shorai-31` → `.31`). Vérifier que `.31–.37` est **hors
+> plage DHCP** et libre côté box ; adresses prises connues : `141`=Pi5, `120`=NanoPi.
 > Côté Pi5, `[energy_manager.toshiba_ac].zones` liste ces noms (souscription réelle par
 > wildcard `santuario/toshiba/+/state`).
 
@@ -1284,6 +1296,66 @@ Alternatives : provisionner en **NVS** (persistant, modifiable sans reflash), ou
 DHCP **ou** IP statique, **reconnexion à backoff**, et **bascule AP** (`ap_ssid()`) si la
 station échoue après N tentatives. La config (défauts, validation, dérivation) est **déjà
 faite et testée** — `wifi.rs` n'ajoute que l'I/O ESP‑IDF.
+
+---
+
+## 18. Contrôle par présence (capteurs **Aqara FP2**)
+
+**Stratégie retenue** pour la phase contrôle des Toshiba : **présence** (3 FP2, un par
+pièce). Politique : **ECO dès absence**, **OFF après 5 min d'absence**, **retour de
+présence → rallumage + preset normal**. Simple et énergétiquement sain (une clim est une
+**charge** ; on ne la pilote pas sur la fréquence AC comme la coupe DEYE).
+
+### 18.1 Pipeline
+
+```
+FP2 (×3, 1/pièce) ──MQTT présence──► energy-manager logic/toshiba_ac
+                                        │  decide_presence(present, absence_s, eco, off)
+                                        ▼
+              santuario/toshiba/<Shorai-3x>/command  ◄── presence_command_json(action)
+                                        │  {"preset":"eco"} / {"power":false} / restore
+                                        ▼
+                          firmware ESP32 (mqtt_payload::parse_command → Client)
+```
+
+### 18.2 État (fait vs. à câbler)
+
+- ✅ **Décision pure + testée** (`logic/toshiba_ac/rules.rs`) :
+  `decide_presence(present, secs_since_presence, eco_after, off_after) -> PresenceAction`
+  et `presence_command_json(action)`.
+- ✅ **Config** : `[energy_manager.toshiba_ac]` `control_enabled` (**OFF** par défaut),
+  `eco_after_secs=0`, `off_after_secs=300` (+ validation `off ≥ eco`).
+- ⏳ **À câbler quand les FP2 seront posés** (§18.4) : la **source de présence** (topic
+  MQTT des FP2 → zone) et la **boucle d'émission débouncée**. Rien n'est émis tant que
+  `control_enabled=false`.
+
+### 18.3 Table de décision
+
+| Présence | Temps d'absence | Action | Commande JSON publiée |
+|:--------:|:---------------:|--------|-----------------------|
+| oui | — | `Occupied` (restaure) | `{"power":true,"preset":"standard"}` |
+| non | `< eco_after` | `Occupied` (grâce) | *(idem — pas de changement)* |
+| non | `eco_after … off_after` | `Eco` | `{"preset":"eco"}` |
+| non | `≥ off_after` | `Off` | `{"power":false}` |
+
+> L'appelant n'émet **que sur changement** d'action (anti‑rebattement) — pas à chaque tick.
+
+### 18.4 Reste à câbler (à réception des FP2)
+
+1. **Topic/payload des FP2** : selon le hub — Aqara **M2/M3** en MQTT, ou **Zigbee2MQTT**
+   (`zigbee2mqtt/<fp2>` → JSON `{"presence": true, …}`, régions/zones supportées). **À
+   confirmer empiriquement** (`mosquitto_sub`) — comme pour ESPHome, ne pas le supposer.
+2. **Mapping FP2 → zone** : config `presence = [{ topic = "...", zone = "Shorai-31" }, …]`.
+3. **Souscription** : ajouter le topic FP2 dans `mqtt/topics.rs::all_subscriptions`.
+4. **Boucle** (`spawn_critical`, règle #16) : sur message FP2 → MAJ `last_presence_ts[zone]` ;
+   tick 1 s → `decide_presence(present, now−last_ts, eco, off)` → si l'action change,
+   publier `presence_command_json` sur `.../command` (débounce).
+
+### 18.5 Infos à me fournir pour finaliser
+
+- (a) **Comment les FP2 publient en MQTT** (hub + **topic + exemple de payload**).
+- (b) **Mapping** FP2 → pièce → `Shorai-3x`.
+- (c) Confirmer **ECO immédiat / OFF 5 min**, ou ajuster `eco_after_secs`/`off_after_secs`.
 
 ---
 

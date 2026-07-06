@@ -468,13 +468,21 @@ pub struct ToshibaAcConfig {
     /// Âge (s) au-delà duquel une unité est considérée muette (liveness).
     #[serde(default = "default_toshiba_stale_secs")]
     pub stale_after_secs: u64,
-    /// Pilotage des clim par l'EM (phase contrôle) — OFF par défaut : la stratégie
-    /// énergie (effacement/solaire) n'est pas encore arrêtée. Réservé au futur.
+    /// Pilotage des clim par l'EM (phase contrôle par présence Aqara FP2) — OFF par
+    /// défaut. À activer une fois les FP2 posés et la source de présence câblée.
     #[serde(default)]
     pub control_enabled: bool,
+    /// Contrôle présence : délai d'absence avant de passer en **ECO** (0 = dès l'absence).
+    #[serde(default = "default_eco_after_secs")]
+    pub eco_after_secs: u64,
+    /// Contrôle présence : délai d'absence avant de passer en **OFF** (défaut 300 s = 5 min).
+    #[serde(default = "default_off_after_secs")]
+    pub off_after_secs: u64,
 }
 
 fn default_toshiba_stale_secs() -> u64 { 300 }
+fn default_eco_after_secs() -> u64 { 0 }
+fn default_off_after_secs() -> u64 { 300 }
 
 impl Default for ToshibaAcConfig {
     fn default() -> Self {
@@ -483,6 +491,8 @@ impl Default for ToshibaAcConfig {
             zones: Vec::new(),
             stale_after_secs: default_toshiba_stale_secs(),
             control_enabled: false,
+            eco_after_secs: default_eco_after_secs(),
+            off_after_secs: default_off_after_secs(),
         }
     }
 }
@@ -562,6 +572,12 @@ impl EnergyManagerConfig {
                 self.toshiba_ac.stale_after_secs > 0,
                 "config invalide : `energy_manager.toshiba_ac.stale_after_secs` doit être > 0"
             );
+            if self.toshiba_ac.control_enabled {
+                anyhow::ensure!(
+                    self.toshiba_ac.off_after_secs >= self.toshiba_ac.eco_after_secs,
+                    "config invalide : `toshiba_ac.off_after_secs` doit être ≥ `eco_after_secs`"
+                );
+            }
         }
         Ok(())
     }

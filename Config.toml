@@ -661,4 +661,8 @@ enabled          = true
 # 3 unités actuelles ; jusqu'à 7 Shorai-xx à terme (ajouter ici au fil des poses).
 zones            = ["Shorai-31", "Shorai-32", "Shorai-33"]
 stale_after_secs = 300
+# Contrôle par présence (capteurs Aqara FP2) — appliqué seulement si control_enabled=true.
+# Politique : ECO dès absence, OFF après off_after_secs d'absence.
 control_enabled  = false
+eco_after_secs   = 0      # ECO dès l'absence
+off_after_secs   = 300    # OFF après 5 min d'absence
