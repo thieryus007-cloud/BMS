@@ -657,6 +657,8 @@ publish_interval_secs = 60
 # Voir docs/toshiba-suzumi-rs-plan.md. control_enabled réservé au futur pilotage.
 [energy_manager.toshiba_ac]
 enabled          = true
-zones            = ["salon", "chambre", "bureau"]
+# Nom de nœud = hostname ESP + segment de topic santuario/toshiba/<nom>.
+# 3 unités actuelles ; jusqu'à 7 Shorai-xx à terme (ajouter ici au fil des poses).
+zones            = ["Shorai-31", "Shorai-32", "Shorai-33"]
 stale_after_secs = 300
 control_enabled  = false
