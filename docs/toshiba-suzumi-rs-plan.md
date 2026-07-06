@@ -57,7 +57,7 @@ vide → zéro impact sur le build/CI daly-bms). Tester :
 | Accumulateur de trames RX incrémental (`validate_message_`) | `src/framing.rs` | ✅ **fait** (5 tests) |
 | Machine à états + file/pacing + watchdog + **simulateur d'unité** | `src/machine.rs` | ✅ **fait** (5 tests, dont handshake→online end-to-end) |
 | Codec MQTT applicatif (`ToshibaState`→JSON ; JSON→`Command`→`apply_command`) | `src/mqtt_payload.rs` | ✅ **fait** (8 tests, transport-agnostique) |
-| Config nœud + dérivation topics + validation | `src/config.rs` | ✅ **fait** (4 tests) |
+| Config nœud (identité `Shorai-3x`, WiFi StarTh, DHCP/IP statique, AP secours, broker, topics/hostname) + validation | `src/config.rs` | ✅ **fait** (5 tests) — §17 |
 | UART ESP-IDF (init 9600 8E1, lecture/écriture octets) | `src/uart.rs` | ⏳ **TODO (attend matériel)** |
 | WiFi + MQTT transport (`santuario/toshiba/<zone>`) | `src/{wifi,mqtt}.rs` | ⏳ TODO (matériel) |
 | `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO (matériel) |
@@ -133,6 +133,13 @@ le matériel ESP32** :
   auto‑suffisante** : prérequis (Git/Python/pilote USB‑série), **clone du dépôt +
   `git checkout` de la branche + `cd firmware/toshiba-suzumi-rs`**, vérif host, install
   toolchain esp, puis flash (`cargo +esp run`) une fois la partie ESP32 ajoutée.
+- **2026-07-05 (suite 6)** — **Config réseau/identité de mise en service** (`config.rs`
+  réécrit + §17) : `NodeConfig::new("Shorai-31")` = 1 ligne/unité → WiFi **StarTh** (mot de
+  passe **injecté au flash/NVS, jamais commité** — règle #12), **DHCP** par défaut (ou
+  **IP statique** via `with_static_ip`), broker Pi5, `ap_fallback` (AP secours). Le
+  **`node_name` = hostname = segment de topic = SSID AP** (`Shorai-31/32/33`, → 7 à terme).
+  **Décision : station WiFi + AP de repli** (un AP principal isolerait du broker). Zones
+  `Config.toml` alignées sur `Shorai-3x`. 5 tests config, 39 tests firmware, clippy+fmt OK.
 
 ---
 
@@ -1197,6 +1204,86 @@ brownouts. (Cf. instabilités d'alim §3.3.)
 | Env | **sourcer `export-esp`** (LIBCLANG_PATH…) |
 | Flash | `cargo run --release` (runner espflash) ou `espflash flash --monitor` |
 | Antenne | **IPEX externe obligatoire** (variante `‑U`) |
+
+---
+
+## 17. Mise en service réseau (WiFi) & identité du nœud
+
+Couche **config déjà faite + testée** sur host (`src/config.rs`, `NodeConfig`) ; le
+code WiFi ESP‑IDF (`wifi.rs`) ne fera que la consommer (à réception matériel).
+
+### 17.1 Décision : **station WiFi** (pas d'AP principal) + **AP de secours**
+
+- Les ESP **doivent rejoindre `StarTh` en mode station** : c'est la seule façon
+  d'atteindre le **broker Mosquitto du Pi5** (`192.168.1.141`). Un **AP « réseau local »
+  comme réseau principal serait contre‑productif** — chaque ESP serait **isolé** sur son
+  propre réseau et **ne pourrait plus parler au broker** (tout le monde doit être sur le
+  **même LAN**).
+- L'AP n'a de sens qu'en **secours/provisioning** : si la connexion station échoue au boot,
+  l'ESP lève un AP `Shorai-31-setup` (portail captif) → on n'est **jamais bloqué**.
+  `ap_fallback = true` par défaut. **C'est le schéma retenu** (station + repli AP).
+
+### 17.2 Config minimale — **une ligne par unité**
+
+```rust
+// Suffit à mettre en service : StarTh, DHCP, broker Pi5, hostname/topics dérivés.
+let cfg = NodeConfig::new("Shorai-31")
+    .with_wifi_pass(option_env!("WIFI_PASS").unwrap_or_default()); // injecté au flash
+cfg.validate().expect("config invalide");
+// → hostname "Shorai-31", topics santuario/toshiba/Shorai-31/{state,command,availability}
+```
+
+Défauts appliqués par `new()` : `wifi_ssid="StarTh"`, `ip=Dhcp`, `mqtt=192.168.1.141:1883`,
+GPIO `33/32`, `ap_fallback=true`.
+
+### 17.3 Mot de passe WiFi — **jamais commité** (règle projet #12)
+
+Le SSID `StarTh` est en défaut (non secret), **mais pas le mot de passe**. Le fournir au
+**flash** via variable d'environnement, lue par `option_env!` :
+
+```bash
+# Windows PowerShell : $env:WIFI_PASS="Santuario1962"; cargo +esp run --release
+# Linux / macOS      : WIFI_PASS="Santuario1962" cargo +esp run --release
+```
+
+Alternatives : provisionner en **NVS** (persistant, modifiable sans reflash), ou un fichier
+**`.env` local non commité** (déjà couvert par `.gitignore`) sourcé avant le flash.
+**Ne jamais écrire le mot de passe dans un fichier commité.**
+
+### 17.4 Adresse IP — DHCP (défaut) ou statique
+
+- **DHCP par défaut** + **réservation par MAC** côté box Starlink (comme le Pi5,
+  CLAUDE.md §2) = le plus simple, IP stable, repérable par **hostname** `Shorai-3x`.
+- **IP statique** si pas de réservation possible :
+  ```rust
+  NodeConfig::new("Shorai-31").with_static_ip(
+      "192.168.1.131".parse().unwrap(), // ip
+      "192.168.1.1".parse().unwrap(),   // gateway
+      "255.255.255.0".parse().unwrap(), // netmask
+      "192.168.1.1".parse().unwrap());  // dns
+  ```
+
+### 17.5 Plan de nommage & d'adressage (jusqu'à 7 unités)
+
+`node_name` = **hostname** = **segment de topic** = base du **SSID AP secours**.
+
+| node_name | Topics | IP statique suggérée (si non‑DHCP) |
+|-----------|--------|:----------------------------------:|
+| `Shorai-31` | `santuario/toshiba/Shorai-31/…` | `192.168.1.131` |
+| `Shorai-32` | `santuario/toshiba/Shorai-32/…` | `192.168.1.132` |
+| `Shorai-33` | `santuario/toshiba/Shorai-33/…` | `192.168.1.133` |
+| `Shorai-34…37` | `…/Shorai-3x/…` | `192.168.1.134…137` |
+
+> IPs suggérées **hors** de la plage DHCP et des adresses prises (`141`=Pi5, `120`=NanoPi).
+> Côté Pi5, `[energy_manager.toshiba_ac].zones` liste ces noms (souscription réelle par
+> wildcard `santuario/toshiba/+/state`).
+
+### 17.6 Reste au firmware (à réception matériel)
+
+`wifi.rs` consommera `NodeConfig` : `EspWifi` **station**, `set_hostname(node_name)`,
+DHCP **ou** IP statique, **reconnexion à backoff**, et **bascule AP** (`ap_ssid()`) si la
+station échoue après N tentatives. La config (défauts, validation, dérivation) est **déjà
+faite et testée** — `wifi.rs` n'ajoute que l'I/O ESP‑IDF.
 
 ---
 
