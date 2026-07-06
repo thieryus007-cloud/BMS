@@ -1361,6 +1361,16 @@ Deux options :
 | **A. Pont `aiohomekit` → MQTT** *(recommandé)* | Petit service **Python sur le Pi5** : `aiohomekit` (contrôleur HomeKit **IP autonome**, sans HA ni cloud) s'appaire à chaque FP2, lit présence + zones, **publie en MQTT** sur notre broker | **Colle au projet** : MQTT‑natif, **sans dépendance Home Assistant**, 100% local sur le Pi5 |
 | **B. Home Assistant + `HomeKit Device`** (`homekit_controller`) | HA s'appaire au FP2 en **local/offline**, expose présence/zones ; un pont HA→MQTT (statestream/automation) republie | Fonctionne, mais **ajoute HA** comme brique |
 
+> **Hébergement = Pi5 existant, AUCUN matériel supplémentaire.** `aiohomekit` fait du
+> **HomeKit‑over‑IP** : le FP2 étant en **WiFi**, il est joignable sur le LAN (`StarTh`,
+> `192.168.1.x`) — **pas de radio dédiée** (ni coordinateur Zigbee, ni Thread Border Router,
+> ni dongle Bluetooth). Le pont tourne comme **service systemd** sur le Pi5, à côté de
+> Mosquitto (publie en local `127.0.0.1:1883`) ; charge négligeable (3 accessoires suivis).
+> Prérequis **logiciels** (pas matériels) : **venv Python 3.11** (déjà sur l'OS du Pi5) +
+> `aiohomekit`, et **découverte mDNS/Bonjour** qui exige FP2 et Pi5 sur le **même
+> sous‑réseau L2** (déjà le cas : tout sur `StarTh`). Si le multicast WiFi est capricieux :
+> viser l'**IP directe** du FP2, ou passer le Pi5 en **Ethernet**.
+
 > **Contrainte HomeKit (à vérifier sur l'appareil)** : un accessoire HomeKit s'appaire à
 > **un seul contrôleur** via le code d'appairage (Apple Home **ou** HA/aiohomekit — pas les
 > deux). La liaison **cloud Aqara reste possible en parallèle**. Donc « local + cloud
