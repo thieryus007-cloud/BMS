@@ -68,6 +68,15 @@ est **fait** — souscrit `santuario/toshiba/<zone>/state`, remplit
 (+ `--check-config`). 4 tests, clippy propre, build vert. La **phase contrôle**
 (`control_enabled`) reste à faire (dépend de la stratégie énergie, §10.4).
 
+> ⚠️ **Note de conception (phase contrôle) — NE PAS copier la logique DEYE telle quelle.**
+> La coupe DEYE déconnecte des **sources PV** quand la batterie est pleine (fréquence AC
+> haute). Une **clim est une CHARGE** : sur surplus PV on veut la faire tourner **plus**
+> (absorber l'excédent), pas la couper. La stratégie AC est donc **inverse** de DEYE
+> côté fréquence. Options réelles à trancher avec l'utilisateur : (a) **marche/boost sur
+> surplus PV** (seuil W + SOC), (b) **plages horaires/confort**, (c) délestage sur import
+> réseau / SOC bas. → implémenter en `rules.rs` **pur + tests** une fois la stratégie
+> choisie, `control_enabled=false` par défaut.
+
 ### 0.4 Prochaines étapes (ordre conseillé, sans matériel)
 
 Faits (session 2026-07-05) : ✅ state machine (`machine.rs`), ✅ accumulateur RX
