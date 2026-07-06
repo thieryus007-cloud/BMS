@@ -1257,7 +1257,7 @@ Alternatives : provisionner en **NVS** (persistant, modifiable sans reflash), ou
 - **IP statique** si pas de réservation possible :
   ```rust
   NodeConfig::new("Shorai-31").with_static_ip(
-      "192.168.1.131".parse().unwrap(), // ip
+      "192.168.1.31".parse().unwrap(),  // ip
       "192.168.1.1".parse().unwrap(),   // gateway
       "255.255.255.0".parse().unwrap(), // netmask
       "192.168.1.1".parse().unwrap());  // dns
@@ -1269,12 +1269,14 @@ Alternatives : provisionner en **NVS** (persistant, modifiable sans reflash), ou
 
 | node_name | Topics | IP statique suggérée (si non‑DHCP) |
 |-----------|--------|:----------------------------------:|
-| `Shorai-31` | `santuario/toshiba/Shorai-31/…` | `192.168.1.131` |
-| `Shorai-32` | `santuario/toshiba/Shorai-32/…` | `192.168.1.132` |
-| `Shorai-33` | `santuario/toshiba/Shorai-33/…` | `192.168.1.133` |
-| `Shorai-34…37` | `…/Shorai-3x/…` | `192.168.1.134…137` |
+| `Shorai-31` | `santuario/toshiba/Shorai-31/…` | `192.168.1.31` |
+| `Shorai-32` | `santuario/toshiba/Shorai-32/…` | `192.168.1.32` |
+| `Shorai-33` | `santuario/toshiba/Shorai-33/…` | `192.168.1.33` |
+| `Shorai-34…37` | `…/Shorai-3x/…` | `192.168.1.34…37` |
 
-> IPs suggérées **hors** de la plage DHCP et des adresses prises (`141`=Pi5, `120`=NanoPi).
+> Plage **`.31–.37`** choisie car le scope **`.130–.137`** est **déjà partiellement occupé**.
+> Dernier octet = suffixe du nom (`Shorai-31` → `.31`). Vérifier que `.31–.37` est **hors
+> plage DHCP** et libre côté box ; adresses prises connues : `141`=Pi5, `120`=NanoPi.
 > Côté Pi5, `[energy_manager.toshiba_ac].zones` liste ces noms (souscription réelle par
 > wildcard `santuario/toshiba/+/state`).
 

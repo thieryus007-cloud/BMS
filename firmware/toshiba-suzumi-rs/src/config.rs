@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn static_ip_configurable_and_validated() {
         let c = NodeConfig::new("Shorai-33").with_static_ip(
-            Ipv4Addr::new(192, 168, 1, 133),
+            Ipv4Addr::new(192, 168, 1, 33),
             Ipv4Addr::new(192, 168, 1, 1),
             Ipv4Addr::new(255, 255, 255, 0),
             Ipv4Addr::new(192, 168, 1, 1),
