@@ -150,6 +150,12 @@ le matériel ESP32** :
   `control_enabled=false` par défaut. Reste à câbler (à réception des FP2) : source de
   présence (topic → zone) + boucle débouncée (§18). IP statiques recalées `.31–.37`.
   energy-manager clippy propre, 8 tests toshiba, `--check-config` OK. Détail → §18.
+- **2026-07-06 (suite 8)** — **Recherche intégration LOCALE des FP2** (§18.4) : le FP2 est
+  en **WiFi + HomeKit** (pas Zigbee → Z2M écarté). HomeKit = protocole **local/offline** →
+  voie locale **en parallèle du cloud Aqara**. Retenu : **pont `aiohomekit` → MQTT** sur le
+  Pi5 (contrôleur HomeKit IP autonome, sans HA ni cloud) ; alternative = HA
+  `homekit_controller`. Contrat MQTT `santuario/toshiba/presence/<Shorai-3x>` défini.
+  Sources : aqara.com, home‑assistant.io (homekit_controller), github Jc2k/aiohomekit.
 
 ---
 
@@ -1340,22 +1346,53 @@ FP2 (×3, 1/pièce) ──MQTT présence──► energy-manager logic/toshiba_a
 
 > L'appelant n'émet **que sur changement** d'action (anti‑rebattement) — pas à chaque tick.
 
-### 18.4 Reste à câbler (à réception des FP2)
+### 18.4 Source de présence FP2 — **intégration LOCALE** (résultat de recherche, juillet 2026)
 
-1. **Topic/payload des FP2** : selon le hub — Aqara **M2/M3** en MQTT, ou **Zigbee2MQTT**
-   (`zigbee2mqtt/<fp2>` → JSON `{"presence": true, …}`, régions/zones supportées). **À
-   confirmer empiriquement** (`mosquitto_sub`) — comme pour ESPHome, ne pas le supposer.
-2. **Mapping FP2 → zone** : config `presence = [{ topic = "...", zone = "Shorai-31" }, …]`.
-3. **Souscription** : ajouter le topic FP2 dans `mqtt/topics.rs::all_subscriptions`.
-4. **Boucle** (`spawn_critical`, règle #16) : sur message FP2 → MAJ `last_presence_ts[zone]` ;
+⚠️ **Le FP2 est en WiFi (PAS Zigbee)** — alimenté USB‑C permanent, expose ses **zones
+(jusqu'à 30)** comme capteurs. → **Zigbee2MQTT ne s'applique pas.**
+
+Le FP2 **parle nativement HomeKit (HAP)**, un protocole **100% local et hors‑ligne**
+(aucun compte Apple ni Internet requis — HA le confirme). C'est **la** voie locale, **en
+parallèle du cloud Aqara** (la liaison du FP2 au cloud Aqara via l'app reste indépendante).
+Deux options :
+
+| Option | Principe | Pour nous |
+|--------|----------|-----------|
+| **A. Pont `aiohomekit` → MQTT** *(recommandé)* | Petit service **Python sur le Pi5** : `aiohomekit` (contrôleur HomeKit **IP autonome**, sans HA ni cloud) s'appaire à chaque FP2, lit présence + zones, **publie en MQTT** sur notre broker | **Colle au projet** : MQTT‑natif, **sans dépendance Home Assistant**, 100% local sur le Pi5 |
+| **B. Home Assistant + `HomeKit Device`** (`homekit_controller`) | HA s'appaire au FP2 en **local/offline**, expose présence/zones ; un pont HA→MQTT (statestream/automation) republie | Fonctionne, mais **ajoute HA** comme brique |
+
+> **Contrainte HomeKit (à vérifier sur l'appareil)** : un accessoire HomeKit s'appaire à
+> **un seul contrôleur** via le code d'appairage (Apple Home **ou** HA/aiohomekit — pas les
+> deux). La liaison **cloud Aqara reste possible en parallèle**. Donc « local + cloud
+> Aqara » = **OK** ; « HA/aiohomekit **et** Apple Home simultanés » = non.
+
+**Contrat MQTT proposé** (le pont publie, l'EM consomme) — messages *retained* :
+```
+santuario/toshiba/presence/<Shorai-3x>   →  {"present": true|false, "ts": <epoch>}
+```
+(un topic par pièce, aligné sur le nom du nœud ; le FP2 gérant plusieurs zones, le pont
+agrège en une présence « pièce » ou publie par zone selon le découpage).
+
+### 18.5 Câblage EM (une fois le pont en place)
+
+1. **Config** `presence = [{ topic="santuario/toshiba/presence/Shorai-31", zone="Shorai-31" }, …]`.
+2. **Souscription** : ajouter ces topics (ou `santuario/toshiba/presence/+`) dans `all_subscriptions`.
+3. **Boucle** (`spawn_critical`, règle #16) : message présence → MAJ `last_presence_ts[zone]` ;
    tick 1 s → `decide_presence(present, now−last_ts, eco, off)` → si l'action change,
    publier `presence_command_json` sur `.../command` (débounce).
 
-### 18.5 Infos à me fournir pour finaliser
+### 18.6 À finaliser / décider
 
-- (a) **Comment les FP2 publient en MQTT** (hub + **topic + exemple de payload**).
-- (b) **Mapping** FP2 → pièce → `Shorai-3x`.
-- (c) Confirmer **ECO immédiat / OFF 5 min**, ou ajuster `eco_after_secs`/`off_after_secs`.
+- **Option A (pont `aiohomekit` local — recommandé) vs B (Home Assistant).**
+- **Construire le pont** (petit service Python `aiohomekit → MQTT` sur le Pi5) — livrable
+  séparé, à faire quand un FP2 réel est disponible pour l'appairage.
+- **Vérifier l'appairage** FP2 ↔ contrôleur local (contrainte mono‑contrôleur ci‑dessus).
+- **Mapping** FP2 → pièce → `Shorai-3x` (+ découpage en zones du FP2).
+- Confirmer **ECO immédiat / OFF 5 min** ou ajuster `eco_after_secs`/`off_after_secs`.
+
+> **Sources** : Aqara FP2 (WiFi, HomeKit, multi‑zones) — aqara.com ; HomeKit = protocole
+> local/offline — home‑assistant.io/integrations/homekit_controller ; `aiohomekit`
+> contrôleur HomeKit IP autonome — github.com/Jc2k/aiohomekit.
 
 ---
 
