@@ -1,0 +1,20 @@
+[Unit]
+Description=Aqara FP2 -> MQTT presence bridge (HomeKit local, sans cloud)
+Documentation=file:///home/pi5compute/Daly-BMS-Rust/docs/toshiba-suzumi-rs-plan.md
+After=network-online.target mosquitto-broker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi5compute
+WorkingDirectory=/home/pi5compute/Daly-BMS-Rust/bridge/aqara-fp2-mqtt
+ExecStart=/home/pi5compute/Daly-BMS-Rust/bridge/aqara-fp2-mqtt/.venv/bin/python -m fp2_bridge run --config /etc/daly-bms/fp2-bridge.toml
+Restart=on-failure
+RestartSec=5
+# Durcissement léger
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/pi5compute/Daly-BMS-Rust/bridge/aqara-fp2-mqtt/pairings
+
+[Install]
+WantedBy=multi-user.target
