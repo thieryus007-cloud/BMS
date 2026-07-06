@@ -128,8 +128,11 @@ le matériel ESP32** :
 - **2026-07-05 (suite 5)** — **§16 Toolchain/installation** (ESP32‑WROOM‑32U « KIT A »
   IPEX) : procédure fournie **validée + corrigée** — `xtensa-esp32-espidf` vient d'`espup`
   (pas `rustup target add`, vérifié), ESP‑IDF auto‑fetch par embuild (pas d'installer),
-  sourcer `export-esp`, générer depuis `esp-idf-template`, `.cargo/config.toml` complété
-  (`espidf_time64`, `build-std`, `MCU`), antenne IPEX externe obligatoire (variante ‑U).
+  sourcer `export-esp`, `.cargo/config.toml` complété (`espidf_time64`, `build-std`,
+  `MCU`), antenne IPEX externe obligatoire (variante ‑U). §16.2 rendue **complète et
+  auto‑suffisante** : prérequis (Git/Python/pilote USB‑série), **clone du dépôt +
+  `git checkout` de la branche + `cd firmware/toshiba-suzumi-rs`**, vérif host, install
+  toolchain esp, puis flash (`cargo +esp run`) une fois la partie ESP32 ajoutée.
 
 ---
 
@@ -1049,31 +1052,80 @@ recoupée o0Zz) reste la meilleure source disponible.**
    `.cargo/config.toml` correct. Le `Cargo.toml` minimal ci‑dessus **manque** `build.rs` +
    `embuild` → la build ESP‑IDF ne se déclenche pas.
 
-### 16.2 Procédure corrigée (ordre exact)
+### 16.2 Procédure complète (ordre exact, rien d'omis)
+
+> Commandes identiques Windows (PowerShell **ou** Git Bash) / Linux / macOS, sauf mention
+> `[Windows]`. Ne **jamais** faire `rustup target add …` ni `idf-installer.exe` (§16.1).
+
+**Étape 0 — Prérequis à installer une fois** (globaux, pas liés au projet) :
+
+- **Git** — https://git-scm.com (indispensable pour cloner).
+- **Rust** (rustup) — https://rustup.rs.
+- **Python 3** dans le PATH (utilisé par le build ESP‑IDF).
+- **[Windows] Pilote USB‑série** de la carte : selon la puce USB‑UART du KIT A,
+  **CP210x** (Silicon Labs) ou **CH340/CH341** (WCH). Sans lui, **aucun port `COMx`
+  n'apparaît**. (Sous Linux : `/dev/ttyUSB0` via `cp210x`/`ch341`, ajouter l'utilisateur
+  au groupe `dialout`.)
+
+**Étape 1 — Récupérer le code depuis Git et se placer dans le crate** :
 
 ```bash
-# 1) Outils Rust ESP (installe le toolchain `esp` + LLVM Xtensa)
-cargo install espup
-espup install
-#   → puis SOURCER l'environnement (indispensable) :
-#     PowerShell : . $HOME/export-esp.ps1
-#     bash/zsh   : . $HOME/export-esp.sh
+# Cloner le dépôt (HTTPS)
+git clone https://github.com/thieryus007-cloud/Daly-BMS-Rust.git
 
-# 2) Outils de flash / link
-cargo install espflash ldproxy cargo-generate
+# Entrer dans le dépôt
+cd Daly-BMS-Rust
 
-# 3) Générer le squelette (build.rs + embuild + .cargo/config.toml prêts)
-cargo generate esp-rs/esp-idf-template
-#   Board = esp32 (PAS s3/c3). Prérequis : Python 3 + Git dans le PATH.
+# Se placer sur la branche de travail (tant qu'elle n'est pas mergée dans main)
+git checkout claude/toshiba-suzumi-docs-gt2w6d
+#   (après merge : rester sur `main` → `git checkout main && git pull`)
 
-# 4) Build + flash + monitor (ESP-IDF est fetch/compilé automatiquement la 1re fois)
-cargo run --release            # --release conseillé (le debug est volumineux/lent)
-#   ou manuellement :
-espflash flash --monitor --chip esp32 --port COM3 --baud 921600 \
-  target/xtensa-esp32-espidf/release/<binaire>
+# Aller dans le crate firmware (c'est ICI qu'on travaille)
+cd firmware/toshiba-suzumi-rs
 ```
 
-> **Ne PAS** faire `rustup target add …` ni `idf-installer.exe` (cf. §16.1).
+**Étape 2 — Vérifier les couches pures SUR HOST** (sans matériel, sans ESP‑IDF ; utilise
+le toolchain épinglé `1.94.1` du dépôt) :
+
+```bash
+cargo test                                   # doit afficher "test result: ok"
+cargo clippy --all-targets -- -D warnings    # doit finir sans warning
+```
+
+**Étape 3 — Installer la toolchain ESP (une seule fois)** — nécessaire **seulement** pour
+compiler/flasher l'ESP32 (pas pour l'étape 2) :
+
+```bash
+cargo install espup espflash ldproxy
+espup install                       # installe le toolchain `esp` (Xtensa) + LLVM
+#   ⚠️ SOURCER l'environnement à CHAQUE nouveau terminal (sinon libclang introuvable) :
+#     [Windows PowerShell] : . $HOME/export-esp.ps1
+#     [Linux / macOS]      : . $HOME/export-esp.sh
+```
+
+**Étape 4 — Compiler et flasher l'ESP32** — **⚠️ possible uniquement une fois la partie
+firmware ESP32 ajoutée au crate** (fichiers `uart.rs`/`wifi.rs`/`mqtt.rs`/`main.rs` +
+feature `esp32` + `build.rs`/`embuild` + `.cargo/config.toml` + `sdkconfig.defaults`, cf.
+§0.3 « TODO matériel » et §16.3). Aujourd'hui le crate est une **lib pure** (pas de binaire
+à flasher). Une fois cette partie en place :
+
+```bash
+# Depuis firmware/toshiba-suzumi-rs, avec le toolchain esp actif :
+cargo +esp run --release            # build (ESP-IDF auto-fetch 1re fois) + flash + monitor
+#   ou manuellement (préciser le port) :
+espflash flash --monitor --chip esp32 --port COM3 --baud 921600 \
+  target/xtensa-esp32-espidf/release/toshiba-suzumi-rs
+#   [Linux] remplacer COM3 par /dev/ttyUSB0
+```
+
+> **Note toolchain** : l'étape 2 (host) utilise `1.94.1` (fichier `rust-toolchain.toml`
+> à la racine du dépôt) ; l'étape 4 (ESP32) exige le toolchain **`esp`** → soit `cargo +esp`
+> comme ci‑dessus, soit ajouter un `firmware/toshiba-suzumi-rs/rust-toolchain.toml` avec
+> `channel = "esp"` (fait basculer aussi les builds host sur `esp`, ce qui est OK).
+>
+> **Si le flash échoue** (« Failed to connect ») : maintenir le bouton **BOOT** (GPIO0)
+> enfoncé pendant le lancement du flash, relâcher après le début du transfert. Vérifier le
+> bon port `COMx` (Gestionnaire de périphériques) et l'**antenne IPEX** branchée (§16.4).
 
 ### 16.3 Fichiers projet (corrigés)
 
