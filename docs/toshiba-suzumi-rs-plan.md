@@ -125,6 +125,11 @@ le matériel ESP32** :
   wildcard, `rules.rs` pur (parse_zone/payload) testé. Section ajoutée à `Config.toml`.
   Build energy-manager vert, clippy `-D warnings` propre, 4 tests + suite complète (34)
   OK, `--check-config` OK. Phase **contrôle** encore à faire (stratégie énergie §10.4).
+- **2026-07-05 (suite 5)** — **§16 Toolchain/installation** (ESP32‑WROOM‑32U « KIT A »
+  IPEX) : procédure fournie **validée + corrigée** — `xtensa-esp32-espidf` vient d'`espup`
+  (pas `rustup target add`, vérifié), ESP‑IDF auto‑fetch par embuild (pas d'installer),
+  sourcer `export-esp`, générer depuis `esp-idf-template`, `.cargo/config.toml` complété
+  (`espidf_time64`, `build-std`, `MCU`), antenne IPEX externe obligatoire (variante ‑U).
 
 ---
 
@@ -1015,6 +1020,131 @@ pertinents** pour le protocole série applicatif : guides de **codes défaut TCC
 **passerelles** LonWorks/Modbus/BACnet (ex. interface **TCB‑IFLN642TLE**) — ces passerelles
 parlent Modbus/LON côté client, pas le protocole CN22. → **Notre spec §6 (issue de pedobry,
 recoupée o0Zz) reste la meilleure source disponible.**
+
+---
+
+## 16. Toolchain Rust + ESP-IDF (Windows) — carte **ESP32‑WROOM‑32U « KIT A » (IPEX)**
+
+> Procédure **validée et corrigée** (juillet 2026) pour la cible **ESP32** (cœur
+> **Xtensa LX6**, pas RISC‑V) en flux **`std` / ESP‑IDF** (celui de ce projet :
+> `esp-idf-svc`). À suivre **au moment d'ajouter la partie firmware** (feature `esp32`,
+> cf. §0.3) — pas avant (pas de matériel).
+
+### 16.1 Corrections par rapport à la procédure brute
+
+1. **❌ `rustup target add xtensa-esp32-espidf` — NE PAS exécuter.** Ce n'est **pas** un
+   target rustup standard (rustc upstream n'a pas de backend Xtensa) — vérifié : absent de
+   `rustup target list`. Le target Xtensa est **fourni par le toolchain `esp`** qu'installe
+   **`espup`**. Il n'y a rien à « ajouter » via rustup.
+2. **⚠️ `idf-installer.exe` (ESP‑IDF officiel) — inutile ici.** En flux Rust `std`,
+   **`esp-idf-sys` (via `embuild`) télécharge et compile ESP‑IDF automatiquement** à la 1ʳᵉ
+   build, dans un dossier privé. Installer l'IDF officiel séparément est optionnel et peut
+   créer des **conflits de version**. Prérequis réels : **Python 3** et **Git** dans le PATH.
+3. **❗ Étape manquante critique : sourcer `export-esp`** après `espup install` (définit
+   `PATH`, `LIBCLANG_PATH`, `LIBCLANG_BIN_PATH`…). Sans ça → build échoue (libclang
+   introuvable). Windows PowerShell : `. $HOME/export-esp.ps1` ; Linux/macOS :
+   `. $HOME/export-esp.sh`. (À refaire à chaque nouveau shell, ou automatiser.)
+4. **✅ Recommandé : générer depuis le template** `esp-rs/esp-idf-template` (via
+   `cargo generate`) → fournit `build.rs`, `[build-dependencies] embuild` et un
+   `.cargo/config.toml` correct. Le `Cargo.toml` minimal ci‑dessus **manque** `build.rs` +
+   `embuild` → la build ESP‑IDF ne se déclenche pas.
+
+### 16.2 Procédure corrigée (ordre exact)
+
+```bash
+# 1) Outils Rust ESP (installe le toolchain `esp` + LLVM Xtensa)
+cargo install espup
+espup install
+#   → puis SOURCER l'environnement (indispensable) :
+#     PowerShell : . $HOME/export-esp.ps1
+#     bash/zsh   : . $HOME/export-esp.sh
+
+# 2) Outils de flash / link
+cargo install espflash ldproxy cargo-generate
+
+# 3) Générer le squelette (build.rs + embuild + .cargo/config.toml prêts)
+cargo generate esp-rs/esp-idf-template
+#   Board = esp32 (PAS s3/c3). Prérequis : Python 3 + Git dans le PATH.
+
+# 4) Build + flash + monitor (ESP-IDF est fetch/compilé automatiquement la 1re fois)
+cargo run --release            # --release conseillé (le debug est volumineux/lent)
+#   ou manuellement :
+espflash flash --monitor --chip esp32 --port COM3 --baud 921600 \
+  target/xtensa-esp32-espidf/release/<binaire>
+```
+
+> **Ne PAS** faire `rustup target add …` ni `idf-installer.exe` (cf. §16.1).
+
+### 16.3 Fichiers projet (corrigés)
+
+`Cargo.toml` — ajouter **`build.rs` + `embuild`** (versions à garder **mutuellement
+compatibles** ; suivre les pins du template) :
+
+```toml
+[dependencies]
+esp-idf-svc = { version = "0.49", features = ["binstart"] }  # tire hal + sys
+log = "0.4"
+
+[build-dependencies]
+embuild = "0.32"
+```
+
+`build.rs` (généré par le template) :
+
+```rust
+fn main() { embuild::espidf::sysenv::output(); }
+```
+
+`.cargo/config.toml` — **compléter** la version fournie :
+
+```toml
+[build]
+target = "xtensa-esp32-espidf"
+
+[target.xtensa-esp32-espidf]
+linker = "ldproxy"
+runner = "espflash flash --monitor"
+rustflags = ["--cfg", "espidf_time64"]   # requis ESP-IDF v5.x — MANQUAIT
+
+[unstable]
+build-std = ["std", "panic_abort"]        # MANQUAIT (toolchain esp)
+
+[env]
+MCU = "esp32"                             # MANQUAIT
+ESP_IDF_VERSION = "v5.2"                   # v5.1/v5.2/v5.3 selon besoin
+```
+
+`sdkconfig.defaults` (à la racine) — **OK tel quel** :
+
+```
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESPTOOLPY_FLASHMODE="dio"
+CONFIG_ESPTOOLPY_FLASHFREQ="40m"
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_PARTITION_TABLE_SINGLE_APP=y
+```
+> Si OTA voulu plus tard (§9.2) : passer à une table de partition **avec** slots OTA
+> (`CONFIG_PARTITION_TABLE_TWO_OTA`), pas `SINGLE_APP`.
+
+### 16.4 Matériel — antenne **IPEX/u.FL** (variante `‑U`)
+
+⚠️ Le suffixe **`U`** (ESP32‑WROOM‑32**U**) = module à **connecteur u.FL/IPEX**, **sans
+antenne PCB**. → **Brancher obligatoirement une antenne 2,4 GHz externe** sur l'IPEX
+**avant** de mettre sous tension le WiFi. Sur le module nu, il n'y a en général **pas de
+« switch » d'antenne** à basculer (contrairement à certaines devkits à résistance 0 Ω entre
+PCB et IPEX) : l'IPEX est **l'unique** voie. Sans antenne → portée WiFi quasi nulle /
+brownouts. (Cf. instabilités d'alim §3.3.)
+
+### 16.5 Récapitulatif
+
+| Aspect | Valeur validée |
+|--------|----------------|
+| Toolchain | **`esp`** via `espup` (❌ pas `rustup target add`) |
+| Target | `xtensa-esp32-espidf` (cœur Xtensa LX6) |
+| ESP‑IDF | **auto‑fetch** par `esp-idf-sys`/embuild (❌ pas d'installer séparé) |
+| Env | **sourcer `export-esp`** (LIBCLANG_PATH…) |
+| Flash | `cargo run --release` (runner espflash) ou `espflash flash --monitor` |
+| Antenne | **IPEX externe obligatoire** (variante `‑U`) |
 
 ---
 

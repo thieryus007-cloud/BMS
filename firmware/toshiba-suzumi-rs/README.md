@@ -32,6 +32,9 @@ build/CI de `daly-bms-server`/`energy-manager`.
 À venir (⏳ nécessite le matériel) : `uart` (ESP-IDF), `wifi`, `mqtt` (transport),
 `main` — se contenteront de relayer vers `Client::{on_rx_byte, poll_tx, on_tick}`.
 
+**Toolchain ESP32 (Xtensa) + flash** : voir `docs/toshiba-suzumi-rs-plan.md` **§16**
+(carte ESP32‑WROOM‑32U « KIT A » IPEX ; `espup`, pas `rustup target add`).
+
 ## Tester (sur host, sans matériel)
 
 ```bash
