@@ -156,6 +156,13 @@ le matériel ESP32** :
   Pi5 (contrôleur HomeKit IP autonome, sans HA ni cloud) ; alternative = HA
   `homekit_controller`. Contrat MQTT `santuario/toshiba/presence/<Shorai-3x>` défini.
   Sources : aqara.com, home‑assistant.io (homekit_controller), github Jc2k/aiohomekit.
+- **2026-07-06 (suite 9)** — **Scaffold du pont FP2→MQTT** : `bridge/aqara-fp2-mqtt/`
+  (Python, hébergé sur le Pi5, **aucun matériel en plus**). Cœur **pur testé**
+  (`fp2_bridge/core.py` : config, contrat MQTT `presence/<zone>`, agrégation OU des zones,
+  anti‑rebattement) — **7 tests unittest verts** sans dépendance ni matériel. CLI
+  (discover/pair/dump/run), publisher MQTT (paho, LWT), unité systemd, `.gitignore`
+  (clés d'appairage = secrets). `hap.py` (aiohomekit) = **scaffold à finaliser sur un FP2
+  réel** (`# VERIFY`). Détail → §18.6.
 
 ---
 
@@ -1391,13 +1398,24 @@ agrège en une présence « pièce » ou publie par zone selon le découpage).
    tick 1 s → `decide_presence(present, now−last_ts, eco, off)` → si l'action change,
    publier `presence_command_json` sur `.../command` (débounce).
 
-### 18.6 À finaliser / décider
+### 18.6 Le pont (Option A) — **scaffold en place**
 
-- **Option A (pont `aiohomekit` local — recommandé) vs B (Home Assistant).**
-- **Construire le pont** (petit service Python `aiohomekit → MQTT` sur le Pi5) — livrable
-  séparé, à faire quand un FP2 réel est disponible pour l'appairage.
-- **Vérifier l'appairage** FP2 ↔ contrôleur local (contrainte mono‑contrôleur ci‑dessus).
-- **Mapping** FP2 → pièce → `Shorai-3x` (+ découpage en zones du FP2).
+Livré : **`bridge/aqara-fp2-mqtt/`** (service Python, à héberger sur le Pi5) :
+- ✅ **Cœur pur testé** (`fp2_bridge/core.py`) : config, topics/payloads du contrat MQTT,
+  agrégation présence (OU des zones FP2), anti‑rebattement + heartbeat. **7 tests**
+  (`python3 tests/test_core.py`) — aucune dépendance, tournent sans matériel.
+- ✅ CLI (`discover` / `pair` / `dump` / `run`), publisher MQTT (`paho`, LWT), unité
+  **systemd**, `config.example.toml`, `.gitignore` (les clés d'appairage = secrets).
+- ⏳ **Couche HomeKit** (`fp2_bridge/hap.py`) : **scaffold à finaliser sur un FP2 réel**
+  (appels `aiohomekit` marqués `# VERIFY`, dépendants de la version + de l'appareil).
+
+### 18.7 À finaliser / décider (à réception des FP2)
+
+- **Finaliser `hap.py`** sur un FP2 réel (appairage `pair`, repérage des zones via `dump`).
+- **Vérifier l'appairage** mono‑contrôleur (ce pont **ou** Apple Home ; cloud Aqara en //).
+- **Mapping** FP2 → pièce → `Shorai-3x` (renseigner `device_id` via `discover`).
+- **Câbler l'EM** : souscrire `santuario/toshiba/presence/+`, appliquer `decide_presence`
+  (§18.5), activer `control_enabled`.
 - Confirmer **ECO immédiat / OFF 5 min** ou ajuster `eco_after_secs`/`off_after_secs`.
 
 > **Sources** : Aqara FP2 (WiFi, HomeKit, multi‑zones) — aqara.com ; HomeKit = protocole

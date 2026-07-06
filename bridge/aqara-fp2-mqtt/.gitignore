@@ -1,0 +1,10 @@
+# Secrets & artefacts — NE JAMAIS committer (règle projet #12)
+pairings/
+*.pairing.json
+config.toml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

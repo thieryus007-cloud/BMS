@@ -1,0 +1,25 @@
+# Config du pont Aqara FP2 → MQTT. Copier en `config.toml` (non commité) et adapter.
+
+[mqtt]
+host = "127.0.0.1"     # broker Mosquitto local du Pi5
+port = 1883
+# user     = "..."     # seulement si une ACL Mosquitto est activée
+# password = "..."
+
+# Dossier des clés d'appairage HomeKit — SECRET, jamais commité (voir .gitignore).
+pairings_dir   = "pairings"
+# Republication périodique de la présence (rafraîchit le message retained).
+heartbeat_secs = 60
+
+# Un FP2 par pièce = une zone Shorai. Le `device_id` s'obtient via `discover`.
+[[units]]
+zone      = "Shorai-31"
+device_id = "AA:BB:CC:DD:EE:01"
+
+[[units]]
+zone      = "Shorai-32"
+device_id = "AA:BB:CC:DD:EE:02"
+
+[[units]]
+zone      = "Shorai-33"
+device_id = "AA:BB:CC:DD:EE:03"
