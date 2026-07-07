@@ -1,0 +1,33 @@
+# Config du pont MQTT → HomeKit (occupation). Copier en `config.toml` (non commité) et adapter.
+# Ré-expose la présence FP2 (santuario/toshiba/presence/<zone>) dans l'app Maison de l'iPhone.
+
+[mqtt]
+host = "127.0.0.1"     # broker Mosquitto local du Pi5
+port = 1883
+# user     = "..."     # seulement si une ACL Mosquitto est activée
+# password = "..."
+
+[hap]
+bridge_name = "Santuario Presence"   # nom du Bridge à l'appairage dans l'app Maison
+port        = 51826
+# Code d'appairage HomeKit à taper dans l'app Maison. Format XXX-XX-XXX.
+# Le changer avant la mise en service ; l'état d'appairage vit dans state_dir (SECRET).
+pincode     = "031-45-154"
+# Dossier de l'état HAP (accessory.state = clé d'appairage) — jamais commité (.gitignore).
+state_dir   = "hap-state"
+
+# Une pièce ré-exposée = un capteur d'occupation HomeKit.
+#   zone  : segment de topic FP2 (= nom du nœud Toshiba)  → topic dérivé automatiquement
+#   name  : nom affiché dans l'app Maison (défaut = zone) ; doit être UNIQUE
+#   topic : (optionnel) pour souscrire un topic autre que santuario/toshiba/presence/<zone>
+[[units]]
+zone = "Shorai-31"
+name = "Clim Chambre"
+
+[[units]]
+zone = "Shorai-32"
+name = "Clim Salon"
+
+[[units]]
+zone = "Shorai-33"
+name = "Clim Bureau"

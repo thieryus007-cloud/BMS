@@ -1,0 +1,10 @@
+# Secrets & artefacts — NE JAMAIS committer (règle projet #12)
+hap-state/          # accessory.state = clé d'appairage HomeKit
+*.state
+config.toml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

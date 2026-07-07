@@ -1,0 +1,21 @@
+[Unit]
+Description=MQTT -> HomeKit occupancy bridge (ré-expose la présence FP2 dans l'app Maison)
+Documentation=file:///home/pi5compute/Daly-BMS-Rust/docs/toshiba-suzumi-rs-plan.md
+# Le broker doit être là ; le pont FP2 alimente les topics de présence.
+After=network-online.target mosquitto-broker.service aqara-fp2-mqtt.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi5compute
+WorkingDirectory=/home/pi5compute/Daly-BMS-Rust/bridge/mqtt-homekit-occupancy
+ExecStart=/home/pi5compute/Daly-BMS-Rust/bridge/mqtt-homekit-occupancy/.venv/bin/python -m mqtt_hk run --config /etc/daly-bms/mqtt-homekit-occupancy.toml
+Restart=on-failure
+RestartSec=5
+# Durcissement léger
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/pi5compute/Daly-BMS-Rust/bridge/mqtt-homekit-occupancy/hap-state
+
+[Install]
+WantedBy=multi-user.target

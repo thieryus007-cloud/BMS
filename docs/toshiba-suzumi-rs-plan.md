@@ -93,6 +93,14 @@ MQTT). Tester le cœur : `python3 tests/test_core.py` (**8 tests**).
 - ✅ **Cœur pur testé** (`fp2_bridge/core.py`) + CLI + MQTT + systemd + packaging.
 - ⏳ **`hap.py`** (`aiohomekit`) = scaffold à finaliser sur un **FP2 réel** (§18.6).
 
+**D. Pont MQTT → HomeKit (scénario C, optionnel)** — `bridge/mqtt-homekit-occupancy/`
+(Python **HAP‑python**, sur le Pi5). Ré‑expose la présence MQTT en **capteurs d'occupation
+Apple Home** (tuiles iPhone) — cf. §18.9. Tester le cœur : `python3 tests/test_core.py`
+(**10 tests**).
+- ✅ **Cœur pur testé** (`mqtt_hk/core.py`) + CLI `check-config`/`run` + systemd + packaging.
+- ⏳ **`accessory.py`/`mqtt_in.py`** (pyhap/paho) = glu `# VERIFY` à valider à l'appairage
+  réel à l'app Maison. S'appaire avec **son propre PIN** → aucun conflit mono‑contrôleur FP2.
+
 > ✅ **Stratégie de contrôle TRANCHÉE = présence (capteurs Aqara FP2).** Politique :
 > **ECO dès absence, OFF après 5 min d'absence** (retour de présence → rallumage + preset
 > normal). C'est énergétiquement sain **et** simple. (À noter : la coupe DEYE — déconnexion
@@ -212,6 +220,25 @@ donnée d'appairage :
   définitivement écarté** (décision utilisateur) ; brique domotique tierce future
   éventuelle = **Hubitat / Homey Pro**. Ordre de préférence figé (§18.8). Décision §0.2 #9.
   **Doc seule, aucun code touché.**
+- **2026-07-07 (suite 12)** — **Lecture du manuel FP2** (`docs/AQARA Presence-Sensor-FP2_
+  User-Manual.pdf`, sur `main`) → **§18.9 ajoutée**. Faits clés : FP2 expose à HomeKit
+  **sans hub**, **1 capteur d'occupation par zone** (jusqu'à 30) + présence globale +
+  luminosité → dimensionne `hap.py`. **Le FP2 a son propre délai d'absence (défaut 10 min)**
+  → **le régler court** pour que notre `off_after_secs=300` gouverne. Reset >10 s / 10 appuis
+  = usine. **Réponse visibilité Apple Home** : appairage **mono‑contrôleur** → A) aiohomekit
+  seul (pas de tuiles Maison, app Aqara OK) ; C) aiohomekit **+ ré‑exposition** (serveur
+  d'accessoires Homebridge/HAP‑python → tuiles Maison reconstruites). Reco = **A + app
+  Aqara**. **Doc seule.**
+- **2026-07-07 (suite 13)** — **Scénario C livré** : nouveau pont
+  `bridge/mqtt-homekit-occupancy/` (**HAP‑python**, pas de Node.js) qui ré‑expose la présence
+  MQTT (`santuario/toshiba/presence/<zone>`) en **capteurs d'occupation Apple Home**. Même
+  pattern que le pont FP2 : **cœur pur `mqtt_hk/core.py` testé (10 tests verts)** — config+
+  validation (nom/topic uniques, PIN `XXX-XX-XXX`, port), routage topic→accessoire, décodage
+  présence→valeur HAP 0/1, anti‑rebattement — + **glu I/O `# VERIFY`** (`accessory.py`,
+  `mqtt_in.py`) à valider à l'appairage. CLI `check-config` (dry‑run **sans dépendance**,
+  vérifié) / `run`. `py_compile` OK sur tous les modules. Le pont s'appaire à l'app Maison
+  avec **son propre PIN** → aucun conflit avec l'appairage mono‑contrôleur du FP2. Secrets
+  (`hap-state/`, `config.toml`) gitignorés. Détail → §18.9 + README du pont.
 
 ---
 
@@ -1517,6 +1544,68 @@ de pousser vers une passerelle Zigbee. **Aucune brique domotique tierce ajoutée
 >
 > **Source** : `ebaauw/fp2-proxy` = client HAP séparé pour le FP2 (Homebridge ne peut pas
 > appairer un accessoire HomeKit) — github.com/ebaauw/fp2-proxy.
+
+### 18.9 Manuel FP2 — faits matériels & visibilité Apple Home (2026‑07‑07)
+
+Source : **`docs/AQARA Presence-Sensor-FP2_User-Manual.pdf`** (sur `main`). Faits utiles
+pour finaliser `hap.py` et régler la logique de présence.
+
+**Modèle HomeKit exposé (→ dimensionne `hap.py`)**
+
+- Exposé à HomeKit **sans hub**. *« If FP2 is added to Apple Home, the area syncs
+  automatically, creating occupancy sensors »* → **chaque zone = un capteur d'occupation**
+  HomeKit (sync auto ; nom de zone synchronisable en option), **+ présence globale** **+
+  luminosité** (light sensor).
+- Jusqu'à **30 zones** ; plan 16×20 = 320 cellules (0,5 m/cellule). Les zones se
+  **configurent dans l'app Aqara** (obligatoire), **indépendamment** de l'appairage HomeKit.
+- → `hap.py` doit s'attendre à **N services *Occupancy*** (un par zone) + 1 light sensor ;
+  l'agrégation « pièce » = **OU** des zones (déjà dans `core.py`). Le mapping zone→pièce se
+  fera au `dump` sur l'appareil réel.
+- *(NB : le manuel mentionne un « Hub with Wi-Fi Local Automation » — c'est pour
+  l'automatisation **locale côté Aqara**, PAS pour la lecture HomeKit ; aiohomekit lit le FP2
+  **sans hub Aqara**.)*
+
+**Timing — à accorder avec notre logique (`decide_presence`)**
+
+- Le FP2 a **son propre délai d'absence** : **défaut 10 min** (réglable 1 s–23h59min).
+  Latence présence→absence **6–30 s**.
+- ⚠️ **À régler COURT côté FP2** (délai d'absence de zone minimal) pour que **notre**
+  `off_after_secs=300` (5 min, §18.3) **gouverne** réellement l'extinction — sinon les
+  **10 min** du capteur **masquent** nos 5 min. À valider à la mise en service (§18.7).
+
+**Appairage / reset (utile pour appairer à aiohomekit)**
+
+- Reset : appui **> 10 s** = reset ; **10 appuis successifs** = réglages usine. LED **jaune
+  clignote vite** = mode réseau/appairage.
+- **Exclusivité de contrôleur confirmée** : pour appairer à aiohomekit, **retirer d'abord le
+  FP2 d'Apple Home**. Le lien **app Aqara (cloud) reste actif en parallèle**.
+
+**Visibilité Apple Home + energy-manager — 3 scénarios**
+
+| Scénario | Présence→MQTT (EM) | App Maison (HomeKit) | App Aqara |
+|---|:---:|:---:|:---:|
+| **A. FP2 → aiohomekit** *(plan actuel)* | ✅ | ❌ | ✅ |
+| **B. FP2 → Apple Home seul** | ❌ *(Maison n'exporte pas en MQTT)* | ✅ | ✅ |
+| **C. aiohomekit + ré‑exposition** | ✅ | ✅ *(reconstruit)* | ✅ |
+
+- **Scénario C** = le seul qui donne **les deux** : FP2 → aiohomekit → MQTT → **serveur
+  d'accessoires** (HAP‑python **ou** Homebridge + `homebridge-mqttthing`) republie un capteur
+  d'occupation vers Apple Home. Ici Homebridge serait dans son rôle **légitime** de *serveur
+  d'accessoires* (MQTT→HomeKit), **pas** lecteur du FP2 — cf. §18.8. Occupation
+  « reconstruite » par pièce (pas la UI multi‑zones native).
+- **Reco** : rester en **A** et utiliser l'**app Aqara** pour la visu iPhone du FP2
+  (obligatoire de toute façon + plus riche). Ne passer en **C** que si les **tuiles de l'app
+  Maison** sont explicitement souhaitées.
+
+**Livré (scénario C) : `bridge/mqtt-homekit-occupancy/`** — service Python **HAP‑python**
+(pas de Node.js), même pattern que le pont FP2 : **cœur pur testé** (`mqtt_hk/core.py` :
+config+validation, routage topic→accessoire, décodage présence→valeur HAP 0/1,
+anti‑rebattement — **10 tests**, `python3 tests/test_core.py`) + **glu I/O `# VERIFY`**
+(`accessory.py` pyhap, `mqtt_in.py` paho) à valider à l'appairage réel. CLI `check-config`
+(dry‑run sans dépendance) / `run`. Ce pont **s'appaire à l'app Maison avec SON propre PIN**
+→ **inverse** de l'appairage du FP2, donc **aucun conflit** mono‑contrôleur (§18.9). Secrets :
+`hap-state/accessory.state` + `config.toml` (PIN) → jamais commités. Détail →
+`bridge/mqtt-homekit-occupancy/README.md`.
 
 ---
 
