@@ -107,12 +107,18 @@ def parse_config(data: dict) -> BridgeConfig:
     if not units:
         raise ValueError("aucune unité configurée (section [[units]])")
 
+    # `heartbeat_secs <= 0` rendrait la condition `stale` toujours vraie dans
+    # PresenceTracker → publications MQTT en boucle continue (surcharge CPU).
+    heartbeat = int(data.get("heartbeat_secs", 60))
+    if heartbeat <= 0:
+        raise ValueError("heartbeat_secs doit être strictement supérieur à 0")
+
     return BridgeConfig(
         mqtt_host=str(mqtt.get("host", "127.0.0.1")),
         mqtt_port=int(mqtt.get("port", 1883)),
         mqtt_user=mqtt.get("user"),
         mqtt_pass=mqtt.get("password"),
         pairings_dir=str(data.get("pairings_dir", "pairings")),
-        heartbeat_secs=int(data.get("heartbeat_secs", 60)),
+        heartbeat_secs=heartbeat,
         units=tuple(units),
     )

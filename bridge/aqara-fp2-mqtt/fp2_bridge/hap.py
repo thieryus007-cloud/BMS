@@ -13,6 +13,7 @@ reste la référence pour le contrat MQTT.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Awaitable, Callable
@@ -55,6 +56,8 @@ async def pair(device_id: str, setup_code: str, zone: str, pairings_dir: str) ->
     os.makedirs(pairings_dir, exist_ok=True)
     async with Controller() as controller:
         disc = await controller.async_find(device_id)  # VERIFY
+        if disc is None:
+            raise RuntimeError(f"appareil HomeKit introuvable : {device_id} (essayer `discover`)")
         finish = await disc.async_start_pairing(zone)  # VERIFY
         pairing = await finish(setup_code)  # VERIFY
         data = pairing.pairing_data  # VERIFY: dict sérialisable
@@ -71,6 +74,11 @@ async def watch(
     appelle `on_room_presence(zone, present)` (présence pièce = OU des régions).
     """
     path = _pairing_path(pairings_dir, unit.zone)
+    if not os.path.exists(path):
+        raise RuntimeError(
+            f"aucun appairage pour la zone {unit.zone!r} ({path}) — "
+            f"appairer d'abord avec `pair --zone {unit.zone} --device-id … --code …`"
+        )
     with open(path, encoding="utf-8") as fh:
         pairing_data = json.load(fh)
 
@@ -101,18 +109,19 @@ async def watch(
             region_state[(aid, iid)] = bool(v.get("value"))
         await emit()
 
-        # Abonnement aux changements.
+        # Abonnement : ré-émettre **immédiatement** à chaque event (latence minimale),
+        # au lieu de sonder chaque seconde.
+        loop = asyncio.get_running_loop()
+
         def _on_event(data):  # VERIFY: forme de l'event
             for (aid, iid), v in data.items():
                 region_state[(aid, iid)] = bool(v.get("value"))
+            loop.create_task(emit())
 
         pairing.dispatcher_connect(_on_event)  # VERIFY
         await pairing.subscribe(occ)  # VERIFY
 
-        # La connexion est maintenue par le contexte ; les events déclenchent emit().
-        # (Boucle de maintien + ré-émission périodique gérées par l'appelant.)
-        import asyncio
-
+        # Boucle de maintien à basse fréquence = heartbeat (rafraîchit le retained).
         while True:
-            await asyncio.sleep(1)
+            await asyncio.sleep(30)
             await emit()

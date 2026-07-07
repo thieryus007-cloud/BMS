@@ -40,6 +40,15 @@
 2. **Protocole SUZUMI vérifié** contre pedobry, **recoupé** avec o0Zz (§14) → fiable.
 3. **`issalig`/AB TCC-Link = protocole différent, non applicable** à nos Shorai Edge (§15).
 4. **Aucune spec officielle Toshiba** publique → §6 est la meilleure source (§15.1).
+5. **Réseau/identité** (§17) : ESP32 en **station WiFi `StarTh`** (DHCP par défaut, **IP
+   statique `.31–.37`** possible) + **AP de secours**. Identité **`Shorai-3x`** = hostname
+   + segment de topic + SSID AP. **Mot de passe WiFi injecté au flash/NVS, jamais commité**.
+6. **Topics figés** : `santuario/toshiba/<Shorai-3x>/{state,command,availability}` et
+   `santuario/toshiba/presence/<Shorai-3x>` (préfixe **local**, non bridgé).
+7. **Contrôle = présence** (Aqara FP2) : **ECO dès absence, OFF après 5 min** (§18). Pas de
+   pilotage sur la fréquence AC (une clim est une **charge**, pas une source PV).
+8. **FP2 = intégration LOCALE via HomeKit** (`aiohomekit → MQTT`, §18.4), pont Python
+   **sur le Pi5 (aucun matériel en plus)**, en parallèle du cloud Aqara.
 
 ### 0.3 État du code
 
@@ -47,7 +56,11 @@ Crate : **`firmware/toshiba-suzumi-rs/`** — **détaché** du workspace Pi5 (`[
 vide → zéro impact sur le build/CI daly-bms). Tester : 
 `cargo test --manifest-path firmware/toshiba-suzumi-rs/Cargo.toml`.
 
-**38 tests host verts** au total (clippy `-D warnings` + rustfmt propres).
+**3 composants** (tous verts). Résumé rapide :
+
+**A. Firmware ESP32** — `firmware/toshiba-suzumi-rs/` (crate **détaché**, zéro impact Pi5).
+Tester : `cargo test --manifest-path firmware/toshiba-suzumi-rs/Cargo.toml`. **39 tests
+host** (clippy `-D warnings` + rustfmt propres).
 
 | Composant | Fichier | État |
 |-----------|---------|------|
@@ -55,18 +68,25 @@ vide → zéro impact sur le build/CI daly-bms). Tester :
 | Handshake + timings + bornes température (constantes) | `src/protocol.rs` | ✅ fait |
 | Agrégat d'état (`ToshibaState`, applique les `Field`) | `src/state.rs` | ✅ **fait** (4 tests) |
 | Accumulateur de trames RX incrémental (`validate_message_`) | `src/framing.rs` | ✅ **fait** (5 tests) |
-| Machine à états + file/pacing + watchdog + **simulateur d'unité** | `src/machine.rs` | ✅ **fait** (5 tests, dont handshake→online end-to-end) |
+| Machine à états + file/pacing + watchdog + **simulateur d'unité** | `src/machine.rs` | ✅ **fait** (6 tests, dont handshake→online end-to-end) |
 | Codec MQTT applicatif (`ToshibaState`→JSON ; JSON→`Command`→`apply_command`) | `src/mqtt_payload.rs` | ✅ **fait** (8 tests, transport-agnostique) |
 | Config nœud (identité `Shorai-3x`, WiFi StarTh, DHCP/IP statique, AP secours, broker, topics/hostname) + validation | `src/config.rs` | ✅ **fait** (5 tests) — §17 |
 | UART ESP-IDF (init 9600 8E1, lecture/écriture octets) | `src/uart.rs` | ⏳ **TODO (attend matériel)** |
 | WiFi + MQTT transport (`santuario/toshiba/<zone>`) | `src/{wifi,mqtt}.rs` | ⏳ TODO (matériel) |
 | `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO (matériel) |
 
-**Côté Pi5** (`crates/energy-manager`) : le module **`logic/toshiba_ac` (lecture seule)**
-est **fait** — souscrit `santuario/toshiba/<zone>/state`, remplit
-`EnergyState.toshiba_ac[zone]`, diffuse un event live. Config `[energy_manager.toshiba_ac]`
-(+ `--check-config`). 4 tests, clippy propre, build vert. La **phase contrôle**
-(`control_enabled`) reste à faire (dépend de la stratégie énergie, §10.4).
+**B. Module Pi5** — `crates/energy-manager/src/logic/toshiba_ac/`. Tester :
+`cargo test -p energy-manager toshiba` (**8 tests** : 4 parsing + 4 présence) ; clippy
+propre ; `ENERGY_CONFIG=Config.toml cargo run -p energy-manager -- --check-config` OK.
+- ✅ **Lecture seule** : souscrit `santuario/toshiba/<zone>/state` → `EnergyState.toshiba_ac[zone]` + event live.
+- ✅ **Règles de contrôle présence** pures (`rules.rs` : `decide_presence`, `presence_command_json`),
+  config `control_enabled`/`eco_after_secs`/`off_after_secs` (**OFF par défaut**).
+- ⏳ **Boucle de contrôle** (souscrire la présence + émettre les commandes) : à câbler quand les FP2 seront là (§18.5).
+
+**C. Pont présence FP2** — `bridge/aqara-fp2-mqtt/` (Python, sur le Pi5, HomeKit local →
+MQTT). Tester le cœur : `python3 tests/test_core.py` (**8 tests**).
+- ✅ **Cœur pur testé** (`fp2_bridge/core.py`) + CLI + MQTT + systemd + packaging.
+- ⏳ **`hap.py`** (`aiohomekit`) = scaffold à finaliser sur un **FP2 réel** (§18.6).
 
 > ✅ **Stratégie de contrôle TRANCHÉE = présence (capteurs Aqara FP2).** Politique :
 > **ECO dès absence, OFF après 5 min d'absence** (retour de présence → rallumage + preset
@@ -80,25 +100,33 @@ est **fait** — souscrit `santuario/toshiba/<zone>/state`, remplit
 > **source de présence** (topic MQTT des FP2 → zone) et la boucle d'émission débouncée.
 > Détail → §18.
 
-### 0.4 Prochaines étapes (ordre conseillé, sans matériel)
+### 0.4 Prochaines étapes — tout ce qui reste (par facteur bloquant)
 
-Faits (session 2026-07-05) : ✅ state machine (`machine.rs`), ✅ accumulateur RX
-(`framing.rs`), ✅ agrégat d'état (`state.rs`), ✅ simulateur d'unité (test end-to-end).
+**Toutes les couches purement logicielles sont faites et testées** (3 composants, §0.3).
+Le schéma de topics est **figé** (`santuario/toshiba/<zone>/{state,command,availability}`
++ `santuario/toshiba/presence/<zone>`). Ce qui reste est **bloqué** par le matériel ou une
+donnée d'appairage :
 
-Fait aussi (session 2026-07-05) : ✅ codec MQTT (`mqtt_payload.rs`) + `apply_command`,
-✅ config nœud + topics (`config.rs`). **Schéma de topics FIGÉ** :
-`santuario/toshiba/<zone>/{state,command,availability}` (la voie Rust définit ses
-propres topics → la contrainte ESPHome « observer au 1er boot » ne s'applique plus).
+**🔌 Bloqué par le matériel ESP32** (firmware, composant A) :
+1. `uart.rs` (ESP‑IDF 9600 8E1) → branche `Client::{on_rx_byte, poll_tx, on_tick}`.
+2. `wifi.rs` + `mqtt.rs` (transport esp‑idf‑svc, consomment `NodeConfig`) + `main.rs`
+   (feature `esp32`). Voir §16 (toolchain) + §17 (réseau). **Aucune logique protocolaire
+   nouvelle** — juste relayer vers `Client`.
 
-➡️ **Toutes les couches purement logicielles sont faites.** Ce qui reste **nécessite
-le matériel ESP32** :
-1. `uart.rs` (ESP-IDF, 9600 8E1, lecture/écriture octets) — branche `on_rx_byte`/`poll_tx`.
-2. `wifi.rs` + `mqtt.rs` (transport esp-idf-svc) + `main.rs` (feature `esp32`).
-3. Tests au banc : handshake réel, analyseur logique, commandes bout-en-bout.
+**🟢 Bloqué par les capteurs FP2** (présence, composants B+C) :
+3. Finaliser `bridge/aqara-fp2-mqtt/fp2_bridge/hap.py` sur un FP2 réel
+   (`discover`/`pair`/`dump`, marqueurs `# VERIFY`) — §18.6.
+4. Câbler la boucle de contrôle EM : souscrire `santuario/toshiba/presence/+`, appliquer
+   `decide_presence` (déjà testé) + débounce, activer `control_enabled` — §18.5.
 
-> À la réception du matériel : lire `README.md` du crate + ce §0, puis ajouter la
-> feature `esp32` (deps esp-idf-svc/hal/sys) et les 4 fichiers ci-dessus qui **ne font
-> que relayer** vers `Client`. Aucune logique protocolaire nouvelle à écrire.
+**🟡 Faisable sans matériel, mais optionnel/prématuré** :
+5. **Télémétrie → Grafana** : faire ingérer `santuario/toshiba/+/state` par
+   `daly-bms-server` (→ séries redb `toshiba_ac_*`) + dashboard provisioning (règle #14).
+   Décision‑neutre, mais sans firmware qui publie encore, rien à afficher.
+
+> À la réception du matériel ESP32 : lire `firmware/toshiba-suzumi-rs/README.md` + ce §0,
+> puis ajouter la feature `esp32` et les 4 fichiers I/O (points 1‑2). Idem FP2 : lire
+> `bridge/aqara-fp2-mqtt/README.md` + §18.
 
 ### 0.5 Journal des sessions
 
@@ -163,6 +191,12 @@ le matériel ESP32** :
   (discover/pair/dump/run), publisher MQTT (paho, LWT), unité systemd, `.gitignore`
   (clés d'appairage = secrets). `hap.py` (aiohomekit) = **scaffold à finaliser sur un FP2
   réel** (`# VERIFY`). Détail → §18.6.
+- **2026-07-06 (suite 10)** — **Revue de code du pont** (Gemini) : 6 remarques appliquées
+  — `close()` attend `wait_for_publish` (offline retained fiable), `heartbeat_secs>0`
+  validé (+ test → **8 tests cœur**), event HomeKit déclenche `emit()` **immédiatement**
+  (heartbeat 30 s), annulation propre dans `dump`, erreurs claires si appairage manquant /
+  appareil introuvable. **§0 finalisé pour reprise** : décisions §0.2 (8), état §0.3 (3
+  composants + compteurs), prochaines étapes §0.4 (par facteur bloquant).
 
 ---
 

@@ -58,6 +58,10 @@ async def _cmd_dump(args) -> int:
     task = asyncio.create_task(hap.watch(unit, cfg.pairings_dir, show))
     await asyncio.sleep(3)
     task.cancel()
+    try:
+        await task  # laisse la tâche se terminer proprement (évite "Task was destroyed")
+    except asyncio.CancelledError:
+        pass
     return 0
 
 
