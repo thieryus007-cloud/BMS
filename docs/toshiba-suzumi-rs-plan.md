@@ -239,6 +239,13 @@ donnée d'appairage :
   vérifié) / `run`. `py_compile` OK sur tous les modules. Le pont s'appaire à l'app Maison
   avec **son propre PIN** → aucun conflit avec l'appairage mono‑contrôleur du FP2. Secrets
   (`hap-state/`, `config.toml`) gitignorés. Détail → §18.9 + README du pont.
+- **2026-07-07 (suite 14)** — **Veille : `phunapps/hap-rust`** (contrôleur HAP **pur Rust**)
+  ajouté à l'échelle de préférence §18.8 comme **option Rust future à surveiller**. Même
+  catégorie qu'`aiohomekit` ; attrait = lire le FP2 **dans** energy‑manager (Rust) et
+  supprimer le service Python. **Écarté aujourd'hui** : pré‑release, rien sur crates.io,
+  seul l'appairage prouvé (M5), **`subscribe`/events non implémentés** (→ polling), zéro
+  vécu FP2. **Ré‑évaluer quand M7 `hap-controller` livre lecture+subscribe + crates.io.**
+  **Doc seule** (demande « pour information »).
 
 ---
 
@@ -1539,11 +1546,25 @@ de pousser vers une passerelle Zigbee. **Aucune brique domotique tierce ajoutée
   **Hubitat** ou **Homey Pro** — pas HA. Ni l'une ni l'autre n'est **requise** pour lire le
   FP2 : la voie MQTT locale (aiohomekit **ou** client HAP `fp2-proxy`) reste **autonome**.
 
+**🔭 À SURVEILLER (option Rust future) — `phunapps/hap-rust`.** Contrôleur HAP **pur Rust**
+(même catégorie qu'`aiohomekit`, IP/mDNS, crypto Ed25519/X25519/ChaCha20‑Poly1305). Intérêt
+**pour nous spécifiquement** : energy‑manager étant déjà en Rust, un contrôleur HAP Rust
+pourrait à terme **lire le FP2 directement dans energy‑manager** → supprimer le service
+Python `aqara-fp2-mqtt` **et** un process (on garderait quand même le topic MQTT
+`presence/<zone>` pour le pont scénario C / Grafana).
+**Écarté aujourd'hui** (constaté 2026‑07‑07) : **pré‑release**, rien sur crates.io, seul
+l'**appairage** est prouvé (M5 `hap-pairing`) ; **lecture partielle**, **écriture et surtout
+`subscribe`/events NON implémentés** (M6/M7 planifiés) → présence en **polling** (latence
+dégradée), et **zéro vécu FP2**. **Déclencheur de ré‑évaluation** : quand **M7
+`hap-controller`** livre **lecture + `subscribe`** et **publie sur crates.io**.
+
 > **Ordre de préférence figé** : **(1) `aiohomekit`** (en cours) → **(2) client HAP
-> `fp2-proxy` adapté MQTT** → *(jamais)* Homebridge / Home Assistant.
+> `fp2-proxy` adapté MQTT** → *(à surveiller, futur)* **contrôleur HAP Rust `hap-rust`**
+> (déclencheur : M7 `hap-controller` + crates.io) → *(jamais)* Homebridge / Home Assistant.
 >
-> **Source** : `ebaauw/fp2-proxy` = client HAP séparé pour le FP2 (Homebridge ne peut pas
-> appairer un accessoire HomeKit) — github.com/ebaauw/fp2-proxy.
+> **Sources** : `ebaauw/fp2-proxy` = client HAP séparé pour le FP2 (Homebridge ne peut pas
+> appairer un accessoire HomeKit) — github.com/ebaauw/fp2-proxy ;
+> `phunapps/hap-rust` = contrôleur HAP Rust (pré‑release, M5) — github.com/phunapps/hap-rust.
 
 ### 18.9 Manuel FP2 — faits matériels & visibilité Apple Home (2026‑07‑07)
 
