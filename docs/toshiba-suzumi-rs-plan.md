@@ -49,6 +49,11 @@
    pilotage sur la fréquence AC (une clim est une **charge**, pas une source PV).
 8. **FP2 = intégration LOCALE via HomeKit** (`aiohomekit → MQTT`, §18.4), pont Python
    **sur le Pi5 (aucun matériel en plus)**, en parallèle du cloud Aqara.
+9. **Repli présence FP2 = client HAP type `ebaauw/fp2-proxy`** (§18.8) si `aiohomekit`
+   coince sur le vrai appareil. **Jamais Homebridge** (plugins nommés inexistants sur npm
+   + erreur de catégorie : Homebridge est un *serveur d'accessoires*, pas un *contrôleur*
+   HAP) **ni Home Assistant** (écarté sur décision utilisateur). Brique domotique tierce
+   future *éventuelle* (hors périmètre) : **Hubitat / Homey Pro**, pas HA.
 
 ### 0.3 État du code
 
@@ -116,6 +121,7 @@ donnée d'appairage :
 **🟢 Bloqué par les capteurs FP2** (présence, composants B+C) :
 3. Finaliser `bridge/aqara-fp2-mqtt/fp2_bridge/hap.py` sur un FP2 réel
    (`discover`/`pair`/`dump`, marqueurs `# VERIFY`) — §18.6.
+   *(Repli si l'appairage `aiohomekit` résiste : client HAP type `fp2-proxy`, §18.8.)*
 4. Câbler la boucle de contrôle EM : souscrire `santuario/toshiba/presence/+`, appliquer
    `decide_presence` (déjà testé) + débounce, activer `control_enabled` — §18.5.
 
@@ -197,6 +203,15 @@ donnée d'appairage :
   (heartbeat 30 s), annulation propre dans `dump`, erreurs claires si appairage manquant /
   appareil introuvable. **§0 finalisé pour reprise** : décisions §0.2 (8), état §0.3 (3
   composants + compteurs), prochaines étapes §0.4 (par facteur bloquant).
+- **2026-07-07 (suite 11)** — **Analyse « Homebridge au lieu d'`aiohomekit` ? » → écartée**
+  (§18.8 ajoutée). Vérifié : les plugins `homebridge-aqara-presence-sensor-fp2` /
+  `homebridge-easy-mqtt` **n'existent pas** (registre npm) ; Homebridge est un **serveur
+  d'accessoires**, **pas un contrôleur HAP** → il ne peut pas *lire* un FP2 (qui est déjà un
+  accessoire HomeKit), d'où le **projet séparé** `ebaauw/fp2-proxy` (client HAP). **Repli
+  acté = client HAP type `fp2-proxy` adapté à notre contrat MQTT** ; **Home Assistant
+  définitivement écarté** (décision utilisateur) ; brique domotique tierce future
+  éventuelle = **Hubitat / Homey Pro**. Ordre de préférence figé (§18.8). Décision §0.2 #9.
+  **Doc seule, aucun code touché.**
 
 ---
 
@@ -1400,7 +1415,7 @@ Deux options :
 | Option | Principe | Pour nous |
 |--------|----------|-----------|
 | **A. Pont `aiohomekit` → MQTT** *(recommandé)* | Petit service **Python sur le Pi5** : `aiohomekit` (contrôleur HomeKit **IP autonome**, sans HA ni cloud) s'appaire à chaque FP2, lit présence + zones, **publie en MQTT** sur notre broker | **Colle au projet** : MQTT‑natif, **sans dépendance Home Assistant**, 100% local sur le Pi5 |
-| **B. Home Assistant + `HomeKit Device`** (`homekit_controller`) | HA s'appaire au FP2 en **local/offline**, expose présence/zones ; un pont HA→MQTT (statestream/automation) republie | Fonctionne, mais **ajoute HA** comme brique |
+| **B. Home Assistant + `HomeKit Device`** (`homekit_controller`) | HA s'appaire au FP2 en **local/offline**, expose présence/zones ; un pont HA→MQTT (statestream/automation) republie | **❌ Écarté** (décision : pas de HA). Repli présence = **client HAP `fp2-proxy`**, §18.8 — pas HA. |
 
 > **Hébergement = Pi5 existant, AUCUN matériel supplémentaire.** `aiohomekit` fait du
 > **HomeKit‑over‑IP** : le FP2 étant en **WiFi**, il est joignable sur le LAN (`StarTh`,
@@ -1451,10 +1466,57 @@ Livré : **`bridge/aqara-fp2-mqtt/`** (service Python, à héberger sur le Pi5) 
 - **Câbler l'EM** : souscrire `santuario/toshiba/presence/+`, appliquer `decide_presence`
   (§18.5), activer `control_enabled`.
 - Confirmer **ECO immédiat / OFF 5 min** ou ajuster `eco_after_secs`/`off_after_secs`.
+- **Si l'appairage `aiohomekit` résiste** sur le vrai FP2 : basculer sur un **client HAP
+  type `ebaauw/fp2-proxy`** (§18.8) — **pas** Homebridge, **pas** Home Assistant.
 
 > **Sources** : Aqara FP2 (WiFi, HomeKit, multi‑zones) — aqara.com ; HomeKit = protocole
 > local/offline — home‑assistant.io/integrations/homekit_controller ; `aiohomekit`
 > contrôleur HomeKit IP autonome — github.com/Jc2k/aiohomekit.
+
+### 18.8 Plan de repli présence FP2 + **pourquoi PAS Homebridge** (décision 2026‑07‑07)
+
+**Voie primaire inchangée** = pont **`aiohomekit → MQTT`** (§18.4 option A,
+`bridge/aqara-fp2-mqtt/`, ~90 % fait ; ne reste que `hap.py` sur un FP2 réel). `aiohomekit`
+est un **contrôleur HomeKit‑IP autonome** = la **bonne catégorie** pour *lire* un accessoire
+HomeKit, 100 % local, MQTT‑natif, empreinte minimale.
+
+**❌ Homebridge + plugins (`homebridge-aqara-presence-sensor-fp2`, `homebridge-easy-mqtt`)
+— ÉCARTÉ.** Vérifié le 2026‑07‑07 :
+
+1. **Ces deux plugins n'existent pas** (absents du registre npm). Les plugins Aqara réels
+   pour Homebridge (`homebridge-mi-aqara`…) parlent au **hub Aqara** ou au **cloud** ; or le
+   FP2 **n'a pas de hub** → cette voie retombe sur le **cloud Aqara**, exactement ce que
+   §18.4 veut éviter.
+2. **Erreur de catégorie (le point de fond)** : Homebridge est un **serveur d'accessoires**
+   (il expose du non‑HomeKit *vers* Apple Home) — **pas un contrôleur**. Le FP2 est **déjà**
+   un accessoire HomeKit ; le *lire* exige un **contrôleur HAP**, ce qu'un plugin Homebridge
+   **ne sait pas faire nativement**. C'est précisément pour cela que **`ebaauw/fp2-proxy`**
+   est un **projet séparé** embarquant un **client HAP** (et non un simple plugin).
+3. **Sortie = HomeKit, pas MQTT** : il faudrait un second pont pour ressortir la donnée. Et
+   Homebridge ajoute un **runtime Node.js permanent** sur le Pi5 (à rebours de la posture
+   « churn mémoire » du projet) **sans rien simplifier** : la contrainte d'appairage
+   **mono‑contrôleur** du FP2 reste identique dans tous les cas.
+
+**✅ Repli retenu si `aiohomekit` coince sur le vrai FP2 = client HAP type
+`ebaauw/fp2-proxy`.** Client HAP **éprouvé, spécifique FP2** (même catégorie qu'`aiohomekit`,
+mais logique d'appairage/lecture d'occupation FP2 déjà rodée). Il vise nativement
+deCONZ/Hue → pour nous : **réutiliser son appairage + sa lecture d'occupation** et
+**publier sur notre contrat MQTT** `santuario/toshiba/presence/<Shorai‑3x>` (§18.4) au lieu
+de pousser vers une passerelle Zigbee. **Aucune brique domotique tierce ajoutée.**
+
+**Écosystème tiers — décision utilisateur :**
+
+- **Home Assistant = NON** (option B de §18.4 abandonnée). Le repli présence ne passe
+  **jamais** par HA.
+- Si une brique domotique devait être ajoutée **un jour** (hors périmètre actuel), ce serait
+  **Hubitat** ou **Homey Pro** — pas HA. Ni l'une ni l'autre n'est **requise** pour lire le
+  FP2 : la voie MQTT locale (aiohomekit **ou** client HAP `fp2-proxy`) reste **autonome**.
+
+> **Ordre de préférence figé** : **(1) `aiohomekit`** (en cours) → **(2) client HAP
+> `fp2-proxy` adapté MQTT** → *(jamais)* Homebridge / Home Assistant.
+>
+> **Source** : `ebaauw/fp2-proxy` = client HAP séparé pour le FP2 (Homebridge ne peut pas
+> appairer un accessoire HomeKit) — github.com/ebaauw/fp2-proxy.
 
 ---
 
