@@ -1,0 +1,3 @@
+# Pont MQTT → HomeKit (occupation). Python 3.11+ (tomllib en stdlib).
+HAP-python>=4.9
+paho-mqtt>=1.6
