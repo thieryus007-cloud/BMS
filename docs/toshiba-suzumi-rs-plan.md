@@ -254,6 +254,14 @@ donnée d'appairage :
   consommateur **secondaire spéculatif**. **Retenu = adaptateur Homie sur le Pi5 différé**
   (traducteur `santuario/toshiba/*` → `homie/…`, même patron que le pont scénario C), activé
   **si** Homey Pro est adopté, dans la version Homie requise à ce moment‑là. **Doc seule.**
+- **2026-07-07 (suite 16)** — **HomeSpan sur ESP32 étudié → écarté (§18.11)**. Idée : clim en
+  **accessoire HomeKit natif** (HomeSpan, C++/ESP32), commandée par aiohomekit, « tout HomeKit
+  sans MQTT ». Écartée : asymétrie **HomeKit imposé (FP2) vs auto‑imposé (clim)** ; HomeSpan =
+  **C++** → réécrit SUZUMI (39 tests Rust jetés, annule §0.2 #1) ; **aplatit** la télémétrie
+  ODU/IDU dans un HeaterCooler limité ; **déplace** la commande (EM→aiohomekit = IPC réintro) ;
+  mono‑contrôleur inchangé ; perte du fan‑out MQTT ; 14 sessions HAP vs Mosquitto durci.
+  **Retenu = dorsal MQTT + HomeKit aux bords** (ré‑expose HAP‑python peut exposer un
+  HeaterCooler piloté par le state MQTT si tuiles clim voulues). **Doc seule.**
 
 ---
 
@@ -1682,6 +1690,52 @@ traducteurs par consommateur externe ».
 
 > **Sources** : homieiot.github.io (v5 actuel) ; spec‑core‑v4 (base‑topic configurable) ;
 > github.com/harriedegroot/nl.hdg.mqtt (MQTT Hub Homey = Homie v3.0.1 + driver MQTT Device).
+
+### 18.11 **HomeSpan** sur les ESP32 (clim en accessoire HomeKit natif) — étudié, **écarté**
+
+**Question étudiée** : puisque le FP2 est HomeKit et qu'aiohomekit tourne sur le Pi5, faire des
+ESP32 (pilotant les Toshiba) des **accessoires HomeKit natifs via HomeSpan** (**sans** MQTT),
+commandés par aiohomekit → « tout HomeKit », architecture unifiée. **Décision : NON.**
+
+**HomeSpan (fait)** : lib **C++/Arduino‑ESP32** mature, *serveur d'accessoires* HAP‑R2 sur
+l'ESP32 (Thermostat/HeaterCooler…), s'appaire comme tout accessoire HAP (aiohomekit **ou**
+Apple Home ; code d'appairage en macro).
+
+**Asymétrie décisive** : HomeKit est **imposé** sur le FP2 (capteur Aqara qu'on *subit* →
+aiohomekit = seule voie locale), mais serait **auto‑imposé** sur la clim (chaîne **nôtre** de
+bout en bout → on est libres du backbone). Or sur ce maillon libre, HomeKit **coûte** :
+
+1. **Jette la partie dure ET faite** : le protocole **SUZUMI** (vérifié 2 sources, **39 tests**
+   Rust) devrait être **réécrit en C++** → **annule la décision « Rust, pas ESPHome/C++ »**
+   (§0.2 #1). Réécriture de l'éprouvé, pas simplification.
+2. **Aplatit la télémétrie** : diagnostics ODU/IDU (charge compresseur, courants, RPM, temp
+   ext.), presets, self‑clean → un **HeaterCooler** HAP a un jeu de caractéristiques **fixe et
+   limité**. On perd la richesse (projet = **monitoring**, 21 dashboards). MQTT/JSON porte tout.
+3. **Déplace la commande, ne la simplifie pas** : la décision vit dans **energy‑manager (Rust,
+   testé)**. « Sans MQTT », EM devrait commander **via aiohomekit (Python)** → IPC réintroduit
+   (souvent MQTT) **+** saut HAP. « Sans MQTT » ne supprime pas MQTT, il le **relocalise**.
+4. **Mono‑contrôleur inchangé** : ESP32 appairé à aiohomekit ⇒ **pas** aussi dans Apple Home
+   (même exclusivité que le FP2) → ne donne **pas** « automatisation + tuiles iPhone » gratis.
+5. **Perte du fan‑out MQTT** : l'état clim alimente EM **+** Grafana **+** ré‑expose scénario C
+   **+** futur adaptateur Homie. HomeKit = point‑à‑**un** contrôleur ; MQTT = pub/sub.
+6. **Échelle** : 7 FP2 + 7 ESP32 = **14 sessions HAP** chiffrées à maintenir (mDNS,
+   reconnexions) vs **Mosquitto local** durci (retained + LWT). Plus fragile.
+
+> Même en effort brut : HomeSpan économise le glue **WiFi/MQTT** (modeste, fourni par
+> esp‑idf‑svc) mais force la **réécriture de SUZUMI** + **régression** des tests → **bilan net
+> négatif**.
+
+**Retenu (la vraie simplification)** : **un seul dorsal = MQTT**, HomeKit **uniquement aux
+bords** — aiohomekit *lit* le FP2 (imposé) ; un **ré‑expose HAP‑python** (pont scénario C,
+`bridge/mqtt-homekit-occupancy/`) donne les **tuiles iPhone**, et pourrait exposer un
+**HeaterCooler** piloté par le state MQTT **si** on veut la clim dans l'app Maison — **sans**
+HomeSpan, **sans** perdre la télémétrie SUZUMI, la traduction vivant sur le **Pi5** (capable),
+pas sur l'ESP32 (contraint). Firmware ESP32 = **Rust + MQTT**, source de vérité.
+
+> **Seul cas où HomeSpan gagnerait** : si le contrôle **natif Apple Home** de la clim primait
+> sur l'automatisation + la télémétrie — non pertinent pour un projet de gestion d'énergie.
+>
+> **Source** : github.com/HomeSpan/HomeSpan (lib HomeKit Arduino‑ESP32).
 
 ---
 
