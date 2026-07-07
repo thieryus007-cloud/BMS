@@ -118,7 +118,7 @@ Pi5 (192.168.1.141, pi5compute)
     └── publication MQTT → consommée par daly-bms-server (writes metrics-store)
   grafana-server (systemd, :3000)
     ├── Datasource : "Daly Metrics (redb)" → http://127.0.0.1:8080 (UID: daly-metrics)
-    ├── 21 dashboards provisionés dans /var/lib/grafana/dashboards/
+    ├── 22 dashboards provisionés dans /var/lib/grafana/dashboards/
     └── Données NVMe optionnel (/mnt/nvme/grafana)
 
 NanoPi (192.168.1.120, root)
@@ -188,10 +188,11 @@ contrib/energy-manager.service          ← unité systemd energy-manager
 contrib/journald/daly-bms.conf          ← drop-in journald (plafond journal : SystemMaxUse=200M)
                                           déployé par deploy-pi5.sh → /etc/systemd/journal.conf.d/
 contrib/grafana/                        ← provisioning Grafana complet
-  dashboards/01-bms.json … 21-memoire-daly-bms.json ← 21 dashboards JSON
+  dashboards/01-bms.json … 22-toshiba-clim.json ← 22 dashboards JSON
     (17→20 = dashboards évolués PromQL avancé : flotte/SLO, rendement PV,
      bilan énergie J/J-1, alertes multi-critères — cf. docs/metriques-promql-reference.md §9 ;
-     21 = mémoire process RSS/jemalloc — diagnostic fuite, cf. docs/diagnostic-depannage.md §17)
+     21 = mémoire process RSS/jemalloc — diagnostic fuite, cf. docs/diagnostic-depannage.md §17 ;
+     22 = climatiseurs Toshiba, séries toshiba_ac_* labellisées par zone — cf. docs/toshiba-suzumi-rs-plan.md §0.4)
   provisioning/datasources/daly-metrics.yaml        ← datasource PromQL → :8080
   provisioning/dashboards/daly-bms.yaml             ← provider → /var/lib/grafana/dashboards
 scripts/setup-grafana.sh                ← installation Grafana (première fois)
@@ -428,7 +429,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Déployer (Pi5 + NanoPi), procédures détaillées, restauration git | `docs/deploiement-exploitation.md` |
 | Architecture redb (schéma, tiering) + historique migration VM→redb | `docs/metriques-redb-architecture.md` |
 | Catalogue des métriques + requêtes & conformité PromQL | `docs/metriques-promql-reference.md` |
-| Grafana — 21 dashboards (liste, datasource, provisioning) | `docs/grafana-dashboards.md` |
+| Grafana — 22 dashboards (liste, datasource, provisioning) | `docs/grafana-dashboards.md` |
 | MQTT / Mosquitto (topics, bridge, anti-boucle, migration Docker→natif) | `docs/mqtt-mosquitto.md` |
 | Alertes (AlertEngine natif, règles, hysteresis, notifications) | `docs/alertes.md` |
 | Ajouter un appareil / BMS Daly, ATS CHINT, ET112, PRALRAN | `docs/integration-materiel.md` |

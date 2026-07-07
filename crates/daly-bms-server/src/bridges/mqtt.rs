@@ -531,6 +531,8 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
         ("santuario/em/metrics", SUB_QOS),
         ("santuario/em/water_heater", SUB_QOS),
         ("santuario/em/solar", SUB_QOS),
+        // Télémétrie clim Toshiba (firmware ESP32) → séries redb toshiba_ac_*.
+        ("santuario/toshiba/+/state", SUB_QOS),
     ];
 
     for (topic, qos) in &topics {
@@ -596,6 +598,8 @@ pub async fn start_venus_mqtt_subscriber(state: AppState, cfg: MqttConfig) {
                         handle_wh_metrics_topic(&state, &json);
                     } else if topic == "santuario/em/solar" {
                         handle_em_solar_topic(&state, &json).await;
+                    } else if topic.starts_with("santuario/toshiba/") && topic.ends_with("/state") {
+                        handle_toshiba_state_topic(&state, topic, &json);
                     }
                 }
             }
@@ -960,6 +964,37 @@ fn handle_em_metrics_topic(state: &AppState, json: &Value) {
         net_tx_bps:     f("net_tx_bps"),
     };
     crate::redb_writes::write_em_metrics(&store.writer(), &state.redb_rl, &payload);
+}
+
+/// Traite `santuario/toshiba/<zone>/state` — télémétrie clim Toshiba publiée par
+/// le firmware ESP32 (cf. `docs/toshiba-suzumi-rs-plan.md`). Historise les champs
+/// numériques dans redb en séries `toshiba_ac_*` labellisées par `zone`.
+///
+/// Payload (tous champs optionnels) : `{ "power": true, "mode": "cool",
+/// "target_temp": 24, "current_temp": 21, "outdoor_temp": 8, "pwr_level": 100,
+/// "self_clean": false, ... }`.
+fn handle_toshiba_state_topic(state: &AppState, topic: &str, json: &Value) {
+    let Some(store) = &state.metrics_store else { return };
+    // santuario/toshiba/<zone>/state → <zone>
+    let Some(zone) = topic
+        .strip_prefix("santuario/toshiba/")
+        .and_then(|s| s.strip_suffix("/state"))
+        .filter(|z| !z.is_empty())
+    else {
+        return;
+    };
+
+    let b = |k: &str| json.get(k).and_then(|v| v.as_bool());
+    let f = |k: &str| json.get(k).and_then(|v| v.as_f64()).map(|v| v as f32);
+    let metrics = crate::redb_writes::ToshibaAcMetrics {
+        power:          b("power"),
+        target_temp_c:  f("target_temp"),
+        current_temp_c: f("current_temp"),
+        outdoor_temp_c: f("outdoor_temp"),
+        pwr_level_pct:  f("pwr_level"),
+        self_clean:     b("self_clean"),
+    };
+    crate::redb_writes::write_toshiba_ac(&store.writer(), &state.redb_rl, zone, &metrics);
 }
 
 /// Traite le topic `santuario/em/solar` — télémétrie solaire agrégée publiée
