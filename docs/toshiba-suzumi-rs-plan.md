@@ -246,6 +246,14 @@ donnée d'appairage :
   seul l'appairage prouvé (M5), **`subscribe`/events non implémentés** (→ polling), zéro
   vécu FP2. **Ré‑évaluer quand M7 `hap-controller` livre lecture+subscribe + crates.io.**
   **Doc seule** (demande « pour information »).
+- **2026-07-07 (suite 15)** — **Interop Homie / Homey étudiée → §18.10** : adopter Homie sur
+  les ESP32 **dès maintenant = NON**. Faits : Homie = convention **ouverte** (pas propre à
+  Homey) ; Homey ne lit Homie que via l'app communautaire **MQTT Hub** en **v3.0.1** (spec
+  actuelle = **v5**) + driver « MQTT Device » (mapping manuel, sans Homie). Graver Homie dans
+  le firmware = parier sur une version + ripple sur tout le contrat figé + coût ESP32, pour un
+  consommateur **secondaire spéculatif**. **Retenu = adaptateur Homie sur le Pi5 différé**
+  (traducteur `santuario/toshiba/*` → `homie/…`, même patron que le pont scénario C), activé
+  **si** Homey Pro est adopté, dans la version Homie requise à ce moment‑là. **Doc seule.**
 
 ---
 
@@ -1627,6 +1635,53 @@ anti‑rebattement — **10 tests**, `python3 tests/test_core.py`) + **glu I/O `
 → **inverse** de l'appairage du FP2, donc **aucun conflit** mono‑contrôleur (§18.9). Secrets :
 `hap-state/accessory.state` + `config.toml` (PIN) → jamais commités. Détail →
 `bridge/mqtt-homekit-occupancy/README.md`.
+
+### 18.10 Interop **Homie / Homey** — adaptateur Pi5 **différé** (décision 2026‑07‑07)
+
+**Question étudiée** : adopter la convention MQTT **Homie** dès maintenant sur les 3 ESP32
+(en vue d'une éventuelle passerelle **Homey Pro**). **Décision : NON — on garde
+`santuario/toshiba/*` comme source de vérité, et on prévoit un *adaptateur Homie sur le Pi5*
+le jour où Homey serait réellement adopté.**
+
+**Faits (vérifiés 2026‑07‑07)**
+
+- **Homie = convention ouverte, neutre** (homieiot), lue par plusieurs contrôleurs (Homey via
+  app communautaire, openHAB, HA, Domoticz…). Ce n'est **pas** « la convention de Homey ».
+- **Homey ne lit pas Homie nativement** : c'est l'app communautaire **« MQTT Hub »**
+  (harriedegroot / fork RonnyWinkler) qui fait la découverte — et elle implémente **Homie
+  v3.0.1** (spec 2018). Elle offre **aussi** un driver **« MQTT Device »** = mapping de topics
+  **arbitraires** → capabilities Homey (donc **sans** Homie, à la main).
+- **Décalage de versions** : spec Homie actuelle = **v5.0** (description en **un seul JSON**
+  `$description` sous `homie/5/…`) ; v4 = beaucoup de `$`‑attributs retained ; l'app Homey =
+  **v3.0.1**. Graver Homie dans le firmware **aujourd'hui** = **parier** sur une version
+  (v3.0.1 pour Homey actuel ↔ v5 pour l'écosystème). Base‑topic **configurable** (défaut
+  `homie/`).
+
+**Pourquoi différer (et surtout NE PAS mettre Homie dans les ESP32)**
+
+1. **Ripple** : `santuario/toshiba/<zone>/{state,command,availability}` + `presence/<zone>`
+   est câblé dans le firmware Rust (`config.rs`), `energy-manager logic/toshiba_ac`, les ponts
+   présence + scénario C, l'ingest Grafana prévu, et l'**anti‑boucle Mosquitto** (règle #11).
+2. **Le contrôleur primaire (energy-manager) n'est pas Homie** → Homie ne lui apporte rien ;
+   il ne sert qu'un consommateur **secondaire éventuel** (Homey). Optimiser le primaire pour un
+   secondaire spéculatif = à l'envers.
+3. **Coût ESP32** : Homie impose une flopée de topics auto‑descriptifs retained
+   (`$homie/$name/$state/$nodes`, `$type/$properties`, `$datatype/$settable/$unit/$format`) à
+   maintenir cohérents — complexité/flash en plus, zéro gain pour la boucle de contrôle.
+4. **Homey n'exige pas Homie** : le driver « MQTT Device » mappe nos topics natifs à la main
+   → Homie n'est qu'un **confort de découverte**, pas une porte obligatoire.
+
+**Plan retenu (à activer si Homey Pro adopté)** : ajouter un **adaptateur Homie sur le Pi5**
+(service traducteur, **même patron que le pont scénario C**) qui **miroite** l'arbre
+state/command des clims vers un arbre `homie/…`, dans **la version Homie exigée par Homey à ce
+moment‑là**. Publier cet arbre **hors** de l'espace bridgé `santuario/` (topic local, comme la
+présence) pour respecter l'anti‑boucle. Avantages : **choix de version reporté** (pas de pari),
+**zéro perturbation** du firmware/EM/contrat testé, **réversible** (pas de Homey → pas
+d'adaptateur), firmware **léger**. Cohérent avec l'archi « contrat natif + fins ponts
+traducteurs par consommateur externe ».
+
+> **Sources** : homieiot.github.io (v5 actuel) ; spec‑core‑v4 (base‑topic configurable) ;
+> github.com/harriedegroot/nl.hdg.mqtt (MQTT Hub Homey = Homie v3.0.1 + driver MQTT Device).
 
 ---
 
