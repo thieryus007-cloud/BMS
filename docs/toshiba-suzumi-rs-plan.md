@@ -137,10 +137,12 @@ donnée d'appairage :
    1 Hz + publication débouncée, testée) — §18.5. **Reste juste** : activer `control_enabled`
    dans Config.toml une fois les FP2 posés et la présence qui arrive sur le broker.
 
-**🟡 Faisable sans matériel, mais optionnel/prématuré** :
-5. **Télémétrie → Grafana** : faire ingérer `santuario/toshiba/+/state` par
-   `daly-bms-server` (→ séries redb `toshiba_ac_*`) + dashboard provisioning (règle #14).
-   Décision‑neutre, mais sans firmware qui publie encore, rien à afficher.
+**✅ Fait (sans matériel)** :
+5. **Télémétrie → Grafana** — ✅ **fait** : `daly-bms-server` ingère `santuario/toshiba/+/state`
+   (`bridges/mqtt.rs::handle_toshiba_state_topic` → `redb_writes::write_toshiba_ac`) en séries
+   redb **`toshiba_ac_*`** labellisées par `zone` + **dashboard 22** provisionné
+   (`contrib/grafana/dashboards/22-toshiba-clim.json`, format règle #14). **Vide tant qu'aucun
+   firmware ne publie** (attendu). Détail → `docs/grafana-dashboards.md` §7.3.
 
 > À la réception du matériel ESP32 : lire `firmware/toshiba-suzumi-rs/README.md` + ce §0,
 > puis ajouter la feature `esp32` et les 4 fichiers I/O (points 1‑2). Idem FP2 : lire
@@ -276,6 +278,16 @@ donnée d'appairage :
   `control_enabled=false`** (défaut Config.toml). `cargo test -p energy-manager toshiba` =
   **14 tests** verts, **clippy `-D warnings` propre**, `--check-config` OK. Reste : poser
   les FP2 + activer le flag. Composant B (§0.3) ✅. **Prochaine étape #1 terminée.**
+- **2026-07-07 (suite 18)** — **Télémétrie Toshiba → Grafana (#3, §0.4 #5)** — CODE.
+  `daly-bms-server` : souscription `santuario/toshiba/+/state` +
+  `handle_toshiba_state_topic` (`bridges/mqtt.rs`) → `redb_writes::write_toshiba_ac` (nouveau,
+  + struct `ToshibaAcMetrics`) qui historise `toshiba_ac_{power,target_temp_c,current_temp_c,
+  outdoor_temp_c,pwr_level_pct,self_clean}` labellisés par **`zone`** (rate-limité comme
+  les autres séries). **Dashboard 22** provisionné (`22-toshiba-clim.json`, uid
+  `daly-toshiba-22`, format règle #14 vérifié : pas de `__inputs`, datasource `daly-metrics`).
+  `clippy -D warnings` propre, `cargo test -p daly-bms-server` = 22 tests verts, 22 dashboards
+  JSON valides. Champs chaîne (mode/fan/swing/preset) non historisés. **Vide tant qu'aucun
+  firmware ne publie** (attendu). Doc : §0.4 #5, `grafana-dashboards.md` §7.3, CLAUDE.md (22).
 
 ---
 

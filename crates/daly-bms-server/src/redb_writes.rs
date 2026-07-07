@@ -389,6 +389,59 @@ pub fn write_et112(writer: &Writer, rl: &RateLimiter, snap: &Et112Snapshot) {
 }
 
 // =============================================================================
+// Toshiba climatiseurs (télémétrie publiée par le firmware ESP32 sur
+// santuario/toshiba/<zone>/state ; séries labellisées par `zone`)
+// =============================================================================
+
+/// Métriques numériques d'une clim Toshiba (tous champs optionnels — l'unité
+/// renseigne au fil de l'eau). Les champs chaîne (mode/fan/swing/preset) ne sont
+/// pas historisés ici (non numériques).
+#[derive(Default)]
+pub struct ToshibaAcMetrics {
+    pub power: Option<bool>,
+    pub target_temp_c: Option<f32>,
+    pub current_temp_c: Option<f32>,
+    pub outdoor_temp_c: Option<f32>,
+    pub pwr_level_pct: Option<f32>,
+    pub self_clean: Option<bool>,
+}
+
+pub fn write_toshiba_ac(writer: &Writer, rl: &RateLimiter, zone: &str, m: &ToshibaAcMetrics) {
+    let ts = now_ms();
+
+    if let Some(p) = m.power {
+        push(writer, rl, MIN_WRITE_INTERVAL, format_args!("toshiba_ac_power:{zone}"),
+             || Sample::new("toshiba_ac_power", ts, p as i32 as f64)
+                .with_label("zone", zone.to_string()));
+    }
+    if let Some(v) = m.target_temp_c {
+        push(writer, rl, TEMP_WRITE_INTERVAL, format_args!("toshiba_ac_target_temp_c:{zone}"),
+             || Sample::new("toshiba_ac_target_temp_c", ts, v as f64)
+                .with_label("zone", zone.to_string()));
+    }
+    if let Some(v) = m.current_temp_c {
+        push(writer, rl, TEMP_WRITE_INTERVAL, format_args!("toshiba_ac_current_temp_c:{zone}"),
+             || Sample::new("toshiba_ac_current_temp_c", ts, v as f64)
+                .with_label("zone", zone.to_string()));
+    }
+    if let Some(v) = m.outdoor_temp_c {
+        push(writer, rl, TEMP_WRITE_INTERVAL, format_args!("toshiba_ac_outdoor_temp_c:{zone}"),
+             || Sample::new("toshiba_ac_outdoor_temp_c", ts, v as f64)
+                .with_label("zone", zone.to_string()));
+    }
+    if let Some(v) = m.pwr_level_pct {
+        push(writer, rl, MIN_WRITE_INTERVAL, format_args!("toshiba_ac_pwr_level_pct:{zone}"),
+             || Sample::new("toshiba_ac_pwr_level_pct", ts, v as f64)
+                .with_label("zone", zone.to_string()));
+    }
+    if let Some(sc) = m.self_clean {
+        push(writer, rl, MIN_WRITE_INTERVAL, format_args!("toshiba_ac_self_clean:{zone}"),
+             || Sample::new("toshiba_ac_self_clean", ts, sc as i32 as f64)
+                .with_label("zone", zone.to_string()));
+    }
+}
+
+// =============================================================================
 // Irradiance
 // =============================================================================
 
