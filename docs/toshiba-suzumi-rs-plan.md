@@ -81,12 +81,15 @@ host** (clippy `-D warnings` + rustfmt propres).
 | `main.rs` + esp-idf-svc (feature `esp32`) | `src/main.rs` | ⏳ TODO (matériel) |
 
 **B. Module Pi5** — `crates/energy-manager/src/logic/toshiba_ac/`. Tester :
-`cargo test -p energy-manager toshiba` (**8 tests** : 4 parsing + 4 présence) ; clippy
-propre ; `ENERGY_CONFIG=Config.toml cargo run -p energy-manager -- --check-config` OK.
+`cargo test -p energy-manager toshiba` (**14 tests**) ; clippy `-D warnings` propre ;
+`ENERGY_CONFIG=Config.toml cargo run -p energy-manager -- --check-config` OK.
 - ✅ **Lecture seule** : souscrit `santuario/toshiba/<zone>/state` → `EnergyState.toshiba_ac[zone]` + event live.
 - ✅ **Règles de contrôle présence** pures (`rules.rs` : `decide_presence`, `presence_command_json`),
   config `control_enabled`/`eco_after_secs`/`off_after_secs` (**OFF par défaut**).
-- ⏳ **Boucle de contrôle** (souscrire la présence + émettre les commandes) : à câbler quand les FP2 seront là (§18.5).
+- ✅ **Boucle de contrôle câblée** (§18.5) : souscrit `santuario/toshiba/presence/+`,
+  `PresenceControl` (pur, testé) suit la présence par zone, tick 1 Hz → publie
+  `presence_command_json` sur `.../<zone>/command` **sur changement** (débounce). **Inerte
+  tant que `control_enabled=false`** (défaut). Reste : activer le flag une fois les FP2 posés.
 
 **C. Pont présence FP2** — `bridge/aqara-fp2-mqtt/` (Python, sur le Pi5, HomeKit local →
 MQTT). Tester le cœur : `python3 tests/test_core.py` (**8 tests**).
@@ -130,8 +133,9 @@ donnée d'appairage :
 3. Finaliser `bridge/aqara-fp2-mqtt/fp2_bridge/hap.py` sur un FP2 réel
    (`discover`/`pair`/`dump`, marqueurs `# VERIFY`) — §18.6.
    *(Repli si l'appairage `aiohomekit` résiste : client HAP type `fp2-proxy`, §18.8.)*
-4. Câbler la boucle de contrôle EM : souscrire `santuario/toshiba/presence/+`, appliquer
-   `decide_presence` (déjà testé) + débounce, activer `control_enabled` — §18.5.
+4. ✅ **Boucle de contrôle EM câblée** (souscription `presence/+` + `PresenceControl` + tick
+   1 Hz + publication débouncée, testée) — §18.5. **Reste juste** : activer `control_enabled`
+   dans Config.toml une fois les FP2 posés et la présence qui arrive sur le broker.
 
 **🟡 Faisable sans matériel, mais optionnel/prématuré** :
 5. **Télémétrie → Grafana** : faire ingérer `santuario/toshiba/+/state` par
@@ -254,6 +258,24 @@ donnée d'appairage :
   consommateur **secondaire spéculatif**. **Retenu = adaptateur Homie sur le Pi5 différé**
   (traducteur `santuario/toshiba/*` → `homie/…`, même patron que le pont scénario C), activé
   **si** Homey Pro est adopté, dans la version Homie requise à ce moment‑là. **Doc seule.**
+- **2026-07-07 (suite 16)** — **HomeSpan sur ESP32 étudié → écarté (§18.11)**. Idée : clim en
+  **accessoire HomeKit natif** (HomeSpan, C++/ESP32), commandée par aiohomekit, « tout HomeKit
+  sans MQTT ». Écartée : asymétrie **HomeKit imposé (FP2) vs auto‑imposé (clim)** ; HomeSpan =
+  **C++** → réécrit SUZUMI (39 tests Rust jetés, annule §0.2 #1) ; **aplatit** la télémétrie
+  ODU/IDU dans un HeaterCooler limité ; **déplace** la commande (EM→aiohomekit = IPC réintro) ;
+  mono‑contrôleur inchangé ; perte du fan‑out MQTT ; 14 sessions HAP vs Mosquitto durci.
+  **Retenu = dorsal MQTT + HomeKit aux bords** (ré‑expose HAP‑python peut exposer un
+  HeaterCooler piloté par le state MQTT si tuiles clim voulues). **Doc seule.**
+- **2026-07-07 (suite 17)** — **Boucle de contrôle EM câblée (#1, §18.5)** — CODE.
+  `logic/toshiba_ac` : souscription `santuario/toshiba/presence/+` + builder
+  `publish::toshiba_command`. Décision pure **testée** : `parse_presence_zone`,
+  `PresencePayload`, **`PresenceControl`** (suivi présence par zone, `evaluate` ne renvoie
+  que les actions **changées**, ancrage du compteur d'absence à `now` au 1er message → pas
+  d'OFF au boot). Boucle `mod.rs` = `select!` tick **1 Hz** (gardé par `control_enabled`) →
+  publie `presence_command_json` sur `.../<zone>/command`. **Inerte tant que
+  `control_enabled=false`** (défaut Config.toml). `cargo test -p energy-manager toshiba` =
+  **14 tests** verts, **clippy `-D warnings` propre**, `--check-config` OK. Reste : poser
+  les FP2 + activer le flag. Composant B (§0.3) ✅. **Prochaine étape #1 terminée.**
 
 ---
 
@@ -1429,9 +1451,9 @@ FP2 (×3, 1/pièce) ──MQTT présence──► energy-manager logic/toshiba_a
   et `presence_command_json(action)`.
 - ✅ **Config** : `[energy_manager.toshiba_ac]` `control_enabled` (**OFF** par défaut),
   `eco_after_secs=0`, `off_after_secs=300` (+ validation `off ≥ eco`).
-- ⏳ **À câbler quand les FP2 seront posés** (§18.4) : la **source de présence** (topic
-  MQTT des FP2 → zone) et la **boucle d'émission débouncée**. Rien n'est émis tant que
-  `control_enabled=false`.
+- ✅ **Boucle d'émission câblée + testée** (§18.5) : `PresenceControl` (pur) + tick 1 Hz +
+  publication débouncée. **Reste** (à réception des FP2) : la **source de présence** réelle
+  (le pont FP2 qui publie `presence/<zone>`) et **activer `control_enabled=true`**.
 
 ### 18.3 Table de décision
 
@@ -1481,13 +1503,24 @@ santuario/toshiba/presence/<Shorai-3x>   →  {"present": true|false, "ts": <epo
 (un topic par pièce, aligné sur le nom du nœud ; le FP2 gérant plusieurs zones, le pont
 agrège en une présence « pièce » ou publie par zone selon le découpage).
 
-### 18.5 Câblage EM (une fois le pont en place)
+### 18.5 Câblage EM — ✅ **fait** (`crates/energy-manager/src/logic/toshiba_ac/`)
 
-1. **Config** `presence = [{ topic="santuario/toshiba/presence/Shorai-31", zone="Shorai-31" }, …]`.
-2. **Souscription** : ajouter ces topics (ou `santuario/toshiba/presence/+`) dans `all_subscriptions`.
-3. **Boucle** (`spawn_critical`, règle #16) : message présence → MAJ `last_presence_ts[zone]` ;
-   tick 1 s → `decide_presence(present, now−last_ts, eco, off)` → si l'action change,
-   publier `presence_command_json` sur `.../command` (débounce).
+Réalisé (2026‑07‑07), **inerte tant que `control_enabled=false`** :
+
+1. **Souscription** : `santuario/toshiba/presence/+` ajouté à `all_subscriptions` (`mqtt/topics.rs`),
+   + builder `publish::toshiba_command(zone)` = `santuario/toshiba/<zone>/command`.
+2. **Décision pure** (`rules.rs`, **testée**) : `parse_presence_zone`, `PresencePayload`
+   (`{"present":bool}` ; `ts` ignoré → on ancre l'horloge d'absence sur l'`Utc::now()` local),
+   et **`PresenceControl`** — suit la présence **par zone** (`on_presence`) et renvoie, à
+   l'évaluation, **uniquement** les `(zone, action)` **changées** (`evaluate`). Ancrage du
+   compteur d'absence à `now` au **premier** message d'une zone → pas d'OFF intempestif au boot.
+3. **Boucle** (`mod.rs`, `spawn_critical`, règle #16) : `tokio::select!` avec un tick **1 Hz**
+   (gardé par `control_enabled`) → `control.evaluate(now, eco, off)` → publie
+   `presence_command_json` sur `.../<zone>/command` (non‑retained). Le nom de zone du topic de
+   présence = zone de commande (le pont FP2 publie déjà sous le nom du nœud Toshiba → **pas de
+   table de mapping**). La branche présence du `select!` alimente `PresenceControl`.
+
+**Reste** : poser les FP2 + le pont qui publie `presence/<zone>`, puis **`control_enabled=true`**.
 
 ### 18.6 Le pont (Option A) — **scaffold en place**
 
@@ -1682,6 +1715,52 @@ traducteurs par consommateur externe ».
 
 > **Sources** : homieiot.github.io (v5 actuel) ; spec‑core‑v4 (base‑topic configurable) ;
 > github.com/harriedegroot/nl.hdg.mqtt (MQTT Hub Homey = Homie v3.0.1 + driver MQTT Device).
+
+### 18.11 **HomeSpan** sur les ESP32 (clim en accessoire HomeKit natif) — étudié, **écarté**
+
+**Question étudiée** : puisque le FP2 est HomeKit et qu'aiohomekit tourne sur le Pi5, faire des
+ESP32 (pilotant les Toshiba) des **accessoires HomeKit natifs via HomeSpan** (**sans** MQTT),
+commandés par aiohomekit → « tout HomeKit », architecture unifiée. **Décision : NON.**
+
+**HomeSpan (fait)** : lib **C++/Arduino‑ESP32** mature, *serveur d'accessoires* HAP‑R2 sur
+l'ESP32 (Thermostat/HeaterCooler…), s'appaire comme tout accessoire HAP (aiohomekit **ou**
+Apple Home ; code d'appairage en macro).
+
+**Asymétrie décisive** : HomeKit est **imposé** sur le FP2 (capteur Aqara qu'on *subit* →
+aiohomekit = seule voie locale), mais serait **auto‑imposé** sur la clim (chaîne **nôtre** de
+bout en bout → on est libres du backbone). Or sur ce maillon libre, HomeKit **coûte** :
+
+1. **Jette la partie dure ET faite** : le protocole **SUZUMI** (vérifié 2 sources, **39 tests**
+   Rust) devrait être **réécrit en C++** → **annule la décision « Rust, pas ESPHome/C++ »**
+   (§0.2 #1). Réécriture de l'éprouvé, pas simplification.
+2. **Aplatit la télémétrie** : diagnostics ODU/IDU (charge compresseur, courants, RPM, temp
+   ext.), presets, self‑clean → un **HeaterCooler** HAP a un jeu de caractéristiques **fixe et
+   limité**. On perd la richesse (projet = **monitoring**, 21 dashboards). MQTT/JSON porte tout.
+3. **Déplace la commande, ne la simplifie pas** : la décision vit dans **energy‑manager (Rust,
+   testé)**. « Sans MQTT », EM devrait commander **via aiohomekit (Python)** → IPC réintroduit
+   (souvent MQTT) **+** saut HAP. « Sans MQTT » ne supprime pas MQTT, il le **relocalise**.
+4. **Mono‑contrôleur inchangé** : ESP32 appairé à aiohomekit ⇒ **pas** aussi dans Apple Home
+   (même exclusivité que le FP2) → ne donne **pas** « automatisation + tuiles iPhone » gratis.
+5. **Perte du fan‑out MQTT** : l'état clim alimente EM **+** Grafana **+** ré‑expose scénario C
+   **+** futur adaptateur Homie. HomeKit = point‑à‑**un** contrôleur ; MQTT = pub/sub.
+6. **Échelle** : 7 FP2 + 7 ESP32 = **14 sessions HAP** chiffrées à maintenir (mDNS,
+   reconnexions) vs **Mosquitto local** durci (retained + LWT). Plus fragile.
+
+> Même en effort brut : HomeSpan économise le glue **WiFi/MQTT** (modeste, fourni par
+> esp‑idf‑svc) mais force la **réécriture de SUZUMI** + **régression** des tests → **bilan net
+> négatif**.
+
+**Retenu (la vraie simplification)** : **un seul dorsal = MQTT**, HomeKit **uniquement aux
+bords** — aiohomekit *lit* le FP2 (imposé) ; un **ré‑expose HAP‑python** (pont scénario C,
+`bridge/mqtt-homekit-occupancy/`) donne les **tuiles iPhone**, et pourrait exposer un
+**HeaterCooler** piloté par le state MQTT **si** on veut la clim dans l'app Maison — **sans**
+HomeSpan, **sans** perdre la télémétrie SUZUMI, la traduction vivant sur le **Pi5** (capable),
+pas sur l'ESP32 (contraint). Firmware ESP32 = **Rust + MQTT**, source de vérité.
+
+> **Seul cas où HomeSpan gagnerait** : si le contrôle **natif Apple Home** de la clim primait
+> sur l'automatisation + la télémétrie — non pertinent pour un projet de gestion d'énergie.
+>
+> **Source** : github.com/HomeSpan/HomeSpan (lib HomeKit Arduino‑ESP32).
 
 ---
 

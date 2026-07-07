@@ -85,6 +85,9 @@ pub fn all_subscriptions(portal_id: &str, vebus: u32, mppt1: u32, mppt2: u32, pv
         // --- Toshiba climatiseurs (télémétrie lecture seule, wildcard par zone).
         //     Préfixe LOCAL, non relayé par le bridge NanoPi (règle #11). ---
         "santuario/toshiba/+/state".to_string(),
+        // Présence FP2 par pièce (contrôle opt-in `toshiba_ac.control_enabled`),
+        // publiée par le pont `bridge/aqara-fp2-mqtt`. Préfixe LOCAL également.
+        "santuario/toshiba/presence/+".to_string(),
 
         // --- Persist (retained baselines + DEYE state) ---
         "santuario/persist/pvinv_baseline".to_string(),
@@ -119,6 +122,12 @@ pub mod publish {
     #[allow(dead_code)]
     pub fn tasmota_cmd(tasmota_id: &str) -> String {
         format!("cmnd/{tasmota_id}/Power")
+    }
+
+    /// Commande d'une clim Toshiba (contrôle par présence FP2). Non-retained : c'est
+    /// un événement, consommé par le firmware ESP32 sur `.../<zone>/command`.
+    pub fn toshiba_command(zone: &str) -> String {
+        format!("santuario/toshiba/{zone}/command")
     }
 
     pub const HEATPUMP_VENUS: &str = "santuario/heatpump/1/venus";
