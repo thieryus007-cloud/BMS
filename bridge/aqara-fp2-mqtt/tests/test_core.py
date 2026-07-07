@@ -91,6 +91,13 @@ class TestParseConfig(unittest.TestCase):
 
         self.assertRaises(ValueError, core.parse_config, {"units": []})  # aucune unité
 
+    def test_rejects_non_positive_heartbeat(self):
+        d = self._valid()
+        d["heartbeat_secs"] = 0
+        self.assertRaises(ValueError, core.parse_config, d)
+        d["heartbeat_secs"] = -5
+        self.assertRaises(ValueError, core.parse_config, d)
+
 
 if __name__ == "__main__":
     unittest.main()

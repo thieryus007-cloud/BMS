@@ -45,7 +45,14 @@ class MqttPublisher:
 
     def close(self) -> None:
         try:
-            self._client.publish(AVAILABILITY_TOPIC, "offline", qos=1, retain=True)
+            # Attendre que le "offline" (retained) parte réellement : un disconnect()
+            # propre ne déclenche PAS le LWT côté broker, donc si ce message est perdu
+            # le broker garderait "online" indéfiniment.
+            info = self._client.publish(AVAILABILITY_TOPIC, "offline", qos=1, retain=True)
+            try:
+                info.wait_for_publish(timeout=2.0)
+            except Exception:  # noqa: BLE001 — publication best-effort
+                pass
             self._client.loop_stop()
             self._client.disconnect()
         except Exception:  # noqa: BLE001 — best-effort à l'arrêt
