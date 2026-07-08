@@ -25,7 +25,8 @@ isolation. → L'axe est **l'unité de déploiement**, pas le langage.
 | | Pont | Langage | Rôle | README |
 |---|------|---------|------|--------|
 | **C** | `aqara-fp2-mqtt/` | Python (aiohomekit) | lit la présence FP2 (HomeKit local) → publie `santuario/toshiba/presence/<zone>` | [→](./aqara-fp2-mqtt/README.md) |
-| **D** | `mqtt-homekit-occupancy/` | Python (HAP-python) | ré-expose la présence MQTT → capteurs d'occupation **Apple Home** | [→](./mqtt-homekit-occupancy/README.md) |
+| **D** | `mqtt-homekit-occupancy/` | Python (HAP-python) | ré-expose la présence MQTT → capteurs d'occupation **Apple Home** — *généralisé par `mqtt-homekit-sensors`* | [→](./mqtt-homekit-occupancy/README.md) |
+| **D′** | `mqtt-homekit-sensors/` | Python (HAP-python) | **généralise D** : MQTT → capteurs HomeKit **multi-types** (température, luminosité, occupation). Sert à **tester la chaîne** avec les capteurs déjà en place | [→](./mqtt-homekit-sensors/README.md) |
 | **E** | `matter-toshiba-rs/` | **Rust** (détaché) | expose les clim (Thermostat) + présence (Occupancy) en **Matter** multi-fabric | [→](./matter-toshiba-rs/README.md) |
 
 > Référence opérationnelle complète (contrat MQTT, carte des composants A–E, pipeline

@@ -1,0 +1,32 @@
+# Config du pont MQTT → HomeKit (capteurs). Copier en `config.toml` (non commité) et adapter.
+# Pointé sur les capteurs DÉJÀ EN PLACE → sert à tester la chaîne MQTT→HomeKit avant le FP2.
+
+[mqtt]
+host = "127.0.0.1"     # broker Mosquitto local du Pi5
+port = 1883
+# user     = "..."
+# password = "..."
+
+[hap]
+bridge_name = "Santuario Sensors"    # nom du Bridge à l'appairage dans l'app Maison
+port        = 51827
+pincode     = "031-45-155"           # à changer avant la mise en service
+state_dir   = "hap-state"
+
+# --- Capteurs réels déjà publiés sur le broker Pi5 ---
+
+# Température extérieure : payload JSON {"Temperature":15.3,"TemperatureType":4,"Humidity":65}
+[[sensors]]
+name       = "Température extérieure"
+type       = "temperature"
+topic      = "santuario/heat/1/venus"
+json_field = "Temperature"
+
+# Irradiance PRALRAN : payload = nombre brut (ex. "750") → exposé en LightSensor (lux).
+# NB : HomeKit n'a pas de type « irradiance » ; la valeur W/m² est portée telle quelle en lux
+# (approximation assumée — le but est de valider la découverte de l'accessoire).
+[[sensors]]
+name  = "Irradiance PRALRAN"
+type  = "light"
+topic = "santuario/irradiance/raw"
+# pas de json_field → payload numérique brut

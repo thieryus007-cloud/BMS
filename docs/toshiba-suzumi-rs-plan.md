@@ -333,6 +333,17 @@ donnée d'appairage :
   `PresencePayload`, `config::presence_topic`/`zone_from_presence_topic`, `Bridge::on_presence_json`
   + cache) → **matérialise « E supersède D »**. `cargo test` E = **18 tests** verts, clippy propre.
   READMEs (crate E, `docs/toshiba-bridges.md` §5) mis à jour.
+- **2026-07-07 (suite 23)** — **Pont test chaîne MQTT→HomeKit livré** : `bridge/mqtt-homekit-sensors/`
+  (Python HAP-python) — généralise D en capteurs **multi-types** (TemperatureSensor / LightSensor /
+  OccupancySensor) pour **valider la chaîne dès maintenant** avec les capteurs déjà en place
+  (température `santuario/heat/1/venus`, irradiance `santuario/irradiance/raw`), **sans** Toshiba/FP2.
+  **Cœur pur** `core.py` (extraction champ JSON **ou** nombre brut, conversion→caractéristique
+  bornée, config+validation) — **9 tests** verts. **Couche HAP vérifiée par smoke-test réel**
+  (pyhap en venv : build du Bridge + injection simulée → 15,3 °C / 750 lux / 0→0,0001 lux clampé).
+  **Distinction Matter/hub clarifiée** : rs-matter sait faire contrôleur, mais notre bridge E est
+  le **côté device** ; le besoin de hub vient de l'**écosystème** (Homey Pro = hub intégré → **pas**
+  de hub en plus ; Apple Home = **exige** HomePod/Apple TV pour commissionner du Matter). Reste sur
+  D′ : appairer l'iPad (seul geste matériel). Doc : README pont, `toshiba-bridges.md` §5, bridge/README.
 
 ---
 
