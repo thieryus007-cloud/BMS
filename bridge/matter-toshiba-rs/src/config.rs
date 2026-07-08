@@ -84,6 +84,18 @@ pub fn zone_from_state_topic(topic: &str) -> Option<&str> {
         .filter(|z| !z.is_empty() && !z.contains('/'))
 }
 
+/// `santuario/toshiba/presence/<zone>` (souscrit — présence FP2 publiée par le pont C).
+pub fn presence_topic(zone: &str) -> String {
+    format!("{TOPIC_ROOT}/presence/{zone}")
+}
+
+/// Extrait `<zone>` d'un topic `santuario/toshiba/presence/<zone>`.
+pub fn zone_from_presence_topic(topic: &str) -> Option<&str> {
+    topic
+        .strip_prefix("santuario/toshiba/presence/")
+        .filter(|z| !z.is_empty() && !z.contains('/'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +141,16 @@ mod tests {
         );
         assert_eq!(zone_from_state_topic("santuario/toshiba/Shorai-31/command"), None);
         assert_eq!(zone_from_state_topic("santuario/toshiba/presence/Shorai-31"), None);
+    }
+
+    #[test]
+    fn presence_topic_helpers() {
+        assert_eq!(presence_topic("Shorai-31"), "santuario/toshiba/presence/Shorai-31");
+        assert_eq!(
+            zone_from_presence_topic("santuario/toshiba/presence/Shorai-31"),
+            Some("Shorai-31")
+        );
+        // Ne matche pas un topic d'état.
+        assert_eq!(zone_from_presence_topic("santuario/toshiba/Shorai-31/state"), None);
     }
 }

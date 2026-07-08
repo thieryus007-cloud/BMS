@@ -150,6 +150,28 @@ pub fn command_json(w: MatterWrite) -> Option<String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Présence FP2 → cluster Occupancy Sensor Matter
+// ---------------------------------------------------------------------------
+//
+// Permet au bridge d'exposer AUSSI la présence (un endpoint Occupancy Sensor par pièce),
+// ce qui rend le pont HomeKit `mqtt-homekit-occupancy` (D) redondant : Apple Home étant un
+// contrôleur Matter, l'Occupancy apparaît dans l'app Maison **et** dans Homey/Google.
+// Cf. `docs/toshiba-bridges.md` §5 (« E supersède D »).
+
+/// Payload de présence publié par le pont FP2 (`bridge/aqara-fp2-mqtt`) sur
+/// `santuario/toshiba/presence/<zone>` : `{"present": bool, "ts": epoch}` (`ts` ignoré).
+#[derive(Debug, Deserialize)]
+pub struct PresencePayload {
+    pub present: bool,
+}
+
+/// Présence → attribut `Occupancy` du cluster Occupancy Sensor Matter (**bitmap8**,
+/// bit0 = occupé) : `1` si présent, `0` sinon.
+pub fn occupancy_bitmap(present: bool) -> u8 {
+    u8::from(present)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,5 +261,15 @@ mod tests {
             let js = command_json(w).unwrap();
             let _: serde_json::Value = serde_json::from_str(&js).unwrap();
         }
+    }
+
+    #[test]
+    fn presence_maps_to_occupancy() {
+        assert_eq!(occupancy_bitmap(true), 1);
+        assert_eq!(occupancy_bitmap(false), 0);
+        let p: PresencePayload = serde_json::from_str(r#"{"present":true,"ts":1}"#).unwrap();
+        assert!(p.present);
+        let p: PresencePayload = serde_json::from_str(r#"{"present":false}"#).unwrap();
+        assert!(!p.present);
     }
 }

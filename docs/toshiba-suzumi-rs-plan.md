@@ -107,8 +107,10 @@ Apple Home** (tuiles iPhone) — cf. §18.9. Tester le cœur : `python3 tests/te
 **E. Bridge Matter → passerelle (tout‑Rust, optionnel/futur)** — `bridge/matter-toshiba-rs/`
 (crate **détaché**, Rust pur, **sans Node.js**). Expose les clim en **endpoints Thermostat
 Matter** multi‑fabric depuis MQTT — cf. §18.12. Tester le cœur :
-`cargo test --manifest-path bridge/matter-toshiba-rs/Cargo.toml` (**15 tests**).
+`cargo test --manifest-path bridge/matter-toshiba-rs/Cargo.toml` (**18 tests**).
 - ✅ **Cœur pur testé** (`mapping.rs`/`config.rs`/`bridge.rs`, deps `serde` only) + README + systemd.
+  Couvre **Thermostat** (clim) **et** **Occupancy** (présence FP2 → `occupancy_bitmap`) → E
+  **supersède D** (§18.9 / `docs/toshiba-bridges.md` §5).
 - ⏳ **Couche transport** feature `matter` (`matter.rs` rs‑matter / `mqtt.rs` rumqttc / `main.rs`)
   = **pur relais** vers `bridge::Bridge`, à câbler quand une passerelle sera adoptée.
 
@@ -323,6 +325,14 @@ donnée d'appairage :
   (HomeKit re-expose)** — Apple Home consomme Matter → un endpoint Occupancy de E couvre les
   tuiles Maison **et** Homey/Google ; **D = stopgap**, **E = cible** (ajouter présence→Occupancy à
   E puis retirer D). Note ajoutée §18.9. **Doc seule.**
+- **2026-07-07 (suite 22)** — **`bridge/` clarifié + présence→Occupancy ajoutée à E**.
+  Question orga (Rust vs Python dans `bridge/`) : **ne pas migrer** vers `crates/` (= membres
+  workspace + CI cross‑build ; `matter-toshiba-rs` détaché comme `firmware/` pour tenir rs‑matter
+  hors CI). Axe = **unité de déploiement, pas langage**. Ajout `bridge/README.md` (convention).
+  **Code** : mapping pur **présence FP2 → cluster Occupancy** dans E (`mapping::occupancy_bitmap`,
+  `PresencePayload`, `config::presence_topic`/`zone_from_presence_topic`, `Bridge::on_presence_json`
+  + cache) → **matérialise « E supersède D »**. `cargo test` E = **18 tests** verts, clippy propre.
+  READMEs (crate E, `docs/toshiba-bridges.md` §5) mis à jour.
 
 ---
 
