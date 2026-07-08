@@ -1,5 +1,5 @@
 [Unit]
-Description=MQTT -> HomeKit sensors bridge (température / luminosité / occupation)
+Description=MQTT -> HomeKit sensors bridge (température / humidité / luminosité / switch)
 Documentation=file:///home/pi5compute/Daly-BMS-Rust/docs/toshiba-bridges.md
 After=network-online.target mosquitto-broker.service
 Wants=network-online.target
@@ -8,10 +8,11 @@ Wants=network-online.target
 Type=simple
 User=pi5compute
 WorkingDirectory=/home/pi5compute/Daly-BMS-Rust/bridge/mqtt-homekit-sensors
-ExecStart=/home/pi5compute/Daly-BMS-Rust/bridge/mqtt-homekit-sensors/.venv/bin/python -m mqtt_hk_sensors run --config /etc/daly-bms/mqtt-homekit-sensors.toml
+# Config LOCALE au dossier (config.toml, gitignoré — contient le PIN). CWD = WorkingDirectory.
+ExecStart=/home/pi5compute/Daly-BMS-Rust/bridge/mqtt-homekit-sensors/.venv/bin/python -m mqtt_hk_sensors run --config config.toml
 Restart=on-failure
 RestartSec=5
-# Durcissement léger
+# Durcissement léger. hap-state (clé d'appairage) = seul chemin inscriptible.
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/home/pi5compute/Daly-BMS-Rust/bridge/mqtt-homekit-sensors/hap-state

@@ -70,10 +70,36 @@ python -m mqtt_hk_sensors run          --config config.toml
   remonte via `stat/<id>/POWER`. La **puissance W** mesurée par le Tongou ne s'affiche **pas**
   dans Apple Home (pas de type natif) → reste sur la page Tasmota / Grafana.
 
-## Déploiement systemd
+## Déploiement systemd (service permanent)
 
-Unité : `contrib/mqtt-homekit-sensors.service` (après `mosquitto-broker`). Config déployée en
-`/etc/daly-bms/mqtt-homekit-sensors.toml`.
+Pour que le pont tourne **en continu** (survit aux reboots) — unité fournie :
+`contrib/mqtt-homekit-sensors.service` (config **locale** `config.toml`, après `mosquitto-broker`).
+
+```bash
+# venv + deps + config déjà faits (cf. « Installation »). Puis :
+sudo cp contrib/mqtt-homekit-sensors.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now mqtt-homekit-sensors
+systemctl status mqtt-homekit-sensors        # doit être "active (running)"
+journalctl -u mqtt-homekit-sensors -f        # logs (dont "Enter this code..." au 1er appairage)
+```
+
+> L'appairage HomeKit **persiste** dans `hap-state/accessory.state` → après un redémarrage du
+> service ou du Pi5, les accessoires **restent appairés** (pas de ré-appairage).
+
+## Diagnostic « accessoire sans réponse » (No Response)
+
+Un accessoire **capteur** reste « sans réponse » s'il ne reçoit **jamais** de valeur — c.-à-d.
+si le **champ n'existe pas** dans le payload publié. Exemple courant : `humidity` sur
+`santuario/heat/1/venus` alors que le capteur externe ne publie **que** la température.
+
+```bash
+mosquitto_sub -t 'santuario/heat/1/venus' -v      # le champ "Humidity" est-il présent ?
+```
+
+→ Si le champ est absent : **retirer ce capteur** de `config.toml` (ou le pointer sur une source
+qui publie réellement la valeur). Ce n'est **pas** un bug du pont : température (même topic) et
+switch fonctionnent car leurs valeurs, elles, arrivent.
 
 ## Sécurité (règle #12)
 
