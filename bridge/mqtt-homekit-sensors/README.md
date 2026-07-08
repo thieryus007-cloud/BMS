@@ -89,17 +89,27 @@ journalctl -u mqtt-homekit-sensors -f        # logs (dont "Enter this code..." a
 
 ## Diagnostic « accessoire sans réponse » (No Response)
 
-Un accessoire **capteur** reste « sans réponse » s'il ne reçoit **jamais** de valeur — c.-à-d.
-si le **champ n'existe pas** dans le payload publié. Exemple courant : `humidity` sur
-`santuario/heat/1/venus` alors que le capteur externe ne publie **que** la température.
+Deux causes possibles :
+
+**1. Réattribution d'AID après modification d'un bridge déjà appairé** *(cause la plus fréquente
+quand on ajoute des capteurs)*. HAP-python assigne les *Accessory ID* dans l'**ordre de la
+config** ; **insérer** un capteur au **milieu** décale les AID des suivants → l'iPad déjà appairé
+garde l'ancienne correspondance → l'accessoire décalé s'affiche « sans réponse ».
+
+- **Correctif** : dans l'app Maison, **supprimer le pont « Santuario Sensors » puis le ré-ajouter**
+  (ré‑appairage → l'iPad réapprend tous les AID). Alternative radicale : `rm -rf hap-state/` + relancer + ré‑appairer.
+- **Prévention** : **ajouter les nouveaux capteurs à la FIN** de `config.toml` (ne pas insérer au milieu).
+
+**2. Le capteur ne reçoit jamais de valeur** (champ réellement absent du payload) :
 
 ```bash
-mosquitto_sub -t 'santuario/heat/1/venus' -v      # le champ "Humidity" est-il présent ?
+mosquitto_sub -t 'santuario/heat/1/venus' -v      # le champ attendu est-il présent ?
 ```
 
-→ Si le champ est absent : **retirer ce capteur** de `config.toml` (ou le pointer sur une source
-qui publie réellement la valeur). Ce n'est **pas** un bug du pont : température (même topic) et
-switch fonctionnent car leurs valeurs, elles, arrivent.
+→ Si le champ est absent : retirer ce capteur, ou le pointer sur une source qui le publie.
+
+> Dans tous les cas ce **n'est pas un bug du pont** : les accessoires dont l'AID est stable **et**
+> qui reçoivent une valeur (température, switch…) fonctionnent.
 
 ## Sécurité (règle #12)
 
