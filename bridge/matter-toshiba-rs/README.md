@@ -18,12 +18,12 @@ n'est qu'un **traducteur au bord** (même patron que `bridge/mqtt-homekit-occupa
 
 ## État
 
-- ✅ **Cœur pur testé** (`cargo test`, **15 tests**, aucune dépendance réseau/crypto) :
+- ✅ **Cœur pur testé** (`cargo test`, **18 tests**, aucune dépendance réseau/crypto) :
   - `mapping.rs` — état Toshiba (JSON) ↔ attributs cluster **Thermostat** ; écriture
-    Matter → commande MQTT.
+    Matter → commande MQTT ; **présence FP2 → `Occupancy`** (cluster Occupancy Sensor).
   - `config.rs` — `NodeConfig` (zones, broker, **commissioning Matter**) + validation
-    (discriminateur 0..4095, passcode non-interdit par la spec) + dérivation des topics.
-  - `bridge.rs` — **orchestration** transport-agnostique (cache par zone).
+    (discriminateur 0..4095, passcode non-interdit par la spec) + topics (état **et** présence).
+  - `bridge.rs` — **orchestration** transport-agnostique (cache par zone : Thermostat + Occupancy).
 - ⏳ **Couche transport** (feature `matter`, **à câbler**) : `matter.rs` (rs-matter),
   `mqtt.rs` (rumqttc), `main.rs`. Ne fait que **relayer** vers `bridge::Bridge` — aucune
   logique nouvelle. Voir ci-dessous.
@@ -49,6 +49,13 @@ Tester le cœur : `cargo test --manifest-path bridge/matter-toshiba-rs/Cargo.tom
 (8°/Fireplace/ECO), `pwr_level`, `self_clean`, diagnostics ODU/IDU. La ventilation
 Toshiba se mappera sur un cluster **FanControl** séparé (évolution).
 
+### Présence FP2 → cluster **Occupancy Sensor**
+
+Le bridge expose **aussi** la présence (un endpoint Occupancy Sensor par pièce) : `Occupancy`
+(bitmap8, bit0) ← `santuario/toshiba/presence/<zone>` `{"present":bool}`. Comme Apple Home est
+un contrôleur Matter, ça **remplace** le pont HomeKit `mqtt-homekit-occupancy` (D) — cf.
+`docs/toshiba-bridges.md` §5 (« E supersède D »). Mapping pur = `mapping::occupancy_bitmap`.
+
 ## Couche transport à câbler (feature `matter`)
 
 Activer la feature et ajouter les dépendances (versions à figer au moment du câblage —
@@ -67,13 +74,14 @@ log       = { version = "0.4", optional = true }
 
 Puis 3 fichiers (relais pur vers `bridge::Bridge`) :
 
-1. **`mqtt.rs`** — client rumqttc : souscrit `santuario/toshiba/+/state`, extrait la zone
-   (`config::zone_from_state_topic`), appelle `Bridge::on_state_json` → transmet les
-   `ThermostatAttrs` au cluster ; publie `Bridge::on_matter_write(...)` sur
-   `config::command_topic(zone)` (QoS1, non-retained) sur écriture Matter.
+1. **`mqtt.rs`** — client rumqttc : souscrit `santuario/toshiba/+/state` **et**
+   `santuario/toshiba/presence/+` ; extrait la zone (`config::zone_from_state_topic` /
+   `zone_from_presence_topic`), appelle `Bridge::on_state_json` → `ThermostatAttrs` au cluster
+   Thermostat, et `Bridge::on_presence_json` → `Occupancy` au cluster Occupancy ; publie
+   `Bridge::on_matter_write(...)` sur `config::command_topic(zone)` (QoS1, non-retained).
 2. **`matter.rs`** — nœud rs-matter : un **Aggregator** (device-type Bridge) portant **un
-   endpoint Thermostat par zone** (+ Descriptor/Bridged Device Basic Information). Câbler
-   les *read/write callbacks* des attributs Thermostat (§« Mapping ») ↔ `Bridge`.
+   endpoint Thermostat + un endpoint Occupancy Sensor par zone** (+ Descriptor/Bridged Device
+   Basic Information). Câbler les *read/write callbacks* des attributs (§« Mapping ») ↔ `Bridge`.
    Commissioning depuis `NodeConfig` (discriminator/passcode/VID/PID). Le **multi-fabric**
    est natif (≥ 5 fabrics) → commissionner dans Homey **puis** partager à Apple/Google.
 3. **`main.rs`** — `#[tokio::main]` : charge la config, démarre MQTT + le nœud Matter,

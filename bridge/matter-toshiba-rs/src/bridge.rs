@@ -9,12 +9,18 @@
 
 use std::collections::HashMap;
 
-use crate::mapping::{attrs_from_state, command_json, MatterWrite, ThermostatAttrs, ToshibaStatePayload};
+use crate::mapping::{
+    attrs_from_state, command_json, occupancy_bitmap, MatterWrite, PresencePayload,
+    ThermostatAttrs, ToshibaStatePayload,
+};
 
-/// Cache par zone du dernier état projeté en attributs Matter.
+/// Cache par zone du dernier état projeté en attributs Matter :
+/// - `zones` : attributs du cluster **Thermostat** (télémétrie clim) ;
+/// - `occupancy` : attribut `Occupancy` du cluster **Occupancy Sensor** (présence FP2).
 #[derive(Default)]
 pub struct Bridge {
     zones: HashMap<String, ThermostatAttrs>,
+    occupancy: HashMap<String, u8>,
 }
 
 impl Bridge {
@@ -41,6 +47,21 @@ impl Bridge {
     /// complet est construit par le transport via `config::command_topic(zone)`.
     pub fn on_matter_write(&self, write: MatterWrite) -> Option<String> {
         command_json(write)
+    }
+
+    /// Traite un message de présence (`santuario/toshiba/presence/<zone>`). Renvoie la
+    /// valeur `Occupancy` (bitmap8) à pousser sur l'endpoint Occupancy Sensor de la zone,
+    /// ou `None` si le JSON est invalide.
+    pub fn on_presence_json(&mut self, zone: &str, json: &[u8]) -> Option<u8> {
+        let payload: PresencePayload = serde_json::from_slice(json).ok()?;
+        let occ = occupancy_bitmap(payload.present);
+        self.occupancy.insert(zone.to_string(), occ);
+        Some(occ)
+    }
+
+    /// Dernière valeur `Occupancy` connue d'une zone.
+    pub fn occupancy(&self, zone: &str) -> Option<u8> {
+        self.occupancy.get(zone).copied()
     }
 }
 
@@ -85,5 +106,18 @@ mod tests {
             b.on_matter_write(MatterWrite::Setpoint(2300)).unwrap(),
             r#"{"target_temp":23}"#
         );
+    }
+
+    #[test]
+    fn presence_message_updates_occupancy() {
+        let mut b = Bridge::new();
+        assert_eq!(b.on_presence_json("Shorai-31", br#"{"present":true}"#), Some(1));
+        assert_eq!(b.occupancy("Shorai-31"), Some(1));
+        assert_eq!(b.on_presence_json("Shorai-31", br#"{"present":false,"ts":9}"#), Some(0));
+        assert_eq!(b.occupancy("Shorai-31"), Some(0));
+        // JSON invalide → ignoré, cache inchangé.
+        assert!(b.on_presence_json("Shorai-31", b"nope").is_none());
+        assert_eq!(b.occupancy("Shorai-31"), Some(0));
+        assert!(b.occupancy("Shorai-99").is_none());
     }
 }

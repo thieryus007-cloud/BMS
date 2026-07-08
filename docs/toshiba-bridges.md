@@ -88,7 +88,7 @@ complémentaires** : ce sont **deux barreaux de la même échelle**.
 |---|---|---|
 | Sortie | **HomeKit seul** (app Maison iPhone) | **Matter multi-fabric** : Apple **+** Homey **+** Google simultanés |
 | Couvre l'app Maison ? | ✅ | ✅ (Apple Home **est** un contrôleur Matter) |
-| Portée | présence (Occupancy) | clim (Thermostat) **+** présence (Occupancy, à ajouter) |
+| Portée | présence (Occupancy) | clim (Thermostat) **+** présence (Occupancy — mapping pur **fait**) |
 | Disponibilité | **maintenant**, sans passerelle | **futur** (transport rs-matter + passerelle) |
 | Techno | Python (HAP-python) | Rust (sans Node) |
 
@@ -98,9 +98,10 @@ et Google. Conséquences :
 
 - **D = stopgap** : à n'utiliser que pour obtenir les **tuiles présence dans Apple Home**
   **avant** d'avoir câblé le transport Matter (D est prêt et ne dépend d'aucune passerelle).
-- **E = cible** : quand le bridge Matter tourne, on lui ajoute un mapping **présence→Occupancy**
-  (trivial : `{"present":bool}` → `OccupancyDetected`) et **on retire D**. Un seul pont pour
-  **clim + présence**, multi-écosystème.
+- **E = cible** : le mapping **présence→Occupancy** est **déjà fait et testé** dans E
+  (`mapping::occupancy_bitmap` + `Bridge::on_presence_json`). Quand le transport rs-matter de E
+  sera câblé (endpoints Occupancy Sensor), **on retire D**. Un seul pont pour **clim + présence**,
+  multi-écosystème.
 
 Rationale complet → plan **§18.9** (scénario C) + **§18.12** (Matter).
 
