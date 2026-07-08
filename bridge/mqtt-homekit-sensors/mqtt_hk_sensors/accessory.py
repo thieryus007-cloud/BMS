@@ -26,8 +26,8 @@ class SensorAccessory(Accessory):
 
     category = CATEGORY_SENSOR
 
-    def __init__(self, driver, spec: core.SensorSpec) -> None:
-        super().__init__(driver, spec.name)
+    def __init__(self, driver, spec: core.SensorSpec, aid: int) -> None:
+        super().__init__(driver, spec.name, aid=aid)  # AID épinglé (stable) → cf. core.stable_aid
         service_name, char_name = core.service_and_char(spec.kind)
         serv = self.add_preload_service(service_name)
         initial = core.to_char_value(spec.kind, 0.0)
@@ -43,8 +43,8 @@ class SwitchAccessory(Accessory):
 
     category = CATEGORY_SWITCH
 
-    def __init__(self, driver, spec: core.SensorSpec, publish: PublishCommand) -> None:
-        super().__init__(driver, spec.name)
+    def __init__(self, driver, spec: core.SensorSpec, publish: PublishCommand, aid: int) -> None:
+        super().__init__(driver, spec.name, aid=aid)  # AID épinglé (stable)
         serv = self.add_preload_service("Switch")
         # `setter_callback` = appelé UNIQUEMENT sur écriture HomeKit (pas par set_value)
         # → pas de boucle quand on reflète l'état physique via `set_from_value`.
@@ -68,11 +68,17 @@ def build_bridge(driver, cfg: core.BridgeConfig, publish: PublishCommand):
     """
     bridge = Bridge(driver, cfg.hap_bridge_name)
     accessories: dict[str, Accessory] = {}
+    used_aids: set[int] = {1}  # 1 = Bridge lui-même
     for spec in cfg.sensors:
+        # AID stable par nom (+ anti-collision : bump en cas de rare collision de hash).
+        aid = core.stable_aid(spec.name)
+        while aid in used_aids:
+            aid = aid + 1 if aid < 2**31 - 1 else 2
+        used_aids.add(aid)
         if spec.kind in core.CONTROLLABLE_KINDS:
-            acc: Accessory = SwitchAccessory(driver, spec, publish)
+            acc: Accessory = SwitchAccessory(driver, spec, publish, aid)
         else:
-            acc = SensorAccessory(driver, spec)
+            acc = SensorAccessory(driver, spec, aid)
         bridge.add_accessory(acc)
         accessories[spec.name] = acc
     return bridge, accessories

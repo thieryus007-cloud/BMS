@@ -13,6 +13,7 @@ depuis le payload, et conversion → valeur de caractéristique HomeKit. Testabl
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -198,6 +199,17 @@ def parse_config(data: dict) -> BridgeConfig:
         hap_state_dir=str(hap.get("state_dir", "hap-state")),
         sensors=tuple(sensors),
     )
+
+
+def stable_aid(name: str) -> int:
+    """AID HomeKit **stable** dérivé du nom (indépendant de l'ordre de la config).
+
+    Avec des AID épinglés par nom, ajouter/retirer/**réordonner** d'autres accessoires ne
+    décale plus les AID existants → plus de « sans réponse » après édition d'un bridge déjà
+    appairé (seul renommer un accessoire change SON aid). `1` est réservé au Bridge lui-même.
+    """
+    digest = hashlib.sha256(name.encode("utf-8")).digest()
+    return 2 + (int.from_bytes(digest[:6], "big") % (2**31 - 3))
 
 
 def build_route(cfg: BridgeConfig) -> dict[str, list[SensorSpec]]:

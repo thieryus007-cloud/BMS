@@ -90,6 +90,23 @@ class TestToCharValue(unittest.TestCase):
         self.assertEqual(core.to_char_value("occupancy", 0.0), 0)
 
 
+class TestStableAid(unittest.TestCase):
+    def test_deterministic_and_valid(self):
+        a = core.stable_aid("Température extérieure")
+        self.assertEqual(a, core.stable_aid("Température extérieure"))  # déterministe
+        self.assertGreaterEqual(a, 2)  # jamais 1 (réservé au Bridge)
+        self.assertLess(a, 2**31)
+
+    def test_independent_of_order(self):
+        # Le point clé : l'aid ne dépend QUE du nom, pas de la position dans la config.
+        names = ["Température extérieure", "Humidité extérieure", "Irradiance PRALRAN", "Prise séjour (Tongou)"]
+        aids = {n: core.stable_aid(n) for n in names}
+        self.assertEqual(len(set(aids.values())), len(names))  # tous distincts
+        # Réordonner les noms ne change aucun aid.
+        for n in reversed(names):
+            self.assertEqual(core.stable_aid(n), aids[n])
+
+
 class TestConfig(unittest.TestCase):
     def _valid(self):
         return {
