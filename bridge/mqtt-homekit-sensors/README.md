@@ -12,24 +12,32 @@ Deux usages :
 
 ## État
 
-- ✅ **Cœur pur testé** (`mqtt_hk_sensors/core.py`, **9 tests**, sans dépendance) :
-  extraction de valeur (champ JSON **ou** nombre brut), conversion → caractéristique HomeKit
-  (bornes respectées), config + validation.
-- ✅ **Couche HAP vérifiée** contre pyhap réel (services/caractéristiques sondés ;
-  **smoke-test** : build du Bridge + injection de valeurs simulées → les caractéristiques se
-  mettent à jour). Reste le seul geste matériel : **appairer l'iPad/iPhone**.
+- ✅ **Cœur pur testé** (`mqtt_hk_sensors/core.py`, **14 tests**, sans dépendance) :
+  extraction de valeur (champ JSON / nombre brut / texte ON-OFF), conversion → caractéristique
+  HomeKit (bornes respectées), commande switch, config + validation, **topic partagé** (un
+  message → plusieurs accessoires : température **et** humidité).
+- ✅ **Couche HAP vérifiée** contre pyhap réel (services/caractéristiques sondés ; **smoke-test** :
+  build du Bridge + injection de valeurs → caractéristiques mises à jour ; **switch : write
+  HomeKit → commande MQTT publiée** + reflet de l'état physique). Reste le seul geste matériel :
+  **appairer l'iPad/iPhone**.
 
 Tester le cœur : `python3 bridge/mqtt-homekit-sensors/tests/test_core.py`
 
 ## Types supportés
 
-| `type` | Service HomeKit | Caractéristique | Note |
-|--------|-----------------|-----------------|------|
-| `temperature` | TemperatureSensor | CurrentTemperature (°C) | `json_field` = ex. `"Temperature"` |
-| `light` | LightSensor | CurrentAmbientLightLevel (**lux**) | 0 → `0.0001` (min HomeKit) ; l'irradiance W/m² est portée telle quelle |
-| `occupancy` | OccupancySensor | OccupancyDetected (0/1) | `json_field="present"` (bool) accepté |
+| `type` | Service HomeKit | Caractéristique | Tuile Apple | Note |
+|--------|-----------------|-----------------|:---:|------|
+| `temperature` | TemperatureSensor | CurrentTemperature (°C) | ✅ | `json_field` = ex. `"Temperature"` |
+| `humidity` | HumiditySensor | CurrentRelativeHumidity (%) | ✅ | `json_field` = ex. `"Humidity"` (borné 0–100) |
+| `light` | LightSensor | CurrentAmbientLightLevel (lux) | ⚠️ | affiché comme « lumière » dans la pièce ; 0→`0.0001` ; pas de déclencheur d'automatisation natif |
+| `occupancy` | OccupancySensor | OccupancyDetected (0/1) | ✅ | `json_field="present"` (bool) accepté |
+| `switch` | Switch | On (bool) | ✅ **contrôlable** | état `stat/<id>/POWER` (`ON`/`OFF`) + **`command_topic`** `cmnd/<id>/POWER` |
 
-`json_field` absent → le payload entier est parsé comme **nombre** (ex. `santuario/irradiance/raw` = `"750"`).
+`json_field` absent (capteurs) → le payload entier est parsé comme **nombre** (ex. `santuario/irradiance/raw` = `"750"`). Pour `switch`, l'état est le **texte** `ON`/`OFF`.
+
+> **⚠️ `switch` = actionneur réel** (disjoncteur/prise Tongou). N'exposer **que** des switches
+> **non** pilotés par energy-manager (ex. `tongou_3BC764` = chauffe-eau piloté par EM → **ne pas**
+> exposer : conflit de commande). `tongou_3ACC34` (Switch5) n'est pas piloté par EM → OK.
 
 ## Installation & mise en service (Pi5)
 
@@ -47,6 +55,20 @@ python -m mqtt_hk_sensors run          --config config.toml
 > **Réseau** : l'iPad et le Pi5 doivent être sur le **même sous-réseau L2** (StarTh) pour la
 > découverte mDNS/Bonjour `_hap._tcp`. Pas de hub requis pour l'**appairage local** (un
 > HomePod/Apple TV n'est nécessaire que pour l'accès distant / les automatisations).
+
+## Retours de mise en service (validé sur iPad, 2026-07-07)
+
+- ✅ **Chaîne validée** : le capteur **température** apparaît et se met à jour dans l'app Maison
+  → toute la plomberie MQTT → HAP → HomeKit fonctionne.
+- ⚠️ **PIN** : dans l'app Maison, on entre les **8 chiffres sans tirets** (`03145155`). La config
+  **doit** garder le format à tirets `XXX-XX-XXX` (imposé par HAP-python) ; l'app les ignore/ajoute.
+- ✅ **Capteur de lumière (irradiance)** : **apparaît bien** comme une « lumière » dans la
+  **pièce assignée** (validé — Séjour). Seule limite Apple : les capteurs lux ne sont pas
+  utilisables comme **déclencheur d'automatisation** dans l'app **native** (une app tierce comme
+  Eve le permet). Pour un vrai suivi d'irradiance, Grafana (`irradiance_wm2`) reste la référence.
+- ✅ **Switch Tongou** : contrôlable depuis l'app Maison (allumer/couper) ; l'état physique
+  remonte via `stat/<id>/POWER`. La **puissance W** mesurée par le Tongou ne s'affiche **pas**
+  dans Apple Home (pas de type natif) → reste sur la page Tasmota / Grafana.
 
 ## Déploiement systemd
 

@@ -344,6 +344,23 @@ donnée d'appairage :
   le **côté device** ; le besoin de hub vient de l'**écosystème** (Homey Pro = hub intégré → **pas**
   de hub en plus ; Apple Home = **exige** HomePod/Apple TV pour commissionner du Matter). Reste sur
   D′ : appairer l'iPad (seul geste matériel). Doc : README pont, `toshiba-bridges.md` §5, bridge/README.
+- **2026-07-07 (suite 24)** — **Chaîne MQTT→HomeKit VALIDÉE sur iPad** (pont D′). La **température**
+  apparaît et se met à jour → plomberie MQTT→HAP→HomeKit OK de bout en bout. Deux retours terrain
+  consignés (README D′) : (1) **PIN** = saisir 8 chiffres **sans tirets** dans l'app (config garde
+  `XXX-XX-XXX`, imposé par HAP-python) ; (2) **capteur de lumière/irradiance** = appairé mais
+  **l'app Maison Apple n'affiche pas les capteurs lux comme tuile** (limitation Apple, pas un bug) →
+  visible dans la barre d'état / Eve ; Grafana `irradiance_wm2` reste la référence. **Doc seule.**
+  *(Correction suite : l'irradiance apparaît en fait bien comme une « lumière » dans la pièce
+  assignée ; la seule limite est l'usage comme déclencheur d'automatisation en app native.)*
+- **2026-07-07 (suite 25)** — **Pont D′ étendu : humidité + switch Tongou contrôlable**. Ajout des
+  types `humidity` (HumiditySensor, tuile Apple OK, depuis `heat/1/venus` champ `Humidity`) et
+  **`switch`** (Switch On, **contrôlable** : `stat/<id>/POWER`→état, écriture HomeKit→`cmnd/<id>/POWER`).
+  Corrigé au passage : un **topic peut alimenter plusieurs accessoires** (temp+humidité d'un seul
+  message → `build_route` renvoie une liste). `core.py` **14 tests** verts ; **smoke-test HAP** :
+  switch write→commande MQTT publiée + reflet d'état, humidité 65 %. Config exemple pointée sur
+  `tongou_3ACC34` (⚠️ actionneur réel, **non** piloté par EM → pas de conflit ; `tongou_3BC764`
+  chauffe-eau EM = à NE PAS exposer). Tri des types selon rendu Apple (switch/temp/humidité/occupation
+  ✅ ; puissance/énergie/lux limités). Doc : README pont mis à jour. **Code + doc.**
 
 ---
 

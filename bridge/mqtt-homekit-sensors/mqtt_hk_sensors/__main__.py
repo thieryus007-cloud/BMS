@@ -30,7 +30,12 @@ def _cmd_check_config(args) -> int:
     print(f"HomeKit : bridge {cfg.hap_bridge_name!r}, port {cfg.hap_port}, PIN {cfg.hap_pincode}")
     for s in cfg.sensors:
         svc, char = core.service_and_char(s.kind)
-        src = f"{s.topic}" + (f" [{s.json_field}]" if s.json_field else " [nombre brut]")
+        if s.kind == "switch":
+            src = f"{s.topic} ↔ {s.command_topic}"
+        elif s.json_field:
+            src = f"{s.topic} [{s.json_field}]"
+        else:
+            src = f"{s.topic} [nombre brut]"
         print(f"  - {s.name!r}  ({svc}.{char})  ←  {src}")
     return 0
 
@@ -48,8 +53,10 @@ def _cmd_run(args) -> int:
         persist_file=os.path.join(cfg.hap_state_dir, "accessory.state"),
         pincode=cfg.hap_pincode.encode(),
     )
-    bridge, accessories = accessory.build_bridge(driver, cfg)
-    driver.add_accessory(bridge)
+
+    # Le subscriber est créé d'abord (pour fournir `publish` aux switches) ; son
+    # callback route vers `accessories`, peuplé juste après par build_bridge.
+    accessories: dict = {}
 
     def on_value(name: str, value: float) -> None:
         acc = accessories.get(name)
@@ -57,6 +64,9 @@ def _cmd_run(args) -> int:
             acc.set_from_value(value)
 
     sub = mqtt_in.MqttSubscriber(cfg, on_value)
+    bridge, built = accessory.build_bridge(driver, cfg, sub.publish)
+    accessories.update(built)
+    driver.add_accessory(bridge)
     sub.connect()
 
     signal.signal(signal.SIGTERM, lambda *_: driver.stop())

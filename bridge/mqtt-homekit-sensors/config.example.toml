@@ -10,7 +10,9 @@ port = 1883
 [hap]
 bridge_name = "Santuario Sensors"    # nom du Bridge à l'appairage dans l'app Maison
 port        = 51827
-pincode     = "031-45-155"           # à changer avant la mise en service
+# Format à tirets XXX-XX-XXX OBLIGATOIRE ici. Dans l'app Maison, on saisit les 8
+# chiffres SANS tirets (ex. 03145155). À changer avant la mise en service.
+pincode     = "031-45-155"
 state_dir   = "hap-state"
 
 # --- Capteurs réels déjà publiés sur le broker Pi5 ---
@@ -22,11 +24,30 @@ type       = "temperature"
 topic      = "santuario/heat/1/venus"
 json_field = "Temperature"
 
+# Humidité (même payload que la température) → HumiditySensor (tuile Apple OK).
+[[sensors]]
+name       = "Humidité extérieure"
+type       = "humidity"
+topic      = "santuario/heat/1/venus"
+json_field = "Humidity"
+
 # Irradiance PRALRAN : payload = nombre brut (ex. "750") → exposé en LightSensor (lux).
-# NB : HomeKit n'a pas de type « irradiance » ; la valeur W/m² est portée telle quelle en lux
-# (approximation assumée — le but est de valider la découverte de l'accessoire).
+# NB : HomeKit n'a pas de type « irradiance » ; la valeur W/m² est portée telle quelle en lux.
+# Apple l'affiche comme une « lumière » dans la pièce assignée (pas utilisable en déclencheur
+# d'automatisation dans l'app native — cf. README).
 [[sensors]]
 name  = "Irradiance PRALRAN"
 type  = "light"
 topic = "santuario/irradiance/raw"
 # pas de json_field → payload numérique brut
+
+# Switch Tongou (Tasmota) — CONTRÔLABLE depuis l'app Maison (allumer/couper).
+#   état  : stat/<id>/POWER = "ON"/"OFF"   |   commande : cmnd/<id>/POWER = "ON"/"OFF"
+# ⚠️ ACTIONNEUR RÉEL (disjoncteur/prise). N'exposer QUE des switches NON pilotés par
+#    energy-manager (ex. tongou_3BC764 = chauffe-eau piloté par EM → NE PAS exposer, conflit).
+#    tongou_3ACC34 (Switch5) n'est pas piloté par EM → OK.
+[[sensors]]
+name           = "Prise séjour (Tongou)"
+type           = "switch"
+topic          = "stat/tongou_3ACC34/POWER"
+command_topic  = "cmnd/tongou_3ACC34/POWER"
