@@ -98,6 +98,12 @@ et Google. Conséquences :
 
 - **D = stopgap** : à n'utiliser que pour obtenir les **tuiles présence dans Apple Home**
   **avant** d'avoir câblé le transport Matter (D est prêt et ne dépend d'aucune passerelle).
+  D est **généralisé** par `bridge/mqtt-homekit-sensors/` (**D′**) : MQTT → capteurs HomeKit
+  **multi-types** (température / luminosité / occupation). D′ permet de **tester la chaîne
+  MQTT→HomeKit dès maintenant** avec les capteurs déjà en place (température `santuario/heat/1/venus`,
+  irradiance `santuario/irradiance/raw`) — **sans** matériel Toshiba/FP2 : HAP-python est un
+  accessoire logiciel, il suffit du Pi5 + un iPad/iPhone sur le même WiFi pour appairer. Couche
+  HAP **vérifiée par smoke-test** (build + injection de valeurs). Cf. `bridge/mqtt-homekit-sensors/README.md`.
 - **E = cible** : le mapping **présence→Occupancy** est **déjà fait et testé** dans E
   (`mapping::occupancy_bitmap` + `Bridge::on_presence_json`). Quand le transport rs-matter de E
   sera câblé (endpoints Occupancy Sensor), **on retire D**. Un seul pont pour **clim + présence**,

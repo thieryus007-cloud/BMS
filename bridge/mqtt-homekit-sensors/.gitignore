@@ -1,0 +1,10 @@
+# Secrets & état d'appairage HomeKit — NE JAMAIS committer (règle #12)
+hap-state/
+*.state
+config.toml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
