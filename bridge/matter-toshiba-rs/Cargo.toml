@@ -1,0 +1,21 @@
+[package]
+name = "matter-toshiba-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Bridge Matter (Pi5) exposant les clim Toshiba en endpoints Thermostat, depuis MQTT — Rust pur, sans Node.js (cf. docs/toshiba-suzumi-rs-plan.md §18.12)"
+
+# Crate DÉTACHÉ du workspace Pi5 (même choix que firmware/toshiba-suzumi-rs) → le
+# `[workspace]` vide isole ce crate : ZÉRO impact sur le build/CI de daly-bms. La
+# couche transport rs-matter (dépendances lourdes) sera ajoutée derrière la feature
+# `matter` (voir README §« Couche transport ») ; PAR DÉFAUT le crate est **pur**
+# (serde only) et entièrement testable sur host — aucune dépendance réseau/crypto.
+[workspace]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# Active la future couche transport (rs-matter + rumqttc + tokio) — À CÂBLER, cf. README.
+# Vide pour l'instant : garde `cargo test` rapide et auto-suffisant (cœur pur uniquement).
+matter = []

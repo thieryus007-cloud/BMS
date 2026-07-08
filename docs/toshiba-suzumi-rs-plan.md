@@ -104,6 +104,14 @@ Apple Home** (tuiles iPhone) — cf. §18.9. Tester le cœur : `python3 tests/te
 - ⏳ **`accessory.py`/`mqtt_in.py`** (pyhap/paho) = glu `# VERIFY` à valider à l'appairage
   réel à l'app Maison. S'appaire avec **son propre PIN** → aucun conflit mono‑contrôleur FP2.
 
+**E. Bridge Matter → passerelle (tout‑Rust, optionnel/futur)** — `bridge/matter-toshiba-rs/`
+(crate **détaché**, Rust pur, **sans Node.js**). Expose les clim en **endpoints Thermostat
+Matter** multi‑fabric depuis MQTT — cf. §18.12. Tester le cœur :
+`cargo test --manifest-path bridge/matter-toshiba-rs/Cargo.toml` (**15 tests**).
+- ✅ **Cœur pur testé** (`mapping.rs`/`config.rs`/`bridge.rs`, deps `serde` only) + README + systemd.
+- ⏳ **Couche transport** feature `matter` (`matter.rs` rs‑matter / `mqtt.rs` rumqttc / `main.rs`)
+  = **pur relais** vers `bridge::Bridge`, à câbler quand une passerelle sera adoptée.
+
 > ✅ **Stratégie de contrôle TRANCHÉE = présence (capteurs Aqara FP2).** Politique :
 > **ECO dès absence, OFF après 5 min d'absence** (retour de présence → rallumage + preset
 > normal). C'est énergétiquement sain **et** simple. (À noter : la coupe DEYE — déconnexion
@@ -299,6 +307,15 @@ donnée d'appairage :
   matterbridge-mqtt-gateway** (clé en main, Node) / **évolution = bridge rs‑matter std** (Rust,
   sans Node) ; mapping cluster Thermostat documenté. **Ne rien construire maintenant** (pas de
   passerelle, pas de firmware qui publie). **Doc seule.**
+- **2026-07-07 (suite 20)** — **Bridge Matter tout‑Rust amorcé** (choix utilisateur : pas de
+  Node) : crate **détaché** `bridge/matter-toshiba-rs/` (zéro impact CI daly-bms). **Cœur pur
+  testé** — `mapping.rs` (état Toshiba ↔ cluster **Thermostat** : LocalTemperature/setpoints/
+  SystemMode + écriture Matter→commande MQTT), `config.rs` (`NodeConfig` + validation
+  commissioning : discriminateur 0..4095, passcode non‑interdit spec + topics), `bridge.rs`
+  (orchestration transport‑agnostique). `cargo test` = **15 tests** verts, **clippy `-D warnings`
+  propre**, deps `serde` uniquement. Couche transport (rs‑matter/rumqttc/main) derrière la
+  feature `matter` = **pur relais**, à câbler à l'adoption d'une passerelle (README détaille deps
+  + API rs‑matter + commissioning multi‑fabric). Composant **E** (§0.3). **Code (cœur) + doc.**
 
 ---
 
@@ -1844,12 +1861,21 @@ self_clean, diagnostics ODU/IDU (restent sur MQTT/Grafana). **Coexistence EM** :
 **2ᵉ surface de commande** (utilisateur via gateway) qui publie sur le **même** `.../command` que la
 boucle présence EM → arbitrage de priorité à définir le jour venu (plomberie identique, décision = politique).
 
-**Reco / trigger** : **ne rien construire maintenant** (aucune passerelle adoptée, aucun firmware
-ne publie encore de `state` → rien à exposer). Quand une passerelle sera là : **MVP =
-Matterbridge + mqtt‑gateway** (preuve multi‑écosystème rapide, mapping en config) ; **évolution
-« tout‑Rust » = bridge rs‑matter std** si on veut retirer Node ou du comportement sur‑mesure.
-**À surveiller pour le natif‑B (Matter sur ESP32)** : rs‑matter embarqué devenant *certifiable +
-stable* (aujourd'hui non).
+**Livré (voie tout‑Rust, choix utilisateur — pas de Node)** : crate **détaché**
+`bridge/matter-toshiba-rs/` (même isolation que `firmware/toshiba-suzumi-rs`, zéro impact CI
+daly-bms). **Cœur pur testé** (`cargo test` = **15 tests**, deps `serde` uniquement) :
+`mapping.rs` (état↔attributs Thermostat + écriture Matter→commande), `config.rs` (`NodeConfig`
++ validation commissioning : discriminateur 0..4095, passcode non‑interdit par la spec + topics),
+`bridge.rs` (orchestration transport‑agnostique, cache par zone). **Reste** derrière la feature
+`matter` (deps + API rs‑matter à figer) : `matter.rs` (nœud rs‑matter = Aggregator + 1 endpoint
+Thermostat/zone), `mqtt.rs` (rumqttc), `main.rs` — **pur relais** vers `bridge::Bridge`.
+Détail → `bridge/matter-toshiba-rs/README.md`.
+
+**Reco / trigger** : **ne pas câbler la couche transport maintenant** (aucune passerelle
+adoptée, aucun firmware ne publie encore de `state` → rien à exposer). Le **cœur Rust est prêt**
+d'avance ; la voie **Matterbridge (Node)** reste le MVP *si* on veut une preuve multi‑écosystème
+immédiate sans écrire le transport rs‑matter. **À surveiller pour le natif‑B (Matter sur ESP32)** :
+rs‑matter embarqué devenant *certifiable + stable* (aujourd'hui non).
 
 > **Sources** : github.com/project-chip/rs-matter (Rust, crates.io, no_std, ex. ESP32‑C3) ;
 > docs.espressif.com/projects/esp-matter (ESP‑Matter C++, production) ; Matter multi‑admin
