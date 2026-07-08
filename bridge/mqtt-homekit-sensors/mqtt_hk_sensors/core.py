@@ -17,15 +17,22 @@ import json
 import re
 from dataclasses import dataclass
 
-#: Types de capteurs supportés → (service HAP, caractéristique HAP).
+#: Types supportés → (service HAP, caractéristique HAP). `switch` est **contrôlable**
+#: (lecture d'état + commande) ; les autres sont des **capteurs** (lecture seule).
 SENSOR_KINDS: dict[str, tuple[str, str]] = {
     "temperature": ("TemperatureSensor", "CurrentTemperature"),
+    "humidity": ("HumiditySensor", "CurrentRelativeHumidity"),
     "light": ("LightSensor", "CurrentAmbientLightLevel"),
     "occupancy": ("OccupancySensor", "OccupancyDetected"),
+    "switch": ("Switch", "On"),
 }
+
+#: Types **contrôlables** (nécessitent un `command_topic`).
+CONTROLLABLE_KINDS = frozenset({"switch"})
 
 #: Bornes HomeKit (extraites des définitions pyhap) à respecter côté valeurs.
 TEMP_MIN, TEMP_MAX = -273.1, 1000.0
+HUM_MIN, HUM_MAX = 0.0, 100.0
 LUX_MIN = 0.0001  # CurrentAmbientLightLevel : minValue strictement > 0 → clamp du 0.
 
 #: Format du code d'appairage HomeKit : `XXX-XX-XXX`.
@@ -38,10 +45,12 @@ class SensorSpec:
 
     name: str  # nom affiché dans l'app Maison (unique)
     kind: str  # clé de SENSOR_KINDS
-    topic: str  # topic MQTT souscrit
+    topic: str  # topic MQTT d'ÉTAT souscrit
     #: Champ JSON à extraire (ex. "Temperature"). `None` → payload = **nombre brut**
-    #: (ex. `santuario/irradiance/raw` = `"750"`).
+    #: (ex. `santuario/irradiance/raw` = `"750"`). Ignoré pour `switch` (état = texte ON/OFF).
     json_field: str | None = None
+    #: Topic de **commande** (types contrôlables). Ex. `cmnd/tongou_3ACC34/POWER`.
+    command_topic: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +88,14 @@ def parse_value(spec: SensorSpec, raw) -> float | None:
     raw = raw.strip()
     if not raw:
         return None
+    # `switch` : l'état Tasmota est un texte "ON"/"OFF" (stat/<id>/POWER).
+    if spec.kind == "switch":
+        s = raw.upper()
+        if s in ("ON", "1", "TRUE"):
+            return 1.0
+        if s in ("OFF", "0", "FALSE"):
+            return 0.0
+        return None
     try:
         if spec.json_field is not None:
             obj = json.loads(raw)
@@ -90,16 +107,25 @@ def parse_value(spec: SensorSpec, raw) -> float | None:
         return None
 
 
-def to_char_value(kind: str, value: float) -> float | int:
+def to_char_value(kind: str, value: float) -> float | int | bool:
     """Valeur numérique → valeur de caractéristique HomeKit (bornée/typée)."""
     if kind == "temperature":
         return float(min(max(value, TEMP_MIN), TEMP_MAX))
+    if kind == "humidity":
+        return float(min(max(value, HUM_MIN), HUM_MAX))
     if kind == "light":
         # HomeKit lux : minValue = 0.0001 → 0 W/m² (nuit) devient 0.0001 pour rester valide.
         return float(max(value, LUX_MIN))
     if kind == "occupancy":
         return 1 if value >= 0.5 else 0
+    if kind == "switch":
+        return value >= 0.5  # caractéristique "On" (bool)
     raise ValueError(f"type de capteur inconnu : {kind!r}")
+
+
+def switch_command_payload(on: bool) -> str:
+    """Valeur HomeKit d'un switch → commande Tasmota (`cmnd/<id>/POWER`)."""
+    return "ON" if on else "OFF"
 
 
 def _valid_topic(topic: str) -> bool:
@@ -114,26 +140,31 @@ def parse_config(data: dict) -> BridgeConfig:
 
     sensors: list[SensorSpec] = []
     seen_names: set[str] = set()
-    seen_topics: set[str] = set()
     for s in sensors_raw:
         name = str(s.get("name", "")).strip()
         kind = str(s.get("kind", s.get("type", ""))).strip()
         topic = str(s.get("topic", "")).strip()
         field = s.get("json_field")
         field = str(field).strip() if field is not None else None
+        cmd = s.get("command_topic")
+        cmd = str(cmd).strip() if cmd is not None else None
         if not name:
             raise ValueError("capteur sans `name`")
         if kind not in SENSOR_KINDS:
             raise ValueError(f"capteur {name!r} : type inconnu {kind!r} (attendu {sorted(SENSOR_KINDS)})")
         if not _valid_topic(topic):
-            raise ValueError(f"capteur {name!r} : topic invalide {topic!r}")
+            raise ValueError(f"capteur {name!r} : topic d'état invalide {topic!r}")
+        if kind in CONTROLLABLE_KINDS:
+            if not cmd or not _valid_topic(cmd):
+                raise ValueError(f"capteur {name!r} ({kind}) : `command_topic` requis et valide")
+        elif cmd is not None:
+            raise ValueError(f"capteur {name!r} ({kind}) : `command_topic` interdit (non contrôlable)")
         if name in seen_names:
             raise ValueError(f"nom d'accessoire dupliqué : {name!r}")
-        if topic in seen_topics:
-            raise ValueError(f"topic dupliqué : {topic!r}")
         seen_names.add(name)
-        seen_topics.add(topic)
-        sensors.append(SensorSpec(name=name, kind=kind, topic=topic, json_field=field or None))
+        sensors.append(
+            SensorSpec(name=name, kind=kind, topic=topic, json_field=field or None, command_topic=cmd or None)
+        )
 
     if not sensors:
         raise ValueError("aucun capteur configuré (section [[sensors]])")
@@ -158,6 +189,10 @@ def parse_config(data: dict) -> BridgeConfig:
     )
 
 
-def build_route(cfg: BridgeConfig) -> dict[str, SensorSpec]:
-    """Table `topic MQTT → SensorSpec` (dispatch des messages reçus)."""
-    return {s.topic: s for s in cfg.sensors}
+def build_route(cfg: BridgeConfig) -> dict[str, list[SensorSpec]]:
+    """Table `topic MQTT → [SensorSpec]` : un même topic peut alimenter **plusieurs**
+    accessoires (ex. `santuario/heat/1/venus` → température **et** humidité)."""
+    route: dict[str, list[SensorSpec]] = {}
+    for s in cfg.sensors:
+        route.setdefault(s.topic, []).append(s)
+    return route

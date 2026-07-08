@@ -39,10 +39,34 @@ class TestParseValue(unittest.TestCase):
             self.assertIsNone(core.parse_value(self.temp(), raw), repr(raw))
 
 
+class TestSwitch(unittest.TestCase):
+    def spec(self):
+        return core.SensorSpec(
+            "Sw", "switch", "stat/tongou_3ACC34/POWER", command_topic="cmnd/tongou_3ACC34/POWER"
+        )
+
+    def test_state_text_parsing(self):
+        s = self.spec()
+        self.assertEqual(core.parse_value(s, b"ON"), 1.0)
+        self.assertEqual(core.parse_value(s, b"OFF"), 0.0)
+        self.assertEqual(core.parse_value(s, "on"), 1.0)  # casse insensible
+        self.assertIsNone(core.parse_value(s, b"blink"))
+
+    def test_to_char_bool_and_command(self):
+        self.assertIs(core.to_char_value("switch", 1.0), True)
+        self.assertIs(core.to_char_value("switch", 0.0), False)
+        self.assertEqual(core.switch_command_payload(True), "ON")
+        self.assertEqual(core.switch_command_payload(False), "OFF")
+
+
 class TestToCharValue(unittest.TestCase):
     def test_temperature_clamped(self):
         self.assertEqual(core.to_char_value("temperature", 15.3), 15.3)
         self.assertEqual(core.to_char_value("temperature", -999), core.TEMP_MIN)
+
+    def test_humidity_clamped(self):
+        self.assertEqual(core.to_char_value("humidity", 65.0), 65.0)
+        self.assertEqual(core.to_char_value("humidity", 150.0), core.HUM_MAX)
 
     def test_light_zero_becomes_min_lux(self):
         # 0 W/m² (nuit) → lux minimal valide (HomeKit refuse 0).
@@ -71,7 +95,38 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg.sensors[0].json_field, "Temperature")
         self.assertIsNone(cfg.sensors[1].json_field)
         route = core.build_route(cfg)
-        self.assertEqual(route["santuario/irradiance/raw"].kind, "light")
+        self.assertEqual(route["santuario/irradiance/raw"][0].kind, "light")
+
+    def test_shared_topic_feeds_multiple(self):
+        # Un même topic (heat/1/venus) → température + humidité.
+        d = self._valid()
+        d["sensors"].append({"name": "Hum", "type": "humidity", "topic": "santuario/heat/1/venus", "json_field": "Humidity"})
+        cfg = core.parse_config(d)
+        route = core.build_route(cfg)
+        kinds = sorted(s.kind for s in route["santuario/heat/1/venus"])
+        self.assertEqual(kinds, ["humidity", "temperature"])
+
+    def test_switch_needs_command_topic(self):
+        base = self._valid()
+        # Switch valide.
+        base["sensors"].append({
+            "name": "Prise séjour", "type": "switch",
+            "topic": "stat/tongou_3ACC34/POWER", "command_topic": "cmnd/tongou_3ACC34/POWER",
+        })
+        cfg = core.parse_config(base)
+        sw = cfg.sensors[-1]
+        self.assertEqual(sw.kind, "switch")
+        self.assertEqual(sw.command_topic, "cmnd/tongou_3ACC34/POWER")
+
+        # Switch sans command_topic → rejeté.
+        bad = self._valid()
+        bad["sensors"].append({"name": "P", "type": "switch", "topic": "stat/x/POWER"})
+        self.assertRaises(ValueError, core.parse_config, bad)
+
+        # command_topic sur un capteur non contrôlable → rejeté.
+        bad = self._valid()
+        bad["sensors"][0]["command_topic"] = "cmnd/x/POWER"
+        self.assertRaises(ValueError, core.parse_config, bad)
 
     def test_rejects_bad(self):
         d = self._valid()

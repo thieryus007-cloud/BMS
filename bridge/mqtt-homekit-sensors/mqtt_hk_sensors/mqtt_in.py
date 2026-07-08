@@ -45,13 +45,15 @@ class MqttSubscriber:
         client.publish(AVAILABILITY_TOPIC, "online", qos=1, retain=True)
 
     def _on_message(self, client, userdata, msg) -> None:
-        spec = self._route.get(msg.topic)
-        if spec is None:
-            return
-        value = core.parse_value(spec, msg.payload)
-        if value is None:
-            return
-        self._on_value(spec.name, value)
+        # Un topic peut alimenter plusieurs accessoires (température + humidité, …).
+        for spec in self._route.get(msg.topic, ()):
+            value = core.parse_value(spec, msg.payload)
+            if value is not None:
+                self._on_value(spec.name, value)
+
+    def publish(self, topic: str, payload: str) -> None:
+        """Publie une commande (ex. switch → `cmnd/<id>/POWER` = `ON`/`OFF`)."""
+        self._client.publish(topic, payload, qos=0, retain=False)
 
     def connect(self) -> None:
         self._client.connect(self._cfg.mqtt_host, self._cfg.mqtt_port, keepalive=30)
