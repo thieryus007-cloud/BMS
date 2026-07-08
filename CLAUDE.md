@@ -434,6 +434,7 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Alertes (AlertEngine natif, règles, hysteresis, notifications) | `docs/alertes.md` |
 | Ajouter un appareil / BMS Daly, ATS CHINT, ET112, PRALRAN | `docs/integration-materiel.md` |
 | **Clim Toshiba SHORAI EDGE — VOIE RETENUE = firmware RUST natif ESP32** (protocole SUZUMI CN22 vérifié vs pedobry + o0Zz ; PAS ESPHome). **Reprise de session → §0 du doc.** Crate détaché `firmware/toshiba-suzumi-rs/` (couche protocole pure faite + testée host ; ESP32 en attente matériel). Test : `cargo test --manifest-path firmware/toshiba-suzumi-rs/Cargo.toml` | `docs/toshiba-suzumi-rs-plan.md` |
+| Clim Toshiba / FP2 — **référence opérationnelle des ponts & crates** (contrat MQTT, carte des composants A–E, pipeline présence, HomeKit **D** vs Matter **E**, commandes/tests). Allège le plan. | `docs/toshiba-bridges.md` |
 | Clim Toshiba — **référence câblage/MQTT** (BOM, brochage CN22, topics `santuario/toshiba`, module EM `logic/toshiba_ac`, conso Tongou) — ⚠️ voie ESPHome **non retenue**, YAML §4 obsolète | `docs/integration-toshiba-shorai-esphome.md` |
 | Dépannage, netdiag réseau, debug onduleur/SmartShunt, memory-leak | `docs/diagnostic-depannage.md` |
 | **Audit robustesse 2026-06** — 18 axes (§3-§18 implémentés ; §1-§2 sécurité en attente d'action utilisateur) | `docs/audit-robustesse-2026-06.md` |

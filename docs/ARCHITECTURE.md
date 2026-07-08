@@ -44,17 +44,23 @@ transverse**. Tous les documents vivent dans `docs/`.
 | [deploiement-exploitation.md](./deploiement-exploitation.md) | Build (cibles Makefile), workflow de déploiement Pi5 + NanoPi, services systemd, logs/rétention, restauration git, conventions Git. |
 | [metriques-redb-architecture.md](./metriques-redb-architecture.md) | Moteur TSDB **redb** : schéma, encodage, write/read path, tiering & rétention. Annexe historique : migration VictoriaMetrics → redb. |
 | [metriques-promql-reference.md](./metriques-promql-reference.md) | **Catalogue des métriques** (labels hex), requêtes PromQL par appareil, roadmap d'implémentation, audit de conformité PromQL. |
-| [grafana-dashboards.md](./grafana-dashboards.md) | Grafana : installation, datasource (UID `daly-metrics`), provisioning, **21 dashboards**, monitoring PV. |
+| [grafana-dashboards.md](./grafana-dashboards.md) | Grafana : installation, datasource (UID `daly-metrics`), provisioning, **22 dashboards**, monitoring PV. |
 | [mqtt-mosquitto.md](./mqtt-mosquitto.md) | Architecture MQTT : Mosquitto natif systemd, topics `santuario/*`, bridge `pi5-nanopi`, anti-boucle, migration Docker → natif. |
 | [alertes.md](./alertes.md) | **AlertEngine** natif Rust : règles + hysteresis, persistance SQLite, notifications Telegram/SMTP, API alertes. |
 | [integration-materiel.md](./integration-materiel.md) | Inventaire RS485/D-Bus, **ajout d'un BMS Daly**, ATS CHINT, ET112, PRALRAN, Tasmota/Shelly. |
 | [integration-toshiba-shorai-esphome.md](./integration-toshiba-shorai-esphome.md) | **Plan d'intégration Toshiba SHORAI EDGE** (×3) : ESP32 + ESPHome `toshiba_suzumi` sur CN22 → MQTT Mosquitto → module EM `logic/toshiba_ac`. BOM, câblage, phases. |
+| [toshiba-suzumi-rs-plan.md](./toshiba-suzumi-rs-plan.md) | **Projet Toshiba — firmware Rust ESP32 + décisions d'intégration** (protocole SUZUMI vérifié, §18 décisions FP2/HomeKit/Homie/HomeSpan/Matter, reprise de session §0). Lourd → détail opérationnel déporté ci-dessous. |
+| [toshiba-bridges.md](./toshiba-bridges.md) | **Ponts & crates Toshiba/FP2 — référence opérationnelle** : contrat MQTT, carte des composants **A–E**, pipeline présence, HomeKit **D** vs Matter **E**, commandes/tests. |
 | [diagnostic-depannage.md](./diagnostic-depannage.md) | Dépannage transverse, `netdiag` réseau, debug onduleur/SmartShunt, investigation memory-leak (en cours). |
 
 ### Hors `docs/`
 
 - [`CLAUDE.md`](../CLAUDE.md) (racine) — mémoire projet : commandes rapides, inventaire RS485/D-Bus, règles de travail. Chargé à chaque session.
 - [`nanoPi/README.md`](../nanoPi/README.md) — README de composant pour la configuration Venus OS du NanoPi.
+- [`firmware/toshiba-suzumi-rs/README.md`](../firmware/toshiba-suzumi-rs/README.md) — crate détaché : firmware ESP32 (protocole SUZUMI). Composant **A**.
+- [`bridge/aqara-fp2-mqtt/README.md`](../bridge/aqara-fp2-mqtt/README.md) — pont FP2 → MQTT présence (aiohomekit). Composant **C**.
+- [`bridge/mqtt-homekit-occupancy/README.md`](../bridge/mqtt-homekit-occupancy/README.md) — pont MQTT → HomeKit (HAP-python). Composant **D**.
+- [`bridge/matter-toshiba-rs/README.md`](../bridge/matter-toshiba-rs/README.md) — crate détaché : bridge Matter (Rust, sans Node). Composant **E**.
 - [`README.md`](../README.md) (racine) — page d'accueil du dépôt.
 
 ---
@@ -118,7 +124,7 @@ Détails : [intégration matériel](./integration-materiel.md) · [MQTT](./mqtt-
 | **energy-manager** | Pi5 | 8081 | Automatisation énergie (solaire, DEYE, chauffe-eau, charge, météo) | [app-energy-manager.md](./app-energy-manager.md) |
 | **Mosquitto** | Pi5 | 1883 / 9001 | Broker MQTT natif systemd, bridge `pi5-nanopi` | [mqtt-mosquitto.md](./mqtt-mosquitto.md) |
 | **metrics-store (redb)** | Pi5 | (embarqué :8080) | TSDB pure-Rust, tiering raw 30 j / hourly 365 j / daily 5 ans | [metriques-redb-architecture.md](./metriques-redb-architecture.md) |
-| **grafana-server** | Pi5 | 3000 | Visualisation (datasource PromQL → :8080), 21 dashboards | [grafana-dashboards.md](./grafana-dashboards.md) |
+| **grafana-server** | Pi5 | 3000 | Visualisation (datasource PromQL → :8080), 22 dashboards | [grafana-dashboards.md](./grafana-dashboards.md) |
 | **dbus-mqtt-venus** | NanoPi | — | Bridge MQTT → D-Bus Venus OS (zbus) | [app-dbus-mqtt-venus.md](./app-dbus-mqtt-venus.md) |
 
 ---
