@@ -25,6 +25,9 @@ topic      = "santuario/heat/1/venus"
 json_field = "Temperature"
 
 # Humidité (même payload que la température) → HumiditySensor (tuile Apple OK).
+# ⚠️ REQUIERT que le topic publie réellement le champ `Humidity`. Le capteur externe
+#    Venus (type 4) est souvent température SEULE → l'accessoire reste « sans réponse ».
+#    Vérifier : mosquitto_sub -t 'santuario/heat/1/venus' -v  (retirer ce bloc si pas de Humidity).
 [[sensors]]
 name       = "Humidité extérieure"
 type       = "humidity"

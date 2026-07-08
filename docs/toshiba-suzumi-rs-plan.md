@@ -361,6 +361,15 @@ donnée d'appairage :
   `tongou_3ACC34` (⚠️ actionneur réel, **non** piloté par EM → pas de conflit ; `tongou_3BC764`
   chauffe-eau EM = à NE PAS exposer). Tri des types selon rendu Apple (switch/temp/humidité/occupation
   ✅ ; puissance/énergie/lux limités). Doc : README pont mis à jour. **Code + doc.**
+- **2026-07-07 (suite 26)** — **Validation terrain (2e passe) + service systemd**. Sur iPad :
+  **switch Tongou apparu tout seul** (sans ré-appairage, contrôlable) ✅ ; **humidité = « sans
+  réponse »** → diagnostic : le capteur externe (`santuario/heat/1/venus`, Venus type 4) ne publie
+  probablement **que** la température, pas `Humidity` → l'accessoire ne reçoit jamais de valeur
+  (pas un bug ; vérifier `mosquitto_sub -t santuario/heat/1/venus -v`, retirer le bloc humidité si
+  absent). **Unité systemd finalisée** (`contrib/mqtt-homekit-sensors.service`, config **locale**
+  `config.toml`, appairage persistant dans `hap-state/`) → pont **permanent** ; README complété
+  (mise en service + diagnostic No Response). **Chaîne MQTT→HomeKit prouvée de bout en bout ;
+  on revient à cette brique à l'arrivée des FP2.** Doc + unité.
 
 ---
 
