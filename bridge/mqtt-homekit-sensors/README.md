@@ -48,6 +48,19 @@ python -m mqtt_hk_sensors run          --config config.toml
 > découverte mDNS/Bonjour `_hap._tcp`. Pas de hub requis pour l'**appairage local** (un
 > HomePod/Apple TV n'est nécessaire que pour l'accès distant / les automatisations).
 
+## Retours de mise en service (validé sur iPad, 2026-07-07)
+
+- ✅ **Chaîne validée** : le capteur **température** apparaît et se met à jour dans l'app Maison
+  → toute la plomberie MQTT → HAP → HomeKit fonctionne.
+- ⚠️ **PIN** : dans l'app Maison, on entre les **8 chiffres sans tirets** (`03145155`). La config
+  **doit** garder le format à tirets `XXX-XX-XXX` (imposé par HAP-python) ; l'app les ignore/ajoute.
+- ⚠️ **Capteur de lumière (irradiance)** : **limitation de l'app Maison d'Apple**, PAS un bug du
+  pont. Apple **n'affiche pas** les capteurs de lumière (lux) comme **tuile de pièce** (contrairement
+  à la température) et ne les propose pas comme déclencheur d'automatisation. L'accessoire **est
+  bien appairé et présent** — le voir : **barre d'état** en haut de l'app Maison, ou détail de
+  l'accessoire, ou une **app tierce** (Eve — gratuite — l'affiche pleinement). Pour un vrai suivi
+  d'irradiance, Grafana (série `irradiance_wm2`) reste la référence.
+
 ## Déploiement systemd
 
 Unité : `contrib/mqtt-homekit-sensors.service` (après `mosquitto-broker`). Config déployée en

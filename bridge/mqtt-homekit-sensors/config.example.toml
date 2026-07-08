@@ -10,7 +10,9 @@ port = 1883
 [hap]
 bridge_name = "Santuario Sensors"    # nom du Bridge à l'appairage dans l'app Maison
 port        = 51827
-pincode     = "031-45-155"           # à changer avant la mise en service
+# Format à tirets XXX-XX-XXX OBLIGATOIRE ici. Dans l'app Maison, on saisit les 8
+# chiffres SANS tirets (ex. 03145155). À changer avant la mise en service.
+pincode     = "031-45-155"
 state_dir   = "hap-state"
 
 # --- Capteurs réels déjà publiés sur le broker Pi5 ---
