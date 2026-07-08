@@ -1,0 +1,22 @@
+[Unit]
+Description=Bridge Matter (Rust) — clim Toshiba en endpoints Thermostat depuis MQTT
+Documentation=file:///home/pi5compute/Daly-BMS-Rust/docs/toshiba-suzumi-rs-plan.md
+# Le broker doit être là ; le firmware ESP32 alimente les topics d'état.
+After=network-online.target mosquitto-broker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi5compute
+WorkingDirectory=/home/pi5compute/Daly-BMS-Rust/bridge/matter-toshiba-rs
+ExecStart=/usr/local/bin/matter-toshiba --config /etc/daly-bms/matter-toshiba.toml
+Restart=on-failure
+RestartSec=5
+# Durcissement léger
+NoNewPrivileges=true
+ProtectSystem=strict
+# État d'appairage Matter (fabric keys) — seul chemin inscriptible.
+ReadWritePaths=/home/pi5compute/Daly-BMS-Rust/bridge/matter-toshiba-rs/matter-state
+
+[Install]
+WantedBy=multi-user.target

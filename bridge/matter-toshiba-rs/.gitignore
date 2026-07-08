@@ -1,0 +1,7 @@
+# Build
+/target
+
+# Secrets & état d'appairage Matter (fabric keys) — NE JAMAIS committer (règle #12)
+config.toml
+*.matter-state
+/matter-state/
