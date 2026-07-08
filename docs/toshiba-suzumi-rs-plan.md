@@ -316,6 +316,13 @@ donnée d'appairage :
   propre**, deps `serde` uniquement. Couche transport (rs‑matter/rumqttc/main) derrière la
   feature `matter` = **pur relais**, à câbler à l'adoption d'une passerelle (README détaille deps
   + API rs‑matter + commissioning multi‑fabric). Composant **E** (§0.3). **Code (cœur) + doc.**
+- **2026-07-07 (suite 21)** — **Doc dédiée `docs/toshiba-bridges.md`** (référence opérationnelle
+  des composants A–E : contrat MQTT, carte, pipeline présence, commandes/tests) pour **alléger**
+  le plan (désormais focalisé firmware + décisions §18). Indexée dans CLAUDE.md §10 +
+  `ARCHITECTURE.md` (+ READMEs de crates listés). **Décision consignée : E (Matter) supersède D
+  (HomeKit re-expose)** — Apple Home consomme Matter → un endpoint Occupancy de E couvre les
+  tuiles Maison **et** Homey/Google ; **D = stopgap**, **E = cible** (ajouter présence→Occupancy à
+  E puis retirer D). Note ajoutée §18.9. **Doc seule.**
 
 ---
 
@@ -1709,6 +1716,12 @@ anti‑rebattement — **10 tests**, `python3 tests/test_core.py`) + **glu I/O `
 `hap-state/accessory.state` + `config.toml` (PIN) → jamais commités. Détail →
 `bridge/mqtt-homekit-occupancy/README.md`.
 
+> **⚠️ Ce pont (D) est *superseded* par le bridge Matter (E, §18.12).** Apple Home étant un
+> contrôleur **Matter**, un endpoint **Occupancy** exposé par E apparaît dans l'app Maison
+> **comme** D, **plus** Homey/Google (multi‑fabric). Donc **D = stopgap** (tuiles Apple Home
+> avant que le transport Matter soit câblé) ; **E = cible** (ajouter présence→Occupancy à E,
+> puis retirer D). Détail → `docs/toshiba-bridges.md` §5.
+
 ### 18.10 Interop **Homie / Homey** — adaptateur Pi5 **différé** (décision 2026‑07‑07)
 
 **Question étudiée** : adopter la convention MQTT **Homie** dès maintenant sur les 3 ESP32
@@ -1775,7 +1788,7 @@ bout en bout → on est libres du backbone). Or sur ce maillon libre, HomeKit **
    (§0.2 #1). Réécriture de l'éprouvé, pas simplification.
 2. **Aplatit la télémétrie** : diagnostics ODU/IDU (charge compresseur, courants, RPM, temp
    ext.), presets, self‑clean → un **HeaterCooler** HAP a un jeu de caractéristiques **fixe et
-   limité**. On perd la richesse (projet = **monitoring**, 21 dashboards). MQTT/JSON porte tout.
+   limité**. On perd la richesse (projet = **monitoring**, 22 dashboards). MQTT/JSON porte tout.
 3. **Déplace la commande, ne la simplifie pas** : la décision vit dans **energy‑manager (Rust,
    testé)**. « Sans MQTT », EM devrait commander **via aiohomekit (Python)** → IPC réintroduit
    (souvent MQTT) **+** saut HAP. « Sans MQTT » ne supprime pas MQTT, il le **relocalise**.
