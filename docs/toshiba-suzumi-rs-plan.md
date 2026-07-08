@@ -288,6 +288,17 @@ donnée d'appairage :
   `clippy -D warnings` propre, `cargo test -p daly-bms-server` = 22 tests verts, 22 dashboards
   JSON valides. Champs chaîne (mode/fan/swing/preset) non historisés. **Vide tant qu'aucun
   firmware ne publie** (attendu). Doc : §0.4 #5, `grafana-dashboards.md` §7.3, CLAUDE.md (22).
+- **2026-07-07 (suite 19)** — **Matter évalué (A/B) + bridge Pi5 étudié → §18.12**. Matter =
+  bon *objectif* passerelle (multi‑admin/multi‑fabric : Homey+Apple+Google simultanés, mieux que
+  HomeKit/Homie). **A (ESP‑Matter C++)** = jette le crate Rust 39‑tests + annule §0.2 #1 →
+  **écartée** ; **B (rs‑matter Rust)** = garde le crate (transport de plus) mais rs‑matter
+  *embarqué* expérimental → **différée**. Piège commun A+B = tout Matter sur 7 MCU (empreinte,
+  télémétrie aplatie, EM pas contrôleur Matter). **Retenu = bridge Matter sur le Pi5** (dorsal
+  MQTT inchangé) exposant des endpoints Thermostat, multi‑fabric, supersède l'adaptateur Homie
+  (§18.10) et peut porter aussi la présence FP2. Étude implémentation : **MVP = Matterbridge +
+  matterbridge-mqtt-gateway** (clé en main, Node) / **évolution = bridge rs‑matter std** (Rust,
+  sans Node) ; mapping cluster Thermostat documenté. **Ne rien construire maintenant** (pas de
+  passerelle, pas de firmware qui publie). **Doc seule.**
 
 ---
 
@@ -1773,6 +1784,77 @@ pas sur l'ESP32 (contraint). Firmware ESP32 = **Rust + MQTT**, source de vérit�
 > sur l'automatisation + la télémétrie — non pertinent pour un projet de gestion d'énergie.
 >
 > **Source** : github.com/HomeSpan/HomeSpan (lib HomeKit Arduino‑ESP32).
+
+### 18.12 **Matter** — évaluation « tout‑C++ (A) vs tout‑Rust (B) sur l'ESP32 » + **bridge Matter sur le Pi5** (retenu)
+
+**Contexte** : viser une **passerelle smart‑home** (Homey Pro, Apple, Google…) *en parallèle
+d'energy‑manager*. Deux options proposées mettent le stack **Matter** sur l'ESP32 (cluster
+Thermostat) : **A = ESP‑Matter (C++)**, **B = rs‑matter (Rust)**.
+
+**✅ Matter est le bon *objectif*** (mieux que HomeKit §18.9 / Homie §18.10) : **multi‑admin /
+multi‑fabric** — un appareil Matter est partagé **simultanément** dans Homey **+** Apple **+**
+Google (≥ 5 fabrics imposés ; Matter 1.6 juin 2026 = Joint Fabric). HomeKit (mono‑contrôleur)
+et Homie ne le font pas. La vraie question n'est pas « Matter ou pas » mais **où** vit le stack.
+
+**Évaluation A vs B — pour NOUS (pas un projet vierge)** :
+
+- La couche protocole **SUZUMI est déjà en Rust**, vérifiée 2 sources, **39 tests**, et
+  **transport‑agnostique** (§4). Donc :
+  - **Option A (C++)** = **jeter** ce crate, revenir au C++, **annuler §0.2 #1**. Son « avantage »
+    (récupérer le C++) ne vaut **que** pour un greenfield. Pour nous = **régression + réécriture**
+    (verdict HomeSpan §18.11). **Écartée.**
+  - **Option B (Rust)** = **garde** le crate (branché comme un transport de plus) ; le « downside »
+    annoncé (« traduire le protocole octet par octet ») est **déjà fait**. Plus cohérente **pour
+    nous**, mais **bloquée** par la maturité de **rs‑matter *embarqué*** (1ʳᵉ release, `no_std`,
+    exemple ESP32‑C3, mais **expérimental / certif non éprouvée**). ESP‑Matter (A) est le stack
+    **mûr/certifiable** — mais mauvais langage.
+- **Piège commun A+B (récurrence §18.11)** : mettre **tout Matter sur 7 MCU** = (1) **empreinte**
+  — le stack Matter (WiFi/Thread + mbedTLS + clusters) **domine** flash/RAM quel que soit le
+  langage (l'« empreinte minime » de B ne vaut que pour le *parsing*) ; serré sur ESP32‑C3
+  (pousse vers C6) vs firmware **MQTT plume** ; (2) **télémétrie aplatie** — le cluster
+  Thermostat a un jeu d'attributs **fixe** (consignes/mode/temp) ; **presets, self‑clean,
+  diagnostics ODU/IDU** non représentables (trou climate Matter **confirmé**) ; (3) **commande** —
+  energy‑manager n'est pas contrôleur Matter → MQTT reste nécessaire (ou dual‑stack ESP32 =
+  encore plus lourd).
+
+**✅ RETENU : bridge Matter sur le Pi5** (dorsal MQTT inchangé ; même patron que scénario C).
+Expose les clim comme **endpoints Thermostat Matter** (device‑type **Bridge/Aggregator**),
+traduits depuis `santuario/toshiba/*`. Bénéfices : stack Matter **mûr là où c'est facile** (Pi5
+Linux, pas 7 MCU) ; **multi‑fabric** (le bridge se commissionne dans Homey+Apple+Google) ; ESP32
+**léger** (Rust+MQTT, crate 39‑tests intact) ; **télémétrie complète** préservée sur MQTT ; **un
+seul point** à faire évoluer (versions Matter). **Supersède l'adaptateur Homie (§18.10)** et
+peut **aussi** exposer la **présence FP2** en *Occupancy* Matter → un seul bridge pour clim **+**
+présence.
+
+**Étude d'implémentation du bridge Pi5 — 2 candidats** :
+
+| | **Matterbridge + `matterbridge-mqtt-gateway`** | **rs‑matter (std) — bridge Rust maison** |
+|---|---|---|
+| Techno | matter.js / **Node.js** (tourne en 512 Mo, UI :8283) | **Rust** (rs‑matter côté *std* = son côté le plus mûr) |
+| Effort | **clé en main** : plugin MQTT→Matter **thermostat** existant ; mapping = **config** | **projet** : Aggregator + N Thermostat + FanControl + commissioning (PASE/CASE) |
+| Maturité | **éprouvé**, multi‑écosystème documenté | jeune même en std |
+| Ajustement projet | ⚠️ **ajoute Node.js** (posture anti‑churn) mais **outil légitime** (vrai bridge Matter, ≠ Homebridge détourné §18.8) | ✅ tout‑Rust, pas de Node |
+
+**Mapping cluster Thermostat** (`santuario/toshiba/<zone>/state` → Matter) : `LocalTemperature`
+← `current_temp` (×100, centi‑°C) ; `OccupiedHeating/CoolingSetpoint` ← `target_temp` ;
+`SystemMode` ← `power`+`mode` (Off/Auto/Cool/Heat/Dry/FanOnly) ; ventilation → cluster
+**FanControl** séparé. **Écriture Matter → MQTT** : `SystemMode`→`{"power","mode"}`, setpoint→
+`{"target_temp":N}` sur `.../command`. **Non représentable** : presets (8°/Fireplace/ECO), pwr_level,
+self_clean, diagnostics ODU/IDU (restent sur MQTT/Grafana). **Coexistence EM** : le bridge est une
+**2ᵉ surface de commande** (utilisateur via gateway) qui publie sur le **même** `.../command` que la
+boucle présence EM → arbitrage de priorité à définir le jour venu (plomberie identique, décision = politique).
+
+**Reco / trigger** : **ne rien construire maintenant** (aucune passerelle adoptée, aucun firmware
+ne publie encore de `state` → rien à exposer). Quand une passerelle sera là : **MVP =
+Matterbridge + mqtt‑gateway** (preuve multi‑écosystème rapide, mapping en config) ; **évolution
+« tout‑Rust » = bridge rs‑matter std** si on veut retirer Node ou du comportement sur‑mesure.
+**À surveiller pour le natif‑B (Matter sur ESP32)** : rs‑matter embarqué devenant *certifiable +
+stable* (aujourd'hui non).
+
+> **Sources** : github.com/project-chip/rs-matter (Rust, crates.io, no_std, ex. ESP32‑C3) ;
+> docs.espressif.com/projects/esp-matter (ESP‑Matter C++, production) ; Matter multi‑admin
+> (matteralpha.com) ; Matter 1.6 Joint Fabric (matter-smarthome.de) ; Matterbridge
+> (github.com/Luligu/matterbridge) + plugin MQTT (github.com/jyvern/matterbridge-mqtt-gateway).
 
 ---
 
