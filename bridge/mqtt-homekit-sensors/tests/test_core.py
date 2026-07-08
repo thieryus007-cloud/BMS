@@ -52,6 +52,18 @@ class TestSwitch(unittest.TestCase):
         self.assertEqual(core.parse_value(s, "on"), 1.0)  # casse insensible
         self.assertIsNone(core.parse_value(s, b"blink"))
 
+    def test_state_json_parsing(self):
+        # État de switch niché dans un JSON (Tasmota tele/STATE, Zigbee2MQTT…).
+        s = core.SensorSpec(
+            "Sw", "switch", "tele/tongou_3ACC34/STATE",
+            json_field="POWER", command_topic="cmnd/tongou_3ACC34/POWER",
+        )
+        self.assertEqual(core.parse_value(s, b'{"POWER":"ON"}'), 1.0)
+        self.assertEqual(core.parse_value(s, b'{"POWER":false}'), 0.0)
+        self.assertIsNone(core.parse_value(s, b'{"POWER":"UNKNOWN"}'))
+        self.assertIsNone(core.parse_value(s, b'{"other":"ON"}'))  # champ absent
+        self.assertIsNone(core.parse_value(s, b"pas du json"))
+
     def test_to_char_bool_and_command(self):
         self.assertIs(core.to_char_value("switch", 1.0), True)
         self.assertIs(core.to_char_value("switch", 0.0), False)

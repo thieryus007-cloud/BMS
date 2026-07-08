@@ -88,9 +88,20 @@ def parse_value(spec: SensorSpec, raw) -> float | None:
     raw = raw.strip()
     if not raw:
         return None
-    # `switch` : l'état Tasmota est un texte "ON"/"OFF" (stat/<id>/POWER).
+    # `switch` : état soit texte brut "ON"/"OFF" (Tasmota `stat/<id>/POWER`), soit champ
+    # d'un JSON si `json_field` est défini (ex. `tele/<id>/STATE` `{"POWER":"ON"}`, ou
+    # Zigbee2MQTT `{"state":"ON"}`). Accepte ON/1/true et OFF/0/false.
     if spec.kind == "switch":
-        s = raw.upper()
+        extracted = raw
+        if spec.json_field is not None:
+            try:
+                obj = json.loads(raw)
+            except (ValueError, TypeError):
+                return None
+            if not isinstance(obj, dict) or spec.json_field not in obj:
+                return None
+            extracted = obj[spec.json_field]
+        s = str(extracted).strip().upper()
         if s in ("ON", "1", "TRUE"):
             return 1.0
         if s in ("OFF", "0", "FALSE"):

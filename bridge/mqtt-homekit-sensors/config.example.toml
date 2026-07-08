@@ -24,10 +24,10 @@ type       = "temperature"
 topic      = "santuario/heat/1/venus"
 json_field = "Temperature"
 
-# Humidité (même payload que la température) → HumiditySensor (tuile Apple OK).
-# ⚠️ REQUIERT que le topic publie réellement le champ `Humidity`. Le capteur externe
-#    Venus (type 4) est souvent température SEULE → l'accessoire reste « sans réponse ».
-#    Vérifier : mosquitto_sub -t 'santuario/heat/1/venus' -v  (retirer ce bloc si pas de Humidity).
+# Humidité → HumiditySensor (tuile Apple OK). Le capteur ext. est un BME280 : le payload
+# porte bien Humidity + Pressure + Temperature (ex. {"Humidity":64.0,"Pressure":988.2,
+# "Temperature":29.3,"TemperatureType":4}). NB : la PRESSION n'a pas de type HomeKit standard
+# → non exposable en tuile (reste sur Grafana).
 [[sensors]]
 name       = "Humidité extérieure"
 type       = "humidity"

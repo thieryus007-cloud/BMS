@@ -363,13 +363,21 @@ donnée d'appairage :
   ✅ ; puissance/énergie/lux limités). Doc : README pont mis à jour. **Code + doc.**
 - **2026-07-07 (suite 26)** — **Validation terrain (2e passe) + service systemd**. Sur iPad :
   **switch Tongou apparu tout seul** (sans ré-appairage, contrôlable) ✅ ; **humidité = « sans
-  réponse »** → diagnostic : le capteur externe (`santuario/heat/1/venus`, Venus type 4) ne publie
-  probablement **que** la température, pas `Humidity` → l'accessoire ne reçoit jamais de valeur
-  (pas un bug ; vérifier `mosquitto_sub -t santuario/heat/1/venus -v`, retirer le bloc humidité si
-  absent). **Unité systemd finalisée** (`contrib/mqtt-homekit-sensors.service`, config **locale**
+  réponse »** (⚠️ diagnostic « champ Humidity absent » **infirmé en suite 27** — le champ est bien
+  présent). **Unité systemd finalisée** (`contrib/mqtt-homekit-sensors.service`, config **locale**
   `config.toml`, appairage persistant dans `hap-state/`) → pont **permanent** ; README complété
   (mise en service + diagnostic No Response). **Chaîne MQTT→HomeKit prouvée de bout en bout ;
   on revient à cette brique à l'arrivée des FP2.** Doc + unité.
+- **2026-07-07 (suite 27)** — **Diagnostic humidité corrigé + revue Gemini appliquée.**
+  `mosquitto_sub` : `heat/1/venus` **porte bien** `Humidity` (BME280 : Humidity+Pressure+Temperature)
+  → le diagnostic « champ absent » (suite 26) était **faux**. Vrai coupable du « sans réponse » =
+  **réattribution d'AID** : l'humidité insérée au *milieu* de la config a pris l'AID de l'ancien
+  capteur de lumière → l'iPad appairé est confus. **Correctif = supprimer + ré-ajouter le pont dans
+  Maison** (ou reset `hap-state/`) ; **prévention = ajouter les nouveaux capteurs en FIN de config**.
+  README réécrit (2 causes du No Response). **Revue Gemini (PR)** appliquée : `parse_value` d'un
+  `switch` respecte désormais `json_field` (état niché en JSON : `tele/<id>/STATE {"POWER":"ON"}`,
+  Zigbee2MQTT) + test dédié → **15 tests** verts. Pression BME280 = pas de type HomeKit → Grafana.
+  **Code + doc.**
 
 ---
 
