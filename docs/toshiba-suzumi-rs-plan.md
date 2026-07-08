@@ -378,6 +378,15 @@ donnée d'appairage :
   `switch` respecte désormais `json_field` (état niché en JSON : `tele/<id>/STATE {"POWER":"ON"}`,
   Zigbee2MQTT) + test dédié → **15 tests** verts. Pression BME280 = pas de type HomeKit → Grafana.
   **Code + doc.**
+- **2026-07-07 (suite 28)** — **Cause « sans réponse » PROUVÉE + corrigée définitivement.**
+  Simulation du chemin réseau réel (`_on_message`→accessoires) avec le payload exact : humidité
+  reçoit bien **64** côté service (aucun bug serveur) ; les **AID** confirment le conflit
+  (Temp=2, **Humidité=3**, Irradiance=4, Switch=5 → l'humidité a hérité de l'aid 3 = ancien capteur
+  de lumière de l'iPad appairé). **Correctif permanent** : **AID épinglés stables par nom**
+  (`core.stable_aid`, sha256 → aid déterministe ≥2, anti-collision dans `build_bridge`) →
+  réordonner/insérer/retirer un capteur **ne décale plus** les autres (vérifié : AID identiques
+  quel que soit l'ordre). Nécessite **un** ré-appairage (transition). `cargo`… non — **17 tests
+  Python** verts, smoke-test AID stables OK. README diagnostic réécrit. **Code + doc.**
 
 ---
 

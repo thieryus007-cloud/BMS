@@ -91,14 +91,19 @@ journalctl -u mqtt-homekit-sensors -f        # logs (dont "Enter this code..." a
 
 Deux causes possibles :
 
-**1. Réattribution d'AID après modification d'un bridge déjà appairé** *(cause la plus fréquente
-quand on ajoute des capteurs)*. HAP-python assigne les *Accessory ID* dans l'**ordre de la
-config** ; **insérer** un capteur au **milieu** décale les AID des suivants → l'iPad déjà appairé
-garde l'ancienne correspondance → l'accessoire décalé s'affiche « sans réponse ».
+**1. Réattribution d'AID après modification d'un bridge déjà appairé.** Historiquement,
+HAP-python assignait les *Accessory ID* dans l'**ordre de la config** ; insérer un capteur au
+milieu décalait les AID des suivants → l'iPad déjà appairé gardait l'ancienne correspondance →
+« sans réponse ». **Corrigé** : ce pont **épingle un AID stable dérivé du nom**
+(`core.stable_aid`) → réordonner / insérer / retirer d'autres capteurs **ne décale plus rien**.
+**Transition unique** : le passage aux AID épinglés change les AID actuels → il faut
+**supprimer le pont dans l'app Maison puis le ré-ajouter UNE fois** ; ensuite les éditions de
+config ne cassent plus l'appairage.
 
 - **Correctif** : dans l'app Maison, **supprimer le pont « Santuario Sensors » puis le ré-ajouter**
   (ré‑appairage → l'iPad réapprend tous les AID). Alternative radicale : `rm -rf hap-state/` + relancer + ré‑appairer.
-- **Prévention** : **ajouter les nouveaux capteurs à la FIN** de `config.toml` (ne pas insérer au milieu).
+- **Bon réflexe** : garder les `name` **stables** dans `config.toml` (renommer dans l'app Maison,
+  pas dans la config — changer un `name` change l'aid de CE capteur → à re-découvrir).
 
 **2. Le capteur ne reçoit jamais de valeur** (champ réellement absent du payload) :
 
