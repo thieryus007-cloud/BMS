@@ -429,8 +429,12 @@ maintenance_interval_hours = 6
 #   60 j        → RSS démarre ~94 Mo et reste ~96 Mo (fichier déjà à son palier)
 # Le RSS se stabilise tout seul = ce N'EST PAS une fuite (§21 infirme la
 # conclusion « fuite tokio/hyper » de §20). Pour BAISSER le palier RSS : réduire
-# cette valeur + compacter (scripts/compact-redb.sh). ⚠ 60 j fait ~3-4 Go →
-# démarrages plus lents (tolérés par TimeoutStartSec=300).
+# cette valeur + compacter (scripts/compact-redb.sh). ⚠ 60 j fait plusieurs Go
+# (mesuré 6,1 Go le 2026-07-09) → après un arrêt NON gracieux (reboot brutal),
+# redb fait une récupération intégrale ∝ taille du fichier (dizaines de min).
+# C'est POURQUOI l'unité systemd utilise TimeoutStartSec=infinity : un timeout
+# fini tuait le démarrage lent → boucle de crash (site + RS485 KO). La taille
+# du fichier est un non-problème tant que systemd attend la fin de la recovery.
 raw_retention_days = 60
 hourly_retention_days = 365
 daily_retention_days = 1825   # 5 ans

@@ -89,9 +89,12 @@ cat > "$DROPIN" <<'EOF'
 [Service]
 Environment=DALY_JEMALLOC_PROF=1
 Environment=_RJEM_MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,dirty_decay_ms:1000,muzzy_decay_ms:0,background_thread:true
-# Marge de démarrage : l'ouverture de la base redb (grosse / récupération)
-# peut être lente, et READY n'est envoyé qu'après. Évite un kill systemd.
-TimeoutStartSec=300
+# Marge de démarrage : l'ouverture de la base redb (grosse / récupération
+# après arrêt non gracieux) peut prendre des dizaines de minutes, et READY
+# n'est envoyé qu'après. `infinity` évite un kill systemd → boucle de crash
+# (cf. contrib/daly-bms.service, incident 2026-07-09). Aligne le drop-in de
+# profiling sur l'unité principale.
+TimeoutStartSec=infinity
 # CRUCIAL : sans cela, l'unité a PrivateTmp=true → le service écrit ses
 # profils dans un /tmp PRIVÉ (namespace), invisible depuis le vrai /tmp où ce
 # script les cherche. On désactive l'isolation /tmp le temps de la mesure ;
