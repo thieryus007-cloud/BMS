@@ -95,10 +95,24 @@ TimeoutStopSec=60
 
 # Démarrage : READY=1 (Type=notify) n'est envoyé qu'APRÈS l'ouverture de
 # metrics-store (redb). Sur une grosse base — surtout après un arrêt non
-# gracieux nécessitant une récupération — l'ouverture peut prendre > 90 s
-# (défaut systemd). 300 s évitent que systemd tue un démarrage légitime mais
-# lent (ce qui aggraverait la corruption et créerait une boucle d'échec).
-TimeoutStartSec=300
+# gracieux (reboot brutal, coupure secteur) — redb lance une RÉCUPÉRATION
+# intégrale dont le coût est proportionnel à la taille du fichier : mesuré
+# ~13,5 Go lus en ~2 min pour réparer une base de 6 Go, soit ~30-50 min pour
+# 100 Go. La rétention (raw_retention_days=60) est un choix d'exploitation
+# assumé : le fichier PEUT légitimement atteindre plusieurs dizaines de Go →
+# AUCUNE valeur finie ne couvre tous les cas. Un TimeoutStartSec fini fait
+# tuer un démarrage légitime mais lent → systemd relance → RE-récupération →
+# BOUCLE DE CRASH INFINIE (constaté 2026-07-09 après reboot, base 6,1 Go : le
+# service bouclait toutes les 5 min, port 8080 jamais ouvert, RS485 jamais
+# démarré car le code n'atteignait pas l'ouverture du port série). On met donc
+# `infinity` : systemd attend aussi longtemps que la récupération progresse et
+# ne tue jamais un démarrage en cours. Une VRAIE corruption est gérée à part
+# (quarantaine auto dans open_metrics_store_with_quarantine → base saine
+# recréée) ; `infinity` n'expose donc qu'au cas — improbable — d'un bug redb
+# qui bloquerait sans progresser, ce qui reste préférable à une boucle de
+# crash certaine. Le watchdog (WatchdogSec) ne s'arme qu'APRÈS READY=1, il ne
+# joue donc aucun rôle pendant cette phase de récupération.
+TimeoutStartSec=infinity
 
 # Accès au port série RS485 (/dev/ttyUSB* ou /dev/ttyACM*)
 SupplementaryGroups=dialout
