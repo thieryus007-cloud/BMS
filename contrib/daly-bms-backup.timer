@@ -1,0 +1,14 @@
+[Unit]
+Description=Sauvegarde quotidienne de la base metrics-store (redb) — DalyBMS
+Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
+
+[Timer]
+# Tous les jours à 04:15 (activité faible) + jitter pour lisser la charge.
+OnCalendar=*-*-* 04:15:00
+RandomizedDelaySec=20min
+# Rattrape la sauvegarde manquée si le Pi5 était éteint à l'heure prévue.
+Persistent=true
+Unit=daly-bms-backup.service
+
+[Install]
+WantedBy=timers.target

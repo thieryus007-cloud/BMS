@@ -244,6 +244,46 @@ for svc in daly-bms energy-manager; do
     fi
 done
 
+# ── 5.quater Sauvegarde redb : script + service oneshot + timer quotidien ─────
+# Copie périodique crash-consistent de metrics.redb (#3, incident 2026-07-09).
+# Protège contre une corruption AVÉRÉE (quarantaine auto → base recréée vide) :
+# ni TimeoutStartSec=infinity ni l'ouverture redb en tâche de fond ne couvrent
+# ce cas. Le timer tourne quotidiennement (cf. contrib/daly-bms-backup.timer).
+BK_SRC=scripts/backup-redb.sh
+BK_DST=/usr/local/bin/backup-redb.sh
+if [[ -f "$BK_SRC" ]]; then
+    if $DRY_RUN; then
+        sudo cmp -s "$BK_SRC" "$BK_DST" 2>/dev/null || warn "[dry-run] $BK_DST absent/différent → serait (ré)installé (0755)"
+    else
+        sudo install -m 0755 "$BK_SRC" "$BK_DST"
+        info "Script de sauvegarde installé → $BK_DST"
+    fi
+fi
+BK_UNIT_CHANGED=0
+for unit in daly-bms-backup.service daly-bms-backup.timer; do
+    usrc="contrib/${unit}"
+    udst="/etc/systemd/system/${unit}"
+    [[ -f "$usrc" ]] || continue
+    if sudo diff -q "$usrc" "$udst" >/dev/null 2>&1; then
+        info "Unité $unit à jour"
+    else
+        BK_UNIT_CHANGED=1
+        if $DRY_RUN; then
+            warn "[dry-run] unité $unit modifiée → serait copiée"
+        else
+            sudo cp "$usrc" "$udst"
+            info "Unité systemd $unit mise à jour"
+        fi
+    fi
+done
+if ! $DRY_RUN; then
+    [[ $BK_UNIT_CHANGED -eq 1 ]] && sudo systemctl daemon-reload
+    if [[ -f /etc/systemd/system/daly-bms-backup.timer ]]; then
+        sudo systemctl enable --now daly-bms-backup.timer >/dev/null 2>&1 || true
+        info "Timer daly-bms-backup activé (sauvegarde redb quotidienne)"
+    fi
+fi
+
 # ── 5.bis Mosquitto bridge (si modifié) — backup + verify-no-loop + restart ────
 MOSQ_SRC=contrib/mosquitto/mosquitto.conf
 MOSQ_DST=/etc/mosquitto/mosquitto.conf

@@ -388,10 +388,14 @@ pub struct AppState {
     /// `latest_snapshots()` même sans aucun client WebSocket (churn
     /// d'allocations continu — investigation RSS, docs/diagnostic-depannage.md §17).
     pub alert_tx: Option<tokio::sync::mpsc::Sender<BmsSnapshot>>,
-    /// Backend TSDB redb (metrics-store) : SEULE source de vérité pour les
-    /// lectures et écritures de séries temporelles. `None` uniquement si
-    /// désactivé dans la config (mode dégradé pour debug).
-    pub metrics_store: Option<Arc<metrics_store::MetricsStore>>,
+    /// Slot du backend TSDB redb (metrics-store) : SEULE source de vérité pour
+    /// les lectures et écritures de séries temporelles. Vaut `None` tant que la
+    /// tâche d'ouverture en arrière-plan n'a pas terminé (le site + RS485
+    /// démarrent SANS attendre la récupération redb — #2), ou si le backend est
+    /// désactivé dans la config. Écrit une seule fois via `set_metrics_store()`.
+    /// `std::sync::RwLock` (et non le `tokio::RwLock` du reste du fichier) : lu
+    /// depuis des contextes synchrones et des closures `spawn_blocking`.
+    pub metrics_store_slot: Arc<std::sync::RwLock<Option<Arc<metrics_store::MetricsStore>>>>,
     /// Rate limiter pour les écritures redb depuis les `on_*_snapshot()`.
     /// Empêche un sample d'être poussé plus d'1× / 5 s par série.
     pub redb_rl: crate::redb_writes::RateLimiter,
@@ -402,9 +406,27 @@ pub struct AppState {
 }
 impl AppState {
     /// Indique si le backend de lecture (metrics-store / redb) est prêt.
-    /// À utiliser par les routes pour leur pré-flight check.
+    /// À utiliser par les routes pour leur pré-flight check. Faux tant que la
+    /// tâche d'ouverture en arrière-plan (#2) n'a pas fini la récupération.
     pub fn is_query_backend_ready(&self) -> bool {
-        self.metrics_store.is_some()
+        self.metrics_store().is_some()
+    }
+    /// Accès au backend redb. Retourne `None` tant que la tâche d'ouverture en
+    /// arrière-plan (#2) n'a pas terminé (récupération redb potentiellement
+    /// longue après un arrêt non gracieux), ou si `metrics_store.enabled=false`.
+    /// Clone bon marché d'un `Arc` ; le verrou n'est jamais tenu à travers un
+    /// `.await`.
+    pub fn metrics_store(&self) -> Option<Arc<metrics_store::MetricsStore>> {
+        self.metrics_store_slot.read().map(|g| g.clone()).unwrap_or(None)
+    }
+    /// Renseigne le backend redb une fois ouvert — appelé une seule fois par la
+    /// tâche d'ouverture en arrière-plan (#2). À partir de cet instant, les
+    /// `on_*_snapshot()` recommencent à persister et les lectures Grafana
+    /// répondent.
+    pub fn set_metrics_store(&self, store: Arc<metrics_store::MetricsStore>) {
+        if let Ok(mut g) = self.metrics_store_slot.write() {
+            *g = Some(store);
+        }
     }
     /// Exécute une requête PromQL sur plage temporelle via le shim redb
     /// (`metrics-store::promql`). Le travail synchrone (open reader + eval
@@ -421,8 +443,7 @@ impl AppState {
         step_ms: i64,
     ) -> anyhow::Result<serde_json::Value> {
         let store = self
-            .metrics_store
-            .clone()
+            .metrics_store()
             .ok_or_else(|| anyhow::anyhow!("metrics-store backend not configured"))?;
         let query = query.to_string();
         let max_points = self.config.metrics_store.query_max_points;
@@ -440,8 +461,7 @@ impl AppState {
         time_ms: i64,
     ) -> anyhow::Result<serde_json::Value> {
         let store = self
-            .metrics_store
-            .clone()
+            .metrics_store()
             .ok_or_else(|| anyhow::anyhow!("metrics-store backend not configured"))?;
         let query = query.to_string();
         tokio::task::spawn_blocking(move || {
@@ -599,7 +619,7 @@ impl AppState {
             shelly_client: Arc::new(tokio::sync::Mutex::new(None)),
             alert_engine,
             alert_tx,
-            metrics_store,
+            metrics_store_slot: Arc::new(std::sync::RwLock::new(metrics_store)),
             redb_rl: crate::redb_writes::RateLimiter::with_floor(
                 std::time::Duration::from_secs(config_write_interval_secs),
             ),
@@ -674,7 +694,7 @@ impl AppState {
             let _ = self.ws_tx.send(Arc::new(latest));
         }
         // Écriture redb (rate-limitée 1/5s par série).
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_bms(&store.writer(), &self.redb_rl, &snap);
         }
         // AlertEngine en DERNIER : canal mpsc dédié (et non le broadcast ws_tx,
@@ -752,7 +772,7 @@ impl AppState {
                 .or_insert_with(|| Et112RingBuffer::new(self.config.et112.ring_buffer_size))
                 .push(snap.clone());
         }
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_et112(&store.writer(), &self.redb_rl, &snap);
         }
     }
@@ -785,7 +805,7 @@ impl AppState {
                 "irradiance_wm2": snap.irradiance_wm2,
             })));
         }
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_irradiance(&store.writer(), &self.redb_rl, &snap);
         }
         *self.irradiance_value.write().await = Some(snap);
@@ -809,7 +829,7 @@ impl AppState {
                 "energy_today_kwh": snap.energy_today_kwh,
             })));
         }
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_tasmota(&store.writer(), &self.redb_rl, &snap);
         }
         let mut buffers = self.tasmota_buffers.write().await;
@@ -844,7 +864,7 @@ impl AppState {
     pub async fn on_venus_mppt(&self, mppt: VenusMppt) {
         // Fraîcheur de la source (audit 2026-06 §18).
         self.freshness.touch("venus_mppt");
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_venus_mppt(&store.writer(), &self.redb_rl, &mppt);
         }
         let mut mppts = self.venus_mppts.write().await;
@@ -857,7 +877,7 @@ impl AppState {
     pub async fn on_venus_mppts_replace(&self, mppts: Vec<VenusMppt>) {
         // Fraîcheur de la source (audit 2026-06 §18).
         self.freshness.touch("venus_mppt");
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             let w = store.writer();
             for m in &mppts {
                 crate::redb_writes::write_venus_mppt(&w, &self.redb_rl, m);
@@ -914,7 +934,7 @@ impl AppState {
                     "ah_discharged_today": shunt.ah_discharged_today,
                 })));
             }
-            if let Some(store) = &self.metrics_store {
+            if let Some(store) = self.metrics_store() {
                 crate::redb_writes::write_venus_smartshunt(&store.writer(), &self.redb_rl, &shunt);
             }
             *self.venus_smartshunt.write().await = Some(shunt);
@@ -956,7 +976,7 @@ impl AppState {
                 "ah_discharged_today": shunt.ah_discharged_today,
             })));
         }
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_venus_smartshunt(&store.writer(), &self.redb_rl, &shunt);
         }
         *self.venus_smartshunt.write().await = Some(shunt);
@@ -969,7 +989,7 @@ impl AppState {
     pub async fn on_venus_temperature(&self, temp: VenusTemperature) {
         // Fraîcheur de la source (audit 2026-06 §18).
         self.freshness.touch("venus_temperature");
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_venus_temperature(&store.writer(), &self.redb_rl, &temp);
         }
         let mut temps = self.venus_temperatures.write().await;
@@ -984,7 +1004,7 @@ impl AppState {
     pub async fn on_venus_inverter(&self, inverter: VenusInverter) {
         // Fraîcheur de la source (audit 2026-06 §18).
         self.freshness.touch("venus_inverter");
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_venus_inverter(&store.writer(), &self.redb_rl, &inverter);
         }
         *self.venus_inverter.write().await = Some(inverter);
@@ -1000,7 +1020,7 @@ impl AppState {
     pub async fn on_venus_heatpump(&self, hp: VenusHeatpump) {
         // Fraîcheur de la source (audit 2026-06 §18).
         self.freshness.touch("venus_heatpump");
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_venus_heatpump(&store.writer(), &self.redb_rl, &hp);
         }
         let mut hps = self.venus_heatpumps.write().await;
@@ -1022,7 +1042,7 @@ impl AppState {
     // ==========================================================================
     /// Enregistre le dernier snapshot de monitoring système.
     pub async fn on_monitor_snapshot(&self, snap: MonitorSnapshot) {
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_monitor(&store.writer(), &self.redb_rl, &snap);
         }
         *self.monitor_snapshot.write().await = Some(snap);
@@ -1049,7 +1069,7 @@ impl AppState {
                 "sw_mode": if snap.sw_mode { "Auto" } else { "Manuel" },
             })));
         }
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_ats(&store.writer(), &self.redb_rl, &snap);
         }
         *self.ats_snapshot.write().await = Some(snap);
@@ -1093,7 +1113,7 @@ impl AppState {
                 }),
             ));
         }
-        if let Some(store) = &self.metrics_store {
+        if let Some(store) = self.metrics_store() {
             crate::redb_writes::write_shelly(&store.writer(), &self.redb_rl, &snap);
         }
         let mut map = self.shelly_latest.write().await;

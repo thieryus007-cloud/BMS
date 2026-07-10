@@ -112,7 +112,7 @@ pub async fn query_instant_post(
 /// Logique pure (sans extracteurs Axum) — appelable depuis le dispatcher
 /// `api/promql.rs` quand `default_backend = "redb"`.
 pub async fn run_query_instant(state: &AppState, params: &InstantParams) -> Response {
-    let Some(store) = state.metrics_store.clone() else {
+    let Some(store) = state.metrics_store() else {
         return not_configured();
     };
     let expr = match parse_and_validate(&params.query) {
@@ -269,7 +269,7 @@ pub async fn query_range_post(
 }
 
 pub async fn run_query_range(state: &AppState, params: &RangeParams) -> Response {
-    let Some(store) = state.metrics_store.clone() else {
+    let Some(store) = state.metrics_store() else {
         return not_configured();
     };
     let expr = match parse_and_validate(&params.query) {
@@ -310,7 +310,7 @@ pub async fn list_series(State(state): State<AppState>) -> Response {
 }
 
 pub async fn run_list_series(state: &AppState) -> Response {
-    let Some(store) = state.metrics_store.clone() else {
+    let Some(store) = state.metrics_store() else {
         return not_configured();
     };
     let reader = store.reader();
@@ -339,7 +339,7 @@ pub async fn list_labels(State(state): State<AppState>) -> Response {
 }
 
 pub async fn run_list_labels(state: &AppState) -> Response {
-    let Some(store) = state.metrics_store.clone() else {
+    let Some(store) = state.metrics_store() else {
         return not_configured();
     };
     let reader = store.reader();
@@ -369,7 +369,7 @@ pub async fn label_values(State(state): State<AppState>, Path(name): Path<String
 }
 
 pub async fn run_label_values(state: &AppState, name: &str) -> Response {
-    let Some(store) = state.metrics_store.clone() else {
+    let Some(store) = state.metrics_store() else {
         return not_configured();
     };
     let reader = store.reader();
@@ -398,7 +398,7 @@ pub async fn run_label_values(state: &AppState, name: &str) -> Response {
 // =============================================================================
 
 pub async fn healthy(State(state): State<AppState>) -> Response {
-    if state.metrics_store.is_some() {
+    if state.metrics_store().is_some() {
         (StatusCode::OK, "metrics-store backend is healthy").into_response()
     } else {
         (

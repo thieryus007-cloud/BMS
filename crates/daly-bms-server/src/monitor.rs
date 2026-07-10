@@ -108,7 +108,7 @@ fn maybe_dump_jemalloc_profile() {}
 // =============================================================================
 
 async fn write_process_memory_metrics(state: &AppState) {
-    let Some(store) = &state.metrics_store else { return };
+    let Some(store) = state.metrics_store() else { return };
     let stats = crate::redb_writes::ProcessMemoryStats {
         rss_bytes: read_self_rss_bytes().await,
         ..jemalloc_stats()

@@ -36,7 +36,7 @@ pub async fn import_prometheus(
     State(state): State<AppState>,
     body: String,
 ) -> impl IntoResponse {
-    let Some(store) = &state.metrics_store else {
+    let Some(store) = state.metrics_store() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "metrics-store not available");
     };
     let writer = store.writer();
