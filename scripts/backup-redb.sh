@@ -45,6 +45,31 @@ die() { echo "[backup-redb] ERREUR : $*" >&2; exit 1; }
 base_name="$(basename "$DB_PATH")"
 mkdir -p "$BACKUP_DIR"
 
+# ── Verrou anti-concurrence (best-effort) ────────────────────────────────────
+# Empêche qu'un lancement manuel ET le timer (ou le rattrapage Persistent au
+# 1er `enable`) copient la base en même temps. Lockfile en 0666 pour être
+# utilisable que le script tourne en root (lancement manuel via sudo) OU en
+# dalybms (service systemd). Si le verrou est indisponible (perms), on continue
+# sans (dégradé) plutôt que d'échouer.
+LOCK="$BACKUP_DIR/.backup.lock"
+[ -e "$LOCK" ] || ( umask 0; : >"$LOCK" ) 2>/dev/null || true
+if exec 9>>"$LOCK" 2>/dev/null && command -v flock >/dev/null 2>&1; then
+    if ! flock -n 9; then
+        log "une sauvegarde est déjà en cours (verrou tenu) — abandon"
+        exit 0
+    fi
+fi
+
+# ── Nettoyage des .partial orphelins ─────────────────────────────────────────
+# Un run interrompu (reboot/kill pendant la copie) laisse un `.partial` que la
+# rotation ignore volontairement → il s'accumulerait. Le verrou étant tenu,
+# aucun autre run n'écrit un `.partial` en ce moment : on peut les purger.
+for orphan in "$BACKUP_DIR/${base_name}."*.partial; do
+    [ -e "$orphan" ] || continue
+    log "purge d'un .partial orphelin (run précédent interrompu) : $orphan"
+    rm -f "$orphan"
+done
+
 # ── Garde-fou espace disque : refuser si l'espace libre < 1.2× la taille base ─
 db_bytes=$(stat -c '%s' "$DB_PATH")
 avail_bytes=$(df -PB1 "$BACKUP_DIR" | awk 'NR==2 {print $4}')
