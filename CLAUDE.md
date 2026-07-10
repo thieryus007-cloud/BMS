@@ -441,3 +441,4 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | Clim Toshiba — **référence câblage/MQTT** (BOM, brochage CN22, topics `santuario/toshiba`, module EM `logic/toshiba_ac`, conso Tongou) — ⚠️ voie ESPHome **non retenue**, YAML §4 obsolète | `docs/integration-toshiba-shorai-esphome.md` |
 | Dépannage, netdiag réseau, debug onduleur/SmartShunt, memory-leak | `docs/diagnostic-depannage.md` |
 | **Audit robustesse 2026-06** — 18 axes (§3-§18 implémentés ; §1-§2 sécurité en attente d'action utilisateur) | `docs/audit-robustesse-2026-06.md` |
+| **Incident 2026-07-09** — boucle de crash au reboot (récupération redb > TimeoutStartSec) : diagnostic, cause racine, 3 correctifs, récupération historique, prévention (UPS) | `docs/incident-2026-07-09-reboot-redb.md` |
