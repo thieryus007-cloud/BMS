@@ -1,0 +1,31 @@
+[Unit]
+Description=Sauvegarde de la base metrics-store (redb) — DalyBMS
+Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
+# La base vit sur le NVMe : ne pas tenter la sauvegarde si le mount manque.
+RequiresMountsFor=/mnt/nvme/daly-bms
+# Ordonne après le service principal (sans le requérir : la sauvegarde doit
+# pouvoir tourner même service arrêté — la copie à chaud est crash-consistent).
+After=daly-bms.service
+
+[Service]
+Type=oneshot
+User=dalybms
+Group=dalybms
+
+# Priorité basse : la sauvegarde ne doit pas gêner l'ingestion RS485/redb.
+Nice=15
+IOSchedulingClass=idle
+
+# Surcharges éventuelles (défauts dans le script) :
+# Environment=DB_PATH=/mnt/nvme/daly-bms/metrics.redb
+# Environment=BACKUP_DIR=/mnt/nvme/daly-bms/backups
+# Environment=KEEP=3
+ExecStart=/usr/local/bin/backup-redb.sh
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=daly-bms-backup
+
+# Sécurité minimale
+NoNewPrivileges=true
+PrivateTmp=true

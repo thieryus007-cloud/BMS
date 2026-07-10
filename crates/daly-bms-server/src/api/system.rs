@@ -154,7 +154,7 @@ pub async fn set_mppt_yield(
 ) -> impl IntoResponse {
     if let Some(kwh) = body.total_yield_kwh.or(body.mppt_yield_kwh) {
         *state.mppt_yield_kwh.write().await = kwh;
-        if let Some(store) = &state.metrics_store {
+        if let Some(store) = state.metrics_store() {
             crate::redb_writes::write_solar_yield(&store.writer(), &state.redb_rl, kwh);
         }
     }
@@ -168,7 +168,7 @@ pub async fn set_mppt_yield(
         *state.pvinv_power_w.write().await = v;
     }
     if dc_pv_in.is_some() || body.pvinv_power_w.is_some() {
-        if let Some(store) = &state.metrics_store {
+        if let Some(store) = state.metrics_store() {
             crate::redb_writes::write_solar_components(
                 &store.writer(), &state.redb_rl, dc_pv_in, body.pvinv_power_w);
         }
@@ -176,7 +176,7 @@ pub async fn set_mppt_yield(
     if let Some(tw) = body.solar_total_w {
         *state.solar_total_w.write().await = tw;
         // Écriture redb (rate-limitée 1/5s — cf. redb_writes::MIN_WRITE_INTERVAL).
-        if let Some(store) = &state.metrics_store {
+        if let Some(store) = state.metrics_store() {
             crate::redb_writes::write_solar_total(&store.writer(), &state.redb_rl, tw);
         }
     }

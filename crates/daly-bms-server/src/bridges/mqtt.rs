@@ -948,7 +948,7 @@ async fn handle_inverter_topic(state: &AppState, json: &Value) {
 ///   "net_rx_bps": 1234, "net_tx_bps": 567 }
 /// ```
 fn handle_em_metrics_topic(state: &AppState, json: &Value) {
-    let Some(store) = &state.metrics_store else { return };
+    let Some(store) = state.metrics_store() else { return };
     let f = |k: &str| json.get(k).and_then(|v| v.as_f64()).map(|v| v as f32);
     let payload = crate::redb_writes::EmMetricsPayload {
         cpu_percent:    f("cpu_percent"),
@@ -974,7 +974,7 @@ fn handle_em_metrics_topic(state: &AppState, json: &Value) {
 /// "target_temp": 24, "current_temp": 21, "outdoor_temp": 8, "pwr_level": 100,
 /// "self_clean": false, ... }`.
 fn handle_toshiba_state_topic(state: &AppState, topic: &str, json: &Value) {
-    let Some(store) = &state.metrics_store else { return };
+    let Some(store) = state.metrics_store() else { return };
     // santuario/toshiba/<zone>/state → <zone>
     let Some(zone) = topic
         .strip_prefix("santuario/toshiba/")
@@ -1013,7 +1013,7 @@ async fn handle_em_solar_topic(state: &AppState, json: &Value) {
 
     if let Some(kwh) = f("total_yield_kwh").or_else(|| f("mppt_yield_kwh")) {
         *state.mppt_yield_kwh.write().await = kwh;
-        if let Some(store) = &state.metrics_store {
+        if let Some(store) = state.metrics_store() {
             crate::redb_writes::write_solar_yield(&store.writer(), &state.redb_rl, kwh);
         }
     }
@@ -1028,14 +1028,14 @@ async fn handle_em_solar_topic(state: &AppState, json: &Value) {
         *state.pvinv_power_w.write().await = v;
     }
     if dc_pv_in.is_some() || pvinv_in.is_some() {
-        if let Some(store) = &state.metrics_store {
+        if let Some(store) = state.metrics_store() {
             crate::redb_writes::write_solar_components(
                 &store.writer(), &state.redb_rl, dc_pv_in, pvinv_in);
         }
     }
     if let Some(tw) = f("solar_total_w") {
         *state.solar_total_w.write().await = tw;
-        if let Some(store) = &state.metrics_store {
+        if let Some(store) = state.metrics_store() {
             crate::redb_writes::write_solar_total(&store.writer(), &state.redb_rl, tw);
         }
     }
@@ -1048,7 +1048,7 @@ async fn handle_em_solar_topic(state: &AppState, json: &Value) {
 ///
 /// Payload : `{ "current_temp_c": 48.0, "target_temp_c": 50.0, "mode": 1 }`
 fn handle_wh_metrics_topic(state: &AppState, json: &Value) {
-    let Some(store) = &state.metrics_store else { return };
+    let Some(store) = state.metrics_store() else { return };
     let f = |k: &str| json.get(k).and_then(|v| v.as_f64()).map(|v| v as f32);
     let i = |k: &str| json.get(k).and_then(|v| v.as_i64()).map(|v| v as i32);
     let payload = crate::redb_writes::WhMetricsPayload {

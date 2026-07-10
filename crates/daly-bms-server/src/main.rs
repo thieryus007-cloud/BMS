@@ -371,47 +371,13 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    // ── metrics-store redb (seule TSDB, cf. `docs/metriques-redb-architecture.md`) ──
-    let metrics_store = if config.metrics_store.enabled {
-        let opts = metrics_store::Options {
-            cache_bytes: config.metrics_store.cache_mb * 1024 * 1024,
-            writer_queue_depth: config.metrics_store.queue_depth,
-            writer: metrics_store::WriterConfig::default(),
-        };
-        match open_metrics_store_with_quarantine(&config.metrics_store.db_path, opts) {
-            Ok(s) => {
-                info!(
-                    db_path = %config.metrics_store.db_path,
-                    "metrics-store ouvert (écriture redb activée)"
-                );
-                if config.metrics_store.maintenance_interval_hours > 0 {
-                    let policy = metrics_store::TierPolicy {
-                        raw_retention_days: config.metrics_store.raw_retention_days,
-                        hourly_retention_days: config.metrics_store.hourly_retention_days,
-                        daily_retention_days: config.metrics_store.daily_retention_days,
-                    };
-                    // Le JoinHandle est conservé (binding nommé) : le dropper
-                    // détacherait la tâche sans l'annuler, mais on évite ainsi
-                    // le lint let_underscore_future et on garde la poignée.
-                    let _maintenance_handle = s.spawn_maintenance(
-                        policy,
-                        config.metrics_store.maintenance_interval_hours,
-                    );
-                    info!(
-                        interval_h = config.metrics_store.maintenance_interval_hours,
-                        "metrics-store: maintenance tiered planifiée"
-                    );
-                }
-                Some(s)
-            }
-            Err(e) => {
-                warn!("metrics-store ouverture échouée : {e} — écriture redb désactivée");
-                None
-            }
-        }
-    } else {
-        None
-    };
+    // ── metrics-store redb : ouverture DÉFÉRÉE en tâche de fond (#2) ───────────
+    // On N'ouvre PAS redb ici (avant-plan). Après un arrêt non gracieux, redb
+    // fait une récupération dont le coût ∝ taille du fichier (potentiellement
+    // longue) : la faire ici bloquait le démarrage — donc READY=1 systemd, le
+    // bind du port 8080 ET le polling RS485. `AppState` démarre avec un backend
+    // `None` ; une tâche de fond (plus bas, « OUVERTURE EN TÂCHE DE FOND »)
+    // ouvre redb puis appelle `state.set_metrics_store(...)`.
 
     // ── Canal dédié AlertEngine ────────────────────────────────────────────────
     // mpsc borné (et non un abonnement au broadcast ws_tx) : un abonné
@@ -427,14 +393,15 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // ── État partagé ───────────────────────────────────────────────────────────
-    // metrics-store (redb) est la seule TSDB (lecture + écriture via le Writer du shim).
-    let metrics_store_arc = metrics_store.as_ref().map(|s| std::sync::Arc::new(s.clone()));
+    // metrics-store (redb) est la seule TSDB (lecture + écriture via le Writer du
+    // shim). Le backend démarre à `None` : il est renseigné par la tâche
+    // d'ouverture en arrière-plan (#2) une fois la récupération redb terminée.
     let state = AppState::new(
         config.clone(),
         log_buffer,
         alert_engine.clone(),
         alert_tx,
-        metrics_store_arc,
+        None,
     );
 
     // ── Bridges en arrière-plan ─────────────────────────────────────────────────
@@ -793,28 +760,92 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("Monitor + watchdog désactivés via DALY_DISABLE_MONITOR (debug fuite mémoire)");
     }
 
-    // ── Export de la fraîcheur des sources (audit 2026-06 §18) ────────────────
-    // Toutes les 30 s : âge de la dernière donnée par source →
-    // `source_last_update_age_seconds{source=...}` dans metrics-store.
-    // Transforme les pannes silencieuses (« la donnée ne se rafraîchit
-    // plus ») en signal alertable (âge > N × intervalle de polling).
-    if let Some(store) = &state.metrics_store {
-        let writer = store.writer();
-        let freshness_state = state.clone();
-        spawn_critical(async move {
-            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
-            loop {
-                ticker.tick().await;
-                let ts = chrono::Utc::now().timestamp_millis();
-                for (source, age) in freshness_state.freshness.ages_seconds() {
-                    let sample =
-                        metrics_store::Sample::new("source_last_update_age_seconds", ts, age)
-                            .with_label("source", &source);
-                    // try_write : jamais bloquant ; pendant l'arrêt gracieux
-                    // le canal est fermé → échec silencieux attendu.
-                    let _ = writer.try_write(sample);
+    // ── metrics-store redb : OUVERTURE EN TÂCHE DE FOND (#2) ───────────────────
+    // Le service est déjà « prêt » (site HTTP + RS485). On ouvre redb ici, sans
+    // bloquer le démarrage : après un arrêt non gracieux la récupération peut
+    // être longue (∝ taille du fichier). Pendant ce temps le backend vaut `None`
+    // → les écritures de métriques sont ignorées et les lectures Grafana
+    // renvoient « backend not ready » ; tout reprend dès la fin de la
+    // récupération. Tâche NON critique : un échec d'ouverture laisse le service
+    // tourner en mode dégradé (sans persistance), il ne doit pas arrêter le
+    // process (contrairement à un `spawn_critical`).
+    if config.metrics_store.enabled {
+        let store_state = state.clone();
+        let ms_cfg = config.metrics_store.clone();
+        tokio::spawn(async move {
+            let opts = metrics_store::Options {
+                cache_bytes: ms_cfg.cache_mb * 1024 * 1024,
+                writer_queue_depth: ms_cfg.queue_depth,
+                writer: metrics_store::WriterConfig::default(),
+            };
+            let db_path = ms_cfg.db_path.clone();
+            let t0 = std::time::Instant::now();
+            info!(
+                db_path = %db_path,
+                "metrics-store : ouverture en tâche de fond (récupération éventuelle en cours)…"
+            );
+            // Ouverture bloquante (mmap + récupération éventuelle) → pool blocking
+            // pour ne pas monopoliser un worker de l'exécuteur async.
+            let opened = tokio::task::spawn_blocking(move || {
+                open_metrics_store_with_quarantine(&db_path, opts)
+            })
+            .await;
+            let store = match opened {
+                Ok(Ok(s)) => std::sync::Arc::new(s),
+                Ok(Err(e)) => {
+                    warn!("metrics-store ouverture échouée : {e} — lecture/écriture redb désactivées");
+                    return;
                 }
+                Err(e) => {
+                    error!("metrics-store : tâche d'ouverture a paniqué ({e}) — redb désactivé");
+                    return;
+                }
+            };
+            store_state.set_metrics_store(store.clone());
+            info!(
+                db_path = %ms_cfg.db_path,
+                elapsed_s = t0.elapsed().as_secs(),
+                "metrics-store ouvert (écriture redb activée) — backend disponible"
+            );
+
+            // Maintenance tiered (compaction logique périodique).
+            if ms_cfg.maintenance_interval_hours > 0 {
+                let policy = metrics_store::TierPolicy {
+                    raw_retention_days: ms_cfg.raw_retention_days,
+                    hourly_retention_days: ms_cfg.hourly_retention_days,
+                    daily_retention_days: ms_cfg.daily_retention_days,
+                };
+                // JoinHandle conservé (binding nommé) pour éviter let_underscore_future.
+                let _maintenance_handle =
+                    store.spawn_maintenance(policy, ms_cfg.maintenance_interval_hours);
+                info!(
+                    interval_h = ms_cfg.maintenance_interval_hours,
+                    "metrics-store: maintenance tiered planifiée"
+                );
             }
+
+            // ── Export de la fraîcheur des sources (audit 2026-06 §18) ─────────
+            // Toutes les 30 s : âge de la dernière donnée par source →
+            // `source_last_update_age_seconds{source=...}`. Démarré ici (et non
+            // au boot) car il écrit dans le store : inutile tant que redb n'est
+            // pas ouvert. Boucle infinie → `spawn_critical` (sa fin = anomalie).
+            let writer = store.writer();
+            let freshness_state = store_state.clone();
+            spawn_critical(async move {
+                let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
+                loop {
+                    ticker.tick().await;
+                    let ts = chrono::Utc::now().timestamp_millis();
+                    for (source, age) in freshness_state.freshness.ages_seconds() {
+                        let sample =
+                            metrics_store::Sample::new("source_last_update_age_seconds", ts, age)
+                                .with_label("source", &source);
+                        // try_write : jamais bloquant ; pendant l'arrêt gracieux
+                        // le canal est fermé → échec silencieux attendu.
+                        let _ = writer.try_write(sample);
+                    }
+                }
+            });
         });
     }
 
@@ -857,7 +888,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
-    if let Some(store) = &shutdown_state.metrics_store {
+    if let Some(store) = shutdown_state.metrics_store() {
         info!("Arrêt gracieux : flush du batch metrics-store…");
         store.shutdown();
     }
