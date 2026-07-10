@@ -52,6 +52,7 @@ transverse**. Tous les documents vivent dans `docs/`.
 | [toshiba-suzumi-rs-plan.md](./toshiba-suzumi-rs-plan.md) | **Projet Toshiba — firmware Rust ESP32 + décisions d'intégration** (protocole SUZUMI vérifié, §18 décisions FP2/HomeKit/Homie/HomeSpan/Matter, reprise de session §0). Lourd → détail opérationnel déporté ci-dessous. |
 | [toshiba-bridges.md](./toshiba-bridges.md) | **Ponts & crates Toshiba/FP2 — référence opérationnelle** : contrat MQTT, carte des composants **A–E**, pipeline présence, HomeKit **D** vs Matter **E**, commandes/tests. |
 | [diagnostic-depannage.md](./diagnostic-depannage.md) | Dépannage transverse, `netdiag` réseau, debug onduleur/SmartShunt, investigation memory-leak (en cours). |
+| [incident-2026-07-09-reboot-redb.md](./incident-2026-07-09-reboot-redb.md) | **Post-mortem** : boucle de crash au reboot (récupération redb > `TimeoutStartSec`). Diagnostic, cause racine, 3 correctifs (timeout `infinity`, ouverture redb en tâche de fond, sauvegarde quotidienne), récupération d'historique, prévention (UPS). |
 
 ### Hors `docs/`
 

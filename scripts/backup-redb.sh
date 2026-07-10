@@ -47,13 +47,12 @@ mkdir -p "$BACKUP_DIR"
 
 # ── Verrou anti-concurrence (best-effort) ────────────────────────────────────
 # Empêche qu'un lancement manuel ET le timer (ou le rattrapage Persistent au
-# 1er `enable`) copient la base en même temps. Lockfile en 0666 pour être
-# utilisable que le script tourne en root (lancement manuel via sudo) OU en
-# dalybms (service systemd). Si le verrou est indisponible (perms), on continue
-# sans (dégradé) plutôt que d'échouer.
-LOCK="$BACKUP_DIR/.backup.lock"
-[ -e "$LOCK" ] || ( umask 0; : >"$LOCK" ) 2>/dev/null || true
-if exec 9>>"$LOCK" 2>/dev/null && command -v flock >/dev/null 2>&1; then
+# 1er `enable`) copient la base en même temps. flock (consultatif) directement
+# sur le RÉPERTOIRE de sauvegarde, via un fd en lecture seule : aucun fichier de
+# verrou à créer ni à permissionner (le répertoire est ouvrable en lecture que
+# le script tourne en root — lancement manuel — ou en dalybms — service). Si
+# flock est indisponible, on continue sans (dégradé) plutôt que d'échouer.
+if exec 9<"$BACKUP_DIR" 2>/dev/null && command -v flock >/dev/null 2>&1; then
     if ! flock -n 9; then
         log "une sauvegarde est déjà en cours (verrou tenu) — abandon"
         exit 0
