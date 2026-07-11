@@ -280,6 +280,27 @@ Topics internes `santuario/em/*` (energy-manager → daly-bms-server, pas de D-B
 solaire 1 Hz — remplace l'ancien POST HTTP `/api/v1/solar/mppt-yield`, conservé
 en fallback ; cf. docs/diagnostic-depannage.md §17).
 
+### Topics SCALAIRES (nombre nu, retain=true) — dashboards externes
+
+Pour les tableaux de bord type **Dashboard Studio** qui lient « 1 topic = 1 valeur
+numérique » **sans extraction JSON** (le champ VALUE est une formule numérique, pas
+un JSON path). Publiés **en plus** des payloads `.../venus` (JSON), qui restent
+inchangés. Restent **locaux** au broker Pi5 (pas dans le bridge NanoPi).
+
+| Source | Topic scalaire | Code |
+|--------|----------------|------|
+| BMS `{n}` | `bms/{n}/soc` `voltage` `current` `power` `temperature` | `bridges/mqtt.rs::publish_snapshot` |
+| ET112 `{addr}` (7/8/9) | `et112/{addr}/power` `voltage` `current` `apparent_power` `frequency` `energy_import` `energy_export` | `bridges/mqtt.rs::publish_et112_scalars` |
+| Tongou `{tasmota_id}` | `tasmota/{id}/power` `state`(0/1) `voltage` `current` `energy_today` | `bridges/mqtt.rs::publish_tasmota_scalars` |
+| ATS CHINT | `ats/source`(0/1/2) `ats/mode`(auto=1) | `bridges/mqtt.rs::publish_ats_scalars` |
+| Irradiance | `irradiance/raw` (déjà scalaire) | `bridges/mqtt.rs::publish_irradiance` |
+| Chauffe-eau | `em/water_heater/temp` `target` `mode`(0/1/2) | `energy-manager water_heater/mod.rs::publish_to_venus` |
+| Solaire (agrégats EM) | `em/solar/total_w` `pv_w` `pvinv_w` `yield_kwh` `house_w` | `energy-manager solar_power/mod.rs::writer_task` |
+
+> Victron (`N/{portal}/…`) n'est **pas** sous `santuario/` → hors abonnement
+> `santuario/#` d'un dashboard. Le SOC/tension/… batterie sont dispo via les
+> topics `bms/{n}/…` ci-dessus ; le reste Victron via l'app Victron officielle.
+
 ---
 
 ## 7. API ENDPOINTS (extraits — voir `crates/daly-bms-server/src/api/mod.rs`)

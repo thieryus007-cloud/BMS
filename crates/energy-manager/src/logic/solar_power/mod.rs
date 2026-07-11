@@ -197,6 +197,13 @@ async fn writer_task(
         // (conservé en fallback).
         bus.publish(MqttOutgoing::transient(publish::EM_SOLAR, &body)).await;
 
+        // Topics scalaires (dashboards externes) — agrégats solaires en nombre nu.
+        bus.publish(MqttOutgoing::raw("santuario/em/solar/total_w",   format!("{solar_total:.0}"), true)).await;
+        bus.publish(MqttOutgoing::raw("santuario/em/solar/pv_w",      format!("{dc_pv_w:.0}"),     true)).await;
+        bus.publish(MqttOutgoing::raw("santuario/em/solar/pvinv_w",   format!("{pvinv_w:.0}"),     true)).await;
+        bus.publish(MqttOutgoing::raw("santuario/em/solar/yield_kwh", format!("{total_yield:.2}"), true)).await;
+        bus.publish(MqttOutgoing::raw("santuario/em/solar/house_w",   format!("{house_power:.0}"), true)).await;
+
         bus.emit_live(LiveEvent::new("solar", json!({
             "solar_total_w": solar_total,
             "dc_pv_power_w": dc_pv_w,
