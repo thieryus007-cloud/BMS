@@ -149,6 +149,8 @@ pub async fn run_mqtt_bridge(state: AppState, cfg: MqttConfig, addr_map: HashMap
             if let Err(e) = publish_et112_snapshot(&client, &cfg, snap, idx, position, service_type).await {
                 error!("MQTT publish ET112 erreur : {:?}", e);
             }
+            // Topics scalaires dédiés (dashboards externes type Dashboard Studio).
+            publish_et112_scalars(&client, &cfg, snap).await;
         }
 
         // ── Irradiance PRALRAN → santuario/irradiance/raw ────────────────────
@@ -166,6 +168,7 @@ pub async fn run_mqtt_bridge(state: AppState, cfg: MqttConfig, addr_map: HashMap
                     if let Err(e) = publish_ats_snapshot(&client, &cfg, &ats_snap, ats_cfg.mqtt_index).await {
                         error!("MQTT publish ATS erreur : {:?}", e);
                     }
+                    publish_ats_scalars(&client, &cfg, &ats_snap).await;
                 }
             }
         }
@@ -173,6 +176,8 @@ pub async fn run_mqtt_bridge(state: AppState, cfg: MqttConfig, addr_map: HashMap
         // ── Tasmota → forward Venus OS switch/acload si mqtt_index défini ──
         let tasmota_snaps = state.tasmota_latest_all().await;
         for snap in &tasmota_snaps {
+            // Topics scalaires dédiés (puissance/état par prise Tongou).
+            publish_tasmota_scalars(&client, &cfg, snap).await;
             let dev_cfg = state.config.tasmota.devices
                 .iter()
                 .find(|d| d.id == snap.id);
@@ -206,6 +211,59 @@ async fn publish_irradiance(
         .publish(&topic, PUB_QOS, true, payload)
         .await?;
     Ok(())
+}
+
+// =============================================================================
+// Topics scalaires (une valeur numérique par topic, retain=true)
+// -----------------------------------------------------------------------------
+// Destinés aux tableaux de bord externes (Dashboard Studio, etc.) qui lient un
+// topic = un nombre, SANS extraction de champ JSON. Complètent les payloads
+// `.../venus` (JSON) sans les modifier.
+// =============================================================================
+
+/// Racine des topics (préfixe sans le dernier segment, ex: "santuario").
+fn scalar_base(cfg: &MqttConfig) -> &str {
+    cfg.topic_prefix.rsplit_once('/').map(|(p, _)| p).unwrap_or("santuario")
+}
+
+/// Publie une valeur scalaire (nombre nu) en retain.
+async fn pub_scalar(client: &AsyncClient, topic: String, value: String) {
+    if let Err(e) = client.publish(topic, PUB_QOS, true, value).await {
+        warn!("MQTT publish scalaire échoué : {e}");
+    }
+}
+
+/// ET112 → `{base}/et112/{addr}/{champ}` (inclut fréquence + puissance apparente,
+/// absentes du payload Venus).
+async fn publish_et112_scalars(client: &AsyncClient, cfg: &MqttConfig, snap: &Et112Snapshot) {
+    let base = scalar_base(cfg);
+    let a = snap.address;
+    pub_scalar(client, format!("{base}/et112/{a}/power"),          format!("{:.1}", snap.power_w)).await;
+    pub_scalar(client, format!("{base}/et112/{a}/voltage"),        format!("{:.1}", snap.voltage_v)).await;
+    pub_scalar(client, format!("{base}/et112/{a}/current"),        format!("{:.2}", snap.current_a)).await;
+    pub_scalar(client, format!("{base}/et112/{a}/apparent_power"), format!("{:.1}", snap.apparent_power_va)).await;
+    pub_scalar(client, format!("{base}/et112/{a}/frequency"),      format!("{:.2}", snap.frequency_hz)).await;
+    pub_scalar(client, format!("{base}/et112/{a}/energy_import"),  format!("{:.3}", snap.energy_import_kwh())).await;
+    pub_scalar(client, format!("{base}/et112/{a}/energy_export"),  format!("{:.3}", snap.energy_export_kwh())).await;
+}
+
+/// Tasmota/Tongou → `{base}/tasmota/{tasmota_id}/{champ}` (état relais en 0/1).
+async fn publish_tasmota_scalars(client: &AsyncClient, cfg: &MqttConfig, snap: &TasmotaSnapshot) {
+    let base = scalar_base(cfg);
+    let id = &snap.tasmota_id;
+    pub_scalar(client, format!("{base}/tasmota/{id}/power"),        format!("{:.1}", snap.power_w)).await;
+    pub_scalar(client, format!("{base}/tasmota/{id}/state"),        (if snap.power_on { 1 } else { 0 }).to_string()).await;
+    pub_scalar(client, format!("{base}/tasmota/{id}/voltage"),      format!("{:.1}", snap.voltage_v)).await;
+    pub_scalar(client, format!("{base}/tasmota/{id}/current"),      format!("{:.2}", snap.current_a)).await;
+    pub_scalar(client, format!("{base}/tasmota/{id}/energy_today"), format!("{:.3}", snap.energy_today_kwh)).await;
+}
+
+/// ATS CHINT → `{base}/ats/{source|mode}` (source active 0/1/2, mode auto=1/manuel=0).
+async fn publish_ats_scalars(client: &AsyncClient, cfg: &MqttConfig, snap: &AtsSnapshot) {
+    let base = scalar_base(cfg);
+    let source = if snap.sw2_closed { 2 } else if snap.sw1_closed { 1 } else { 0 };
+    pub_scalar(client, format!("{base}/ats/source"), source.to_string()).await;
+    pub_scalar(client, format!("{base}/ats/mode"),   (if snap.sw_mode { 1 } else { 0 }).to_string()).await;
 }
 
 /// Publie un snapshot ET112 sur le topic `santuario/{service_type}/{idx}/venus`.
@@ -382,6 +440,7 @@ async fn publish_snapshot(
     publish_str(client, &format!("{}/voltage", prefix), &format!("{:.2}", snap.dc.voltage)).await;
     publish_str(client, &format!("{}/current", prefix), &format!("{:.1}", snap.dc.current)).await;
     publish_str(client, &format!("{}/power",   prefix), &format!("{:.1}", snap.dc.power)).await;
+    publish_str(client, &format!("{}/temperature", prefix), &format!("{:.1}", snap.dc.temperature)).await;
 
     // JSON status complet
     let status_json = serde_json::to_string(snap)?;

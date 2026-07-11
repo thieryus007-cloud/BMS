@@ -39,14 +39,25 @@ async fn keepalive_task(interval_secs: u64, bus: AppBus, state: Arc<RwLock<Energ
 
 async fn publish_to_venus(bus: &AppBus, state: &Arc<RwLock<EnergyState>>) {
     let s = state.read().await;
+    let mode   = s.water_heater_mode.to_venus_state();
+    let temp   = s.water_heater_temp_c;
+    let target = s.water_heater_target_c;
     let payload = json!({
-        "State": s.water_heater_mode.to_venus_state(),
-        "Temperature": s.water_heater_temp_c,
-        "TargetTemperature": s.water_heater_target_c,
+        "State": mode,
+        "Temperature": temp,
+        "TargetTemperature": target,
         "Position": 0,
     });
     drop(s);
     bus.publish(MqttOutgoing::retained(publish::HEATPUMP_VENUS, &payload)).await;
+    // Topics scalaires (dashboards externes type Dashboard Studio) : °C et mode 0/1/2.
+    if let Some(t) = temp {
+        bus.publish(MqttOutgoing::raw("santuario/em/water_heater/temp", format!("{t:.1}"), true)).await;
+    }
+    if let Some(t) = target {
+        bus.publish(MqttOutgoing::raw("santuario/em/water_heater/target", format!("{t:.1}"), true)).await;
+    }
+    bus.publish(MqttOutgoing::raw("santuario/em/water_heater/mode", mode.to_string(), true)).await;
     bus.emit_live(LiveEvent::new("water_heater_venus", &payload));
 }
 
