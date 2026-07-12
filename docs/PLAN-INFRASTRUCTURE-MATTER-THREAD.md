@@ -58,6 +58,15 @@
 - Pont FP2 (`bridge/aqara-fp2-mqtt/`) préparé : venv Python + `aiohomekit` installés,
   `config.toml` + service systemd déployés en `disabled/inactive` (prêt pour `discover`/`pair`
   dès réception des capteurs FP2).
+- **Sauvegarde image disque complète** ajoutée (`scripts/backup-sdcard-pi5.sh` +
+  `pi5-sdcard-backup.timer`, hebdomadaire) : la carte microSD du Pi5 (OS, `~/ot-br-posix`,
+  tout ce qui est « local seulement ») est maintenant imagée sur le NVMe. Premier run manuel
+  validé : 29 Go → 4,3 Go compressé (zstd), 3 min, aucun service perturbé. Détails CLAUDE.md §0.
+- **Piège découvert** : le Pi5 était resté checkout sur une ancienne branche Claude déjà
+  fusionnée (`claude/homey-mqtt-device-setup-3ljz66`) → `make sync` « réussissait » sans jamais
+  rapatrier les commits poussés sur `main` (6 commits de cette session étaient invisibles côté
+  Pi5 jusqu'à correction). Corrigé (`git checkout main`). **Toujours vérifier la branche du Pi5
+  après un push notable** — procédure dans CLAUDE.md §3.
 
 #### Documentation / Git
 

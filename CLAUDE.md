@@ -25,6 +25,7 @@
 | Compacter la base redb (réduit le fichier, garde l'historique ; service arrêté pdt l'op) | `sudo bash scripts/compact-redb.sh 7` (abaisse raw_retention_days à 7 + tiering + compaction physique) |
 | **Sauvegarder la base redb** (copie crash-consistent, service EN marche) | `sudo /usr/local/bin/backup-redb.sh` (auto quotidien via `daly-bms-backup.timer`). Lister : `ls -lh /mnt/nvme/daly-bms/backups/`. Restauration : service arrêté → `cp backups/metrics.redb.<TS> /mnt/nvme/daly-bms/metrics.redb` + `chown dalybms:dalybms` (détails en tête de `scripts/backup-redb.sh`). |
 | État du timer de sauvegarde | `systemctl status daly-bms-backup.timer` / `journalctl -u daly-bms-backup.service -n 20` |
+| **Sauvegarder la carte SD complète** (image bootable, protège de la panne microSD) | `sudo /usr/local/bin/backup-sdcard-pi5.sh` (auto hebdo dimanche 03h via `pi5-sdcard-backup.timer`, ~3 min, `/dev/mmcblk0` 29 Go → ~4,3 Go compressé zstd). Lister : `ls -lh /mnt/nvme/daly-bms/backups/sdcard/`. Restauration (procédure complète en tête de `scripts/backup-sdcard-pi5.sh`) : flasher l'image sur une carte de remplacement **depuis une autre machine**, jamais sur la carte qui boot le Pi5. |
 | Nettoyer disque (build) | `rm -rf target/aarch64-unknown-linux-gnu/release-symbols target/armv7-unknown-linux-gnueabihf target/debug target/release ~/.cargo/registry/cache ~/.cargo/registry/src /tmp/jeprof /tmp/jeprof.*.heap && sudo apt-get clean && sudo journalctl --vacuum-size=200M` (garde `target/aarch64-…/release` = cache prod ; `release-symbols`/jeprof = artefacts de diagnostic régénérables). Reset total : `cargo clean` |
 | Nb séries en base | `curl -s http://localhost:8080/api/v1/redb/series \| jq '.data \| length'` |
 | Healthcheck backend | `curl -s http://localhost:8080/-/healthy` |
@@ -224,6 +225,16 @@ SSH Pi5 config (`~/.ssh/config`): clé `~/.ssh/id_nanopi` → `Host nanopi` + `H
 - **Push** : `git push -u origin <branch>`
 - **Convention** : `feat(scope):` `fix(scope):` `chore(scope):` `docs(scope):` `refactor(scope):`
 - **Règle** : 2 branches max (`main` + 1 branche Claude active)
+- **⚠️ Piège `make sync`** : `make sync` fetch/reset sur la branche **actuellement checkout sur
+  le Pi5** (`BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)` dans le Makefile), **pas**
+  forcément `main`. Si le Pi5 est resté sur une ancienne branche Claude déjà mergée (via PR),
+  `make sync` continue de « réussir » silencieusement mais **ne rapatrie jamais les nouveaux
+  commits poussés sur `main`** (vécu le 2026-07-12 : Pi5 resté sur
+  `claude/homey-mqtt-device-setup-3ljz66`, fusionnée depuis longtemps, pendant que 6 commits
+  s'accumulaient sur `main` sans jamais atteindre le Pi5). **Vérifier après tout push notable** :
+  `ssh pi5compute@192.168.1.141 "cd ~/Daly-BMS-Rust && git branch --show-current"` → doit valoir
+  `main` (ou la branche de travail en cours). Si ce n'est pas le cas :
+  `git fetch origin main && git checkout main && git reset --hard origin/main`.
 
 ---
 
