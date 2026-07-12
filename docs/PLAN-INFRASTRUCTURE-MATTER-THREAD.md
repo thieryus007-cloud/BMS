@@ -359,7 +359,7 @@ Résultat attendu :
 
 Le service est activé au boot par le script setup (`systemctl enable otbr-agent`).
 
-### 6.5 Vérifier l'interface Thread et l'interface web
+### 6.5 Vérifier l'interface Thread et l'interface web Attention interface 8080 deja utilisée sur le Pi5.
 
 ```bash
 ip -br link show wpan0
@@ -368,7 +368,7 @@ sudo ot-ctl state
 
 `wpan0` doit exister ; `ot-ctl state` répond `disabled` (normal, le réseau n'est pas encore formé).
 
-Interface web OTBR : `http://<IP-du-RPi5>:80` (ou `:8080` selon la version du paquet otbr-web).
+Interface web OTBR : `http://<IP-du-RPi5>:80` (ou `:8080` selon la version du paquet otbr-web). configurer un autre port.
 
 **Critère de réussite Phase 3 :** service `otbr-agent` actif, interface `wpan0` créée, `ot-ctl` répond.
 
