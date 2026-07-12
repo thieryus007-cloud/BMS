@@ -39,6 +39,34 @@
 | Déployer energy-manager | `sudo systemctl stop energy-manager && sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ && sudo systemctl start energy-manager` |
 | Appliquer Config energy-manager | `sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart energy-manager` |
 
+### OTBR / Thread (Pi5) — préparé, en attente du XIAO RCP
+
+> Installé 2026-07-12 sans le matériel radio (XIAO nRF54LM20A pas encore livré). Services
+> **volontairement désactivés** (`disabled` + `inactive`) pour ne pas crash-looper sur un
+> chemin RCP inexistant (`/dev/ttyACM0`) — cf. incident boucle de redémarrage §8. Ne pas
+> activer avant d'avoir flashé et branché le XIAO#1 (Phase 2 de `docs/PLAN-INFRASTRUCTURE-MATTER-THREAD.md`).
+
+| Quand | Commande |
+|-------|----------|
+| Statut OTBR | `ssh pi5compute@192.168.1.141 "systemctl status otbr-agent otbr-web --no-pager"` |
+| Activer après branchement du XIAO RCP | `sudo systemctl enable --now otbr-agent otbr-web` (vérifier d'abord `/dev/ttyACM0` ou `/dev/ttyOTBR`, et `/etc/default/otbr-agent`) |
+| Interface web OTBR | `http://192.168.1.141:8083` (port choisi pour éviter 8080=daly-bms / 8081=energy-manager / 80=nginx) |
+| Backbone Thread | `wlan0` (**pas** `eth0` — `eth0` est DOWN/NO-CARRIER sur ce Pi5, cf. §2) |
+| Code source | `~/ot-br-posix` (cloné et compilé sur le Pi5, hors dépôt git du projet) |
+
+### nRF Connect SDK (Mac Mini) — toolchain préparée
+
+> `nrfutil` via le cask Homebrew est **cassé par Gatekeeper** (le binaire se fait
+> supprimer après install, cask marqué déprécié). Contournement : téléchargement direct
+> depuis `files.nordicsemi.com` (pas de flag quarantine appliqué par `curl`, contrairement
+> aux téléchargements Homebrew/Safari) → `~/bin/nrfutil`.
+
+| Quand | Commande |
+|-------|----------|
+| SDK installé | NCS v3.2.1 dans `/opt/nordic/ncs/v3.2.1` (~11 Go), toolchain dans `/opt/nordic/ncs/toolchains/` |
+| Lancer une commande dans l'environnement toolchain | `~/bin/nrfutil sdk-manager toolchain launch --ncs-version v3.2.1 --chdir /opt/nordic/ncs/v3.2.1 -- <commande west>` |
+| **⚠️ Board `xiao_nrf54lm20a` absent de NCS officiel** | nécessite le repo tiers `Seeed-Studio/platform-seeedboards` en `-DBOARD_ROOT=.../zephyr`. Son devicetree référence `nordic/nrf54lm20a_cpuapp.dtsi` (n'existe pas en v3.2.1) au lieu de `nordic/nrf54lm20a_enga_cpuapp.dtsi` (nom réel) — à corriger dans le clone local. Après correction : la résolution DTS passe, mais le `defconfig` Seeed déclenche des **warnings Kconfig traités en erreur** (ex. `NULL_POINTER_EXCEPTION_DETECTION_NONE`, `NRFX_GRTC`) non résolus — investigation à poursuivre avec le XIAO physique en main (Phase 1/2 de `docs/PLAN-INFRASTRUCTURE-MATTER-THREAD.md`). Le SoC nRF54LM20A lui-même **est** supporté nativement (board officiel `nrf54lm20dk` présent). |
+
 ### Perses (Pi5, port 8090)
 
 > ⚠️ Perses a été remplacé par Grafana (`:3000`). La page custom `/dashboard/history`
@@ -138,6 +166,8 @@ NanoPi (192.168.1.120, root)
 | NanoPi | 192.168.1.120 | root | WiFi `StarTh` |
 
 SSH Pi5 config (`~/.ssh/config`): clé `~/.ssh/id_nanopi` → `Host nanopi` + `Host 192.168.1.120` (les deux entrées nécessaires).
+
+**Accès Claude Code (Mac Mini → Pi5)** : clé dédiée `~/.ssh/id_pi5_claude` (sans passphrase, hors trousseau macOS) déclarée dans `~/.ssh/config` du Mac Mini (`Host pi5` / `192.168.1.141`, `IdentitiesOnly yes`). Ne pas utiliser la clé personnelle `id_ed25519` pour l'automatisation : elle est liée au trousseau macOS → une commande non-interactive reste bloquée indéfiniment sur le prompt d'autorisation GUI (jamais validable en headless).
 
 **Tous les appareils sont en WiFi sur la box Starlink (SSID `StarTh`, WPA2, passerelle `192.168.1.1`).** Le Pi5 n'a **aucun service réseau dépendant du WiFi pour booter** : `daly-bms` lit le RS485 (USB) même sans réseau → un Pi5 « vivant mais injoignable » est presque toujours un problème WiFi, pas un crash.
 
@@ -460,6 +490,8 @@ Dashboard SSR (Askama) : `/dashboard`, `/dashboard/bms/:id`,
 | **Clim Toshiba SHORAI EDGE — VOIE RETENUE = firmware RUST natif ESP32** (protocole SUZUMI CN22 vérifié vs pedobry + o0Zz ; PAS ESPHome). **Reprise de session → §0 du doc.** Crate détaché `firmware/toshiba-suzumi-rs/` (couche protocole pure faite + testée host ; ESP32 en attente matériel). Test : `cargo test --manifest-path firmware/toshiba-suzumi-rs/Cargo.toml` | `docs/toshiba-suzumi-rs-plan.md` |
 | Clim Toshiba / FP2 — **référence opérationnelle des ponts & crates** (contrat MQTT, carte des composants A–E, pipeline présence, HomeKit **D** vs Matter **E**, commandes/tests). Allège le plan. | `docs/toshiba-bridges.md` |
 | Clim Toshiba — **référence câblage/MQTT** (BOM, brochage CN22, topics `santuario/toshiba`, module EM `logic/toshiba_ac`, conso Tongou) — ⚠️ voie ESPHome **non retenue**, YAML §4 obsolète | `docs/integration-toshiba-shorai-esphome.md` |
+| **Infrastructure Matter/Thread (OTBR Pi5 + XIAO nRF54LM20A)** — plan validé 2026-07-12. Outillage Mac/Pi5 **préparé** (voir §0bis ci-dessous) ; matériel (XIAO, SMHUB) en attente de livraison. | `docs/PLAN-INFRASTRUCTURE-MATTER-THREAD.md` |
+| Pilotage Toshiba par XIAO en **Matter-over-Thread direct** (2ᵉ projet, **parallèle** au firmware ESP32+MQTT ci-dessus — pas un brouillon obsolète) | `docs/Infrastructure-Thread.md` |
 | Dépannage, netdiag réseau, debug onduleur/SmartShunt, memory-leak | `docs/diagnostic-depannage.md` |
 | **Audit robustesse 2026-06** — 18 axes (§3-§18 implémentés ; §1-§2 sécurité en attente d'action utilisateur) | `docs/audit-robustesse-2026-06.md` |
 | **Incident 2026-07-09** — boucle de crash au reboot (récupération redb > TimeoutStartSec) : diagnostic, cause racine, 3 correctifs, récupération historique, prévention (UPS) | `docs/incident-2026-07-09-reboot-redb.md` |

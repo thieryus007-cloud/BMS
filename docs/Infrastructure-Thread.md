@@ -1,5 +1,14 @@
 # PLAN PROJET : Infrastructure Thread redondante avec XIAO nRF54LM20A et Homey Self-Hosted Server
 
+> **Statut (2026-07-12)** : ce document décrit un **second projet, parallèle** au pilotage
+> des Toshiba par ESP32+MQTT (`firmware/toshiba-suzumi-rs/`, cf. `docs/toshiba-bridges.md`) —
+> ce n'est **pas** un brouillon obsolète à corriger. Ici, les XIAO nRF54LM20A pilotent les
+> Toshiba **directement en Matter-over-Thread** (UART + clusters Matter embarqués sur le
+> XIAO), sans passer par MQTT. Les deux approches coexistent ; l'infra Thread de base
+> (OTBR sur Pi5, natif, pas Docker) est mutualisée avec `docs/PLAN-INFRASTRUCTURE-MATTER-THREAD.md`
+> (le plan validé), qui fait foi pour l'architecture OTBR/Homey SHS — voir §2.2 vs Option A2
+> ci-dessous (Homey SHS tourne en app macOS native, pas Docker, sur ce Mac Mini).
+
 ## 1. Contexte et Problématique
 
 Le **XIAO nRF54LM20A Sense** est un SoC **Bluetooth LE + 802.15.4 (Thread/Zigbee)**. Il ne possède **aucune radio Wi-Fi**. Il est donc impossible de réaliser du *Matter over Wi-Fi* avec ce hardware.

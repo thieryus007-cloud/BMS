@@ -165,6 +165,33 @@ west boards | grep xiao_nrf54lm20a
 
 Résultat attendu : `xiao_nrf54lm20a` listé. Si absent, mettre à jour le SDK (le support XIAO nRF54LM20A est présent dans Zephyr upstream et NCS ≥ 3.2).
 
+> **⚠️ Correctif constaté (2026-07-12, préparation sans matériel sur NCS v3.2.1)** : contrairement
+> à ce qui précède, `xiao_nrf54lm20a` n'apparaît **pas** dans `west boards` d'une installation
+> NCS standard — le board n'est **pas mergé en amont**. Il faut cloner le repo tiers
+> **`Seeed-Studio/platform-seeedboards`** et le passer en `-DBOARD_ROOT=<clone>/zephyr` (ou
+> l'ajouter aux « Board Roots » de l'extension VS Code). Une fois ajouté, deux frictions
+> observées avec NCS v3.2.1 :
+>
+> 1. Le devicetree Seeed inclut `<nordic/nrf54lm20a_cpuapp.dtsi>`, qui n'existe pas dans le HAL
+>    v3.2.1 — le fichier réel s'appelle `nrf54lm20a_enga_cpuapp.dtsi` (suffixe « enga » = silicium
+>    ingénierie A). Corriger l'include dans le clone local règle la résolution DTS.
+> 2. Après ce correctif, le `defconfig` Seeed déclenche des **warnings Kconfig traités en erreur**
+>    (`NULL_POINTER_EXCEPTION_DETECTION_NONE`, dépendance `NRFX_GRTC`) — non résolu à ce stade,
+>    probablement un decalage de version entre le `platform-seeedboards` et NCS v3.2.1/Zephyr
+>    4.2.99. À creuser une fois le XIAO physique disponible (essayer une version NCS plus
+>    récente — v3.2.5 ou v3.4.0 disponibles via `nrfutil sdk-manager search` — ou une révision
+>    plus récente de `platform-seeedboards`).
+>
+> Le SoC nRF54LM20A lui-même **est** bien supporté nativement par NCS v3.2.1 (board officiel
+> `nrf54lm20dk` présent dans `west boards`) — c'est uniquement l'empreinte carte XIAO (pinout,
+> régulateur, flash externe PY25Q64) qui manque en amont.
+>
+> Outillage installé (Mac Mini, 2026-07-12) : nRF Connect for Desktop + VS Code (extension nRF
+> Connect déjà présente) via Homebrew ; SDK NCS v3.2.1 installé via `nrfutil sdk-manager install
+> v3.2.1` dans `/opt/nordic/ncs/v3.2.1`. **Le cask Homebrew `nrfutil` est cassé par Gatekeeper**
+> (binaire supprimé après install, cask déprécié) — utiliser `~/bin/nrfutil` téléchargé directement
+> depuis `files.nordicsemi.com` (voir CLAUDE.md § nRF Connect SDK).
+
 ### 4.2 Test de validation de la chaîne
 
 Compiler et flasher un `hello_world` sur un XIAO pour valider la chaîne complète :
@@ -288,6 +315,21 @@ ls -l /dev/ttyOTBR
 ## 6. Phase 3 — Installation OTBR native sur le Raspberry Pi 5
 
 > Installation **native** (sans Docker) : c'est la configuration de référence du projet OpenThread, la plus stable et la plus documentée. Empreinte : < 100 MB RAM, CPU négligeable — sans impact sur les applications Rust existantes.
+>
+> **✅ Déjà fait (2026-07-12)**, sans le XIAO RCP (matériel pas encore livré) : `ot-br-posix`
+> cloné + compilé + installé dans `~/ot-br-posix` sur le Pi5, avec l'interface web (`WEB_GUI=1`).
+> Deux adaptations par rapport aux étapes ci-dessous :
+>
+> - **Backbone = `wlan0`, pas `eth0`** — `eth0` est DOWN/NO-CARRIER sur ce Pi5 (le Pi5 tourne
+>   en WiFi, cf. CLAUDE.md §2). `INFRA_IF_NAME=wlan0 ./script/setup`.
+> - **`otbr-web` sur le port 8083** (`/etc/default/otbr-web` → `OTBR_WEB_OPTS="-I wpan0 -p
+>   8083"`) pour ne pas entrer en conflit avec `daly-bms-server` (8080), `energy-manager`
+>   (8081) ou `nginx` (80) déjà en écoute sur ce Pi5.
+>
+> Les deux services (`otbr-agent`, `otbr-web`) sont **désactivés et arrêtés** volontairement
+> (`systemctl disable/stop`) : sans XIAO RCP branché, le chemin radio configuré
+> (`/dev/ttyACM0`) n'existe pas → risque de boucle crash-restart sur un Pi5 de production (cf.
+> incident CLAUDE.md §8). **Ne pas activer** avant la Phase 2 (flash + branchement du XIAO#1).
 
 ### 6.1 Prérequis
 
