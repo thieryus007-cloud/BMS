@@ -96,6 +96,19 @@ if [[ "$BUILD_WEB" == true ]]; then
     info "Écrit /etc/default/otbr-web (OTBR_WEB_OPTS=\"-I wpan0 -p ${WEB_PORT}\")"
 fi
 
+# ── bind9 (dépendance OTBR pour DNS64) entre en conflit port 53 avec dnsmasq ────
+# dnsmasq est généralement présent mais non configuré sur ce Pi5 (aucune directive
+# active) — le désactiver évite un service "failed" au boot, sans impact fonctionnel
+# (résolution DNS assurée par named/bind9). Ne rien faire si dnsmasq est absent ou
+# déjà désactivé.
+if systemctl list-unit-files dnsmasq.service &>/dev/null; then
+    if systemctl is-enabled dnsmasq &>/dev/null; then
+        step "Désactivation de dnsmasq (conflit port 53 avec bind9/named, config dnsmasq vide/inutilisée)..."
+        systemctl disable dnsmasq &>/dev/null || true
+        systemctl reset-failed dnsmasq &>/dev/null || true
+    fi
+fi
+
 # ── Sécurité : désactiver tant que le XIAO RCP n'est pas branché ─────────────
 step "Désactivation des services (pas de radio XIAO branchée — à activer manuellement après la Phase 2)..."
 systemctl disable otbr-agent &>/dev/null || true

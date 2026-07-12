@@ -75,6 +75,14 @@ installations d'outils, pas du code projet) :
 > **volontairement désactivés** (`disabled` + `inactive`) pour ne pas crash-looper sur un
 > chemin RCP inexistant (`/dev/ttyACM0`) — cf. incident boucle de redémarrage §8. Ne pas
 > activer avant d'avoir flashé et branché le XIAO#1 (Phase 2 de `docs/PLAN-INFRASTRUCTURE-MATTER-THREAD.md`).
+>
+> **Effet de bord découvert au premier reboot post-install (2026-07-12)** : le bootstrap
+> `ot-br-posix` installe **`bind9`** (`named`, requis pour le DNS64 du border router — cf.
+> `script/bootstrap` ligne 108). `named` se met à écouter le port 53 au boot et entre en
+> conflit avec `dnsmasq` (déjà présent avant, mais **config vide/inutilisée** —
+> `/etc/dnsmasq.d/` ne contenait qu'un README). `dnsmasq` a été **désactivé** (`systemctl
+> disable dnsmasq`) : aucun impact fonctionnel constaté (résolution DNS vérifiée OK via
+> `named`, `daly-bms`/`energy-manager`/Grafana/mosquitto tous actifs après reboot).
 
 | Quand | Commande |
 |-------|----------|
