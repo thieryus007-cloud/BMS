@@ -3,7 +3,100 @@
 > **Objectif :** permettre à Homey Self-Hosted Server (Mac Mini) de découvrir et commander automatiquement des appareils Matter-over-Thread construits sur des XIAO nRF54LM20A, via un OpenThread Border Router (OTBR) hébergé sur le Raspberry Pi 5.
 >
 > **Date de rédaction :** 12 juillet 2026
-> **Statut :** plan validé, en attente de réception matériel (SMHUB Nano MG24, XIAO nRF54LM20A)
+> **Statut :** plan validé ; **outillage Mac Mini + Pi5 préparé** (2026-07-12, sans le
+> matériel radio) ; en attente de réception matériel (SMHUB Nano MG24, XIAO nRF54LM20A)
+> pour la suite (Phases 2, 4-7).
+
+---
+
+## 0. Journal de préparation — 2026-07-12 (lire en premier pour reprendre le travail)
+
+> Section à mettre à jour à chaque session de travail sur ce projet. Objectif : qu'une
+> nouvelle session (sans mémoire des échanges précédents) puisse repartir sur une base
+> documentaire fiable sans avoir à tout redécouvrir.
+
+### ✅ Fait
+
+#### Accès & outillage (préalable, réutilisable pour tout le projet)
+
+- SSH Claude Code → Pi5 : clé dédiée `~/.ssh/id_pi5_claude` (sans passphrase, hors trousseau
+  macOS — la clé perso `id_ed25519` bloque tout usage non-interactif). Config dans
+  `~/.ssh/config` du Mac Mini (`Host pi5`). Voir CLAUDE.md §2.
+- SSH Claude Code → GitHub (push) : clé dédiée `~/.ssh/id_github_claude`, ajoutée en
+  **Deploy Key** (write access) sur `github.com/thieryus007-cloud/Daly-BMS-Rust/settings/keys`.
+  Remote `origin` basculé de HTTPS à SSH (`git@github.com:...`).
+
+#### Mac Mini (confirmé être le "Mac Mini" du plan — Apple M4, hostname `Mac-Mini.local`)
+
+- `Homey.app` + `Homey Self-Hosted Server.app` : déjà installés, app macOS native (pas Docker).
+- nRF Connect for Desktop, VS Code (extension nRF Connect **déjà présente** avant la session).
+- SDK NCS v3.2.1 installé (`/opt/nordic/ncs/v3.2.1`, ~11 Go) via `~/bin/nrfutil`
+  (téléchargé directement depuis `files.nordicsemi.com` — **le cask Homebrew `nrfutil` est
+  cassé par Gatekeeper**, ne pas l'utiliser).
+- **Découverte technique importante** : `xiao_nrf54lm20a` n'est **pas** un board NCS officiel
+  (contrairement à ce que ce document affirmait initialement en §3.4/§4.1). Nécessite le repo
+  tiers `Seeed-Studio/platform-seeedboards` en `BOARD_ROOT`. Son devicetree référence un nom
+  de fichier HAL Nordic incorrect pour NCS v3.2.1 (corrigé localement : voir §4.1). Après ce
+  correctif, un **problème Kconfig non résolu** bloque encore la compilation (warnings
+  traités en erreur) — **premier point à reprendre** dès que le XIAO est en main (essayer une
+  version NCS plus récente, ou une révision plus récente de `platform-seeedboards`).
+
+#### Pi5
+
+- `sudo apt update && upgrade` puis **reboot appliqué** — kernel actif `6.18.34+rpt-rpi-2712`.
+  Tout vérifié fonctionnel après coup (`daly-bms`, `energy-manager`, `mosquitto-broker`,
+  `grafana-server` actifs, healthcheck 200, RS485 opérationnel).
+- OTBR natif (`ot-br-posix`) installé via `scripts/setup-otbr-pi5.sh` (script commité,
+  idempotent) : backbone `wlan0` (pas `eth0`, DOWN sur ce Pi5), interface web sur le port
+  **8083** (évite 8080=daly-bms / 8081=energy-manager / 80=nginx). Services `otbr-agent` et
+  `otbr-web` **désactivés + arrêtés volontairement** (pas de XIAO RCP branché — évite un
+  crash-loop, cf. incident CLAUDE.md §8).
+- **Effet de bord découvert et corrigé** : le bootstrap OTBR installe `bind9` (requis DNS64),
+  qui entre en conflit port 53 avec `dnsmasq` (déjà présent mais non configuré). `dnsmasq`
+  désactivé, aucun impact fonctionnel (DNS vérifié OK via `named`). Le correctif est dans le
+  script, donc automatique lors d'une restauration.
+- Pont FP2 (`bridge/aqara-fp2-mqtt/`) préparé : venv Python + `aiohomekit` installés,
+  `config.toml` + service systemd déployés en `disabled/inactive` (prêt pour `discover`/`pair`
+  dès réception des capteurs FP2).
+
+#### Documentation / Git
+
+- Ce document, `CLAUDE.md` et `docs/Infrastructure-Thread.md` mis à jour et **poussés sur
+  GitHub** (`origin/main`, commits `3dff342`..`943be54`, voir `git log`).
+- Clarification actée : `docs/Infrastructure-Thread.md` n'est **pas** un brouillon obsolète —
+  c'est un **second projet parallèle** (pilotage des Toshiba par XIAO en Matter-over-Thread
+  **direct**, sans MQTT), à mener en parallèle du firmware ESP32+MQTT existant
+  (`firmware/toshiba-suzumi-rs/`). Les deux partagent la même infra OTBR/Pi5.
+- CLAUDE.md contient une section dédiée « ⚠️ État Git — ce qui est poussé vs ce qui reste
+  local » qui liste, machine par machine, chaque artefact non commité (builds, venv, secrets,
+  clés SSH) et sa commande de reconstruction exacte. **Toujours vérifier là en premier** avant
+  de supposer qu'un fichier existe sur une machine.
+
+### ⏳ Reste à faire
+
+1. **Bloqué sur matériel** : réception du SMHUB Nano MG24 et des XIAO nRF54LM20A.
+2. **Dès le XIAO en main** : résoudre le blocage Kconfig de `platform-seeedboards` (voir
+   ci-dessus) avant de pouvoir compiler/flasher quoi que ce soit dessus.
+3. Phase 2 du plan (§5) : flasher le XIAO#1 en firmware RCP, le brancher sur le Pi5, vérifier
+   `/dev/ttyACM0`, puis **activer** `otbr-agent`/`otbr-web` (`sudo systemctl enable --now
+   otbr-agent otbr-web` — actuellement désactivés, cf. ci-dessus).
+4. Phases 4-7 (§7-§10) : former le réseau Thread, vérifier la découverte par Homey, flasher
+   les XIAO endpoints, commissioning **depuis un téléphone Android** (contrainte iOS, §3.3).
+5. FP2 : une fois les capteurs reçus, `discover`/`pair` via `bridge/aqara-fp2-mqtt`, puis
+   `[energy_manager.toshiba_ac] control_enabled = true` dans `Config.toml` (cf.
+   `docs/toshiba-bridges.md` §4).
+6. Second projet (`docs/Infrastructure-Thread.md`, XIAO en Matter-over-Thread direct pour
+   piloter les Toshiba) : pas encore démarré, à planifier séparément quand décidé.
+
+### ⚠️ Points d'attention pour la prochaine session
+
+- Les identités SSH créées cette session (`id_pi5_claude`, `id_github_claude`) sont **propres
+  à ce Mac Mini** — si une session tourne sur une autre machine, il faudra soit régénérer des
+  clés dédiées, soit copier les clés privées existantes (jamais les committer).
+- `otbr-agent`/`otbr-web`/`aqara-fp2-mqtt` sont **désactivés par conception** — ne pas
+  s'étonner qu'ils soient `inactive` : c'est l'état attendu tant que le matériel n'est pas là.
+- Avant de relancer une install/compilation, toujours consulter la section « État Git » de
+  CLAUDE.md pour savoir ce qui doit être reconstruit localement vs ce qui vient de `git pull`.
 
 ---
 
