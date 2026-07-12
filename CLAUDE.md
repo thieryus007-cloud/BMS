@@ -39,6 +39,36 @@
 | Déployer energy-manager | `sudo systemctl stop energy-manager && sudo cp target/aarch64-unknown-linux-gnu/release/energy-manager /usr/local/bin/ && sudo systemctl start energy-manager` |
 | Appliquer Config energy-manager | `sudo cp Config.toml /etc/daly-bms/config.toml && sudo systemctl restart energy-manager` |
 
+### ⚠️ État Git — ce qui est poussé vs ce qui reste local (session 2026-07-12)
+
+**✅ Poussé sur GitHub** (`origin/main`, commits `3dff342`, `05fd63d`, `809b702`) :
+`CLAUDE.md`, `docs/PLAN-INFRASTRUCTURE-MATTER-THREAD.md`, `docs/Infrastructure-Thread.md`,
+`scripts/setup-otbr-pi5.sh`. **Rien d'autre de cette session n'est dans Git.** Tout le
+reste ci-dessous est un artefact local (build, secret, ou credential) — **volontairement**
+non commité — avec sa commande de reconstruction exacte.
+
+**❌ Resté en local sur le Mac Mini** (aucune trace dans Git — normal, ce sont des
+installations d'outils, pas du code projet) :
+
+| Élément | Recréer avec |
+|---|---|
+| nRF Connect for Desktop.app | `brew install --cask nrf-connect` |
+| VS Code + extension nRF Connect | `brew install --cask visual-studio-code && code --install-extension nordic-semiconductor.nrf-connect-extension-pack` |
+| `~/bin/nrfutil` | `curl -fsSL -o ~/bin/nrfutil https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/universal-apple-darwin/nrfutil-universal-apple-darwin-1.4.0-5515776 && chmod +x ~/bin/nrfutil` — **ne pas** utiliser le cask Homebrew `nrfutil` (cassé par Gatekeeper, cf. plus bas) |
+| SDK NCS v3.2.1 (`/opt/nordic/ncs/v3.2.1`, ~11 Go) | `~/bin/nrfutil sdk-manager install v3.2.1` |
+| `~/nrf-seeed-boards` (clone Seeed + correctif dtsi appliqué) | `git clone https://github.com/Seeed-Studio/platform-seeedboards.git ~/nrf-seeed-boards` puis appliquer le correctif décrit ci-dessous (§ nRF Connect SDK) |
+| `~/.ssh/id_pi5_claude` (clé privée, accès Pi5) | `ssh-keygen -t ed25519 -f ~/.ssh/id_pi5_claude -N ""` + `ssh-copy-id` + entrée `Host pi5` dans `~/.ssh/config` |
+| `~/.ssh/id_github_claude` (clé privée, push GitHub) | `ssh-keygen -t ed25519 -f ~/.ssh/id_github_claude -N ""` + ajouter la **clé publique** en Deploy Key (write access) sur github.com/thieryus007-cloud/Daly-BMS-Rust/settings/keys + entrée `Host github.com` dans `~/.ssh/config` |
+
+**❌ Resté en local sur le Pi5** (idem — builds et secrets, jamais dans Git) :
+
+| Élément | Recréer avec |
+|---|---|
+| `~/ot-br-posix` (source + build OTBR) et sa config (`wlan0`, port 8083, services désactivés) | `sudo bash scripts/setup-otbr-pi5.sh` — **ce script, lui, est dans Git** : c'est la voie de restauration officielle |
+| `bridge/aqara-fp2-mqtt/.venv` (venv Python) | `cd bridge/aqara-fp2-mqtt && python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt` |
+| `bridge/aqara-fp2-mqtt/config.toml` + `/etc/daly-bms/fp2-bridge.toml` (secret, gitignored règle #12) | `cp config.example.toml config.toml` (éditer `device_id` via `discover` une fois les FP2 posés) puis `sudo cp config.toml /etc/daly-bms/fp2-bridge.toml` |
+| `/etc/systemd/system/aqara-fp2-mqtt.service` (copie déployée — la **source** `contrib/aqara-fp2-mqtt.service` est dans Git) | `sudo cp contrib/aqara-fp2-mqtt.service /etc/systemd/system/ && sudo systemctl daemon-reload` |
+
 ### OTBR / Thread (Pi5) — préparé, en attente du XIAO RCP
 
 > Installé 2026-07-12 sans le matériel radio (XIAO nRF54LM20A pas encore livré). Services
