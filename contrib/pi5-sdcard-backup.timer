@@ -1,0 +1,17 @@
+[Unit]
+Description=Sauvegarde hebdomadaire de l'image disque de la carte SD — Pi5
+Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
+
+[Timer]
+# Chaque dimanche à 03:00 (activité faible) + jitter pour lisser la charge.
+# Hebdomadaire (pas quotidien comme daly-bms-backup) : image volumineuse
+# (~10-20 min de copie) et l'OS/les configs changent bien moins souvent que
+# les métriques.
+OnCalendar=Sun *-*-* 03:00:00
+RandomizedDelaySec=30min
+# Rattrape la sauvegarde manquée si le Pi5 était éteint à l'heure prévue.
+Persistent=true
+Unit=pi5-sdcard-backup.service
+
+[Install]
+WantedBy=timers.target

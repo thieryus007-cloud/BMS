@@ -284,6 +284,44 @@ if ! $DRY_RUN; then
     fi
 fi
 
+# ── 5.quinquies Sauvegarde carte SD : script + service oneshot + timer hebdo ──
+# Image disque complète (/dev/mmcblk0) vers le NVMe, protège contre une panne
+# de carte microSD (le composant le plus fragile d'un Pi) — cf. scripts/backup-sdcard-pi5.sh.
+SDBK_SRC=scripts/backup-sdcard-pi5.sh
+SDBK_DST=/usr/local/bin/backup-sdcard-pi5.sh
+if [[ -f "$SDBK_SRC" ]]; then
+    if $DRY_RUN; then
+        sudo cmp -s "$SDBK_SRC" "$SDBK_DST" 2>/dev/null || warn "[dry-run] $SDBK_DST absent/différent → serait (ré)installé (0755)"
+    else
+        sudo install -m 0755 "$SDBK_SRC" "$SDBK_DST"
+        info "Script de sauvegarde carte SD installé → $SDBK_DST"
+    fi
+fi
+SDBK_UNIT_CHANGED=0
+for unit in pi5-sdcard-backup.service pi5-sdcard-backup.timer; do
+    usrc="contrib/${unit}"
+    udst="/etc/systemd/system/${unit}"
+    [[ -f "$usrc" ]] || continue
+    if sudo diff -q "$usrc" "$udst" >/dev/null 2>&1; then
+        info "Unité $unit à jour"
+    else
+        SDBK_UNIT_CHANGED=1
+        if $DRY_RUN; then
+            warn "[dry-run] unité $unit modifiée → serait copiée"
+        else
+            sudo cp "$usrc" "$udst"
+            info "Unité systemd $unit mise à jour"
+        fi
+    fi
+done
+if ! $DRY_RUN; then
+    [[ $SDBK_UNIT_CHANGED -eq 1 ]] && sudo systemctl daemon-reload
+    if [[ -f /etc/systemd/system/pi5-sdcard-backup.timer ]]; then
+        sudo systemctl enable --now pi5-sdcard-backup.timer >/dev/null 2>&1 || true
+        info "Timer pi5-sdcard-backup activé (image carte SD hebdomadaire)"
+    fi
+fi
+
 # ── 5.bis Mosquitto bridge (si modifié) — backup + verify-no-loop + restart ────
 MOSQ_SRC=contrib/mosquitto/mosquitto.conf
 MOSQ_DST=/etc/mosquitto/mosquitto.conf

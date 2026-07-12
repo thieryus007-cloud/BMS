@@ -1,0 +1,30 @@
+[Unit]
+Description=Image disque complète de la carte SD du Pi5 — sauvegarde NVMe
+Documentation=https://github.com/thieryus007-cloud/Daly-BMS-Rust
+# L'image vit sur le NVMe : ne pas tenter la sauvegarde si le mount manque.
+RequiresMountsFor=/mnt/nvme/daly-bms
+
+[Service]
+Type=oneshot
+User=root
+# Accès bloc à /dev/mmcblk0 : nécessite root (contrairement à backup-redb.sh,
+# copie de fichier, qui tourne en utilisateur dalybms).
+
+# Priorité basse : la copie (10-20 min) ne doit pas gêner l'ingestion RS485/redb.
+Nice=15
+IOSchedulingClass=idle
+
+# Surcharges éventuelles (défauts dans le script) :
+# Environment=SRC_DEVICE=/dev/mmcblk0
+# Environment=BACKUP_DIR=/mnt/nvme/daly-bms/backups/sdcard
+# Environment=KEEP=2
+ExecStart=/usr/local/bin/backup-sdcard-pi5.sh
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pi5-sdcard-backup
+
+# Sécurité minimale (User=root imposé par l'accès bloc, pas de durcissement
+# ProtectSystem/PrivateTmp ici : le script écrit sur /mnt/nvme, hors de portée
+# d'un sandbox trop strict conçu pour un service applicatif).
+NoNewPrivileges=true
