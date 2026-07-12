@@ -120,6 +120,9 @@ Lors du commissioning Matter depuis un iPad, Homey délègue l'opération au fra
 
 ### 3.4 Spécificités matérielles du XIAO nRF54LM20A (vs cartes Nordic officielles)
 
+https://nrfconnectdocs.nordicsemi.com/ncs/3.2.1/zephyr/boards/nordic/nrf54lm20dk/doc/index.html#nrf54lm20dk
+
+
 Vérifié sur le wiki Seeed (`xiao_nrf54lm20a_with_matter`, mis à jour 26 mai 2026) :
 
 - **Flash externe différent :** PY25Q64 (Puya, 64 Mbit SPI NOR) au lieu du MX25R64 des cartes d'évaluation Nordic → overlays et tables de partitions spécifiques obligatoires.
