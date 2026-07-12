@@ -321,7 +321,9 @@ ls -l /dev/ttyOTBR
 >
 > **✅ Déjà fait (2026-07-12)**, sans le XIAO RCP (matériel pas encore livré) : `ot-br-posix`
 > cloné + compilé + installé dans `~/ot-br-posix` sur le Pi5, avec l'interface web (`WEB_GUI=1`).
-> Deux adaptations par rapport aux étapes ci-dessous :
+> **Reproductible/restaurable depuis GitHub** via `sudo bash scripts/setup-otbr-pi5.sh`
+> (script idempotent, commité dans ce repo — encode exactement les étapes ci-dessous +
+> les deux adaptations suivantes). Deux adaptations par rapport aux étapes manuelles ci-dessous :
 >
 > - **Backbone = `wlan0`, pas `eth0`** — `eth0` est DOWN/NO-CARRIER sur ce Pi5 (le Pi5 tourne
 >   en WiFi, cf. CLAUDE.md §2). `INFRA_IF_NAME=wlan0 ./script/setup`.

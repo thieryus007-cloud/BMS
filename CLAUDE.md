@@ -48,11 +48,12 @@
 
 | Quand | Commande |
 |-------|----------|
+| **Installer/restaurer depuis GitHub** (script idempotent) | `sudo bash scripts/setup-otbr-pi5.sh` (clone + compile + configure port 8083 + laisse désactivé) |
 | Statut OTBR | `ssh pi5compute@192.168.1.141 "systemctl status otbr-agent otbr-web --no-pager"` |
 | Activer après branchement du XIAO RCP | `sudo systemctl enable --now otbr-agent otbr-web` (vérifier d'abord `/dev/ttyACM0` ou `/dev/ttyOTBR`, et `/etc/default/otbr-agent`) |
 | Interface web OTBR | `http://192.168.1.141:8083` (port choisi pour éviter 8080=daly-bms / 8081=energy-manager / 80=nginx) |
 | Backbone Thread | `wlan0` (**pas** `eth0` — `eth0` est DOWN/NO-CARRIER sur ce Pi5, cf. §2) |
-| Code source | `~/ot-br-posix` (cloné et compilé sur le Pi5, hors dépôt git du projet) |
+| Code source | `~/ot-br-posix` (cloné et compilé sur le Pi5 par le script ci-dessus — **hors dépôt git**, comme `target/` : reconstruit depuis GitHub upstream `openthread/ot-br-posix`, jamais vendored dans ce repo) |
 
 ### nRF Connect SDK (Mac Mini) — toolchain préparée
 
