@@ -1,0 +1,33 @@
+[package]
+name = "remootio-mqtt-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Pont Remootio (garage) -> MQTT, portage Rust du prototype Node.js (bridge/remootio-mqtt)"
+
+# Crate DÉTACHÉ du workspace Pi5 (même choix que bridge/matter-toshiba-rs) : le
+# `[workspace]` vide isole ce crate, aucun impact sur le build/CI de daly-bms.
+[workspace]
+
+[[bin]]
+name = "remootio-mqtt"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+rumqttc = "0.25"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+aes = "0.8"
+cbc = { version = "0.1", features = ["std"] }
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+rand = "0.8"

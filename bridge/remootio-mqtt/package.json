@@ -1,0 +1,19 @@
+{
+  "name": "remootio-mqtt",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pont Remootio (garage) -> MQTT pour Homey, contourne les deconnexions de l'app Homey Remootio",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "mqtt": "^5.15.2",
+    "remootio-api-client": "^2.0.4",
+    "toml": "^5.0.0"
+  }
+}

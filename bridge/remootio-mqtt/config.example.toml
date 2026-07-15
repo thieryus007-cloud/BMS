@@ -1,0 +1,16 @@
+# Config du pont Remootio -> MQTT. Copier en `config.toml` (non commité) et adapter.
+
+[mqtt]
+host = "127.0.0.1"     # broker Mosquitto local du Pi5
+port = 1883
+# user     = "..."     # seulement si une ACL Mosquitto est activée
+# password = "..."
+
+# Un appareil Remootio (portail/garage) = une entrée. Clés obtenues dans
+# l'app Remootio : Settings > l'appareil > API Secret Key / API Auth Key.
+[[devices]]
+name           = "garage"          # utilisé dans les topics MQTT
+ip             = "192.168.1.228"
+api_secret_key = "SECRET"          # SECRET — ne jamais commiter la vraie valeur
+api_auth_key   = "SECRET"          # SECRET — ne jamais commiter la vraie valeur
+# ping_interval_secs = 60          # optionnel, défaut client = 60 s

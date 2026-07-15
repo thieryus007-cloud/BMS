@@ -1,0 +1,5 @@
+# Secrets — NE JAMAIS committer (règle projet #12)
+config.toml
+
+# Build Rust
+/target

@@ -1,0 +1,20 @@
+[Unit]
+Description=Remootio (garage) -> MQTT bridge
+Documentation=file:///home/pi5compute/Daly-BMS-Rust/bridge/remootio-mqtt/README.md
+After=network-online.target mosquitto-broker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi5compute
+WorkingDirectory=/home/pi5compute/Daly-BMS-Rust/bridge/remootio-mqtt
+Environment=REMOOTIO_MQTT_CONFIG=/etc/daly-bms/remootio-mqtt.toml
+ExecStart=/usr/bin/node /home/pi5compute/Daly-BMS-Rust/bridge/remootio-mqtt/index.js
+Restart=on-failure
+RestartSec=5
+# Durcissement léger
+NoNewPrivileges=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+# Secrets — NE JAMAIS committer (règle projet #12)
+config.toml
+
+# Node.js
+node_modules/
+npm-debug.log*
