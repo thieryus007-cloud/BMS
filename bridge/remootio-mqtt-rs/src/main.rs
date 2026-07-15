@@ -170,20 +170,37 @@ async fn main() -> anyhow::Result<()> {
                 let action = String::from_utf8_lossy(&publish.payload)
                     .trim()
                     .to_lowercase();
+                // Les capabilities booléennes de Homey (onoff/button via MQTT Hub) publient
+                // "true"/"on"/"1" en plus (voire à la place) du "trigger" attendu — accepté
+                // comme synonyme. Le "false"/"off"/"0" du relâchement est un non-événement
+                // volontairement ignoré (silencieux) : le déclencher aussi doublerait
+                // l'impulsion physique à chaque pression (validé 2026-07-15 avec Homey).
+                const FRONT_MONTANT: [&str; 4] = ["trigger", "true", "on", "1"];
+                const FRONT_DESCENDANT: [&str; 3] = ["false", "off", "0"];
                 let command = if is_secondary {
-                    match action.as_str() {
-                        "trigger" => Some(device::Command::TriggerSecondary),
-                        other => {
-                            warn!("[{name}] action secondaire inconnue '{other}' (seul 'trigger' est supporté)");
-                            None
-                        }
+                    if FRONT_MONTANT.contains(&action.as_str()) {
+                        Some(device::Command::TriggerSecondary)
+                    } else if FRONT_DESCENDANT.contains(&action.as_str()) {
+                        debug!(
+                            "[{name}] front descendant '{action}' ignoré sur la sortie secondaire"
+                        );
+                        None
+                    } else {
+                        warn!("[{name}] action secondaire inconnue '{action}' (seul 'trigger' est supporté)");
+                        None
                     }
                 } else {
                     match action.as_str() {
                         "open" => Some(device::Command::Open),
                         "close" => Some(device::Command::Close),
-                        "trigger" => Some(device::Command::Trigger),
                         "query" => Some(device::Command::Query),
+                        _ if FRONT_MONTANT.contains(&action.as_str()) => {
+                            Some(device::Command::Trigger)
+                        }
+                        _ if FRONT_DESCENDANT.contains(&action.as_str()) => {
+                            debug!("[{name}] front descendant '{action}' ignoré");
+                            None
+                        }
                         other => {
                             warn!("[{name}] action inconnue '{other}'");
                             None
