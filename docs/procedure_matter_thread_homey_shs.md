@@ -20,7 +20,7 @@
 |  |  - IPv6 routing     |    |   - IPv6 actif      |    |  - chip-tool   |   |
 |  +----------+----------+    +---------------------+    |  - matterjs-   |   |
 |             |                                          |    server      |   |
-|             |         Thread mesh                        +----------------+   |
+|             |         Thread mesh                      +----------------+   |
 |             |    +-------------+  +-------------+                           |
 |             +--->|  ESP32-C61  |  | IKEA        |                           |
 |                  |  (End Dev)  |  | KAJPLATS    |                           |
@@ -37,7 +37,7 @@
 | **Commissioner Matter** | Raspberry Pi 5 | Commissioning BLE -> Thread des devices (chip-tool / matterjs-server) |
 | **Devices Thread** | ESP32-C61 / IKEA KAJPLATS / GRILLPLATS | End Devices sur le mesh Thread |
 
-> **Important** : L'ESP32-C61 est un **End Device Thread**, pas un Border Router. Seul le SMLight fait office de TBR.
+> **Important** : L'ESP32-C61 est un **End Device Thread**, pour les test ensuite il passera en Border Router pour redondance avec SMLight Nano MG24. Par la suite, des XIAO nRF54LM20A viendront completer le Mesh Thread comme end-devices et router.
 
 ---
 
