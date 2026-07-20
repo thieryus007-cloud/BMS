@@ -41,6 +41,26 @@
 
 ---
 
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           RÉSEAU LOCAL (LAN)                                │
+│                                                                             │
+│  +---------------------+    +---------------------+    +----------------+   │
+│  │  SMLight Nano MG24  │    │   Mac-Mini M4       │    │  Raspberry Pi5 │   │
+│  │  (OTBR / TBR)       │◄──►│   Homey SHS         │    │  (Commissioner│   │
+│  │  • Thread mesh      │IPv6│   • Contrôleur      │    │   Matter)      │   │
+│  │  • mDNS proxy       │    │     Matter          │    │  • BLE + IP    │   │
+│  │  • IPv6 routing     │    │   • IPv6 actif      │    │  • chip-tool   │   │
+│  └──────────┬──────────┘    └─────────────────────┘    └──────┬─────────┘   │
+│             │                                                  │             │
+│             │         Thread mesh                                │             │
+│             │    +-------------+  +-------------+              │             │
+│             └───►│  ESP32-C61  │  │ IKEA        │◄─────────────┘             │
+│                  │  (End Dev)  │  │ KAJPLATS    │   (BLE commissioning)      │
+│                  │             │  │ (End Dev)   │                            │
+│                  └─────────────┘  └─────────────┘                            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
 ## Problème identifié
 
 Le menu **Paramètres -> Thread** n'existe **pas** dans l'app Homey mobile lorsqu'on utilise Homey SHS sans TBR partenaire certifié (Apple, Google, Amazon). Homey SHS ne peut donc **pas récupérer automatiquement les credentials Thread** depuis le téléphone.
