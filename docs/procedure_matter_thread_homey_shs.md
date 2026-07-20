@@ -20,7 +20,7 @@
 |  |  - IPv6 routing     |    |   - IPv6 actif      |    |  - chip-tool   |   |
 |  +----------+----------+    +---------------------+    |  - matterjs-   |   |
 |             |                                          |    server      |   |
-|             |         Thread mesh                        +----------------+   |
+|             |         Thread mesh                      +----------------+   |
 |             |    +-------------+  +-------------+                           |
 |             +--->|  ESP32-C61  |  | IKEA        |                           |
 |                  |  (End Dev)  |  | KAJPLATS    |                           |
